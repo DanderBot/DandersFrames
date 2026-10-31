@@ -1702,17 +1702,16 @@ UFO.Reset = {
         local UF = DF.UnitFrames
         return UFO.IsLoaded() and UF and UF.ResetProfile and true or false
     end,
+    -- A few grouped lines: the warning has to fit one popup (MODULE RESET).
     covers = function()
         return {
-            L["Every unit frame's settings"],
-            L["Frame positions"],
-            L["Linked frames: the default Player and Target link is made again"],
-            L["The Unit Frames Settings page"],
-            L["The Unit Frames and Unit Frames (Small) text templates"],
+            L["All unit frame settings and positions, including the Unit Frames Settings page"],
+            L["Linked frames, back to just the default Player and Target link"],
+            L["The Unit Frames and Unit Frames (Small) text templates are rebuilt, so edits to them are lost"],
         }
     end,
     keeps = function()
-        return { L["Aura Designer and Text Designer presets saved under other names"] }
+        return { L["whether Unit Frames is on, and text templates under other names"] }
     end,
     run = function()
         local UF = DF.UnitFrames

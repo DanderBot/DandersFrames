@@ -3628,10 +3628,8 @@ L["To keep a copy, export it first: %s > %s."] = true
 L["whether click-casting is on, and the settings every click-casting profile shares"] = true
 L["whether Party and Raid are on, settings on the Global page, and designer presets saved under other names"] = true
 -- Unit frames: the Modules page's Reset (DandersFrames_Options/UnitFrames/Pages.lua, UFO.Reset).
-L["Aura Designer and Text Designer presets saved under other names"] = true
-L["Every unit frame's settings"] = true
-L["Frame positions"] = true
-L["Linked frames: the default Player and Target link is made again"] = true
-L["The Unit Frames and Unit Frames (Small) text templates"] = true
-L["The Unit Frames Settings page"] = true
+L["All unit frame settings and positions, including the Unit Frames Settings page"] = true
+L["Linked frames, back to just the default Player and Target link"] = true
+L["The Unit Frames and Unit Frames (Small) text templates are rebuilt, so edits to them are lost"] = true
+L["whether Unit Frames is on, and text templates under other names"] = true
 --@end-do-not-package@

@@ -1391,11 +1391,35 @@ do
     eq(G:GetModuleReset("units"), nil, "reset: not offered while it is not loaded")
     addon.loaded = true
     local covers = table.concat(UFO.Reset.covers(), "|")
-    check(covers:find("Every unit frame's settings", 1, true) and covers:find("Frame positions", 1, true)
-          and covers:find("Linked frames: the default Player and Target link is made again", 1, true)
-          and covers:find("The Unit Frames Settings page", 1, true),
+    check(covers:find("All unit frame settings and positions, including the Unit Frames Settings page", 1, true)
+          and covers:find("Linked frames, back to just the default Player and Target link", 1, true),
           "reset: covers every unit, positions, links and the module's settings")
+    check(covers:find("The Unit Frames and Unit Frames (Small) text templates are rebuilt, so edits to them are lost", 1, true),
+          "reset: ...and says outright that the built-in text templates are rebuilt")
     eq(UFO.Reset.scope, nil, "reset: the current profile's (the default scope line)")
+
+    -- The warning as the Modules page draws it, whole: it must fit its popup (the
+    -- budget test_module_reset.lua holds the built-in warnings to).
+    local prevProfile = DF.GetCurrentProfile
+    function DF:GetCurrentProfile() return "Raiding" end
+    load_options_file_into("GUI/Pages/ModulesPage.lua", NS)
+    local msg = G:ModuleResetMessage("units") or ""
+    eq(msg, table.concat({
+        "These go back to their defaults:",
+        "\226\128\162 All unit frame settings and positions, including the Unit Frames Settings page",
+        "\226\128\162 Linked frames, back to just the default Player and Target link",
+        "\226\128\162 The Unit Frames and Unit Frames (Small) text templates are rebuilt, so edits to them are lost",
+        "Not reset: whether Unit Frames is on, and text templates under other names",
+        "",
+        "Only the current profile, Raiding, is reset. Your other profiles are untouched.",
+        "To keep a copy, export it first: Profiles > Import/Export.",
+        "",
+        "This cannot be undone.",
+    }, "\n"), "warning: the Unit Frames text, whole")
+    local lines = 0
+    for line in (msg .. "\n"):gmatch("(.-)\n") do lines = lines + math.max(1, math.ceil(#line / 55)) end
+    check(112 + 16 * lines <= 400, "warning: fits the popup with room to spare (~" .. (112 + 16 * lines) .. "px of 500)")
+    DF.GetCurrentProfile = prevProfile
 
     local realReset = UF.ResetProfile
     local invalidated = 0
