@@ -135,6 +135,8 @@ local ANCHOR_PAD = 6
 -- shape (label column, dropdown, handle gutter) and a row that is 2px shorter
 -- than the ones around it reads as a mistake rather than as a distinction.
 local ROW_H = 20
+-- Target, Edge, Align, Backup, Mirror.
+local ANCHOR_ROWS = 5
 -- The link-drag handle at a picker row's right end. Wider than it is tall
 -- because it is a GRIP, not an icon: grip dots on the left, the chain glyph on
 -- the right, both inside a backdrop so the thing reads as a control you take
@@ -151,6 +153,9 @@ local HOVER_SCALE, HOVER_DUR = 1.15, 0.08
 -- minimum the rows stop lining up, above the maximum a long translation would
 -- eat the picker instead of wrapping.
 local LABEL_MIN, LABEL_MAX = 34, 96
+-- The Mirror row's two toggles: the kit's checkbox at a size that sits inside
+-- ROW_H, each cell wide enough for its box, the gap and a one-letter caption.
+local MIRROR_BOX, MIRROR_CELL = 14, 44
 local ACW = CW - ANCHOR_PAD * 2   -- the group box's inner content width
 -- The kit's own grey-when-disabled dim (UI:CreateDropdown SetEnabled), matched
 -- so a disabled label and the disabled dropdown beside it fade to the same depth.
@@ -332,10 +337,11 @@ local function layoutAnchorBlock(ui)
     -- same shape as Target and Backup now, and two columns 6px apart would read
     -- as a misalignment rather than as a grouping. Re-measured on every layout
     -- because the seat labels swap with the mode ("Rel point" is twice "Align").
-    labelColumn({ ui.targetRow.label, ui.edgeRow.label, ui.alignRow.label, ui.backupRow.label },
+    labelColumn({ ui.targetRow.label, ui.edgeRow.label, ui.alignRow.label, ui.backupRow.label,
+                  ui.mirrorRow.label },
         LABEL_MIN, LABEL_MAX)
 
-    local contentH = ROW_H * 4 + TIGHT * 3
+    local contentH = ROW_H * ANCHOR_ROWS + TIGHT * (ANCHOR_ROWS - 1)
     ui.anchorBox:SetContentHeight(contentH)
     local h = (ui.anchorBox:GetHeight() or contentH) + GAP
     ui.rest:ClearAllPoints()
@@ -682,6 +688,43 @@ local function buildPanel(po, content)
     ui.alignRow:SetPoint("TOPLEFT", 0, rowY(2))
     ui.specMode = "outside"
 
+    -- ---- mirror ------------------------------------------------------
+    -- Two independent toggles on the PRIMARY anchor: on a mirrored axis the element
+    -- moves the opposite way to its target, reflected across a centre line, and the
+    -- X/Y box for that axis below edits the line (Mirror Position) instead of an
+    -- offset. Last in the block so the rows above keep their places; same label
+    -- column, so it reads as the fifth row of one table.
+    ui.mirrorRow = CreateFrame("Frame", nil, ac)
+    ui.mirrorRow:SetSize(ACW, ROW_H)
+    ui.mirrorRow:SetPoint("TOPLEFT", 0, rowY(4))
+    ui.mirrorRow.label = UI:CreateLabel(ui.mirrorRow, { text = L["Mirror"], size = 10, color = UI.Colors.textDim })
+    ui.mirrorRow.label:SetWordWrap(false)
+    ui.mirrorRow.label:SetPoint("LEFT", 0, 0)
+    local function mirrorToggle(axis, title, line)
+        local cb = UI:CreateCheckbox(ui.mirrorRow, {
+            label = axis == "X" and L["X"] or L["Y"], size = MIRROR_BOX,
+            tooltip = { title = title, lines = { line, L["0 on Mirror Position is the centre of the screen."] } },
+            get = function()
+                local el = po.el
+                local a = el and Registry:GetPos(el).anchor
+                return a and a["mirror" .. axis] and true or false
+            end,
+            set = function(v)
+                local el = po.el; if not el then return end
+                po:AutoPin()
+                Sess:SetMirror(el, axis, v)
+            end,
+        })
+        cb:SetSize(MIRROR_CELL, ROW_H)
+        return cb
+    end
+    ui.mirrorX = mirrorToggle("X", L["Mirror X"],
+        L["Moves the opposite way to its target left and right, mirrored across a vertical centre line."])
+    ui.mirrorX:SetPoint("LEFT", ui.mirrorRow.label, "RIGHT", TIGHT, 0)
+    ui.mirrorY = mirrorToggle("Y", L["Mirror Y"],
+        L["Moves the opposite way to its target up and down, mirrored across a horizontal centre line."])
+    ui.mirrorY:SetPoint("LEFT", ui.mirrorX, "RIGHT", TIGHT, 0)
+
     -- ---- everything below the anchor block ---------------------------
     -- Its own frame so the block above can sit at whatever height the group box
     -- measures: these rows keep their build-time offsets and only ui.rest's
@@ -740,6 +783,21 @@ local function buildPanel(po, content)
     for _, box in ipairs({ ui.xBox, ui.yBox }) do
         box:HookScript("OnEditFocusGained", function() po:AutoPin() end)
     end
+    -- On a mirrored axis the box is the Mirror Position, which is not a number anyone
+    -- can guess the meaning of: say what 0 is. Other states keep the bare box.
+    local function mirrorTip(box, axis)
+        box:HookScript("OnEnter", function(self)
+            local el = po.el
+            local a = el and Registry:GetPos(el).anchor
+            if not (a and a["mirror" .. axis]) then return end
+            UI:ShowTooltip(self, { title = L["Mirror Position"], lines = {
+                L["Where the centre line sits that this element and its target mirror around."],
+                L["0 on Mirror Position is the centre of the screen."] } })
+        end)
+        box:HookScript("OnLeave", function() UI:HideTooltip() end)
+    end
+    mirrorTip(ui.xBox, "X")
+    mirrorTip(ui.yBox, "Y")
 
     -- ---- nudge cluster | 9-point picker: two equal halves ------------
     -- Each cluster sits in its own container, centred in its half of the
@@ -899,7 +957,9 @@ local function refreshInstance(po)
         local text = target and target.title or L["(unavailable)"]
         if active ~= nil and active == a.fallback then text = L["(backup)"] .. " " .. text end
         ui.targetRow.picker:SetDisplayOverride(text)
-        ui.xLabel:SetText(L["Offset X"]); ui.yLabel:SetText(L["Offset Y"])
+        -- A mirrored axis's box edits the centre line, not an offset (Sess:SetXY).
+        ui.xLabel:SetText(a.mirrorX and L["Mirror Position"] or L["Offset X"])
+        ui.yLabel:SetText(a.mirrorY and L["Mirror Position"] or L["Offset Y"])
         ui.btnDetach:SetEnabled(true)
         for _, b in ipairs(ui.points) do b:Hide() end
     else
@@ -947,6 +1007,10 @@ local function refreshInstance(po)
     setRowEnabled(ui.backupRow, anchored)
     setRowEnabled(ui.edgeRow, anchored)
     setRowEnabled(ui.alignRow, anchored)
+    -- Mirror needs a parent to mirror: only offered while there is one.
+    ui.mirrorRow.label:SetAlpha(anchored and 1 or DISABLED_ALPHA)
+    ui.mirrorX:SetEnabled(anchored); ui.mirrorY:SetEnabled(anchored)
+    ui.mirrorX:Refresh(); ui.mirrorY:Refresh()
 
     -- The verb row carries no element state, but a panel that has just been
     -- built (or revived out of the pool) has never been told what the undo
