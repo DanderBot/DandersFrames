@@ -91,6 +91,26 @@ local DBG = "AURACONTAINER"
 -- Runtime A/B: /df debug ownpreview (AuraContainer.ToggleOwnPreview).
 AuraContainer._ownTestPreview = true
 
+-- ★ IS THIS HANDLE IN TEST SHAPE? Test mode (AuraContainer._testMode) puts every test
+-- handle in it. A PREVIEW frame (frame.dfPreview: a standalone frame that only ever
+-- shows test data, see DF:FrameInTestScope) is in it always, with or without test
+-- mode, so its rows preview the moment it is shown and never parse a real unit.
+-- h._previewFrame is resolved once, at Create.
+-- ⚠ HANDLE-LEVEL QUESTIONS ONLY: the shape a handle builds, its preview slot count,
+-- its preview timers, its tuning and test-count rebuilds. The CLIENT-WIDE ones -- the
+-- provider bounce, the safety sweeps, the latch registries, the live re-parse kick --
+-- stay on _testMode, because outside test mode the live frames are on screen and only
+-- the preview frame is not.
+-- ⚠ Own-frame preview only. The engine route (/df debug ownpreview OFF) needs the
+-- global sample provider, which only test mode switches, so there a preview frame
+-- takes the test shape only while test mode is on, as every other test frame does.
+-- Party, raid and pinned frames never carry dfPreview: for them this is _testMode.
+local function testShapeFor(h)
+    if AuraContainer._testMode then return true end
+    return (h and h._previewFrame and AuraContainer._ownTestPreview) and true or false
+end
+AuraContainer._testShapeFor = testShapeFor
+
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder = false, false
@@ -1288,6 +1308,9 @@ function AuraContainer.SetTestMode(on)
     -- DF.testMode/raidTestMode). The asymmetry is what makes it worth naming: a false NEGATIVE
     -- silently corrupts what is on screen, a false POSITIVE only costs one extra rebuild.
     -- (Parent-driven handles are skipped here too — see skipNested at file scope.)
+    -- ⚠ A PREVIEW frame's handles (testShapeFor) are test-shaped on both sides of the
+    -- transition, so for them the rebuild below changes nothing; they are rebuilt anyway
+    -- because they are test-frame handles, which costs one rebuild and nothing else.
     local function rebuildAll()
         -- PERF timing (debug-gated): every test handle's container is rebuilt
         -- across a test transition -- the other synchronous cost of SetTestMode.
@@ -3857,7 +3880,8 @@ function NativeBackend:build()
     -- the current _testMode flag: entering the preview rebuilds while _testMode is
     -- already true, and the container being retired at that moment is the LIVE one --
     -- exactly the one worth parking, since leaving the preview asks for it straight back.
-    self.builtInTestMode = AuraContainer._testMode and true or false
+    -- (A preview frame's handle is test-shaped outside test mode too: testShapeFor.)
+    self.builtInTestMode = testShapeFor(handle)
     -- ☠ The structural key THIS container was built with, captured here and never read
     -- from the handle at park time. Handle:Rebuild writes the INCOMING key to
     -- _structKey before _rebuild runs, so a park that keyed off the handle would file
@@ -3909,7 +3933,9 @@ function NativeBackend:build()
     end
     -- TEST MODE (P5): the sample provider feeds any requested token identically, but
     -- test frames carry fabricated units — parse "player" so presence is guaranteed.
-    local testMode = AuraContainer._testMode
+    -- The handle's own answer (testShapeFor): a preview frame's rows take this shape
+    -- outside test mode too. Captured once; every branch below reads this local.
+    local testMode = testShapeFor(handle)
     local unit = testMode and "player" or config.unit
     if type(unit) == "string" then pcall(function() c:SetUnit(unit) end) end
 
@@ -4405,7 +4431,7 @@ end
 function NativeBackend:setUnit(unit)
     -- Test mode parses "player" regardless of the frame's (fabricated) unit; the
     -- handle's config still tracks the live token for the rebuild back.
-    if AuraContainer._testMode then return end
+    if testShapeFor(self.handle) then return end
     local c = self.container
     if c and type(unit) == "string" then
         pcall(function() c:SetUnit(unit) end)
@@ -4487,7 +4513,7 @@ function NativeBackend:applyGroupTuning()
     -- (one group per preview slot) — tuning them in place would not re-stamp that paint.
     -- Handle:ApplyTuning rebuilds the preview instead, so this path is never reached in
     -- test mode; guard anyway.
-    if AuraContainer._testMode then return end
+    if testShapeFor(self.handle) then return end
     -- OVERLAY declares AuraSLOTs, not groups, so groupKeys is empty and the group
     -- setters have nothing to act on — it needs the slot-side setters instead. The
     -- cfByKey derivation below is shared: build() keys slots and groups identically
@@ -4735,9 +4761,15 @@ end
 
 local function testPoolOffset(config, poolSize, count)
     if config.testEntries or not poolSize or poolSize < 2 then return 0 end
-    local u = config.unit
-    if type(u) ~= "string" then return 0 end
-    local n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
+    -- config.testSeed (a number) stands in for the token's number on a frame whose token
+    -- has none -- standalone frames on "target", "focus", "pet" would otherwise all draw
+    -- the same window. Party and raid rows never set it, so their windows are unchanged.
+    local n = tonumber(config.testSeed)
+    if not n then
+        local u = config.unit
+        if type(u) ~= "string" then return 0 end
+        n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
+    end
     local step = math.max(1, count or 1)
     -- ☠ SCRAMBLE THE SLOT, DO NOT WALK IT. When the count divides the pool the windows
     -- tile into `slots` disjoint runs, and handing them out as (n * step) makes the offset
@@ -4776,7 +4808,7 @@ function Handle:_slotCount()
     -- Capping HERE rather than clamping only in the painter is what actually fixes it:
     -- the count decides how many buttons the flow lays out, so an uncapped count draws
     -- duplicate icons no matter what the painter does with the index.
-    if AuraContainer._testMode then
+    if testShapeFor(self) then
         return testSlotCount(self.config, testPoolFor(self.config))
     end
     return self.config.max or 1
@@ -4982,7 +5014,7 @@ local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
         -- Same gen guard as the re-arm: a repaint or teardown must not leave a stale
         -- closure showing the cue on a slot that has moved on.
         if handle._destroyed or slot._dfTestGen ~= gen then return end
-        if not AuraContainer._testMode then return end
+        if not testShapeFor(handle) then return end
         setShown(true)
     end)
 end
@@ -4998,7 +5030,7 @@ end
 local function scheduleTestRearm(handle, slot, d, gen, delay)
     C_Timer.After(delay, function()
         if handle._destroyed or slot._dfTestGen ~= gen then return end
-        if not AuraContainer._testMode or not slot._dfTestDurObj then return end
+        if not testShapeFor(handle) or not slot._dfTestDurObj then return end
         local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
         if ok then
             -- Re-drive the swipe on the same edge as the duration, or it loops out of step
@@ -5899,7 +5931,7 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
     -- Captured, not read through handle.backend at call time: a re-adopted park swaps
     -- the backend out from under closures that belong to a different container.
     local testShape = self.backend and self.backend.builtInTestMode
-    if testShape == nil then testShape = AuraContainer._testMode end
+    if testShape == nil then testShape = testShapeFor(self) end
     return function(button)
         local ok, err = pcall(function()
             if handle._destroyed or handle._gen ~= gen or not button then return end
@@ -6133,8 +6165,11 @@ function Handle:_applyVisibility()
     -- Composition: consumer intent + the death latch.
     -- ☠ ASKED, NOT REMEMBERED — see unitVisLatched. self._visLatched is a memo of the
     -- last application and must never be the authority here: a retarget would carry it.
-    local want = (self._intendedShown ~= false) and not self._deathLatched
-        and not handleVisDark(self)
+    -- ⚠ A PREVIEW frame's rows ignore both latches. They show sample auras under a REAL
+    -- token ("target"), and the latches are unit state from the live frames -- a dead or
+    -- out-of-world real target would otherwise blank the preview of a target frame.
+    local latched = (not self._previewFrame) and (self._deathLatched or handleVisDark(self))
+    local want = (self._intendedShown ~= false) and not latched
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -6501,7 +6536,7 @@ function Handle:ApplyTuning(tuning)
     end
     -- Test mode: the preview's per-slot pin groups can't be tuned in place
     -- (maxFrameCount = 1 by design) — rebuild so the preview honours the new cap.
-    if AuraContainer._testMode then
+    if testShapeFor(self) then
         self:_rebuild()
         return
     end
@@ -6944,7 +6979,7 @@ end
 function Handle:_readoptParked()
     local p = self._parked
     if not p then return false end
-    if AuraContainer._testMode then return false end
+    if testShapeFor(self) then return false end
     if type(self._structKey) ~= "string" or self._structKey == "" then return false end
     if p.key ~= self._structKey then return false end
     local be = p.backend
@@ -7233,7 +7268,7 @@ function Handle:SetTestMax(n)
     n = tonumber(n)
     if self.config.testMax == n then return end
     self.config.testMax = n
-    if AuraContainer._testMode then self:_rebuild() end
+    if testShapeFor(self) then self:_rebuild() end
 end
 
 -- ============================================================
@@ -8624,10 +8659,16 @@ function AuraContainer:Create(parent, config)
     -- the pinned ones, both long before any consumer drives a row onto them.
     -- Bounded walk: the anchor's parent is usually the unit frame, but AD hangs
     -- containers off the healthBar / background anchor / aura-bar strip instead.
+    -- A PREVIEW frame (dfPreview, stamped with dfIsTestFrame before its elements are
+    -- built) also marks the handle _previewFrame: test-shaped always (testShapeFor).
     local ancestor = parent
     for _ = 1, 6 do
         if not ancestor then break end
-        if ancestor.dfIsTestFrame then h._testFrame = true break end
+        if ancestor.dfIsTestFrame then
+            h._testFrame = true
+            if ancestor.dfPreview then h._previewFrame = true end
+            break
+        end
         ancestor = ancestor.GetParent and ancestor:GetParent() or nil
     end
     if cfg.mode == "missing" then
@@ -9239,7 +9280,9 @@ function AuraContainer.ToggleOwnPreview()
     AuraContainer._ownTestPreview = not AuraContainer._ownTestPreview or nil
     local n = 0
     for h in pairs(AuraContainer._handles or {}) do
-        if h.builtInTestMode or AuraContainer._testMode then
+        -- A preview frame's handle changes shape with the toggle in or out of test mode
+        -- (testShapeFor), so it always rebuilds.
+        if h.builtInTestMode or AuraContainer._testMode or h._previewFrame then
             n = n + 1
             pcall(function() h:_rebuild() end)
         end

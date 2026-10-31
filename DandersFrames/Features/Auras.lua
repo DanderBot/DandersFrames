@@ -3491,6 +3491,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         testMax  = (prefix == "buff" and (db.testBuffCount or 2))
                 or (prefix == "debuff" and (db.testDebuffCount or 2))
                 or nil,
+        -- Which window of the sample pool the preview draws (AuraContainer testPoolOffset);
+        -- nil = the unit token's number, as before.
+        testSeed = opts.testSeed,
         enabled  = true,
         candidateFilters = candidateFilters,
         -- Native hover tooltips: governed by the Tooltips page's per-row Enable.
@@ -3852,6 +3855,7 @@ function DF:DriveBuffFactory(frame, db)
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
+            testSeed = frame.dfTestAuraSeed,
         }))
         frame.buffFactory = h
         frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
@@ -3899,6 +3903,7 @@ function DF:DriveBuffFactory(frame, db)
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
+            testSeed = frame.dfTestAuraSeed,
         })
         -- Re-apply the z-order via the engine (buff rows sit at +32, not ApplyZOrder's 40). Frame Level
         -- is deliberately NOT in the sig, so a level-only change never reaches _build.
@@ -4055,6 +4060,7 @@ function DF:DriveDebuffFactory(frame, db)
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "debuff", {
             unit = frame.unit,
             filterList = filterList,
+            testSeed = frame.dfTestAuraSeed,
         }))
         frame.debuffFactory = h
         frame.dfDebuffFactoryVersion = ver
@@ -4101,6 +4107,7 @@ function DF:DriveDebuffFactory(frame, db)
         local cfg = DF:BuildAuraRowConfig(db, "debuff", {
             unit = frame.unit,
             filterList = filterList,
+            testSeed = frame.dfTestAuraSeed,
         })
         -- Re-apply the z-order via the engine. Frame Level is deliberately NOT in the sig,
         -- so a level-only change never reaches _build.
