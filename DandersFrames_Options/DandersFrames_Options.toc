@@ -106,6 +106,7 @@ GUI\Pages\ModulesPage.lua
 UnitFrames\PageData.lua
 UnitFrames\Pages.lua
 UnitFrames\LinksPage.lua
+UnitFrames\TestPanel.lua
 
 # Aura Designer editor (migrations stay resident in the main addon)
 AuraDesigner\UI\Options.lua

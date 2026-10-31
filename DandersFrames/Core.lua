@@ -7224,6 +7224,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 cmd("/df lock|r / " .. C .. "unlock", L["lock/unlock party frames"])
                 cmd("/df raidlock|r / " .. C .. "raidunlock", L["lock/unlock raid frames"])
                 cmd("/df test", L["toggle the test mode panel"])
+                if DF.UnitFrames then cmd("/df test units", L["toggle the unit frames test mode panel"]) end
                 cmd("/df hide", L["hide test frames"])
                 cmd("/df users", L["show DandersFrames users in your group"])
                 cmd("/df clearoverride <key|all>", L["clear stuck auto-layout overrides"])
@@ -7241,6 +7242,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df test a silent no-op until the settings panel was opened.
                 if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
+            elseif msg == "test units" then
+                -- The Unit Frames companion's own test mode and panel
+                -- (DandersFrames_Options/UnitFrames/TestPanel.lua).
+                if not DF.UnitFrames then
+                    DF:Say(L["Unit Frames is not loaded."])
+                    return
+                end
+                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
+                local UFO = DF.GUI and DF.GUI.UnitFrameOptions
+                if UFO and UFO.ToggleTestPanel then UFO.ToggleTestPanel() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then

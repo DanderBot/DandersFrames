@@ -3604,7 +3604,6 @@ L["In a Pet Battle"] = true
 L["In a Vehicle"] = true
 L["In an Instance"] = true
 L["In Combat"] = true
-L["Include Unit Frames in Test Mode"] = true
 L["Mounted"] = true
 L["Out of Combat"] = true
 L["Show When"] = true
@@ -3632,4 +3631,11 @@ L["All unit frame settings and positions, including the Unit Frames Settings pag
 L["Linked frames, back to just the default Player and Target link"] = true
 L["The Unit Frames and Unit Frames (Small) text templates are rebuilt, so edits to them are lost"] = true
 L["whether Unit Frames is on, and text templates under other names"] = true
+-- Unit frames: the units test mode and its panel (DandersFrames_Options/UnitFrames/TestPanel.lua).
+L["Elite"] = true
+L["Fixed Health"] = true
+L["Raid Target Icon"] = true
+L["Shows sample unit frames. Party and raid test frames stay hidden while this is on."] = true
+L["toggle the unit frames test mode panel"] = true
+L["Unit Frames is not loaded."] = true
 --@end-do-not-package@
