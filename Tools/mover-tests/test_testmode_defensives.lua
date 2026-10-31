@@ -1,28 +1,26 @@
 local NS = ...
 
 -- ============================================================
--- TEST MODE PANEL, DEFENSIVES PAIR -- DandersFrames_Options/TestMode/TestMode.lua
+-- TEST MODE POPUP, DEFENSIVES PAIR -- DandersFrames_Options/TestMode/TestMode.lua
 -- ------------------------------------------------------------
--- Source census, because the panel is not headlessly buildable -- it is one
--- 5,000-line builder over the real settings window.
+-- Source census of the Party / Raid section builders.
 --
--- The rule being pinned (bug #1118 item 1): nothing on this panel may grey a
--- control on a LIVE PROFILE setting. RefreshDependentEnabled runs from exactly
--- two places -- the Show Auras tick and UpdateState -- so a grey taken from a
--- setting that lives on a settings page outlives whatever caused it: switch the
--- Defensive Icon back on and the box stayed dead, and being disabled it also
--- swallowed its own click-through to the page that would have fixed it.
+-- The rule being pinned (bug #1118 item 1): nothing in the test popup may grey
+-- a control on a LIVE PROFILE setting. Nothing tells the popup such a setting
+-- changed, so the grey outlived whatever caused it: switch the Defensive Icon
+-- back on and the box stayed dead, and being disabled it also swallowed its
+-- own click-through to the page that would have fixed it.
 --
--- Test Mode's own flags are fine to gate on (Show Auras drives the aura sliders,
--- raid-vs-party drives the Targeted List pair) -- the panel owns those and
--- refreshes when they change. The two checks below say exactly that: the profile
--- key is gone from the refresh, and the panel-owned gates are still there.
+-- Test Mode's own flags are fine to gate on (Show Auras greys the aura
+-- counts) -- the popup re-reads them on every write. Raid-vs-party is a
+-- VARIANT, so the party-only Targeted List rows are simply not built for Raid
+-- (the behaviour itself is run in test_test_popup.lua).
 -- ============================================================
 
-local src = options_file_source("TestMode/TestMode.lua")
+local src = options_file_source("TestMode/TestMode.lua"):gsub("\r\n", "\n")
 
 -- Comments out first, or the census answers to the note explaining the fix
--- rather than to the code -- the name it is looking for is written in both.
+-- rather than to the code.
 local function code(text)
     local out = {}
     for line in (text .. "\n"):gmatch("([^\n]*)\n") do
@@ -31,31 +29,28 @@ local function code(text)
     return table.concat(out, "\n")
 end
 
--- The refresh body, from its declaration to the `end` that closes it at the same
--- indent -- so the census reads the function rather than the whole file.
-local refreshBody
-do
-    local s = src:find("panel.RefreshDependentEnabled = function()", 1, true)
-    check(s ~= nil, "RefreshDependentEnabled is still where the panel declares it")
-    if s then
-        local e = src:find("\n    end\n", s, true)
-        check(e ~= nil, "RefreshDependentEnabled body is closed at panel indent")
-        refreshBody = code(src:sub(s, e or #src))
-    end
+local function body(name)
+    local s = src:find("local function " .. name .. "(rows, scope)", 1, true)
+    check(s ~= nil, name .. " is where the popup declares it")
+    if not s then return "" end
+    local e = src:find("\nend\n", s, true)
+    return code(src:sub(s, e or #src))
 end
 
-if refreshBody then
-    check(refreshBody:find("defensiveIconEnabled", 1, true) == nil,
-        "the panel refresh reads no live profile setting (defensiveIconEnabled)")
-    check(refreshBody:find("testShowAuras", 1, true) ~= nil,
-        "the aura sliders still gate on Test Mode's own Show Auras flag")
-    check(refreshBody:find("showTargetedListCheck:SetEnabled", 1, true) ~= nil,
-        "the Targeted List pair still greys in raid mode")
-end
+local icons = body("BuildIcons")
+local auras = body("BuildAuras")
+local all = code(src:sub((src:find("-- TEST MODE POPUP", 1, true) or 1)))
 
--- ...and nothing anywhere else in the panel greys the pair either.
-local body = code(src)
-check(body:find("showDefensivesCheck:SetEnabled", 1, true) == nil,
-    "nothing disables the Defensives box")
-check(body:find("defSlider:SetEnabled", 1, true) == nil,
-    "nothing disables the Defensives count slider")
+check(not all:find("defensiveIconEnabled", 1, true), "the popup reads no live profile setting (defensiveIconEnabled)")
+check(not icons:find("disabled", 1, true), "nothing greys the Defensives switch or its count")
+check(icons:find('label = L["Defensives"], key = "testDefensiveCount"', 1, true) ~= nil,
+      "the Defensives switch is a view of testDefensiveCount")
+check(icons:find('label = L["Max Icons"], key = "testDefensiveCount"', 1, true) ~= nil,
+      "...beside the count it views")
+check(auras:find("local function aurasOff() return not GroupDB(scope).testShowAuras end", 1, true) ~= nil,
+      "the aura counts gate on Test Mode's own Show Auras flag")
+local _, gated = auras:gsub("disabled = aurasOff", "")
+eq(gated, 2, "...both of them")
+check(icons:find('if scope == "party" then', 1, true) ~= nil
+      and icons:find('"testShowTargetedList"', 1, true) ~= nil,
+      "the Targeted List rows are party-only")

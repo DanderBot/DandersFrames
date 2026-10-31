@@ -3544,11 +3544,15 @@ end
 -- ============================================================
 
 -- ============================================================
--- TEST PANEL WIDGET KIT
--- The test panel's own widgets -- themed checkbox (two to a row, its label
--- optionally a link to a settings page), mini slider, collapsible section with
--- a count badge -- built here once so every test panel looks and behaves the
--- same. The panel supplies where a checkbox writes and what follows a write:
+-- TEST PANEL WIDGET KIT (legacy)
+-- ⚠ The party / raid test popup below no longer uses this: it is built from
+-- the mode registry and DandersUI's row list. Kept, behaviour unchanged, for
+-- panels still built on it; new work should register a test mode instead
+-- (DandersFrames/TestMode/Modes.lua).
+--
+-- Themed checkbox (two to a row, its label optionally a link to a settings
+-- page), mini slider, collapsible section with a count badge. The panel
+-- supplies where a checkbox writes and what follows a write:
 --   opts.contentWidth        the panel's content width
 --   opts.themeColor()        -> { r, g, b } accent for checks, sliders, badges
 --   opts.getDB()             -> the table a checkbox writes its key into
@@ -3557,7 +3561,7 @@ end
 --   opts.saveSection(key, expanded)  optional: a section folded / unfolded
 --   opts.relayout()          optional: ...and the panel re-lays itself out
 -- Returns { Checkbox = fn, Slider = fn, Section = fn, sections = { ... } } with
--- the same signatures the party / raid panel has always used:
+-- the signatures the old party / raid panel used:
 --   Checkbox(parent, text, dbKey, callback, pageId, setValue)
 --   Slider(parent, width, min, max, step)
 --   Section(parentFrame, title, sectionKey)  -- :AddCheckbox / :AddWidget / ...
@@ -4036,45 +4040,100 @@ function DF:CreateTestPanelKit(opts)
     return kit
 end
 
+-- ============================================================
+-- TEST MODE POPUP
+-- The floating test panel: a slim popout with an icon rail down its left edge
+-- and the active section's settings beside it.
+--
+--   rail     the MODES at the top (Party, Raid, any registered mode), filled
+--            with the mode's accent while active; a hairline; then the active
+--            mode's SECTIONS, the current one marked with the accent bar
+--   header   the section's title, the preview on/off and the close X
+--   chips    the active mode's presets; the chip the current toggles match
+--            is lit (derived from state, never from the last click)
+--   list     the section's settings, one compact row each (DandersUI's row
+--            list); it scrolls once it is taller than the room the rail leaves
+--
+-- Every mode comes through the registry in DandersFrames/TestMode/Modes.lua
+-- (DF:RegisterTestMode) -- Party and Raid register at the bottom of this file.
+-- The popup only draws and routes: what a mode stores, what a write sets off
+-- and what entering or leaving it means are the mode's own.
+--
+-- Kept from the old panel: DF.TestPanel / DF:CreateTestPanel /
+-- DF:ToggleTestPanel, panel:UpdateState() / UpdateStateNoCallback(), the
+-- global frame name (Escape closes it, Edit Mode closes it), the drag, and the
+-- rule that closing it releases the user's preview claim.
+-- The last section is remembered per mode (account window state, testPopup).
+-- ============================================================
+
+local POPUP_WIDTH  = 272
+local RAIL_WIDTH   = 52
+local PANE_PAD     = 8
+local HEADER_H     = 30   -- the title row, measured from the popup's top edge
+local CHIP_H       = 18
+local CHIP_GAP     = 4
+local MIN_HEIGHT   = 200
+local TEST_ICONS   = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+-- A mode's callbacks can come from another addon: an error in one is reported
+-- through the normal handler and the popup carries on.
+local function SafeCall(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, a, b, c = pcall(fn, ...)
+    if not ok then
+        if geterrorhandler then geterrorhandler()(a) end
+        return nil
+    end
+    return a, b, c
+end
+
+local function ResolveValue(v)
+    if type(v) == "function" then return (SafeCall(v)) end
+    return v
+end
+
+-- Where the popup keeps what it remembers: the last mode and each mode's last
+-- section. UI state, not profile content -- the settings window's own place
+-- lives in the same table.
+local function PopupMemory()
+    local ws = DF.GetWindowState and DF:GetWindowState()
+    if type(ws) ~= "table" then
+        DF._testPopupMemory = DF._testPopupMemory or {}
+        ws = { testPopup = DF._testPopupMemory }
+    end
+    if type(ws.testPopup) ~= "table" then ws.testPopup = {} end
+    if type(ws.testPopup.sections) ~= "table" then ws.testPopup.sections = {} end
+    return ws.testPopup
+end
+
+-- A row label that opens a DandersFrames settings page:
+--   spec.link, spec.linkHint = DandersFrames:TestModeSettingsLink("bars_absorb")
+function DF:TestModeSettingsLink(pageId)
+    local function open()
+        local GUI = DF.GUI
+        if not (GUI and GUI.SelectTab) then return end
+        if not DF.GUIFrame then
+            if DF.ToggleGUI then DF:ToggleGUI() end
+        elseif not DF.GUIFrame:IsShown() then
+            DF.GUIFrame:Show()
+        end
+        GUI.SelectTab(pageId)
+    end
+    return open, L["Click to open settings"]
+end
+
 function DF:CreateTestPanel()
     if DF.TestPanel then return DF.TestPanel end
 
-    -- ============================================================
-    -- COLOUR CONSTANTS
-    -- ============================================================
-    -- Neutral tones reuse the shared GUI palette (same numeric values, zero
-    -- visual change) so they track any future palette change in lockstep. The
-    -- mode accent stays driven by GetThemeColor() below (party/raid aware).
-    local GUIColors  = DF.GUI.Colors
-    local C_PARTY    = GUIColors.accent
-    local C_RAID     = GUIColors.raid
-    local C_BG       = GUIColors.background
-    local C_PANEL    = GUIColors.panel
-    local C_ELEMENT  = GUIColors.element
-    local C_BORDER   = GUIColors.border
-    local C_HOVER    = GUIColors.hover
-    local C_TEXT     = GUIColors.text
-    local C_TEXT_DIM = GUIColors.textDim
-
-    local PANEL_WIDTH   = 320
-    local CONTENT_WIDTH = PANEL_WIDTH - 24  -- 12px padding each side
-    local HEADER_TOP    = 108  -- Space used by title + toggle button + description + separator
-
-    local function GetThemeColor()
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        return isRaidMode and C_RAID or C_PARTY
-    end
-
-    local function IsTestActive()
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        return isRaidMode and DF.raidTestMode or DF.testMode
-    end
+    local GUI = DF.GUI
+    local C_BG, C_PANEL, C_BORDER = GUI.Colors.background, GUI.Colors.panel, GUI.Colors.border
+    local C_TEXT, C_TEXT_DIM = GUI.Colors.text, GUI.Colors.textDim
 
     -- ============================================================
-    -- MAIN PANEL FRAME
+    -- FRAME
     -- ============================================================
     local panel = CreateFrame("Frame", "DandersFramesTestPanel", UIParent, "BackdropTemplate")
-    panel:SetSize(PANEL_WIDTH, 420)
+    panel:SetSize(POPUP_WIDTH, 320)
     panel:SetPoint("CENTER", UIParent, "CENTER", 300, 0)
     panel:SetFrameStrata("FULLSCREEN_DIALOG")
     panel:SetFrameLevel(100)
@@ -4083,847 +4142,428 @@ function DF:CreateTestPanel()
     panel:RegisterForDrag("LeftButton")
     panel:SetScript("OnDragStart", panel.StartMoving)
     panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
-    DF.GUI:CreatePanelBackdrop(panel, { bgAlpha = C_BG.a, borderColor = { r = 0, g = 0, b = 0, a = 1 } })
+    GUI:CreatePanelBackdrop(panel, { bgAlpha = C_BG.a, borderColor = { r = 0, g = 0, b = 0, a = 1 } })
     panel:Hide()
-
-    local function ApplyScale(self)
-        self:SetScale(DF:GetWindowState().scale or 1.0)
-    end
-
-    panel:SetScript("OnHide", function()
-        -- Closing the panel drops the USER's claim on both scopes -- and only that;
-        -- it must not hide the frames itself. Unlock's own claim decides whether they
-        -- stay up, and the later lock takes them down.
-        DF:SetTestModeOwner("party", "user", false)
-        DF:SetTestModeOwner("raid", "user", false)
-        if DF.GUI and DF.GUI.UpdateTestButtonState then
-            DF.GUI.UpdateTestButtonState()
-        end
-    end)
-
     tinsert(UISpecialFrames, "DandersFramesTestPanel")
 
-    -- ============================================================
-    -- HEADER
-    -- ============================================================
-    -- Title
-    local title = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    title:SetPoint("TOPLEFT", 12, -10)
-    title:SetText(L["Test Mode"])
-    panel.title = title
+    -- modeId / sectionId: what is on screen. builtFor: the mode|section the
+    -- list was last built for (a rebuild only when it changes). entered: the
+    -- current mode has had its onEnter for this opening. switching: a switch
+    -- is running its mode callbacks, so a re-entrant refresh must not re-decide
+    -- the mode underneath it.
+    local state = { modeId = nil, sectionId = nil, builtFor = nil, entered = false, switching = false }
+    panel.state = state
 
-    -- Mode badge
-    local badge = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    badge:SetSize(40, 18)
-    badge:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    -- Colours are pushed per mode (party/raid theme) when the panel refreshes.
-    DF.GUI:CreateElementBackdrop(badge)
-    badge.text = badge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    badge.text:SetPoint("CENTER", 0, 0)
-    badge.text:SetText(L["Party"])
-    panel.badge = badge
+    local function CurrentMode() return state.modeId and DF:GetTestMode(state.modeId) or nil end
 
-    -- Close button
-    local closeBtn = DF.GUI:CreateCloseButton(panel, {
-        size = 22,
+    local function ModeAccent(def)
+        local c = def and ResolveValue(def.accent)
+        if type(c) ~= "table" then c = GUI:GetAccent() end
+        return c
+    end
+
+    -- ============================================================
+    -- RAIL -- the settings window's own rail widget, at a compact size
+    -- ============================================================
+    local rail = GUI:CreateIconRail(panel, {
+        width = RAIL_WIDTH, itemHeight = 40, iconSize = 16, iconTop = 6,
+        labelGap = 3, labelInset = 1, spacing = 1, paddingTop = 6, paddingBottom = 6,
+        onSelect = function(id) panel:OnRailPick(id) end,
+    })
+    rail:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -1)
+    rail:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 1, 1)
+    local railBg = rail:CreateTexture(nil, "BACKGROUND", nil, -1)
+    railBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    railBg:SetAllPoints(rail)
+    railBg:SetVertexColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.35)
+    local railEdge = rail:CreateTexture(nil, "BORDER")
+    railEdge:SetTexture("Interface\\Buttons\\WHITE8x8")
+    railEdge:SetPoint("TOPRIGHT", rail, "TOPRIGHT", 0, 0)
+    railEdge:SetPoint("BOTTOMRIGHT", rail, "BOTTOMRIGHT", 0, 0)
+    railEdge:SetWidth(1)
+    railEdge:SetVertexColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
+    -- The rail's gaps move the popup, like the rest of its chrome.
+    rail:EnableMouse(true)
+    rail:RegisterForDrag("LeftButton")
+    rail:SetScript("OnDragStart", function() panel:StartMoving() end)
+    rail:SetScript("OnDragStop", function() panel:StopMovingOrSizing() end)
+    panel.rail = rail
+
+    local paneX = RAIL_WIDTH + 1 + PANE_PAD
+    local contentW = POPUP_WIDTH - paneX - PANE_PAD - 1
+
+    -- ============================================================
+    -- HEADER -- section title, preview on/off, close
+    -- ============================================================
+    local closeBtn = GUI:CreateCloseButton(panel, {
+        size = 18,
         onClick = function() panel:Hide() end,
     })
-    closeBtn:SetPoint("TOPRIGHT", -8, -6)
+    closeBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)
+    panel.closeBtn = closeBtn
 
-    -- Separator below header
-    local headerSep = panel:CreateTexture(nil, "ARTWORK")
-    headerSep:SetPoint("TOPLEFT", 0, -32)
-    headerSep:SetPoint("TOPRIGHT", 0, -32)
-    headerSep:SetHeight(1)
-    headerSep:SetColorTexture(1, 1, 1, 0.06)
-
-    -- ============================================================
-    -- TOGGLE BUTTON
-    -- ============================================================
-    local toggleBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    toggleBtn:SetPoint("TOPLEFT", 12, -38)
-    -- Full-width toggle. The active/inactive look (accent fill + "Disable Test
-    -- Mode" label when on) is driven by SetActive(testActive) in
-    -- UpdateStateInternal; here we just set the resting (inactive) label.
-    DF.GUI:StyleButton(toggleBtn, {
-        width = CONTENT_WIDTH,
-        height = 30,
-        font = "DFFontHighlight",
-        text = L["Enable Test Mode"],
+    local previewBtn = GUI:CreateGlyphButton(panel, {
+        size = 18, iconSize = 14,
+        texture = TEST_ICONS .. "preview.png",
+        tooltip = function()
+            local def = CurrentMode()
+            local on = def and def.isPreviewOn and SafeCall(def.isPreviewOn)
+            return { title = on and L["Disable Test Mode"] or L["Enable Test Mode"] }
+        end,
+        onClick = function() panel:TogglePreview() end,
     })
-    toggleBtn:SetScript("OnClick", function()
-        DF:ToggleTestMode()
-        -- This button and the toolbar's test button are the SAME action: turn the
-        -- preview off and close the panel. An open panel always means "the user is
-        -- asking for a preview", which is what makes the toggle's label unambiguous.
-        --
-        -- Hide() runs OnHide, which releases the user's claim on both scopes; that is
-        -- idempotent with the release ToggleTestMode just did.
-        local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
-        if not DF:IsTestModeOwnedBy(scope, "user") then
-            panel:Hide()
-        else
-            panel:UpdateState()
-        end
-    end)
-    panel.toggleBtn = toggleBtn
+    previewBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    panel.previewBtn = previewBtn
 
-    -- Description text
-    local desc = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    desc:SetPoint("TOPLEFT", 12, -74)
-    desc:SetPoint("TOPRIGHT", -12, -74)
-    desc:SetJustifyH("LEFT")
-    desc:SetSpacing(2)
-    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-    desc:SetText(L["Expand sections to toggle features. Click label text to jump to its settings page."])
+    local title = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
+    title:SetPoint("TOPLEFT", panel, "TOPLEFT", paneX, -10)
+    title:SetPoint("RIGHT", previewBtn, "LEFT", -6, 0)
+    title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
+    panel.title = title
 
     -- ============================================================
-    -- WIDGETS (the shared test panel kit, DF:CreateTestPanelKit above)
+    -- PRESET CHIPS
     -- ============================================================
-    local kit = DF:CreateTestPanelKit({
-        contentWidth = CONTENT_WIDTH,
-        themeColor = GetThemeColor,
-        getDB = function()
-            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-            return isRaidMode and DF:GetRaidDB() or DF:GetDB()
+    local chips = CreateFrame("Frame", nil, panel)
+    chips:SetPoint("TOPLEFT", panel, "TOPLEFT", paneX, -HEADER_H)
+    chips:SetSize(contentW, 1)
+    local chipPool, chipCount, chipsHeight = {}, 0, 0
+    panel.chips = chipPool
+
+    -- ============================================================
+    -- THE LIST -- DandersUI's row list, bound to the current mode's store
+    -- ============================================================
+    local list = GUI:CreateRowList(panel, {
+        width = contentW,
+        store = function()
+            local def = CurrentMode()
+            return def and ResolveValue(def.store) or nil
         end,
-        callbackArg = function() return DF.GUI and DF.GUI.SelectedMode == "raid" end,
-        afterToggle = function()
-            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-            if isRaidMode and DF.raidTestMode then
-                DF:UpdateRaidTestFrames()
-                -- ☠ SECOND PASS NEXT TICK — the same one ENTRY runs, for the same
-                -- reason. A toggle flipped on for the first time this session CREATES
-                -- its bars during this pass, and an anchor-derived rect is 0 for the
-                -- whole creation tick — so anything anchored to a new bar's own
-                -- texture (the absorb chained to the brand-new prediction fill)
-                -- paints at width 0 and stays invisible until another toggle pass. The painter order
-                -- fixes the within-pass dependency; this fixes the rects. It goes through the SAME
-                -- UpdateTestFrame pathway — no second painter.
-                C_Timer.After(0, function()
-                    if DF.raidTestMode and DF.UpdateRaidTestFrames then
-                        DF:UpdateRaidTestFrames()
-                    end
-                end)
-            elseif not isRaidMode and DF.testMode then
-                -- ⚠ _Now, not the arm-stub: the RefreshTestFrames right below
-                -- and the After(0) "second pass over settled rects" both depend
-                -- on this rebuild having already happened this tick.
-                DF:UpdateAllFrames_Now()
-                if DF.RefreshTestFrames then DF:RefreshTestFrames() end
-                -- Same second pass as the raid branch above — see that comment.
-                C_Timer.After(0, function()
-                    if DF.testMode and DF.RefreshTestFrames then
-                        DF:RefreshTestFrames()
-                    end
-                end)
-            end
-            -- ☠ RE-EVALUATE THE PRESET HIGHLIGHT. Flipping a toggle can make the state
-            -- stop matching the highlighted preset -- or start matching another one.
-            -- The full panel refresh is not usable from inside a checkbox handler (it re-runs
-            -- SetChecked on every box, including this one, mid-click), so refresh just the
-            -- preset row.
-            if panel.RefreshPresetHighlight then panel:RefreshPresetHighlight() end
+        accent = function() return ModeAccent(CurrentMode()) end,
+        onWrite = function(spec, value)
+            local def = CurrentMode()
+            if def and def.onChanged then SafeCall(def.onChanged, spec.key, value, spec) end
+            -- A toggle can make the lit preset wrong, or another one right.
+            panel:RefreshPresetHighlight()
         end,
-        saveSection = function(key, expanded)
-            if not DF.db then return end
-            if not DF.db.testPanelSections then DF.db.testPanelSections = {} end
-            DF.db.testPanelSections[key] = expanded
-        end,
-        relayout = function() panel:RecalculateLayout() end,
     })
-    local CreateThemedSlider, CreateSection = kit.Slider, kit.Section
-    local allSections = kit.sections
+    panel.list = list
 
     -- ============================================================
-    -- CREATE SECTIONS
+    -- MODE / SECTION RESOLUTION
     -- ============================================================
+    -- Does this mode agree it is the current one? A mode with no isCurrent
+    -- never objects (it is current while the user keeps it picked).
+    local function ReportsCurrent(def)
+        if not def.isCurrent then return true end
+        return SafeCall(def.isCurrent) and true or false
+    end
 
-    -- --- GENERAL ---
-    local secGeneral = CreateSection(panel, L["General"], "general")
-
-    panel.showPetsCheck = secGeneral:AddCheckbox(L["Show Pets"], "testShowPets", function(enabled, isRaidMode)
-        if isRaidMode then
-            if DF.raidTestMode then
-                if enabled then
-                    if DF.InitializeTestRaidPetFrames then DF:InitializeTestRaidPetFrames() end
-                    if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
-                else
-                    if DF.HideAllTestRaidPetFrames then DF:HideAllTestRaidPetFrames() end
-                end
-            end
-        else
-            if DF.testMode then
-                if enabled then
-                    if DF.InitializeTestPetFrames then DF:InitializeTestPetFrames() end
-                    if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
-                else
-                    if DF.HideAllTestPetFrames then DF:HideAllTestPetFrames() end
-                end
+    -- Which mode the popup should show:
+    --   1. the one on screen, while it still agrees (a mode that SAYS it is
+    --      current stays even when unavailable: it is what the settings show)
+    --   2. on a fresh open, the one picked last time, if it agrees
+    --   3. the first mode that says it is current
+    --   4. the first available mode
+    function panel:ResolveMode()
+        local cur = CurrentMode()
+        if cur and ReportsCurrent(cur) and (cur.isCurrent or DF:IsTestModeAvailable(cur.id)) then
+            return cur.id
+        end
+        local modes = DF:GetTestModeList()
+        if not cur then
+            local remembered = DF:GetTestMode(PopupMemory().mode or "")
+            if remembered and DF:IsTestModeAvailable(remembered.id) and ReportsCurrent(remembered) then
+                return remembered.id
             end
         end
-    end, "display_pets")
+        for _, def in ipairs(modes) do
+            if def.isCurrent and ReportsCurrent(def) then return def.id end
+        end
+        for _, def in ipairs(modes) do
+            if DF:IsTestModeAvailable(def.id) then return def.id end
+        end
+        if cur then return cur.id end
+        return modes[1] and modes[1].id or nil
+    end
 
-    panel.animHealthCheck = secGeneral:AddCheckbox(L["Animate Health"], "testAnimateHealth", function(enabled, isRaidMode)
-        if isRaidMode then
-            if DF.raidTestMode then
-                if enabled then DF:StartTestAnimation()
-                else
-                    local partyDb = DF:GetDB()
-                    if not (DF.testMode and partyDb.testAnimateHealth) then DF:StopTestAnimation() end
-                end
-            end
-        else
-            if DF.testMode then
-                if enabled then DF:StartTestAnimation()
-                else
-                    local raidDb = DF:GetRaidDB()
-                    if not (DF.raidTestMode and raidDb.testAnimateHealth) then DF:StopTestAnimation() end
-                end
+    -- The section to show for a mode: the one on screen, else the one
+    -- remembered for that mode, else its first.
+    local function ResolveSection(modeId)
+        local secs = DF:GetTestModeSections(modeId)
+        local want = state.sectionId or PopupMemory().sections[modeId]
+        for _, sec in ipairs(secs) do
+            if sec.id == want then return sec end
+        end
+        return secs[1]
+    end
+    panel.ResolveSection = function(_, modeId) return ResolveSection(modeId) end
+
+    -- ============================================================
+    -- BUILD
+    -- ============================================================
+    local function RailItems()
+        local items = {}
+        local modes = DF:GetTestModeList()
+        for i, def in ipairs(modes) do
+            items[#items + 1] = {
+                id = "mode:" .. def.id, icon = def.icon, label = def.label, slot = "top",
+                accent = function() return ModeAccent(def) end,
+                tooltip = function()
+                    local name = ResolveValue(def.title) or ResolveValue(def.label)
+                    local ok, why, lines = DF:IsTestModeAvailable(def.id)
+                    if ok then return { title = name } end
+                    local body = {}
+                    if why then body[#body + 1] = why end
+                    for _, line in ipairs(type(lines) == "table" and lines or {}) do body[#body + 1] = line end
+                    return { title = name, lines = body }
+                end,
+                dividerAfter = (i == #modes),
+            }
+        end
+        local cur = CurrentMode()
+        if cur then
+            for _, sec in ipairs(DF:GetTestModeSections(cur.id)) do
+                items[#items + 1] = {
+                    id = "sec:" .. sec.id, icon = sec.icon, label = sec.label, slot = "top",
+                    tooltip = sec.title or sec.label,
+                    accent = function() return ModeAccent(CurrentMode()) end,
+                }
             end
         end
-    end)
+        return items
+    end
 
-    -- Section labels: mark whichever element the cursor is over, on any visible
-    -- preview frame. Marking every element at once was unreadable at real frame
-    -- sizes -- see Labels.lua.
-    -- OFF by default -- test mode is also how people pixel-tune spacing.
-    -- ONE toggle for both halves (highlight + naming): they are the same question
-    -- asked two ways, and a user who wants one always wants the other.
-    panel.showLabelsCheck = secGeneral:AddCheckbox(L["Indicator Info"], "testShowLabels", function()
-        if DF.UpdateTestLabels then DF:UpdateTestLabels() end
-    end)
+    local function PaintRailModes()
+        for _, def in ipairs(DF:GetTestModeList()) do
+            local id = "mode:" .. def.id
+            local isCur = def.id == state.modeId
+            rail:SetFilled(id, isCur)
+            -- The current mode stays live even if it went unavailable: greying
+            -- the thing on screen would leave nothing to click away from.
+            rail:SetDisabled(id, (not isCur) and not DF:IsTestModeAvailable(def.id))
+        end
+    end
 
-    -- Frame count slider (below checkboxes)
-    local fcRow = CreateFrame("Frame", nil, secGeneral.content)
-    fcRow:SetHeight(28)
-    local fcLabel = fcRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    fcLabel:SetPoint("LEFT", 0, 0)
-    fcLabel:SetText(L["Frame Count"])
-    fcLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local fcValue = fcRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    fcValue:SetPoint("LEFT", fcLabel, "RIGHT", 6, 0)
-    panel.frameCountValue = fcValue
+    -- Lay the chips out left to right, wrapping when a row is full.
+    function panel:LayoutChips()
+        local x, y = 0, 0
+        for i = 1, chipCount do
+            local btn = chipPool[i]
+            local w = math.max(28, math.ceil((btn.Text:GetStringWidth() or 0) + 12))
+            btn:SetWidth(w)
+            if x > 0 and x + w > contentW then
+                x = 0
+                y = y + CHIP_H + CHIP_GAP
+            end
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", chips, "TOPLEFT", x, -y)
+            x = x + w + CHIP_GAP
+        end
+        chipsHeight = chipCount > 0 and (y + CHIP_H) or 0
+        chips:SetHeight(math.max(chipsHeight, 1))
+    end
 
-    local frameCountSlider = CreateThemedSlider(fcRow, 140, 1, 5, 1)
-    frameCountSlider:SetPoint("LEFT", fcValue, "RIGHT", 8, 0)
+    function panel:BuildChips()
+        local def = CurrentMode()
+        local presets = def and ResolveValue(def.presets)
+        chipCount = 0
+        for i, preset in ipairs(type(presets) == "table" and presets or {}) do
+            local btn = chipPool[i]
+            if not btn then
+                btn = CreateFrame("Button", nil, chips, "BackdropTemplate")
+                -- fitText off: LayoutChips sizes every chip to its label itself.
+                GUI:StyleButton(btn, { height = CHIP_H, text = "", font = "DFFontHighlightSmall", fitText = false })
+                btn:SetScript("OnClick", function(self) panel:ApplyPreset(self.presetId) end)
+                chipPool[i] = btn
+            end
+            btn.presetId = preset.id
+            btn.Text:SetText(ResolveValue(preset.label) or tostring(preset.id))
+            btn:Show()
+            chipCount = i
+        end
+        for i = chipCount + 1, #chipPool do chipPool[i]:Hide() end
+        self:LayoutChips()
+    end
 
-    local frameCountDragging = false
-    frameCountSlider:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            frameCountDragging = true
-            DF:OnSliderDragStart(function()
-                if DF.LightweightUpdateTestFrameCount then DF:LightweightUpdateTestFrameCount() end
+    -- Height: the rail's own, so the list is what scrolls, never the popup.
+    function panel:Relayout()
+        local h = math.max(math.ceil(rail:GetContentHeight()) + 2, MIN_HEIGHT)
+        local top = HEADER_H + chipsHeight + (chipsHeight > 0 and 8 or 0)
+        list:ClearAllPoints()
+        list:SetPoint("TOPLEFT", panel, "TOPLEFT", paneX, -top)
+        list:SetMaxHeight(math.max(h - top - PANE_PAD, 40))
+        self:SetHeight(h)
+    end
+
+    function panel:RefreshPresetHighlight()
+        local def = CurrentMode()
+        local active = def and def.activePreset and SafeCall(def.activePreset)
+        local c = ModeAccent(def)
+        for i = 1, chipCount do
+            local btn = chipPool[i]
+            local isActive = active ~= nil and btn.presetId == active
+            -- The hover wash is only re-tinted by ApplyThemeColor; a mode switch
+            -- changes the accent under it.
+            if btn.ApplyThemeColor then btn.ApplyThemeColor(c) end
+            btn:SetActive(isActive)
+            if isActive then
+                btn.Text:SetTextColor(c.r, c.g, c.b)
+            else
+                btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            end
+        end
+    end
+
+    function panel:RefreshHeader(sec)
+        local def = CurrentMode()
+        sec = sec or (def and ResolveSection(def.id))
+        title:SetText(sec and (ResolveValue(sec.title) or ResolveValue(sec.label)) or L["Test Mode"])
+        local c = ModeAccent(def)
+        title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        if def and def.isPreviewOn then
+            local on = SafeCall(def.isPreviewOn) and true or false
+            previewBtn:SetGlyph(TEST_ICONS .. (on and "preview.png" or "preview_off.png"),
+                on and c or C_TEXT_DIM)
+            previewBtn:Show()
+        else
+            previewBtn:Hide()
+        end
+    end
+
+    -- Everything for the current mode and section, from scratch.
+    function panel:Rebuild()
+        local def = CurrentMode()
+        rail:SetItems(RailItems())
+        PaintRailModes()
+        local sec = def and ResolveSection(def.id) or nil
+        state.sectionId = sec and sec.id or nil
+        rail:Select(sec and ("sec:" .. sec.id) or nil, true)
+        self:BuildChips()
+        list:Clear()
+        if sec then SafeCall(sec.build, list, def) end
+        self:Relayout()
+        list:Refresh()
+        self:RefreshHeader(sec)
+        self:RefreshPresetHighlight()
+        state.builtFor = (state.modeId or "") .. "|" .. (state.sectionId or "")
+        -- Chip widths read the font, which can measure 0 on the frame it was
+        -- set; settle them on the next one.
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                if panel:IsShown() then panel:LayoutChips(); panel:Relayout() end
             end)
         end
-    end)
-    frameCountSlider:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and frameCountDragging then
-            frameCountDragging = false
-            DF:OnSliderDragStop()
-        end
-    end)
-    frameCountSlider:HookScript("OnValueChanged", function(self, value)
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-        local dbKey = isRaidMode and "raidTestFrameCount" or "testFrameCount"
-        db[dbKey] = math.floor(value)
-        fcValue:SetText(tostring(db[dbKey]))
-        if isRaidMode and DF.raidTestMode then
-            DF:ThrottledUpdateRaidTestFrames()
-            if not DF.sliderDragging and DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
-        elseif not isRaidMode and DF.testMode then
-            DF:ThrottledUpdateAll()
-            if not DF.sliderDragging and DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
-        end
-        -- Re-anchor permanent mover when frame count changes
-        C_Timer.After(0.1, function()
-            DF:UpdatePermanentMoverAnchor(isRaidMode and "raid" or "party")
-        end)
-    end)
-    panel.frameCountSlider = frameCountSlider
-    secGeneral:AddWidget(fcRow, 28)
-
-    -- --- BARS & OVERLAYS ---
-    local secBars = CreateSection(panel, L["Bars & Overlays"], "bars")
-    panel.showAbsorbsCheck = secBars:AddCheckbox(L["Absorbs"], "testShowAbsorbs", nil, "bars_absorb")
-    panel.showHealPredictCheck = secBars:AddCheckbox(L["Heal Prediction"], "testShowHealPrediction", nil, "bars_healpred")
-    panel.showOutOfRangeCheck = secBars:AddCheckbox(L["Out of Range"], "testShowOutOfRange", nil, "display_fading")
-    panel.showReducedMaxCheck = secBars:AddCheckbox(L["Reduced Max Health"], "testShowReducedMaxHealth", nil, "bars_health")
-    -- Only offer the toggle when the Text Designer module is loaded.
-    if DF.UpdateTextDesigner then
-        -- Default ON: seed any profile that predates the Config default so the
-        -- checkbox shows checked (migration timing can otherwise leave it nil).
-        local pdb, rdb = DF:GetDB(), DF:GetRaidDB()
-        if pdb and pdb.testShowTextDesigner == nil then pdb.testShowTextDesigner = true end
-        if rdb and rdb.testShowTextDesigner == nil then rdb.testShowTextDesigner = true end
-        panel.showTextDesignerCheck = secBars:AddCheckbox(L["Text Designer"], "testShowTextDesigner", function()
-            if DF.UpdateTextDesigner then
-                for i = 0, 4 do
-                    local f = DF.testPartyFrames and DF.testPartyFrames[i]
-                    if f then DF:UpdateTextDesigner(f, "all") end
-                end
-                for i = 1, 40 do
-                    local f = DF.testRaidFrames and DF.testRaidFrames[i]
-                    if f then DF:UpdateTextDesigner(f, "all") end
-                end
-            end
-        end, "text_designer")  -- pageId → makes the label a quick link to the TD tab
     end
 
-    -- --- AURAS ---
-    local secAuras = CreateSection(panel, L["Auras"], "auras")
-    panel.showAurasCheck = secAuras:AddCheckbox(L["Show Auras"], "testShowAuras", function(enabled, isRaidMode)
-        -- Refresh on BOTH states: the 12.1 preview rows show/hide through the
-        -- UpdateTestAuras seam, so disabling needs a pass too (the old callback
-        -- only refreshed on enable, which left the container rows visible).
-        if not isRaidMode and DF.testMode then
-            if enabled then
-                DF:RefreshTestFramesWithLayout()
-            elseif DF.testPartyFrames then
-                for i = 0, 4 do
-                    local f = DF.testPartyFrames[i]
-                    if f and f:IsShown() then DF:UpdateTestAuras(f) end
-                end
-            end
-        elseif isRaidMode and DF.raidTestMode and DF.testRaidFrames then
-            for i = 1, 40 do
-                local f = DF.testRaidFrames[i]
-                if f and f:IsShown() then DF:UpdateTestAuras(f) end
-            end
-        end
-        -- Buff/Debuff count sliders only matter while auras are shown; grey them
-        -- in place when Show Auras is off.
-        if panel.RefreshDependentEnabled then panel.RefreshDependentEnabled() end
-    end, "auras_buffs")
-    panel.showDispelGlowCheck = secAuras:AddCheckbox(L["Dispel Overlay"], "testShowDispelGlow", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDispelGlow() end
-    end, "auras_dispel")
-    panel.showMissingBuffCheck = secAuras:AddCheckbox(L["Missing Buff"], "testShowMissingBuff", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestMissingBuff() end
-    end, "auras_missingbuffs")
-    panel.showADCheck = secAuras:AddCheckbox(L["Aura Designer"], "testShowAuraDesigner", function(enabled)
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestAuraDesigner() end
-    end, "auras_auradesigner")
-
-    -- Buff/Debuff count sliders
-    local auraSliderRow = CreateFrame("Frame", nil, secAuras.content)
-    auraSliderRow:SetHeight(18)
-
-    local buffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    buffLabel:SetPoint("LEFT", 0, 0)
-    buffLabel:SetText(L["Buffs:"])
-    buffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local buffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
-    buffSlider:SetPoint("LEFT", buffLabel, "RIGHT", 5, 0)
-    local buffValue = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    buffValue:SetPoint("LEFT", buffSlider, "RIGHT", 4, 0)
-    buffValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    panel.buffValueText = buffValue
-
-    local debuffLabel = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    debuffLabel:SetPoint("LEFT", buffValue, "RIGHT", 12, 0)
-    debuffLabel:SetText(L["Debuffs:"])
-    debuffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local debuffSlider = CreateThemedSlider(auraSliderRow, 55, 0, 5, 1)
-    debuffSlider:SetPoint("LEFT", debuffLabel, "RIGHT", 5, 0)
-    local debuffValue = auraSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    debuffValue:SetPoint("LEFT", debuffSlider, "RIGHT", 4, 0)
-    debuffValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    panel.debuffValueText = debuffValue
-
-    -- Buff slider callbacks
-    local buffSliderDragging = false
-    buffSlider:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            buffSliderDragging = true
-            DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
-        end
-    end)
-    buffSlider:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and buffSliderDragging then
-            buffSliderDragging = false
-            DF:OnSliderDragStop()
-        end
-    end)
-    buffSlider:HookScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        -- ☠ THE TAB, NOT THE RUNNING PREVIEW. The panel DISPLAYS and GREYS every control off
-        -- `DF.GUI.SelectedMode`; reading `DF.raidTestMode` here would let a slider show one
-        -- profile's value and WRITE to the other's whenever they disagree (raid preview up,
-        -- Party tab selected). A panel is a view of the selected tab, so a control must write
-        -- where it reads.
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-        db.testBuffCount = value
-        buffValue:SetText(value)
-        if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
-        elseif DF.testMode then DF:ThrottledUpdateAll() end
-    end)
-    panel.buffSlider = buffSlider
-
-    -- Debuff slider callbacks
-    local debuffSliderDragging = false
-    debuffSlider:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            debuffSliderDragging = true
-            DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
-        end
-    end)
-    debuffSlider:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and debuffSliderDragging then
-            debuffSliderDragging = false
-            DF:OnSliderDragStop()
-        end
-    end)
-    debuffSlider:HookScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        -- The tab, not the running preview — see the buff slider above.
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-        db.testDebuffCount = value
-        debuffValue:SetText(value)
-        if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
-        elseif DF.testMode then DF:ThrottledUpdateAll() end
-    end)
-    panel.debuffSlider = debuffSlider
-    -- Stash the slider labels so RefreshDependentEnabled can dim them in step
-    -- with the sliders when Show Auras is off.
-    panel.buffSliderLabel = buffLabel
-    panel.debuffSliderLabel = debuffLabel
-
-    -- Grey the Buff/Debuff count sliders in place when "Show Auras" is off (their
-    -- only consumer). Disabled-in-place per the boolean-enable grey rule: visible
-    -- but non-interactive, with labels + value texts dimmed. Reads testShowAuras
-    -- from the currently active (raid/party) db so mode switches honour it.
-    panel.RefreshDependentEnabled = function()
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        local adb = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-        local aurasOn = adb and adb.testShowAuras and true or false
-        if panel.buffSlider and panel.buffSlider.SetEnabled then
-            panel.buffSlider:SetEnabled(aurasOn)
-        end
-        if panel.debuffSlider and panel.debuffSlider.SetEnabled then
-            panel.debuffSlider:SetEnabled(aurasOn)
-        end
-        local lr, lg, lb = C_TEXT.r, C_TEXT.g, C_TEXT.b
-        if not aurasOn then lr, lg, lb = C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b end
-        if panel.buffSliderLabel then panel.buffSliderLabel:SetTextColor(lr, lg, lb) end
-        if panel.debuffSliderLabel then panel.debuffSliderLabel:SetTextColor(lr, lg, lb) end
-        if panel.buffValueText then panel.buffValueText:SetTextColor(lr, lg, lb) end
-        if panel.debuffValueText then panel.debuffValueText:SetTextColor(lr, lg, lb) end
-
-        -- ☠ THE DEFENSIVES BOX AND SLIDER ARE DELIBERATELY UNGATED, and the addon-side
-        -- `defensiveIconEnabled` is the reason rather than the exception. This pair used
-        -- to grey whenever that profile setting was off, on the grounds that the preview
-        -- can do nothing without it. True -- but nothing ever tells this panel the setting
-        -- changed: RefreshDependentEnabled runs from the Show Auras tick and UpdateState
-        -- and nothing else, and the Defensive Icon settings page has no route to
-        -- DF.TestPanel. So the grey outlived the setting that caused it, and a disabled
-        -- box also swallows its own click-through to that page -- the one control on this
-        -- panel that could have switched the feature back on.
-        -- Every other icon toggle in this section gates on Test Mode's own state or on
-        -- nothing at all, and the preview itself already no-ops while the feature is off,
-        -- so this pair now behaves the same way.
-
-        -- Group Targeted Spells and the Targeted List are PARTY-ONLY features:
-        -- the group cast detection is fingerprint-based and "Raid is intentionally
-        -- unsupported (collisions are near-total)", and the Targeted List bails on
-        -- IsInRaid() outright (Features/TargetedSpells.lua). Their test toggles
-        -- therefore do nothing in raid mode, so grey them in place instead of
-        -- letting them read as available. Personal Targeted has no raid gate and
-        -- stays enabled.
-        local groupTargetingAvailable = not isRaidMode
-        if panel.showTargetedListCheck  then panel.showTargetedListCheck:SetEnabled(groupTargetingAvailable) end
-        if panel.animTargetedListCheck  then panel.animTargetedListCheck:SetEnabled(groupTargetingAvailable) end
-    end
-
-    secAuras:AddWidget(auraSliderRow, 22)
-
-    -- --- INDICATORS & ICONS ---
-    local secIndicators = CreateSection(panel, L["Indicators & Icons"], "indicators")
-
-    -- ☠ THERE IS NO "Defensive Icon" CHECKBOX, AND `testShowExternalDef` IS GONE WITH IT.
-    -- The count slider below is the whole control: 0 hides the row,
-    -- 1-5 previews that many. A checkbox plus a slider whose 0 means the same thing is two
-    -- controls for one decision, and they can disagree — checkbox off with the slider at 3
-    -- reads as broken.
-    -- ⚠ It remains a PRESET toggle, as a count: `testDefensiveCount` is declared in
-    -- TEST_TOGGLE_KEYS and listed `= true` in the presets that want the row on, and
-    -- TEST_COUNT_KEYS translates that to 1 / 0 on apply. GetActiveTestPreset compares
-    -- it through the same translation, so Default/Auras/Healer/Full turn the row on
-    -- and Combat turns it off.
-    -- ⚠ Also lost: the checkbox's click-through to the Defensive Icon settings page. The
-    -- slider row is a plain frame with no pageId hook.
-
-    -- Defensive count slider — the Buffs/Debuffs pair for this row. It lives HERE, in
-    -- Indicators rather than on the Auras slider row, because the row it governs is an
-    -- indicator; a third label+slider+value would also overflow that row's width.
-    --
-    -- ☠ THE AddWidget CALL IS AT THE END OF THE SECTION, NOT HERE. `AddWidget` anchors
-    -- to `GetGridBottom()`, which is computed from the checkbox count AT CALL TIME — so
-    -- adding it after the first checkbox would park it one row down and lay the next four
-    -- checkboxes over it. The widget must be added once every checkbox in the section
-    -- exists, which is exactly what the Auras section does with its own slider row.
-    local defSliderRow = CreateFrame("Frame", nil, secIndicators.content)
-    defSliderRow:SetHeight(18)
-
-    local defLabel = defSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    defLabel:SetPoint("LEFT", 0, 0)
-    defLabel:SetText(L["Defensives:"])
-    defLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    local defSlider = CreateThemedSlider(defSliderRow, 55, 0, 5, 1)
-    defSlider:SetPoint("LEFT", defLabel, "RIGHT", 5, 0)
-    local defValue = defSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    defValue:SetPoint("LEFT", defSlider, "RIGHT", 4, 0)
-    defValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    panel.defValueText = defValue
-
-    local defSliderDragging = false
-    defSlider:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            defSliderDragging = true
-            DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
-        end
-    end)
-    defSlider:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and defSliderDragging then
-            defSliderDragging = false
-            DF:OnSliderDragStop()
-        end
-    end)
-    defSlider:HookScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        -- The tab, not the running preview — see the buff slider above.
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-        db.testDefensiveCount = value
-        defValue:SetText(value)
-        -- The box above is this value's on/off, so it has to follow the slider the
-        -- same tick -- dragging to 0 must untick it, and off 0 must tick it, without
-        -- waiting for a panel refresh that a drag does not trigger.
-        if panel.showDefensivesCheck then
-            panel.showDefensivesCheck:SetChecked(value > 0)
-        end
-        if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
-        elseif DF.testMode then DF:ThrottledUpdateAll() end
-    end)
-    panel.defSlider = defSlider
-    panel.defSliderLabel = defLabel
-    panel.showTargetedListCheck = secIndicators:AddCheckbox(L["Targeted List"], "testShowTargetedList", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
-    end, "indicators_targetedlist")
-    panel.animTargetedListCheck = secIndicators:AddCheckbox(L["Animate Targeted List"], "testAnimateTargetedList", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
-    end)
-    panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
-    end, "indicators_personal_targeted")
-
-    -- Both are greyed in raid (see RefreshDependentEnabled) — say why on hover
-    -- instead of leaving a dead-looking control. Personal Targeted is NOT listed: it
-    -- has no raid gate and works fine there.
-    do
-        local tipLines = { L["The Targeted List is a party-only feature, so it does nothing in raid mode."] }
-        if panel.showTargetedListCheck  then panel.showTargetedListCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
-        if panel.animTargetedListCheck  then panel.animTargetedListCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
-    end
-    -- One unified "Icons" toggle for the whole status/role/leader icon set in test
-    -- mode (was split into "Status / Ready" + "Role / Leader"). Keyed on
-    -- testShowStatusIcons; the role/leader render gate reads the same key.
-    panel.showStatusIconsCheck = secIndicators:AddCheckbox(L["Icons"], "testShowStatusIcons", function()
-        if DF.testMode or DF.raidTestMode then DF:RefreshTestFrames() end
-    end, "indicators_icons")
-
-    -- ★ THE DEFENSIVES ON/OFF, BACK BY REQUEST -- and deliberately
-    -- NOT a second stored value. The block above records why the old checkbox was
-    -- removed: "a checkbox plus a slider whose 0 means the same thing is two controls
-    -- for one decision, and they can disagree -- checkbox off with the slider at 3 reads
-    -- as broken." That objection is about two SOURCES OF TRUTH, not about two controls,
-    -- so this box is a VIEW of testDefensiveCount rather than a key of its own:
-    --   checked  == (count > 0)
-    --   unticking -> remember the count, write 0
-    --   ticking   -> restore the remembered count (1 if there is nothing to restore)
-    -- They cannot disagree because there is only one value; move the slider to 0 and the
-    -- box unticks itself on the next refresh, tick the box and the slider follows.
-    -- Everything downstream is untouched: the preset system still sees one count key
-    -- (TEST_COUNT_KEYS translates `= true` to 1/0), and no new key reaches the profile,
-    -- the export categories or the sync map.
-    --
-    -- ⚠ LAST checkbox in the section ON PURPOSE. The grid fills two per row, so with the
-    -- four above it this lands alone on the final row -- directly above the slider it
-    -- governs, which is where it was asked for and the only place it reads as belonging
-    -- to that slider rather than to the pair of boxes beside it.
-    -- The click-through to the Defensive Icon page comes back with it; the slider row is
-    -- a plain frame and never had one, which the removal note listed as a loss.
-    -- Per mode: the box writes whichever mode's db the panel is showing, so one
-    -- shared remembered count would carry a Party value into a Raid restore.
-    local lastDefCount = {}
-    panel.showDefensivesCheck = secIndicators:AddCheckbox(L["Defensives"], "testDefensiveCount",
-        function(checked)
-            -- Keep the slider showing the value the box just wrote. Set directly rather
-            -- than via RefreshStates: OnValueChanged writes the db too, and letting it
-            -- fire on a value we already stored is a harmless double-write only while
-            -- the two agree -- which they do here, because we hand it the same number.
-            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-            local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-            local n = db.testDefensiveCount or 0
-            if panel.defSlider then panel.defSlider:SetValue(n) end
-            if panel.defValueText then panel.defValueText:SetText(n) end
-            if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
-            elseif DF.testMode then DF:ThrottledUpdateAll() end
-        end,
-        "auras_defensiveicon",
-        function(db, checked)
-            local modeKey = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
-            if checked then
-                local restore = lastDefCount[modeKey]
-                if not restore or restore <= 0 then restore = 1 end
-                db.testDefensiveCount = restore
-            else
-                -- Remember what to come back to, but never remember 0 -- that would
-                -- make the next tick a no-op and the box look broken.
-                local cur = db.testDefensiveCount or 0
-                if cur > 0 then lastDefCount[modeKey] = cur end
-                db.testDefensiveCount = 0
-            end
-        end)
-
-    -- ⚠ LAST in the section, after every AddCheckbox above — see the note where
-    -- defSliderRow is built. AddWidget measures the checkbox grid as it stands right
-    -- now, so anything added afterwards would be drawn on top of this row.
-    secIndicators:AddWidget(defSliderRow, 22)
-
-    -- --- HIGHLIGHTS ---
-    local secHighlights = CreateSection(panel, L["Highlights"], "highlights")
-    panel.showSelectionCheck = secHighlights:AddCheckbox(L["Selection"], "testShowSelection", function()
-        if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
-    end, "indicators_highlights")
-    panel.showAggroCheck = secHighlights:AddCheckbox(L["Aggro"], "testShowAggro", function()
-        if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end
-    end, "indicators_highlights")
-
-    -- ============================================================
-    -- PRESETS FOOTER
-    -- ============================================================
-    local presetsFooter = CreateFrame("Frame", nil, panel)
-    presetsFooter:SetPoint("BOTTOMLEFT", 0, 0)
-    presetsFooter:SetPoint("BOTTOMRIGHT", 0, 0)
-    presetsFooter:SetHeight(58)
-
-    local presetSep = presetsFooter:CreateTexture(nil, "ARTWORK")
-    presetSep:SetPoint("TOPLEFT", 0, 0)
-    presetSep:SetPoint("TOPRIGHT", 0, 0)
-    presetSep:SetHeight(1)
-    presetSep:SetColorTexture(1, 1, 1, 0.06)
-
-    local presetLabel = presetsFooter:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    presetLabel:SetPoint("TOPLEFT", 12, -8)
-    presetLabel:SetText(L["QUICK PRESETS"])
-    presetLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
-    panel.presetLabel = presetLabel
-
-    -- Default first — it is the shipped baseline, so it reads as the starting
-    -- point the others move away from.
-    local presets = {"DEFAULT", "AURAS", "COMBAT", "HEALER", "FULL"}
-    local presetNames = {DEFAULT = L["Default"], AURAS = L["Auras"], COMBAT = L["Combat"],
-        HEALER = L["Healer"], FULL = L["Full"]}
-    local btnSpacing = 4
-    local btnCount = #presets
-    local btnWidth = math.floor((CONTENT_WIDTH - (btnSpacing * (btnCount - 1))) / btnCount)
-    panel.presetBtns = {}
-
-    for i, preset in ipairs(presets) do
-        local btn = CreateFrame("Button", nil, presetsFooter, "BackdropTemplate")
-        btn:SetPoint("TOPLEFT", 12 + (i - 1) * (btnWidth + btnSpacing), -26)
-        -- Segmented quick-preset cell: at most ONE active, and possibly none.
-        -- panel:RefreshPresetHighlight derives which from the live toggles, so the
-        -- highlight is a statement about the current state rather than about which
-        -- button was last pressed. OnClick applies the preset and refreshes.
-        DF.GUI:StyleButton(btn, { width = btnWidth, height = 24, text = presetNames[preset] })
-        btn.preset = preset
-        btn:SetScript("OnClick", function(self)
-            DF:ApplyTestPreset(self.preset)
-            panel:UpdateState()
-        end)
-        panel.presetBtns[i] = btn
+    -- Values, greys, accents -- no rebuild.
+    function panel:RefreshView()
+        PaintRailModes()
+        rail:Refresh(true)
+        list:Refresh()
+        self:RefreshHeader()
+        self:RefreshPresetHighlight()
     end
 
     -- ============================================================
-    -- LAYOUT CALCULATION
+    -- SWITCHING
     -- ============================================================
-    function panel:RecalculateLayout()
-        local y = -HEADER_TOP
-        for _, sec in ipairs(allSections) do
-            sec:ClearAllPoints()
-            sec:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, y)
-            sec.content:SetHeight(sec:GetContentHeight())
-            sec:SetHeight(sec:GetTotalHeight())  -- Section needs valid height for children to render
-            y = y - sec:GetTotalHeight()
+    -- Run the leave / enter pair for a mode change. Re-entrant refreshes (a
+    -- mode's onEnter can switch the settings window, which refreshes this
+    -- popup) see `switching` and leave the mode alone.
+    local function RunSwitch(fromDef, fromId, toId)
+        state.switching = true
+        if fromDef then SafeCall(fromDef.onExit, toId) end
+        local toDef = toId and DF:GetTestMode(toId)
+        if toDef then SafeCall(toDef.onEnter, fromId) end
+        state.switching = false
+    end
+
+    function panel:SelectMode(id)
+        if id == state.modeId or not DF:GetTestMode(id) then return end
+        if not DF:IsTestModeAvailable(id) then return end
+        local fromId, fromDef = state.modeId, CurrentMode()
+        state.modeId, state.sectionId = id, nil
+        PopupMemory().mode = id
+        if state.entered then RunSwitch(fromDef, fromId, id) end
+        self:UpdateState()
+    end
+
+    function panel:SelectSection(id)
+        if id == state.sectionId then return end
+        state.sectionId = id
+        if state.modeId then PopupMemory().sections[state.modeId] = id end
+        self:UpdateState()
+    end
+
+    function panel:OnRailPick(id)
+        local kind, key = tostring(id):match("^(%a+):(.+)$")
+        if kind == "mode" then
+            self:SelectMode(key)
+        elseif kind == "sec" then
+            self:SelectSection(key)
         end
-        -- Set panel height: sections + header + presets footer
-        local totalHeight = HEADER_TOP + math.abs(y - (-HEADER_TOP)) + 62  -- 62 = presets footer
-        self:SetHeight(math.max(totalHeight, 200))
+    end
+
+    function panel:ApplyPreset(presetId)
+        local def = CurrentMode()
+        if not (def and def.applyPreset) then return end
+        SafeCall(def.applyPreset, presetId)
+        self:UpdateState()
+    end
+
+    -- The header's preview toggle. Turning the preview OFF closes the popup:
+    -- an open popup means "show me a preview" (the toolbar's Test button does
+    -- the same thing from the other side).
+    function panel:TogglePreview()
+        local def = CurrentMode()
+        if not (def and def.togglePreview) then return end
+        SafeCall(def.togglePreview)
+        if def.isPreviewOn and not SafeCall(def.isPreviewOn) then
+            self:Hide()
+        else
+            self:UpdateState()
+        end
+    end
+
+    -- The popup was opened by the user: the current mode is entered.
+    function panel:EnterCurrentMode()
+        if state.entered then return end
+        state.entered = true
+        local def = CurrentMode()
+        if def then
+            state.switching = true
+            SafeCall(def.onEnter, nil)
+            state.switching = false
+        end
     end
 
     -- ============================================================
     -- UPDATE STATE
     -- ============================================================
     local function UpdateStateInternal(self, callbackEnabled)
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-        local themeColor = GetThemeColor()
-        -- The toggle is the USER's switch, so it reflects the USER's claim, not
-        -- whether a preview is on screen. Those differ while unlocked (unlock holds
-        -- its own claim), and using the preview state there left the button stuck on
-        -- "Disable Test Mode" after a click that had genuinely worked.
-        local scope = isRaidMode and "raid" or "party"
-        local testActive = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
-            or (not DF.IsTestModeOwnedBy and IsTestActive())
-
-        -- Title
-        self.title:SetText(L["Test Mode"])
-        self.title:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-
-        -- Badge
-        local badgeLabel = isRaidMode and L["Raid"] or L["Party"]
-        self.badge.text:SetText(badgeLabel)
-        self.badge:SetSize(self.badge.text:GetStringWidth() + 14, 18)
-        self.badge:SetBackdropColor(themeColor.r * 0.15, themeColor.g * 0.15, themeColor.b * 0.15, 1)
-        self.badge:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.3)
-        self.badge.text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-
-        -- Toggle button: SetActive drives the accent fill/border when test is on;
-        -- we set the label + (active) accent text colour to match. SetActive repaints
-        -- the resting fill, but the hover wash (the HIGHLIGHT texture) is only re-tinted
-        -- by ApplyThemeColor — the toggle's UpdateTheme listener lives on the test panel,
-        -- which nothing walks on a mode switch, so refresh it here or the wash stays
-        -- frozen at the mode the panel was first opened in.
-        if self.toggleBtn.ApplyThemeColor then self.toggleBtn.ApplyThemeColor(themeColor) end
-        self.toggleBtn:SetActive(testActive)
-        if testActive then
-            self.toggleBtn.Text:SetText(L["Disable Test Mode"])
-            self.toggleBtn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
+        if not state.switching then
+            local want = self:ResolveMode()
+            if want ~= state.modeId then
+                -- Following a change made elsewhere (the settings window's
+                -- Party / Raid): the same leave / enter a click would run.
+                local fromId, fromDef = state.modeId, CurrentMode()
+                state.modeId, state.sectionId = want, nil
+                if want then PopupMemory().mode = want end
+                if state.entered then RunSwitch(fromDef, fromId, want) end
+            end
+        end
+        local def = CurrentMode()
+        local sec = def and ResolveSection(def.id)
+        local key = (state.modeId or "") .. "|" .. (sec and sec.id or "")
+        if key ~= state.builtFor then
+            self:Rebuild()
         else
-            self.toggleBtn.Text:SetText(L["Enable Test Mode"])
-            self.toggleBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            self:RefreshView()
         end
-
-        -- Frame count slider
-        local maxFrames = isRaidMode and 40 or 5
-        local fcKey = isRaidMode and "raidTestFrameCount" or "testFrameCount"
-        local currentCount = db[fcKey] or (isRaidMode and 10 or 5)
-        self.frameCountSlider:SetMinMaxValues(1, maxFrames)
-        self.frameCountSlider:SetValue(currentCount)
-        if self.frameCountSlider.UpdateTheme then self.frameCountSlider:UpdateTheme() end
-        self.frameCountValue:SetText(tostring(currentCount))
-        self.frameCountValue:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-
-        -- Checkboxes from DB
-        self.animHealthCheck:SetChecked(db.testAnimateHealth)
-        self.showPetsCheck:SetChecked(db.testShowPets ~= false)
-        self.showAbsorbsCheck:SetChecked(db.testShowAbsorbs)
-        self.showHealPredictCheck:SetChecked(db.testShowHealPrediction ~= false)
-        self.showOutOfRangeCheck:SetChecked(db.testShowOutOfRange)
-        self.showReducedMaxCheck:SetChecked(db.testShowReducedMaxHealth ~= false)
-        if self.showTextDesignerCheck then
-            self.showTextDesignerCheck:SetChecked(db.testShowTextDesigner ~= false)
-        end
-        -- ☠ EVERY CHECKBOX BELONGS IN THIS LIST. A toggle left out keeps the widget's
-        -- own default (unchecked) while the DB value stays true, so the feature runs
-        -- with its box showing off until the user clicks it twice -- exactly what was
-        -- reported for the section labels.
-        if self.showLabelsCheck then
-            self.showLabelsCheck:SetChecked(db.testShowLabels)
-        end
-        self.showAurasCheck:SetChecked(db.testShowAuras)
-        self.showDispelGlowCheck:SetChecked(db.testShowDispelGlow)
-        self.showMissingBuffCheck:SetChecked(db.testShowMissingBuff)
-        self.showADCheck:SetChecked(db.testShowAuraDesigner)
-        -- The Targeted List is party-only, so it can never be "on" in raid — show it
-        -- unchecked there regardless of what the raid profile stores (an older
-        -- build's preset wrote testShowTargetedList into the raid db, so it would
-        -- otherwise read as checked-but-greyed).
-        self.showTargetedListCheck:SetChecked(not isRaidMode and db.testShowTargetedList)
-        self.animTargetedListCheck:SetChecked(not isRaidMode and db.testAnimateTargetedList)
-        self.showPersonalTargetedCheck:SetChecked(db.testShowPersonalTargeted ~= false)
-        self.showStatusIconsCheck:SetChecked(db.testShowStatusIcons ~= false)
-        self.showSelectionCheck:SetChecked(db.testShowSelection)
-        self.showAggroCheck:SetChecked(db.testShowAggro)
-
-        -- Buff/Debuff sliders
-        local buffCount = db.testBuffCount or 3
-        self.buffSlider:SetValue(buffCount)
-        self.buffValueText:SetText(buffCount)
-        if self.buffSlider.UpdateTheme then self.buffSlider:UpdateTheme() end
-        local debuffCount = db.testDebuffCount or 3
-        self.debuffSlider:SetValue(debuffCount)
-        self.debuffValueText:SetText(debuffCount)
-        if self.debuffSlider.UpdateTheme then self.debuffSlider:UpdateTheme() end
-        -- ⚠ Fallback is 0 here, but Config seeds testDefensiveCount = 1 -- the fallback
-        -- only shows on a db with no key at all. The two above fall back to 3 while
-        -- Config seeds 2, the same kind of mismatch; left alone rather than folded in.
-        if self.defSlider then
-            local defCount = db.testDefensiveCount or 0
-            self.defSlider:SetValue(defCount)
-            self.defValueText:SetText(defCount)
-            if self.defSlider.UpdateTheme then self.defSlider:UpdateTheme() end
-        end
-        -- The Defensives box is a VIEW of the count beside it, so it is derived here
-        -- rather than read from a key of its own -- that is what makes "slider to 0"
-        -- untick it and keeps the two from ever contradicting each other.
-        if self.showDefensivesCheck then
-            self.showDefensivesCheck:SetChecked((db.testDefensiveCount or 0) > 0)
-        end
-
-        -- Grey the Buff/Debuff sliders when Show Auras is off (boolean-enable grey
-        -- rule). Runs AFTER the value/UpdateTheme set above so the disabled muted
-        -- look wins; re-applied here so mode switches + panel opens honour it.
-        if self.RefreshDependentEnabled then self.RefreshDependentEnabled() end
-
-        -- Restore section collapsed states from DB and update badges
-        local savedSections = DF.db and DF.db.testPanelSections
-        for _, sec in ipairs(allSections) do
-            if savedSections and sec.sectionKey and savedSections[sec.sectionKey] ~= nil then
-                sec:SetExpanded(savedSections[sec.sectionKey])
-            end
-            sec:UpdateBadge()
-        end
-
-        self:RefreshPresetHighlight()
-
-        -- Recalculate layout
-        self:RecalculateLayout()
-
-        if callbackEnabled and DF.GUI and DF.GUI.UpdateTestButtonState then
-            DF.GUI.UpdateTestButtonState()
-        end
-    end
-
--- Light the quick-preset button whose definition the current toggles actually match, and
--- none if they match nothing (accent fill + border via the shared toggle look; the active
--- label takes the accent too).
---
--- ☠ SEPARATE FROM THE FULL REFRESH ON PURPOSE, and it is not an optimisation. A checkbox
--- handler cannot call UpdateState: that re-runs SetChecked on every box in the panel,
--- including the one being clicked, in the middle of its own OnClick. This touches only the
--- footer, so it is safe from inside a toggle -- which is exactly where it is needed, since
--- flipping a toggle is what makes the previous highlight wrong.
-    function panel:RefreshPresetHighlight()
-        if not self.presetBtns then return end
-        local themeColor = GetThemeColor()
-        local activePreset = DF.GetActiveTestPreset and DF:GetActiveTestPreset() or nil
-        for _, btn in ipairs(self.presetBtns) do
-            local isActive = btn.preset == activePreset
-            btn:SetActive(isActive)
-            if isActive then
-                btn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            else
-                btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            end
+        if callbackEnabled and GUI.UpdateTestButtonState then
+            GUI.UpdateTestButtonState()
         end
     end
 
@@ -4935,12 +4575,37 @@ function DF:CreateTestPanel()
         UpdateStateInternal(self, false)
     end
 
+    -- A mode registered or removed while the popup exists: rebuild on the
+    -- next look (now, if it is open).
+    DF:OnTestModesChanged(function()
+        state.builtFor = nil
+        if panel:IsShown() then panel:UpdateStateNoCallback() end
+    end)
+
     -- ============================================================
-    -- ONSHOW
+    -- SHOW / HIDE
     -- ============================================================
     panel:SetScript("OnShow", function(self)
-        ApplyScale(self)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
         self:UpdateState()
+    end)
+
+    panel:SetScript("OnHide", function()
+        -- Leaving: the current mode's onExit(nil), then the user's claim on
+        -- both group scopes is dropped -- and only that; closing must not hide
+        -- frames itself. Unlock's own claim decides whether they stay up, and
+        -- the later lock takes them down.
+        local def = CurrentMode()
+        if state.entered and def then
+            state.switching = true
+            SafeCall(def.onExit, nil)
+            state.switching = false
+        end
+        state.entered = false
+        state.modeId, state.sectionId, state.builtFor = nil, nil, nil
+        DF:SetTestModeOwner("party", "user", false)
+        DF:SetTestModeOwner("raid", "user", false)
+        if GUI.UpdateTestButtonState then GUI.UpdateTestButtonState() end
     end)
 
     DF.TestPanel = panel
@@ -4951,15 +4616,416 @@ function DF:ToggleTestPanel()
     local panel = DF:CreateTestPanel()
     if panel:IsShown() then
         panel:Hide()
-    else
-        panel:UpdateState()
-        panel:Show()
+        return
+    end
+    panel:UpdateState()
+    panel:Show()
+    -- Opening the popup claims the current mode's preview for the user (it
+    -- exists to show one): Party / Raid claim their scope. Claiming rather than
+    -- calling Show* directly means the release on close is symmetric, and
+    -- unlock's claim is untouched either way.
+    panel:EnterCurrentMode()
+    panel:UpdateState()
+end
 
-        -- Opening the panel claims the preview for the user (it exists to show
-        -- one). Claiming rather than calling Show* directly means the matching
-        -- release on close is symmetric, and unlock's claim is untouched either way.
-        local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
-        DF:SetTestModeOwner(scope, "user", true)
-        panel:UpdateState()
+-- ============================================================
+-- PARTY AND RAID TEST MODES
+-- The two group modes, registered like any other. One set of section
+-- builders serves both; `scope` is "party" or "raid". Every control writes
+-- the same profile key the old panel did.
+-- ============================================================
+
+local GROUP_SCOPES = { party = true, raid = true }
+
+local function GroupDB(scope)
+    return scope == "raid" and DF:GetRaidDB() or DF:GetDB()
+end
+
+local function GroupIsRaidView()
+    return DF.GUI and DF.GUI.SelectedMode == "raid" or false
+end
+
+-- Put the settings window on this scope, through the one path every Party /
+-- Raid switch takes (GUI:SelectModule): the Party/Raid sync, locking the mode
+-- left behind, carrying a running preview across -- which is what keeps party
+-- and raid test mode from ever running at once.
+-- ⚠ With the window never opened (/df test), it is built hidden first: the
+-- switch needs it. Rare, and the same frame the first open would build.
+local function SwitchGroupScope(scope)
+    local GUI = DF.GUI
+    if not GUI then return end
+    local cur = GroupIsRaidView() and "raid" or "party"
+    if cur == scope then return end
+    if not DF.GUIFrame and DF.CreateGUI then DF:CreateGUI() end
+    if GUI.SelectModule then GUI:SelectModule("group", scope) end
+end
+
+-- What follows a toggle: repaint the running preview.
+local function RepaintGroupPreview(scope)
+    if scope == "raid" then
+        if DF.raidTestMode then
+            DF:UpdateRaidTestFrames()
+            -- ☠ SECOND PASS NEXT TICK. A toggle flipped on for the first time this
+            -- session CREATES its bars during this pass, and an anchor-derived rect
+            -- is 0 for the whole creation tick -- so anything anchored to a new
+            -- bar's own texture (the absorb chained to the brand-new prediction
+            -- fill) paints at width 0 and stays invisible until another toggle
+            -- pass. The painter order fixes the within-pass dependency; this fixes
+            -- the rects. It goes through the SAME UpdateTestFrame pathway -- no
+            -- second painter.
+            C_Timer.After(0, function()
+                if DF.raidTestMode and DF.UpdateRaidTestFrames then
+                    DF:UpdateRaidTestFrames()
+                end
+            end)
+        end
+    elseif DF.testMode then
+        -- ⚠ _Now, not the arm-stub: the RefreshTestFrames right below and the
+        -- After(0) "second pass over settled rects" both depend on this rebuild
+        -- having already happened this tick.
+        DF:UpdateAllFrames_Now()
+        if DF.RefreshTestFrames then DF:RefreshTestFrames() end
+        C_Timer.After(0, function()
+            if DF.testMode and DF.RefreshTestFrames then DF:RefreshTestFrames() end
+        end)
     end
 end
+
+-- A count slider's repaint while it moves.
+local function ThrottledGroupRepaint()
+    if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
+    elseif DF.testMode then DF:ThrottledUpdateAll() end
+end
+
+local function CountDragStart()
+    DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
+end
+local function CountDragStop() DF:OnSliderDragStop() end
+
+-- One on / off row. `after(value)` is the toggle's own follow-up; the preview
+-- repaint runs after it for every toggle, as the old panel's afterToggle did.
+-- The default mirrors how the preset matcher reads an unset key
+-- (TEST_TOGGLE_DEFAULT_ON), so the switch and the lit preset never disagree.
+local function GroupSwitch(rows, scope, label, key, pageId, after, extra)
+    local spec = {
+        label = label, key = key,
+        default = TEST_TOGGLE_DEFAULT_ON[key] == true,
+        onChanged = function(value)
+            if after then after(value) end
+            RepaintGroupPreview(scope)
+        end,
+    }
+    if pageId then spec.link, spec.linkHint = DF:TestModeSettingsLink(pageId) end
+    if extra then for k, v in pairs(extra) do spec[k] = v end end
+    return rows:AddSwitch(spec)
+end
+
+-- The Defensives switch is a VIEW of testDefensiveCount, not a key of its own:
+--   on  == (count > 0)
+--   off -> remember the count, write 0
+--   on  -> restore the remembered count (1 if there is nothing to restore)
+-- They cannot disagree because there is only one value; the count row below
+-- it moves with it, and dragging the count to 0 turns the switch off. The
+-- preset system still sees one count key (TEST_COUNT_KEYS). Remembered per
+-- scope, so a Party value never lands in a Raid restore.
+local lastDefensiveCount = {}
+
+local function BuildGeneral(rows, scope)
+    GroupSwitch(rows, scope, L["Show Pets"], "testShowPets", "display_pets", function(on)
+        if scope == "raid" then
+            if not DF.raidTestMode then return end
+            if on then
+                if DF.InitializeTestRaidPetFrames then DF:InitializeTestRaidPetFrames() end
+                if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+            elseif DF.HideAllTestRaidPetFrames then
+                DF:HideAllTestRaidPetFrames()
+            end
+        else
+            if not DF.testMode then return end
+            if on then
+                if DF.InitializeTestPetFrames then DF:InitializeTestPetFrames() end
+                if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+            elseif DF.HideAllTestPetFrames then
+                DF:HideAllTestPetFrames()
+            end
+        end
+    end)
+    GroupSwitch(rows, scope, L["Animate Health"], "testAnimateHealth", nil, function(on)
+        local running = (scope == "raid") and DF.raidTestMode or DF.testMode
+        if not running then return end
+        if on then
+            DF:StartTestAnimation()
+        else
+            -- The animation driver is shared: keep it while the OTHER scope's
+            -- preview still wants it.
+            local otherOn
+            if scope == "raid" then
+                otherOn = DF.testMode and DF:GetDB().testAnimateHealth
+            else
+                otherOn = DF.raidTestMode and DF:GetRaidDB().testAnimateHealth
+            end
+            if not otherOn then DF:StopTestAnimation() end
+        end
+    end)
+    -- Marks whichever element the cursor is over, on any visible preview frame
+    -- (Labels.lua). OFF by default -- test mode is also how people pixel-tune
+    -- spacing. One toggle for both halves (highlight + naming).
+    GroupSwitch(rows, scope, L["Indicator Info"], "testShowLabels", nil, function()
+        if DF.UpdateTestLabels then DF:UpdateTestLabels() end
+    end)
+
+    local isRaid = scope == "raid"
+    local fcKey = isRaid and "raidTestFrameCount" or "testFrameCount"
+    rows:AddSlider({
+        label = L["Frame Count"], key = fcKey,
+        min = 1, max = isRaid and 40 or 5, step = 1,
+        default = isRaid and 10 or 5,
+        set = function(v) GroupDB(scope)[fcKey] = math.floor(v) end,
+        onDragStart = function()
+            DF:OnSliderDragStart(function()
+                if DF.LightweightUpdateTestFrameCount then DF:LightweightUpdateTestFrameCount() end
+            end)
+        end,
+        onDragStop = CountDragStop,
+        onChanged = function()
+            if isRaid and DF.raidTestMode then
+                DF:ThrottledUpdateRaidTestFrames()
+                if not DF.sliderDragging and DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+            elseif not isRaid and DF.testMode then
+                DF:ThrottledUpdateAll()
+                if not DF.sliderDragging and DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+            end
+            -- Re-anchor the permanent mover when the frame count changes.
+            C_Timer.After(0.1, function() DF:UpdatePermanentMoverAnchor(scope) end)
+        end,
+    })
+end
+
+local function BuildBars(rows, scope)
+    GroupSwitch(rows, scope, L["Absorbs"], "testShowAbsorbs", "bars_absorb")
+    GroupSwitch(rows, scope, L["Heal Prediction"], "testShowHealPrediction", "bars_healpred")
+    GroupSwitch(rows, scope, L["Out of Range"], "testShowOutOfRange", "display_fading")
+    GroupSwitch(rows, scope, L["Reduced Max Health"], "testShowReducedMaxHealth", "bars_health")
+    -- Only offered when the Text Designer module is loaded.
+    if DF.UpdateTextDesigner then
+        GroupSwitch(rows, scope, L["Text Designer"], "testShowTextDesigner", "text_designer", function()
+            if not DF.UpdateTextDesigner then return end
+            for i = 0, 4 do
+                local f = DF.testPartyFrames and DF.testPartyFrames[i]
+                if f then DF:UpdateTextDesigner(f, "all") end
+            end
+            for i = 1, 40 do
+                local f = DF.testRaidFrames and DF.testRaidFrames[i]
+                if f then DF:UpdateTextDesigner(f, "all") end
+            end
+        end)
+    end
+end
+
+local function BuildAuras(rows, scope)
+    GroupSwitch(rows, scope, L["Show Auras"], "testShowAuras", "auras_buffs", function(on)
+        -- Refresh on BOTH states: the 12.1 preview rows show / hide through the
+        -- UpdateTestAuras seam, so turning them off needs a pass too.
+        if scope == "party" and DF.testMode then
+            if on then
+                DF:RefreshTestFramesWithLayout()
+            elseif DF.testPartyFrames then
+                for i = 0, 4 do
+                    local f = DF.testPartyFrames[i]
+                    if f and f:IsShown() then DF:UpdateTestAuras(f) end
+                end
+            end
+        elseif scope == "raid" and DF.raidTestMode and DF.testRaidFrames then
+            for i = 1, 40 do
+                local f = DF.testRaidFrames[i]
+                if f and f:IsShown() then DF:UpdateTestAuras(f) end
+            end
+        end
+    end)
+    -- The Buff / Debuff counts only matter while auras are shown: grey them in
+    -- place when Show Auras is off. Test Mode's OWN flag -- never a live
+    -- profile setting, which nothing here would hear change.
+    local function aurasOff() return not GroupDB(scope).testShowAuras end
+    rows:AddSlider({
+        label = L["Buffs"], key = "testBuffCount", min = 0, max = 5, step = 1, default = 3,
+        disabled = aurasOff,
+        onDragStart = CountDragStart, onDragStop = CountDragStop,
+        onChanged = ThrottledGroupRepaint,
+    })
+    rows:AddSlider({
+        label = L["Debuffs"], key = "testDebuffCount", min = 0, max = 5, step = 1, default = 3,
+        disabled = aurasOff,
+        onDragStart = CountDragStart, onDragStop = CountDragStop,
+        onChanged = ThrottledGroupRepaint,
+    })
+    GroupSwitch(rows, scope, L["Dispel Overlay"], "testShowDispelGlow", "auras_dispel", function()
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDispelGlow() end
+    end)
+    GroupSwitch(rows, scope, L["Missing Buff"], "testShowMissingBuff", "auras_missingbuffs", function()
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestMissingBuff() end
+    end)
+    GroupSwitch(rows, scope, L["Aura Designer"], "testShowAuraDesigner", "auras_auradesigner", function()
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestAuraDesigner() end
+    end)
+end
+
+local function BuildIcons(rows, scope)
+    -- ☠ THE DEFENSIVES PAIR IS DELIBERATELY UNGATED. It used to grey whenever the
+    -- profile's defensiveIconEnabled was off -- but nothing tells this popup that
+    -- setting changed, so the grey outlived its cause, and a greyed switch also
+    -- swallowed its own click-through to the page that would fix it. The preview
+    -- already no-ops while the feature is off (bug #1118 item 1).
+    rows:AddHeading(L["Defensive Icon"])
+    local link, hint = DF:TestModeSettingsLink("auras_defensiveicon")
+    rows:AddSwitch({
+        label = L["Defensives"], key = "testDefensiveCount", link = link, linkHint = hint,
+        get = function() return (GroupDB(scope).testDefensiveCount or 0) > 0 end,
+        set = function(on)
+            local db = GroupDB(scope)
+            if on then
+                local restore = lastDefensiveCount[scope]
+                if not restore or restore <= 0 then restore = 1 end
+                db.testDefensiveCount = restore
+            else
+                -- Remember what to come back to, but never 0 -- the next switch
+                -- on would then be a no-op.
+                local cur = db.testDefensiveCount or 0
+                if cur > 0 then lastDefensiveCount[scope] = cur end
+                db.testDefensiveCount = 0
+            end
+        end,
+        onChanged = ThrottledGroupRepaint,
+    })
+    -- ⚠ Fallback 0 here while Config seeds 1 -- the fallback only shows on a db
+    -- with no key at all, as before.
+    rows:AddSlider({
+        label = L["Max Icons"], key = "testDefensiveCount", min = 0, max = 5, step = 1, default = 0,
+        onDragStart = CountDragStart, onDragStop = CountDragStop,
+        onChanged = ThrottledGroupRepaint,
+    })
+
+    rows:AddHeading(L["Targeted Spells"])
+    -- The Targeted List is PARTY-ONLY (the list bails on IsInRaid() outright and
+    -- its keys are stripped from the raid profile), so Raid does not offer it.
+    if scope == "party" then
+        GroupSwitch(rows, scope, L["Targeted List"], "testShowTargetedList", "indicators_targetedlist", function()
+            if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
+        end)
+        GroupSwitch(rows, scope, L["Animate Targeted List"], "testAnimateTargetedList", nil, function()
+            if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
+        end)
+    end
+    -- Personal Targeted has no raid gate and is offered in both.
+    GroupSwitch(rows, scope, L["Personal Targeted"], "testShowPersonalTargeted", "indicators_personal_targeted", function()
+        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
+    end)
+
+    rows:AddHeading(L["Status Icons"])
+    -- One toggle for the whole status / role / leader icon set; the role and
+    -- leader render gates read the same key.
+    GroupSwitch(rows, scope, L["Icons"], "testShowStatusIcons", "indicators_icons", function()
+        if DF.testMode or DF.raidTestMode then DF:RefreshTestFrames() end
+    end)
+end
+
+local function BuildHighlights(rows, scope)
+    local function repaint() if DF.UpdateAllTestHighlights then DF:UpdateAllTestHighlights() end end
+    GroupSwitch(rows, scope, L["Selection"], "testShowSelection", "indicators_highlights", repaint)
+    GroupSwitch(rows, scope, L["Aggro"], "testShowAggro", "indicators_highlights", repaint)
+end
+
+local function GroupSections(scope)
+    return {
+        { id = "general", label = function() return L["General"] end,
+          icon = TEST_ICONS .. "tune.png",
+          build = function(rows) BuildGeneral(rows, scope) end },
+        { id = "bars", label = function() return L["Bars"] end,
+          title = function() return L["Bars & Overlays"] end,
+          icon = TEST_ICONS .. "favorite.png",
+          build = function(rows) BuildBars(rows, scope) end },
+        { id = "auras", label = function() return L["Auras"] end,
+          icon = TEST_ICONS .. "auto_awesome.png",
+          build = function(rows) BuildAuras(rows, scope) end },
+        { id = "icons", label = function() return L["Icons"] end,
+          title = function() return L["Indicators & Icons"] end,
+          icon = TEST_ICONS .. "widget_small.png",
+          build = function(rows) BuildIcons(rows, scope) end },
+        { id = "highlights", label = function() return L["Highlights"] end,
+          icon = TEST_ICONS .. "border_style.png",
+          build = function(rows) BuildHighlights(rows, scope) end },
+    }
+end
+
+local GROUP_PRESETS = {
+    { id = "DEFAULT", label = function() return L["Default"] end },
+    { id = "AURAS",   label = function() return L["Auras"] end },
+    { id = "COMBAT",  label = function() return L["Combat"] end },
+    { id = "HEALER",  label = function() return L["Healer"] end },
+    { id = "FULL",    label = function() return L["Full"] end },
+}
+
+-- Text Designer previews default ON: seed a profile that predates the Config
+-- default (migration timing can leave it nil), or the switch and the preview
+-- disagree. Both scopes, on every open, as the old panel did on its build.
+local function SeedGroupDefaults()
+    if not DF.UpdateTextDesigner then return end
+    local pdb, rdb = DF:GetDB(), DF:GetRaidDB()
+    if pdb and pdb.testShowTextDesigner == nil then pdb.testShowTextDesigner = true end
+    if rdb and rdb.testShowTextDesigner == nil then rdb.testShowTextDesigner = true end
+end
+
+local function RegisterGroupTestMode(scope, order)
+    local isRaid = scope == "raid"
+    DF:RegisterTestMode(scope, {
+        label = function() return isRaid and L["Raid"] or L["Party"] end,
+        icon = TEST_ICONS .. (isRaid and "grid_view.png" or "groups.png"),
+        order = order,
+        accent = function()
+            local GUI = DF.GUI
+            if GUI and GUI.GetThemeColorFor then return GUI.GetThemeColorFor(isRaid) end
+            return nil
+        end,
+        isAvailable = function()
+            local db = DF.db
+            if isRaid and db and db.raidEnabled == false then
+                return false, L["Raid frames are disabled. Enable them in General settings to use raid test mode."]
+            elseif not isRaid and db and db.partyEnabled == false then
+                return false, L["Party frames are disabled. Enable them in General settings to use party test mode."]
+            end
+            local GUI = DF.GUI
+            if GUI and GUI.IsModulePickLocked and GUI:IsModulePickLocked("group", scope) then return false end
+            return true
+        end,
+        -- Party / Raid follow the settings window's own Party / Raid: the popup
+        -- is a view of the tab the user is on, exactly as the old panel was.
+        isCurrent = function() return GroupIsRaidView() == isRaid end,
+        onEnter = function(fromId)
+            SeedGroupDefaults()
+            SwitchGroupScope(scope)
+            -- Opening the popup, or arriving from a mode that is not a group
+            -- one: the user is asking for this scope's preview. Party <-> Raid
+            -- needs nothing more -- the switch carries a running preview over.
+            if not GROUP_SCOPES[fromId or ""] then
+                DF:SetTestModeOwner(scope, "user", true)
+            end
+        end,
+        onExit = function(toId)
+            -- To another kind of mode: the group preview goes. Party <-> Raid is
+            -- the switch's to carry, and closing releases both (OnHide).
+            if toId ~= nil and not GROUP_SCOPES[toId] then
+                DF:SetTestModeOwner("party", "user", false)
+                DF:SetTestModeOwner("raid", "user", false)
+            end
+        end,
+        store = function() return GroupDB(scope) end,
+        presets = GROUP_PRESETS,
+        applyPreset = function(id) DF:ApplyTestPreset(id) end,
+        activePreset = function() return DF:GetActiveTestPreset() end,
+        isPreviewOn = function() return DF:IsTestModeOwnedBy(scope, "user") end,
+        togglePreview = function() DF:ToggleTestMode() end,
+        sections = GroupSections(scope),
+    })
+end
+
+RegisterGroupTestMode("party", 10)
+RegisterGroupTestMode("raid", 20)
