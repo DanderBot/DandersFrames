@@ -15,12 +15,15 @@ local addonName, UF = ...
 --   key            default                         notes
 --   player         CENTER (-280, -200)
 --   target         CENTER (280, -200)
---   targettarget   beside target's right edge      relevant only while you have a target
+--   targettarget   beside target.outer's right     relevant only while you have a target
 --   focus          CENTER (-280, -300)
---   pet            under player's bottom edge
+--   focustarget    beside focus.outer's right      relevant only while you have a focus
+--   pet            CENTER (-365, -242)             free, below-left of the player
 --   boss           CENTER (480, 120)               the boss container (Boss.lua):
 --                                                  rect = union of the shown slots
 --   boss.slot1..N  anchor targets only             partOf "boss", no snap zones
+--   target.outer   anchor targets only             the frame + an outside portrait
+--   focus.outer                                    (OUTER RECTS below), no snap zones
 --
 -- While the preview is up (UF.Preview: a mover session turns it on), each
 -- element measures and reports the PREVIEW frame, so an absent unit (no target,
@@ -114,6 +117,57 @@ function M:BuildDef(unit)
     }
     for k, v in pairs(M.EXTRA[unit] or {}) do def[k] = v end
     return def
+end
+
+-- ============================================================
+-- OUTER RECTS (anchor targets "<unit>.outer")
+-- The frame widened to take in a portrait that sits OUTSIDE it (Portrait side Left /
+-- Right), so a frame anchored beside it -- target of target, focus target -- clears
+-- the portrait at any size and side. The height is the frame's, so an anchor's
+-- alignment (start = level with the top) stays the frame's. Part of its unit's
+-- element (anchoring the frame to its own outer rect is a loop) and builds no snap
+-- zones: it is for the default records and the anchor picker.
+-- A portrait change re-sizes the rect without moving the frame, so the layout tick
+-- (UF:RefreshAll) asks the lib to re-solve whatever is anchored to one that moved
+-- (M:RefreshOuter).
+-- ============================================================
+M.OUTER_UNITS = { "target", "focus" }
+M.OUTER_KEYS = {}
+for i, unit in ipairs(M.OUTER_UNITS) do M.OUTER_KEYS[i] = unit .. ".outer" end
+
+function M:OuterRect(unit)
+    local r = M:RectFor(unit)
+    if not r then return nil end
+    local f = M:FrameFor(unit)
+    local PO = UF.Portrait
+    local K = UF.Elements and UF.Elements.Kit
+    if not (f and PO and PO.OutsideExtent and K) then return r end
+    local left, right = PO.OutsideExtent(f, K.DB(f))
+    if left == 0 and right == 0 then return r end
+    local ratio = f:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    return { x = r.x + (right - left) * ratio / 2, y = r.y,
+             w = r.w + (left + right) * ratio, h = r.h }
+end
+
+function M:OuterDef(unit)
+    local L = DF.L or {}
+    return {
+        title     = string.format("%s \194\183 %s", M:Title(unit), L["Portrait"] or "Portrait"),
+        group     = L["Unit Frames"] or "Unit Frames",
+        getFrame  = function() return M:FrameFor(unit) end,
+        getRect   = function() return M:OuterRect(unit) end,
+        partOf    = M.ADDON_KEY .. ":" .. unit,
+        snappable = false,
+    }
+end
+
+-- Re-solve what is anchored to an outer rect that moved or re-sized (a portrait or
+-- frame-size change). The lib measures the named targets and does nothing unless
+-- one actually moved, so this is cheap on every layout tick.
+function M:RefreshOuter()
+    if not (Lib and M.initialised and M.outerRegistered and Lib.RefreshMovedTargets) then return 0 end
+    local ok, n = pcall(Lib.RefreshMovedTargets, Lib, M.ADDON_KEY, M.OUTER_KEYS)
+    return ok and n or 0
 end
 
 -- ============================================================
@@ -275,6 +329,15 @@ function M:Init()
             Lib:Register(M.ADDON_KEY, unit, M:BuildDef(unit))
             M.registered = M.registered or {}
             M.registered[unit] = true
+        end
+    end
+    -- The outer rects (OUTER RECTS above), once their units are registered.
+    if Lib.RegisterAnchorTarget then
+        for _, unit in ipairs(M.OUTER_UNITS) do
+            if M.registered and M.registered[unit] then
+                Lib:RegisterAnchorTarget(M.ADDON_KEY, unit .. ".outer", M:OuterDef(unit))
+                M.outerRegistered = true
+            end
         end
     end
     -- A session needs something to drag: the preview's "unlock" claim (spec §1.5,

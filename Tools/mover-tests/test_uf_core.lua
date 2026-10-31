@@ -148,9 +148,9 @@ local pos = UF:GetPositionRecord("targettarget")
 eq(type(pos), "table", "a record")
 eq(pos, DF.db.unitframes.units.targettarget.position, "the stored table itself (the mover mutates it)")
 check(pos ~= UF.UnitDefaults.targettarget.position, "not the default table")
-eq(pos.anchor and pos.anchor.target, "DandersFrames_UnitFrames:target", "target of target anchors to target")
+eq(pos.anchor and pos.anchor.target, "DandersFrames_UnitFrames:target.outer", "target of target anchors to target (portrait included)")
 pos.x = 1
-eq(UF.UnitDefaults.targettarget.position.x, 449, "moving it leaves the default")
+eq(UF.UnitDefaults.targettarget.position.x, 496, "moving it leaves the default")
 eq(UF:GetPositionRecord("player").point, "CENTER", "player record")
 eq(UF:GetPositionRecord("player").x, -280, "player default x")
 

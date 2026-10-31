@@ -198,8 +198,6 @@ CB.Pick, CB.AlphaFrom, CB.IsNil = Pick, AlphaFrom, IsNil
 -- ============================================================
 function CB:Attach(f)
     if not f or f.dfUFCastBar or not CB.UNITS[f.dfUFUnit] then return end
-    -- The aura rows' reserve under an attached cast bar (AURA ROW RESERVE).
-    f.dfAuraRowOffset = CB.AuraRowOffset
     local cb = CreateFrame("Frame", nil, f)
     cb:Hide()
     cb.owner = f
@@ -325,8 +323,8 @@ end
 -- height, gap, border, enable or attach moves the rows at their next drive.
 -- Rows anchored to the top or a side are never pushed; nor is anything on a frame
 -- whose cast bar is off, detached (Player's default) or attached on top.
--- Reaches the rows through DandersFrames' per-frame row offset (frame.dfAuraRowOffset,
--- Features/Auras.lua), set on every unit frame that has a cast bar (CB:Attach).
+-- Reaches the rows through DandersFrames' per-frame row placement
+-- (frame.dfAuraRowPlacement, Features/Auras.lua; UF.AuraRowPlacement, Elements.lua).
 -- ============================================================
 function CB.BottomReserve(f, db)
     db = db or K.DB(f)
@@ -343,14 +341,6 @@ function CB.BottomReserve(f, db)
     local r = gap - y + h + border
     if r < 0 then r = 0 end
     return r
-end
-
--- frame.dfAuraRowOffset: (frame, db, prefix, anchor) -> dx, dy in the frame's units.
-function CB.AuraRowOffset(f, db, prefix, anchor)
-    if type(anchor) ~= "string" or not anchor:find("BOTTOM", 1, true) then return 0, 0 end
-    local r = CB.BottomReserve(f, db)
-    if r == 0 then return 0, 0 end
-    return 0, -r
 end
 
 function CB:Layout(f)

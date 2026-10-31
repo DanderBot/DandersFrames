@@ -63,6 +63,7 @@ local UF = {}
 load_uf_file_into("Core.lua", UF)
 load_uf_file_into("Links.lua", UF)
 load_uf_file_into("Defaults.lua", UF)
+load_uf_file_into("Elements.lua", UF)
 local Links = UF.Links
 check(type(Links) == "table", "Links.lua loads")
 
@@ -516,9 +517,10 @@ end
 -- 5c. AURA ROW DEFAULTS
 -- Effective values through the unit's settings chain (stored -> unit defaults ->
 -- party defaults), after Links.MirrorDefaults made Target's from Player's. The rows'
--- rects come from the legacy row maths (AuraContainer layoutRow: icon i's anchor
--- point sits on the frame's same point, offset + i steps along the growth), which
--- the engine's flow is meant to match -- a model, so the game is the final word.
+-- rects come from the legacy row maths (AuraContainer layoutRow: icon i's ROW corner --
+-- the frames' derived rowPoint, else the anchor -- sits on the frame's anchor point,
+-- offset + i steps along the growth), which the engine's flow is meant to match -- a
+-- model, so the game is the final word.
 -- The cast bar reserve under a frame is added at run time (test_uf_castbar.lua).
 -- ============================================================
 print("-- Unit frames: aura row defaults")
@@ -526,23 +528,28 @@ do
     local AXIS = { RIGHT = { 1, 0 }, LEFT = { -1, 0 }, UP = { 0, 1 }, DOWN = { 0, -1 } }
     -- Rects of the first n icons of `prefix`'s row on a w x h frame: { l, r, b, t }
     -- with the frame's bottom-left at 0,0 and y growing up.
-    local function rowRects(db, prefix, w, h, n)
+    local K = UF.Elements.Kit
+    -- `big`: { [i] = size } for icons drawn bigger than the row's (an important debuff).
+    local function rowRects(db, prefix, w, h, n, big)
         local s = db[prefix .. "Size"]
         local step = s + db[prefix .. "PaddingX"]
         local stepY = s + db[prefix .. "PaddingY"]
         local anchor = db[prefix .. "Anchor"]
-        local p, q = db[prefix .. "Growth"]:match("^(%a+)_(%a+)$")
+        local growth = db[prefix .. "Growth"]
+        local point = K.RowPoint(anchor, growth) or anchor
+        local p, q = growth:match("^(%a+)_(%a+)$")
         local wrap = db[prefix .. "Wrap"]
         local ax = anchor:find("LEFT") and 0 or (anchor:find("RIGHT") and w or w / 2)
         local ay = anchor:find("BOTTOM") and 0 or (anchor:find("TOP") and h or h / 2)
         local out = {}
         for i = 1, n do
+            local si = (big and big[i]) or s
             local col, row = (i - 1) % wrap, math.floor((i - 1) / wrap)
             local px = ax + db[prefix .. "OffsetX"] + (AXIS[p][1] * col + AXIS[q][1] * row) * step
             local py = ay + db[prefix .. "OffsetY"] + (AXIS[p][2] * col + AXIS[q][2] * row) * stepY
-            local l = anchor:find("LEFT") and px or (anchor:find("RIGHT") and px - s or px - s / 2)
-            local b = anchor:find("BOTTOM") and py or (anchor:find("TOP") and py - s or py - s / 2)
-            out[i] = { l = l, r = l + s, b = b, t = b + s }
+            local l = point:find("LEFT") and px or (point:find("RIGHT") and px - si or px - si / 2)
+            local b = point:find("BOTTOM") and py or (point:find("TOP") and py - si or py - si / 2)
+            out[i] = { l = l, r = l + si, b = b, t = b + si }
         end
         return out
     end
@@ -562,8 +569,10 @@ do
     eq(T.showDebuffs, true, "target: debuffs on")
     eq(T.buffAnchor .. " " .. T.buffGrowth, "TOPLEFT RIGHT_UP", "target: buffs from the top-left, growing right then up")
     eq(T.debuffAnchor .. " " .. T.debuffGrowth, "BOTTOMLEFT RIGHT_DOWN", "target: debuffs from the bottom-left, growing right then down")
-    eq(T.buffOffsetX .. "," .. T.buffOffsetY, "0,23", "target: buff row one icon + gap (22 + 1) up")
-    eq(T.debuffOffsetX .. "," .. T.debuffOffsetY, "0,-23", "target: debuff row one icon + gap down")
+    eq(T.buffOffsetX .. "," .. T.buffOffsetY, "0,1", "target: buff row 1px (the gap) above the frame")
+    eq(T.debuffOffsetX .. "," .. T.debuffOffsetY, "0,-1", "target: debuff row 1px below")
+    eq(K.RowPoint(T.buffAnchor, T.buffGrowth), "BOTTOMLEFT", "target: the buff row hangs by its bottom-left corner")
+    eq(K.RowPoint(T.debuffAnchor, T.debuffGrowth), "TOPLEFT", "target: the debuff row by its top-left corner")
     eq(T.buffSize .. "/" .. T.buffPaddingX .. "/" .. T.buffPaddingY .. "/" .. T.buffMax .. "/" .. T.buffWrap,
         "22/1/1/8/8", "target: 22px buffs, spacing 1, 8 to a row")
     eq(T.debuffSize .. "/" .. T.debuffPaddingX .. "/" .. T.debuffPaddingY .. "/" .. T.debuffMax .. "/" .. T.debuffWrap,
@@ -590,8 +599,10 @@ do
     eq(P.showDebuffs, true, "player: debuffs on")
     eq(P.debuffAnchor .. " " .. P.debuffGrowth, "BOTTOMRIGHT LEFT_DOWN", "player: debuffs from the bottom-right, growing left then down")
     eq(P.buffAnchor .. " " .. P.buffGrowth, "TOPRIGHT LEFT_UP", "player: buffs (when on) from the top-right, growing left then up")
-    eq(P.debuffOffsetX .. "," .. P.debuffOffsetY, "0,-23", "player: debuff row one icon + gap down")
-    eq(P.buffOffsetX .. "," .. P.buffOffsetY, "0,23", "player: buff row one icon + gap up")
+    eq(P.debuffOffsetX .. "," .. P.debuffOffsetY, "0,-1", "player: debuff row 1px below")
+    eq(P.buffOffsetX .. "," .. P.buffOffsetY, "0,1", "player: buff row 1px above")
+    eq(K.RowPoint(P.debuffAnchor, P.debuffGrowth), "TOPRIGHT", "player: the debuff row hangs by its top-right corner")
+    eq(K.RowPoint(P.buffAnchor, P.buffGrowth), "BOTTOMRIGHT", "player: the buff row by its bottom-right corner")
     local pw, ph = P.frameWidth, P.frameHeight
     local pl, pr, _, pt = span(rowRects(P, "debuff", pw, ph, P.debuffMax))
     eq(pr, pw, "player: the debuff row ends at the frame's right edge")
@@ -678,6 +689,89 @@ do
     local yl, _, _, yt = span(rowRects(B, "buff", B.frameWidth, B.frameHeight, B.buffMax))
     eq(yl, B.frameWidth + 1, "boss: buffs (when on) start 1px right of the frame")
     eq(yt, B.frameHeight, "boss: ...level with its top")
+
+    -- ALIGNMENT: a row hanging outside an edge is pinned by its corner nearest the
+    -- frame (K.RowPoint), so its icons line up on that edge and a bigger icon (an
+    -- important debuff, 1.25x) grows AWAY from the frame, never back into it.
+    local RP = K.RowPoint
+    for _, c in ipairs({
+        { "BOTTOMLEFT", "RIGHT_DOWN", "TOPLEFT", "under the frame from the left" },
+        { "BOTTOMRIGHT", "LEFT_DOWN", "TOPRIGHT", "under the frame from the right" },
+        { "BOTTOMLEFT", "DOWN_RIGHT", "TOPLEFT", "under the frame, a column" },
+        { "TOPLEFT", "RIGHT_UP", "BOTTOMLEFT", "above the frame from the left" },
+        { "TOPRIGHT", "LEFT_UP", "BOTTOMRIGHT", "above the frame from the right" },
+        { "TOPLEFT", "LEFT_DOWN", "TOPRIGHT", "left of the frame (top-aligned)" },
+        { "TOPRIGHT", "RIGHT_DOWN", "TOPLEFT", "right of the frame (top-aligned)" },
+        { "BOTTOMLEFT", "LEFT_UP", "BOTTOMRIGHT", "left of the frame, bottom-up" },
+    }) do
+        eq(RP(c[1], c[2]), c[3], "row point, " .. c[4] .. ": " .. c[3])
+    end
+    for _, c in ipairs({
+        { "BOTTOMRIGHT", "LEFT_UP", "inside, bottom-right growing up (the party default)" },
+        { "BOTTOMLEFT", "RIGHT_UP", "inside, bottom-left growing up" },
+        { "TOPLEFT", "RIGHT_DOWN", "inside, top-left growing down" },
+        { "BOTTOM", "RIGHT_DOWN", "an edge midpoint (not a corner)" },
+        { "CENTER", "RIGHT_DOWN", "the centre" },
+        { "BOTTOMLEFT", "CENTER_DOWN", "centred growth" },
+    }) do
+        eq(RP(c[1], c[2]), nil, "row point, " .. c[3] .. ": the anchor (as DF always did)")
+    end
+    eq(RP(nil, "RIGHT_DOWN"), nil, "row point: no anchor, nothing")
+    local x0, y0, rp = UF.AuraRowPlacement({}, T, "debuff", T.debuffAnchor, T.debuffGrowth)
+    eq(tostring(rp), "TOPLEFT", "the frames' row placement answers the row point")
+    eq(x0 .. "," .. y0, "0,0", "...and no reserve without a cast bar module")
+    -- Rects with an important icon (1.25x) in the first slot.
+    local bigD = { [1] = T.debuffSize * 1.25 }
+    local dR = rowRects(T, "debuff", tw, th, 3, bigD)
+    eq(dR[1].t .. "," .. dR[2].t, "-1,-1", "target debuffs: a big icon's top lines up with the rest (1px under the frame)")
+    check(dR[1].b < dR[2].b, "...and it grows DOWN, away from the frame")
+    local bR = rowRects(T, "buff", tw, th, 3, { [1] = T.buffSize * 1.25 })
+    eq(bR[1].b .. "," .. bR[2].b, (th + 1) .. "," .. (th + 1), "target buffs: a big icon's bottom lines up (1px above)")
+    check(bR[1].t > bR[2].t, "...and it grows UP, away from the frame")
+    local pR = rowRects(P, "debuff", pw, ph, 2, { [1] = P.debuffSize * 1.25 })
+    eq(pR[1].r .. "," .. pR[1].t, pw .. ",-1", "player debuffs: a big icon at the right edge, top lined up")
+    local xR = rowRects(B, "debuff", B.frameWidth, B.frameHeight, 2, { [1] = B.debuffSize * 1.25 })
+    eq(xR[1].r .. "," .. xR[1].t, "-1," .. B.frameHeight, "boss debuffs: a big icon stays left of the frame, top lined up")
+    check(xR[1].l < xR[2].l + B.debuffSize, "...growing left and down, away from it")
+
+    -- PET: free, a bit bigger, below-left of the player and clear of its debuff row.
+    eq(Pet.frameWidth .. "x" .. Pet.frameHeight, "140x30", "pet: 140 x 30")
+    local pos = Pet.position
+    eq(pos.anchor, nil, "pet: free (not anchored to the player)")
+    eq(pos.point .. " " .. pos.x .. "," .. pos.y, "CENTER -365,-242", "pet: its default seat")
+    local PP = P.position
+    local pLeft, pBottom = PP.x - pw / 2, PP.y - ph / 2
+    local petL, petR = pos.x - Pet.frameWidth / 2, pos.x + Pet.frameWidth / 2
+    local petT = pos.y + Pet.frameHeight / 2
+    local dl2 = span(rowRects(P, "debuff", pw, ph, P.debuffMax))
+    local _, _, rowBottom = span(rowRects(P, "debuff", pw, ph, P.debuffMax))
+    check(petR <= pLeft + dl2 - 8, "pet: 8px or more left of Player's full debuff row (" .. petR .. " vs " .. (pLeft + dl2) .. ")")
+    check(petT < pBottom, "pet: below the player frame (" .. petT .. " < " .. pBottom .. ")")
+    check(petT < pBottom - 1, "...and below the player's portrait border")
+    check(petL < pLeft, "pet: reaching left of the player (below-left)")
+    check(pBottom + rowBottom < petT, "pet: its top is level with the player's debuff row, beside it")
+    local cbr = Pet.castbarPosition
+    eq(cbr.anchor and cbr.anchor.target, "DandersFrames_UnitFrames:pet", "pet cast bar record: follows the pet")
+    eq(cbr.anchor and cbr.anchor.edge, "bottom", "...under it")
+    eq(cbr.x .. "," .. cbr.y, pos.x .. "," .. (pos.y - Pet.frameHeight / 2 - 2 - Pet.castbarHeight / 2),
+        "...its x/y the solve gives under the new seat")
+
+    -- TARGET OF TARGET clears Target's portrait (on the right, outside).
+    eq(T.portraitSide, "RIGHT", "target's portrait: on the right (Player's mirrored)")
+    local TTd = UF:GetUnitDB("targettarget")
+    local reachT = 2 + T.frameHeight + 1        -- gap + size (= frame height) + border
+    local fb = TTd.position.anchor.fallback
+    eq(fb.offsetX, reachT, "target of target: the fallback anchor clears the default portrait")
+    local tRight = T.position.x + tw / 2
+    local totLeft = TTd.position.x - TTd.frameWidth / 2
+    eq(totLeft - (tRight + reachT), 2, "target of target: 2px right of the portrait at the default seat")
+    eq(TTd.position.y + TTd.frameHeight / 2, T.position.y + th / 2, "...level with the target's top")
+    -- Focus target: Focus's portrait is on its left, so its right edge is free.
+    local FTd = UF:GetUnitDB("focustarget")
+    eq(F.portraitSide or "LEFT", "LEFT", "focus's portrait: on the left")
+    eq(FTd.position.anchor.fallback.offsetX, 0, "focus target: nothing to clear by default")
+    check(FTd.position.x - FTd.frameWidth / 2 > F.position.x + F.frameWidth / 2,
+        "focus target: right of the focus frame")
 
     -- Filters: Target every caster's debuffs, Focus and Boss yours; buffs all.
     eq(T.directDebuffShowAll, true, "filters: target shows every caster's debuffs")
@@ -808,6 +902,10 @@ do
           "Preview: a preview frame gets it too")
     check(uf_file_source("Defaults.lua"):find("if UF.Links and UF.Links.Ensure then UF.Links:Ensure(tbl) end", 1, true),
           "Defaults: the profile-root migrate hook ensures the links")
+    check(uf_file_source("Units.lua"):find("f.dfAuraRowPlacement = UF.AuraRowPlacement", 1, true),
+          "Units: every live unit frame places its aura rows (row corner + cast bar reserve)")
+    check(uf_file_source("Preview.lua"):find("f.dfAuraRowPlacement = UF.AuraRowPlacement", 1, true),
+          "Preview: every preview frame too")
 
 end
 

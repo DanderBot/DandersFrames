@@ -120,8 +120,8 @@ for _, unit in ipairs({ "player", "target", "targettarget", "focus", "pet" }) do
 end
 eq(lib.defs[A .. ":focus"].title, "Focus", "focus element title")
 eq(lib.defs[A .. ":pet"].title, "Pet", "pet element title")
-eq(lib.defs[A .. ":pet"].default.anchor.target, A .. ":player", "pet: anchored to the player by default")
-eq(lib.defs[A .. ":pet"].default.anchor.edge, "bottom", "...its bottom edge")
+eq(lib.defs[A .. ":pet"].default.anchor, nil, "pet: free by default (not anchored to the player)")
+eq(lib.defs[A .. ":pet"].default.x .. "," .. lib.defs[A .. ":pet"].default.y, "-365,-242", "...below-left of the player")
 eq(lib.defs[A .. ":focus"].default.x, -280, "focus default x")
 eq(lib.defs[A .. ":focus"].default.y, -300, "focus default y")
 check(type(lib.defs[A .. ":target"].getRect) == "function", "elements report a rect")

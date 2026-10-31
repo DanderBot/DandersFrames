@@ -199,6 +199,17 @@ local function Detached(unit, edge, x, y)
                         align = "center", offsetX = 0, offsetY = 0 } }
 end
 
+-- Beside `owner`'s right edge, past a portrait that sits outside it: anchored to the
+-- owner's OUTER rect (Mover.lua, "<unit>.outer"), with the owner frame itself as the
+-- fallback (for a mover without outer rects), offset by the default portrait's reach.
+local function BesideOuter(owner, x, y, reach)
+    return { point = "CENTER", x = x, y = y,
+             anchor = { target = "DandersFrames_UnitFrames:" .. owner .. ".outer", edge = "right",
+                        align = "start", offsetX = 0, offsetY = 0,
+                        fallback = { target = "DandersFrames_UnitFrames:" .. owner, edge = "right",
+                                     align = "start", offsetX = reach, offsetY = 0 } } }
+end
+
 -- Enemy-frame aura filter: debuffs you cast, buffs shown in full (any caster).
 -- Target widens its debuffs to every caster's (PER_UNIT below); Focus and Boss keep
 -- yours only. Sated, Exhaustion and the rest of DandersFrames' default debuff
@@ -221,10 +232,10 @@ local ENEMY_AURAS = {
 -- Player, Target and Focus put BUFFS ABOVE the frame and DEBUFFS BELOW it, one row
 -- each, flush with an outer corner: buffs on a top corner growing sideways then UP,
 -- debuffs on a bottom corner growing sideways then DOWN, so extra rows wrap away
--- from the frame. The flow pins a row's first icon by its anchor corner to the
--- frame's same corner, so a row outside the frame is pushed out by one icon + gap
--- (offset Y +/- AURA_ROW). That offset lives in the row's scaled space, as its icons
--- do, so the gap holds at any Scale; a bigger Size needs a bigger offset to keep it.
+-- from the frame. A row that grows away from its edge hangs OUTSIDE it, pinned by its
+-- own corner nearest the frame (Elements.lua, AURA ROW PLACEMENT), so its offset is
+-- just the gap to the frame (+/- AURA_GAP) at any icon size, and a bigger icon (an
+-- important debuff) grows away from the frame.
 -- Target from the LEFT edge growing right. Player is its mirror for the link
 -- (Links.MirrorDefaults turns Player's anchors and growth into Target's): from the
 -- RIGHT edge growing left. Every row key the two share is equal or mirrored, so the
@@ -234,7 +245,6 @@ local ENEMY_AURAS = {
 -- Size 22 / spacing 1: 8 buffs span 183px (inside Target's 220), 5 debuffs 114px.
 -- ============================================================
 local AURA_SIZE, AURA_GAP = 22, 1
-local AURA_ROW = AURA_SIZE + AURA_GAP
 
 -- Shared by Player, Target and Focus. Sizes and counts are LOOK keys, which the
 -- default link shares rather than mirrors, so Player and Target must agree on them.
@@ -246,15 +256,15 @@ local OUTSIDE_FRAME_AURAS = {
     -- Flush with the frame's edge. Set here, not mirrored: a mirror of 0 is 0, so
     -- MirrorDefaults leaves it and Target would fall back to the party default.
     buffOffsetX = 0, debuffOffsetX = 0,
-    -- One icon + gap above / below the frame. Vertical: the mirror leaves it alone.
-    buffOffsetY = AURA_ROW, debuffOffsetY = -AURA_ROW,
+    -- The gap above / below the frame. Vertical: the mirror leaves it alone.
+    buffOffsetY = AURA_GAP, debuffOffsetY = -AURA_GAP,
 }
 local OUTSIDE_FRAME = { player = true, target = true, focus = true }
 
 -- Boss: debuffs (yours) in one row to the LEFT of the frame, growing left, as tall
 -- as the frame (40). Buffs are off; turned on, they sit in one row to the RIGHT.
--- The flow puts the first icon's anchor corner on the frame's, so a row that starts
--- outside the frame is pushed out by one icon + gap.
+-- Each hangs outside its side, pinned by the corner nearest the frame, so its
+-- offset is the gap and its icons line up on the frame's top.
 local BOSS_DEBUFF_SIZE = 40
 
 local PER_UNIT = {
@@ -317,11 +327,13 @@ local PER_UNIT = {
         showBuffs = false, showDebuffs = false,
         oorEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
-        -- Beside the target's right edge. x/y are where the mover's solve puts it
-        -- for the default target position, so it is right without the mover too.
-        position = { point = "CENTER", x = 449, y = -189,
-                     anchor = { target = "DandersFrames_UnitFrames:target", edge = "right",
-                                align = "start", offsetX = 0, offsetY = 0 } },
+        -- Beside the target's right edge, past its portrait (Target's sits outside on
+        -- the right): anchored to the target's OUTER rect, which takes the portrait in
+        -- at whatever size and side it has (Mover.lua, OUTER RECTS). x/y are where the
+        -- mover's solve puts it for the default target position and portrait, so it is
+        -- right without the mover too; the fallback is a mover without outer rects:
+        -- the frame, past the default portrait (2 gap + 46 + 1 border).
+        position = BesideOuter("target", 496, -189, 2 + 46 + 1),
     },
     focus = {
         frameWidth = 180, frameHeight = 36,
@@ -342,7 +354,9 @@ local PER_UNIT = {
         classificationEnabled = true,
     },
     -- The focus's target: target of target's look, beside the focus's right edge
-    -- (x/y are the mover's solve for the default focus position, as for ToT).
+    -- (x/y are the mover's solve for the default focus position, as for ToT). Focus's
+    -- portrait sits on its LEFT, so nothing is in the way by default; the outer rect
+    -- keeps it clear if the portrait is moved to the right.
     focustarget = {
         frameWidth = 110, frameHeight = 24,
         healthColorMode = "CLASS_REACTION",
@@ -350,30 +364,28 @@ local PER_UNIT = {
         showBuffs = false, showDebuffs = false,
         oorEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
-        position = { point = "CENTER", x = -131, y = -294,
-                     anchor = { target = "DandersFrames_UnitFrames:focus", edge = "right",
-                                align = "start", offsetX = 0, offsetY = 0 } },
+        position = BesideOuter("focus", -131, -294, 0),
     },
     pet = {
-        frameWidth = 110, frameHeight = 24,
+        frameWidth = 140, frameHeight = 30,
         healthColorMode = "CLASS",
         resourceBarEnabled = false,
         -- A few debuffs (what you would dispel off your pet) in one row under the
-        -- frame from its left edge, growing right: 4 x 22px spans 91 of its 110px.
+        -- frame from its left edge, growing right: 4 x 22px spans 91 of its 140px.
         -- Buffs stay off.
         showBuffs = false, showDebuffs = true,
         debuffSize = AURA_SIZE, debuffPaddingX = AURA_GAP, debuffPaddingY = AURA_GAP,
         debuffMax = 4, debuffWrap = 4,
         debuffAnchor = "BOTTOMLEFT", debuffGrowth = "RIGHT_DOWN",
-        debuffOffsetX = 0, debuffOffsetY = -AURA_ROW,
+        debuffOffsetX = 0, debuffOffsetY = -AURA_GAP,
         oorEnabled = false,
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
         castbarHeight = 12,
-        castbarPosition = Detached("pet", "bottom", -335, -260),
-        -- Under the player frame, left edges aligned.
-        position = { point = "CENTER", x = -335, y = -239,
-                     anchor = { target = "DandersFrames_UnitFrames:player", edge = "bottom",
-                                align = "start", offsetX = 0, offsetY = 0 } },
+        castbarPosition = Detached("pet", "bottom", -365, -265),
+        -- FREE (no anchor), below-left of the player frame: its top 4px under the
+        -- player's bottom, its right edge 11px left of where Player's debuff row
+        -- (five 22px icons from the player's right edge) ends.
+        position = { point = "CENTER", x = -365, y = -242 },
     },
     boss = {
         frameWidth = 180, frameHeight = 40,
@@ -385,11 +397,11 @@ local PER_UNIT = {
         debuffSize = BOSS_DEBUFF_SIZE, debuffPaddingX = AURA_GAP, debuffPaddingY = AURA_GAP,
         debuffMax = 4, debuffWrap = 4,
         debuffAnchor = "TOPLEFT", debuffGrowth = "LEFT_DOWN",
-        debuffOffsetX = -(BOSS_DEBUFF_SIZE + AURA_GAP), debuffOffsetY = 0,
+        debuffOffsetX = -AURA_GAP, debuffOffsetY = 0,
         buffSize = AURA_SIZE, buffPaddingX = AURA_GAP, buffPaddingY = AURA_GAP,
         buffMax = 4, buffWrap = 4,
         buffAnchor = "TOPRIGHT", buffGrowth = "RIGHT_DOWN",
-        buffOffsetX = AURA_ROW, buffOffsetY = 0,
+        buffOffsetX = AURA_GAP, buffOffsetY = 0,
         -- ⚠ Both rows are anchored to a TOP corner, so the attached cast bar under
         -- each boss never pushes them (CastBar.lua, AURA ROW RESERVE).
         oorEnabled = true,

@@ -500,6 +500,8 @@ function Units:Build(key, unit, token, name, parent, slot)
     f.dfUFUnit = unit
     f.dfUFKey = key
     f.dfUFSlot = slot
+    -- Where its aura rows sit: their own corner and the cast bar reserve (Elements.lua).
+    f.dfAuraRowPlacement = UF.AuraRowPlacement
     f.dfTextPresetOverride = db.textDesignerPreset
     f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(unit) or false
     if VEHICLE[unit] then f:SetAttribute("toggleForVehicle", true) end

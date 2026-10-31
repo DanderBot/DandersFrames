@@ -252,12 +252,13 @@ CB:SetActive(BS, false)
 
 print("-- Aura row reserve: an attached cast bar under the frame pushes bottom rows down")
 do
-    eq(T.dfAuraRowOffset, CB.AuraRowOffset, "a frame with a cast bar carries DF's row-offset hook")
-    eq(TT.dfAuraRowOffset, nil, "...a frame without one does not")
+    -- Through the frames' row placement (Elements.lua), which the builds set on every
+    -- unit frame (pinned in test_uf_units / test_uf_preview).
     local function off(f, anchor)
-        local x, y = f.dfAuraRowOffset(f, f.dfDB, "debuff", anchor)
+        local x, y = UF.AuraRowPlacement(f, f.dfDB, "debuff", anchor, "RIGHT_DOWN")
         return x .. "," .. y
     end
+    eq(off(TT, "BOTTOMLEFT"), "0,0", "a frame without a cast bar: nothing reserved")
     local tdb = UF:GetUnitDB("target")
     -- Target's defaults: on, attached under, 18 high, 2 gap, 1px border.
     eq(CB.BottomReserve(T), 21, "target: 2 gap + 18 high + 1 border = 21")
@@ -267,7 +268,7 @@ do
     for _, a in ipairs({ "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "RIGHT", "CENTER" }) do
         eq(off(T, a), "0,0", "a " .. a .. " row: never pushed")
     end
-    eq(select("#", T.dfAuraRowOffset(T, tdb, "buff", "TOPLEFT")), 2, "always two answers")
+    eq(select("#", UF.AuraRowPlacement(T, tdb, "buff", "TOPLEFT", "RIGHT_UP")), 3, "always three answers")
     -- Follows the settings, live.
     tdb.castbarHeight = 30
     eq(off(T, "BOTTOMLEFT"), "0,-33", "taller (30): pushed further (33)")

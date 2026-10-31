@@ -271,6 +271,8 @@ function P:Build(unit, name, parent, slot)
     f.unit = slot and (unit .. slot) or unit
     f.dfTestData = P:TestData(unit, slot)
     f.dfTestAuraSeed = P.AURA_SEEDS[unit]
+    -- Where its aura rows sit, as on the live frame (Elements.lua).
+    f.dfAuraRowPlacement = UF.AuraRowPlacement
     f.index = f.dfTestData.index
     f:EnableMouse(true)
     if DF.CreateFrameElements then DF:CreateFrameElements(f, false) end

@@ -35,6 +35,12 @@ function lib:RegisterAddon(name, opts) self.addons[name] = opts end
 function lib:Register(addon, key, def) self.defs[addon .. ":" .. key] = def end
 function lib:Apply(addon, key) self.applied[#self.applied + 1] = addon .. ":" .. key end
 lib.ApplyPosition = function() end
+lib.targets, lib.refreshed = {}, {}
+function lib:RegisterAnchorTarget(addon, key, def) self.targets[addon .. ":" .. key] = def end
+function lib:RefreshMovedTargets(addon, keys)
+    self.refreshed[#self.refreshed + 1] = addon .. ":" .. table.concat(keys, ",")
+    return 0
+end
 LibStub = function(name, silent)
     if name == "DandersMover-1.0" then return lib end
 end
@@ -90,9 +96,14 @@ if P and T and TT then
     eq(P.default.y, -200, "player default y")
     eq(T.default.x, 280, "target default x")
     eq(T.default.y, -200, "target default y")
-    eq(TT.default.anchor and TT.default.anchor.target, A .. ":target", "target of target anchors to target")
+    eq(TT.default.anchor and TT.default.anchor.target, A .. ":target.outer", "target of target anchors to target's outer rect")
     eq(TT.default.anchor and TT.default.anchor.edge, "right", "...its right edge")
     eq(TT.default.anchor and TT.default.anchor.align, "start", "...aligned to the start")
+    local fb = TT.default.anchor and TT.default.anchor.fallback
+    eq(fb and fb.target, A .. ":target", "...falling back to the target frame")
+    eq(fb and (fb.edge .. "/" .. fb.align .. "/" .. fb.offsetX), "right/start/49",
+        "...past the default portrait (2 + 46 + 1)")
+    eq(TT.default.x .. "," .. TT.default.y, "496,-189", "...x/y the solve gives at the default target and portrait")
     eq(P.isRelevant, nil, "player always relevant")
     eq(T.isRelevant, nil, "target always relevant (an absent target holds its place)")
     eq(TT.isRelevant(), false, "target of target: irrelevant without a target")
@@ -127,12 +138,57 @@ check(FT ~= nil, "focus target: an element of its own (registered at Init like e
 if FT then
     eq(FT.title, "L:Focus Target", "focus target title")
     eq(FT.getFrame(), UF.frames.focustarget, "its frame")
-    eq(FT.default.anchor and FT.default.anchor.target, A .. ":focus", "anchors to the focus frame")
+    eq(FT.default.anchor and FT.default.anchor.target, A .. ":focus.outer", "anchors to the focus's outer rect")
+    eq(FT.default.anchor and FT.default.anchor.fallback and FT.default.anchor.fallback.target, A .. ":focus",
+        "...falling back to the focus frame")
     eq(FT.default.anchor and FT.default.anchor.edge, "right", "...its right edge, like target of target")
     exists.focus = false
     eq(FT.isRelevant(), false, "irrelevant without a focus")
     exists.focus = true
     eq(FT.isRelevant(), true, "...relevant with one")
+end
+
+print("-- Outer rects: the frame widened by a portrait outside it")
+do
+    local OT = lib.targets[A .. ":target.outer"]
+    check(OT ~= nil, "target.outer: an anchor target")
+    eq(lib.targets[A .. ":focus.outer"], nil, "...none for a unit that was not registered at Init")
+    if OT then
+        eq(OT.partOf, A .. ":target", "...part of the target element (no anchoring target to it)")
+        eq(OT.snappable, false, "...no snap zones")
+        check(OT.title:find("L:Target", 1, true) == 1 and OT.title:find("L:Portrait", 1, true) ~= nil, "...titled from the locale")
+        eq(OT.getFrame(), UF.frames.target, "...the target frame")
+    end
+    -- Geometry: a stand-in portrait reach, 0 on the left and 49 on the right.
+    local reach = { 0, 49 }
+    local savedPO, savedE = UF.Portrait, UF.Elements
+    UF.Portrait = { OutsideExtent = function() return reach[1], reach[2] end }
+    UF.Elements = { Kit = { DB = function() return {} end } }
+    local f = UF.frames.target
+    f:Show()
+    f:SetFakeCenter(1240, 340)
+    local plain, outer = M:RectFor("target"), M:OuterRect("target")
+    eq(outer.w, plain.w + 49, "a portrait on the right: 49 wider")
+    eq(outer.x, plain.x + 24.5, "...grown to the right only (the centre moves half of it)")
+    eq(outer.y .. "," .. outer.h, plain.y .. "," .. plain.h, "...the frame's height and centre line (alignment unchanged)")
+    eq(outer.x + outer.w / 2, plain.x + plain.w / 2 + 49, "...its right edge past the portrait")
+    reach = { 30, 0 }
+    outer = M:OuterRect("target")
+    eq(outer.x - outer.w / 2, plain.x - plain.w / 2 - 30, "a portrait on the left: grown to the left")
+    eq(outer.x + outer.w / 2, plain.x + plain.w / 2, "...its right edge is the frame's")
+    reach = { 0, 0 }
+    local o0, r0 = M:OuterRect("target"), M:RectFor("target")
+    eq(o0.x .. "," .. o0.y .. "," .. o0.w .. "," .. o0.h, r0.x .. "," .. r0.y .. "," .. r0.w .. "," .. r0.h,
+        "no portrait outside: the frame's own rect")
+    f:Hide()
+    eq(M:OuterRect("target"), nil, "nothing on screen: nothing (the lib holds what is anchored to it)")
+    UF.Portrait, UF.Elements = savedPO, savedE
+    -- The layout tick asks the lib to re-solve what hangs off an outer rect that moved.
+    lib.refreshed = {}
+    M:RefreshOuter()
+    eq(lib.refreshed[1], A .. ":target.outer,focus.outer", "RefreshOuter: the outer keys")
+    check(uf_file_source("Core.lua"):find("if UF.Mover and UF.Mover.RefreshOuter then UF.Mover:RefreshOuter() end", 1, true),
+        "UF:RefreshAll runs it after every layout pass")
 end
 
 print("-- Lib absent")

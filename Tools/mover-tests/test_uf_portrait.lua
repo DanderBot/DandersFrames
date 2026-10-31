@@ -125,6 +125,41 @@ eq(pt and pt[3], "RIGHT", "...on the frame's right edge")
 eq(p._w, 30, "a set size")
 db.portraitSide, db.portraitSize = nil, nil
 
+print("-- Reach outside the frame (the outer rect a frame beside it clears)")
+do
+    local function reach(f) local l, r = PO.OutsideExtent(f); return l .. "," .. r end
+    eq(reach(P), "43,0", "Left, size = height (40): 2 gap + 40 + 1 border on the left")
+    db.portraitSide = "RIGHT"
+    eq(reach(P), "0,43", "Right: the same on the right")
+    db.portraitSize = 60
+    eq(reach(P), "0,63", "a bigger portrait reaches further")
+    db.portraitX = 5
+    eq(reach(P), "0,68", "...and moved out by X")
+    db.portraitX = -70
+    eq(reach(P), "0,0", "...moved back over the frame: nothing (never negative)")
+    db.portraitX = nil
+    db.portraitBorderEnabled = false
+    eq(reach(P), "0,62", "no border")
+    db.portraitBorderEnabled, db.portraitBorderSize = nil, 3
+    eq(reach(P), "0,65", "a 3px border")
+    db.portraitBorderSize = nil
+    for _, side in ipairs({ "INSIDE_LEFT", "INSIDE_RIGHT" }) do
+        db.portraitSide = side
+        eq(reach(P), "0,0", side .. ": inside the frame, reaches nothing")
+    end
+    db.portraitSide = "RIGHT"
+    db.portraitEnabled = false
+    eq(reach(P), "0,0", "off: nothing")
+    db.portraitEnabled, db.portraitSide, db.portraitSize = nil, nil, nil
+    -- Target's portrait is Player's mirrored by the link (Links.lua, not loaded here).
+    local T = Owner("target")
+    local tdb = UF:GetUnitDB("target")
+    tdb.portraitSide = "RIGHT"
+    eq(reach(T), "0,49", "target (46 high, portrait on the right): 49 past its right edge")
+    tdb.portraitSide = nil
+    eq(UF:GetUnitDB("focus").portraitSide or "LEFT", "LEFT", "focus: its portrait on the left (out of a focus target's way)")
+end
+
 print("-- Painting")
 PO:Update(P)
 check(p.model ~= nil, "3D: the model is made")

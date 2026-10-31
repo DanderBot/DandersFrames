@@ -203,3 +203,49 @@ function K.PlaceDetached(el, f, record)
     if type(record) ~= "table" then return end
     if UF.Units and UF.Units.PlaceAt then UF.Units:PlaceAt(el, record) end
 end
+
+-- ============================================================
+-- AURA ROW PLACEMENT (DandersFrames' frame.dfAuraRowPlacement, Features/Auras.lua)
+-- Set on every unit frame, live and preview (Units:Build, Preview:Build). Two parts:
+--   * the ROW'S OWN CORNER (K.RowPoint): a row that grows AWAY from the edge it is
+--     anchored to hangs outside that edge, so it is pinned by its corner nearest
+--     the frame. Icons line up on that corner's edges, so a bigger icon (an
+--     important debuff) grows away from the frame instead of back into it: a row
+--     under the frame lines its icons up by their tops, a row above it by their
+--     bottoms, a row beside it by the side nearest the frame (and its top). The
+--     row's offset then measures from that corner, so the gap to the frame does
+--     not depend on the icon size. Derived from the row's own anchor and growth
+--     every time, so a row the user moves keeps lining up the right way. A row
+--     inside the frame (growing back over it) keeps its anchor, as DF always did.
+--   * the CAST BAR RESERVE (CastBar.lua): a row anchored to the bottom edge goes
+--     below an attached cast bar.
+-- ============================================================
+function K.RowPoint(anchor, growth)
+    if type(anchor) ~= "string" or type(growth) ~= "string" then return nil end
+    local p, s = growth:match("^(%a+)_?(%a*)$")
+    if not p or p == "CENTER" then return nil end
+    local v = ((p == "UP" or p == "DOWN") and p) or ((s == "UP" or s == "DOWN") and s) or nil
+    local h = ((p == "LEFT" or p == "RIGHT") and p) or ((s == "LEFT" or s == "RIGHT") and s) or nil
+    local av = (anchor:find("TOP", 1, true) and "TOP") or (anchor:find("BOTTOM", 1, true) and "BOTTOM") or nil
+    local ah = (anchor:find("LEFT", 1, true) and "LEFT") or (anchor:find("RIGHT", 1, true) and "RIGHT") or nil
+    -- Corners only (DF's rowPoint is a corner): an edge midpoint or the centre keeps
+    -- the anchor.
+    if not (av and ah) then return nil end
+    if av == "BOTTOM" and v == "DOWN" then av = "TOP"
+    elseif av == "TOP" and v == "UP" then av = "BOTTOM" end
+    if ah == "LEFT" and h == "LEFT" then ah = "RIGHT"
+    elseif ah == "RIGHT" and h == "RIGHT" then ah = "LEFT" end
+    local point = av .. ah
+    if point == anchor then return nil end
+    return point
+end
+
+function UF.AuraRowPlacement(f, db, prefix, anchor, growth)
+    local dy = 0
+    if type(anchor) == "string" and anchor:find("BOTTOM", 1, true) then
+        local CB = UF.CastBar
+        local r = CB and CB.BottomReserve and CB.BottomReserve(f, db) or 0
+        if r > 0 then dy = -r end
+    end
+    return 0, dy, K.RowPoint(anchor, growth)
+end

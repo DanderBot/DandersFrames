@@ -192,7 +192,7 @@ if pt then
     eq(pt[5], -200, "y from the record")
 end
 local tpt = TT._points[#TT._points]
-eq(tpt and tpt[4], 449, "target of target: the record's x, anchor ignored")
+eq(tpt and tpt[4], 496, "target of target: the record's x, anchor ignored")
 
 print("-- Events: registered only while shown")
 local evs = Units:EventsFor("player")
@@ -370,8 +370,8 @@ eq(DF.ranged[FT], true, "focus target: in the range tick")
 eq(FT:GetParent(), Units.holders.focustarget, "focus target: its own holder")
 eq(DF.standalone[FT], UF:GetUnitDB("focustarget"), "focus target: standalone on its own table")
 eq(#Units:EventsFor("focustarget"), 0, "focus target: no events of its own (polled)")
-check(UF:GetUnitDB("focustarget").position.anchor.target == "DandersFrames_UnitFrames:focus",
-      "focus target: anchored to the focus frame by default")
+check(UF:GetUnitDB("focustarget").position.anchor.target == "DandersFrames_UnitFrames:focus.outer",
+      "focus target: anchored to the focus frame (portrait included) by default")
 tickers = {}
 guids.focustarget = "F1"
 count = {}

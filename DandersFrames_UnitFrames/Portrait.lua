@@ -104,6 +104,31 @@ function PO:Layout(f)
     if not f.dfUFPreview then PO:Update(f) end
 end
 
+-- How far a portrait OUTSIDE the frame (side Left / Right) reaches past the frame's
+-- left and right edges, border included, in the frame's units: left, right. Inside
+-- portraits and a portrait that is off reach nothing. From the settings, the same
+-- numbers Layout places it by -- read by the frame's outer rect (Mover.lua).
+function PO.OutsideExtent(f, db)
+    db = db or K.DB(f)
+    if not Enabled(db) then return 0, 0 end
+    local side = db.portraitSide or "LEFT"
+    if side ~= "LEFT" and side ~= "RIGHT" then return 0, 0 end
+    local size = tonumber(db.portraitSize) or 0
+    if size <= 0 then size = K.FrameHeight(f, db) end
+    local x = tonumber(db.portraitX) or 0
+    local border = 0
+    if db.portraitBorderEnabled ~= false then
+        border = tonumber(db.portraitBorderSize) or 1
+        if border < 1 then border = 1 end    -- K.Border draws at least 1px
+    end
+    if side == "RIGHT" then
+        local r = 2 + x + size + border
+        return 0, (r > 0) and r or 0
+    end
+    local l = 2 - x + size + border
+    return (l > 0) and l or 0, 0
+end
+
 -- The unit's class token, or nil (an NPC, or a secret answer).
 local function UnitClassToken(unit)
     if not (UnitIsPlayer and UnitClass) then return nil end
