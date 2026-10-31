@@ -8,7 +8,7 @@ local NS = ...
 -- writes its key into the panel's table (or through setValue), calls its
 -- callback with the panel's argument, then the panel's afterToggle, and counts
 -- toward its section's badge; a section folds through the panel's own store and
--- asks it to re-lay out; the party / raid panel builds its widgets from it.
+-- asks it to re-lay out. Legacy: the party / raid popup no longer uses it.
 -- ============================================================
 
 local saved = { CreateFrame = CreateFrame, PlaySound = PlaySound, SOUNDKIT = SOUNDKIT }
@@ -109,11 +109,12 @@ check(s.slider and s.UpdateTheme and s.SetEnabled, "slider: the mini slider")
 s:SetEnabled(false)
 eq(s.dfDisabled, true, "slider: greys")
 
--- the party / raid panel builds from it
+-- The party / raid popup no longer builds from it (it is a registered test
+-- mode on DandersUI's row list -- test_test_popup.lua); the kit stays for any
+-- panel still built on it, so its contract above is still pinned.
 local body = src:sub(b)
-check(body:find("DF:CreateTestPanelKit({", 1, true), "party panel: built from the kit")
-check(not body:find("local function CreateThemedCheckbox", 1, true), "party panel: no private checkbox copy left")
-check(not body:find("local function CreateSection", 1, true), "party panel: no private section copy left")
-check(body:find("DF.db.testPanelSections[key] = expanded", 1, true), "party panel: its sections still fold into testPanelSections")
+check(not body:find("DF:CreateTestPanelKit(", 1, true), "popup: not built from the legacy kit")
+check(not body:find("local function CreateThemedCheckbox", 1, true), "popup: no private checkbox copy")
+check(not body:find("local function CreateSection", 1, true), "popup: no private section copy")
 
 CreateFrame, PlaySound, SOUNDKIT = saved.CreateFrame, saved.PlaySound, saved.SOUNDKIT

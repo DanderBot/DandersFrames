@@ -27,6 +27,13 @@ if not UI then return end
 --   rail:Select("a")          -- paints only; onSelect fires on a USER click
 --   rail:SetBadge("a", "New") / rail:SetBadge("a", nil)
 --   rail:SetDisabled("a", true)
+--   rail:SetFilled("a", true)  -- a solid accent plate: an item that is ON (a
+--                              -- mode toggle), apart from the selection marker
+--   rail:GetContentHeight()    -- the height the items and dividers need
+--
+-- Compact sizes: opts.width / itemHeight / iconSize / spacing as before, plus
+-- opts.iconTop (icon's inset from the item's top edge, 8), opts.labelGap (icon
+-- to label, 3) and opts.labelInset (label's side inset, 2 each side).
 --
 -- label / tooltip / accent may be functions, resolved on every paint, so a
 -- language override or a mode-following accent is picked up without a rebuild.
@@ -70,6 +77,9 @@ function UI:CreateIconRail(parent, opts)
     local padTop   = opts.paddingTop or 6
     local padBot   = opts.paddingBottom or 6
     local font     = opts.font or "DFFontHighlightSmall"
+    local iconTop  = opts.iconTop or 8
+    local labelGap = opts.labelGap or 3
+    local labelIn  = opts.labelInset or 2
     local badgeC   = opts.badgeColor or C_NOTICE
 
     local rail = CreateFrame("Frame", nil, parent)
@@ -80,6 +90,7 @@ function UI:CreateIconRail(parent, opts)
     local list = {}        -- current ids, in the order given
     local disabled = {}    -- id -> true
     local badges = {}      -- id -> text
+    local filled = {}      -- id -> true
     local selected
 
     local marker = host:CreateSelectionMarker(rail, {
@@ -101,7 +112,16 @@ function UI:CreateIconRail(parent, opts)
         local isSel = (id == selected)
         local isOff = disabled[id] and true or false
         btn:SetAlpha(isOff and DISABLED_ALPHA or 1)
-        if isSel then
+        if filled[id] then
+            -- ON, not "current": a solid accent plate with the glyph and label
+            -- in full text colour on it. Wins over the selected and hover looks;
+            -- the selection marker still says which item is current.
+            local r, g, b = Unpack(AccentOf(id), 1, 1, 1)
+            btn.Plate:SetColorTexture(r, g, b, (btn.hovered and not isOff) and 1 or 0.85)
+            btn.Plate:Show()
+            btn.Icon:SetVertexColor(1, 1, 1)
+            btn.Label:SetTextColor(1, 1, 1)
+        elseif isSel then
             local r, g, b = Unpack(AccentOf(id), 1, 1, 1)
             btn.Plate:SetColorTexture(r, g, b, 0.18)
             btn.Plate:Show()
@@ -157,12 +177,12 @@ function UI:CreateIconRail(parent, opts)
 
         local icon = btn:CreateTexture(nil, "ARTWORK")
         icon:SetSize(iconSize, iconSize)
-        icon:SetPoint("TOP", btn, "TOP", 0, -8)
+        icon:SetPoint("TOP", btn, "TOP", 0, -iconTop)
         btn.Icon = icon
 
         local label = btn:CreateFontString(nil, "OVERLAY", font)
-        label:SetPoint("TOP", icon, "BOTTOM", 0, -3)
-        label:SetWidth(width - 4)
+        label:SetPoint("TOP", icon, "BOTTOM", 0, -labelGap)
+        label:SetWidth(width - labelIn * 2)
         label:SetJustifyH("CENTER")
         label:SetWordWrap(false)
         btn.Label = label
@@ -348,6 +368,47 @@ function UI:CreateIconRail(parent, opts)
     end
 
     function rail:IsDisabled(id) return disabled[id] == true end
+
+    -- ON / OFF, separate from selection (see Paint). A mode toggle at the top of
+    -- a rail is filled while it is the active one, while the selection marker
+    -- belongs to whatever the rail lists below it.
+    function rail:SetFilled(id, isFilled)
+        isFilled = isFilled and true or nil
+        if filled[id] == isFilled then return self end
+        filled[id] = isFilled
+        if items[id] and buttons[id] then Paint(buttons[id]) end
+        return self
+    end
+
+    function rail:IsFilled(id) return filled[id] == true end
+
+    -- The height the current set needs end to end: the top slot, the bottom
+    -- slot, their dividers and the paddings. A surface that sizes itself to its
+    -- rail (rather than the rail to the surface) reads this after SetItems.
+    function rail:GetContentHeight()
+        local n, dividersUsed = #list, 0
+        for i, id in ipairs(list) do
+            local item = items[id]
+            local nextId = list[i + 1]
+            -- Same rule Layout follows: a divider draws only between two items
+            -- of the same slot.
+            if item.dividerAfter and nextId and (items[nextId].slot == "bottom") == (item.slot == "bottom") then
+                dividersUsed = dividersUsed + 1
+            end
+        end
+        if n == 0 then return padTop + padBot end
+        local h = padTop + padBot + n * itemH
+        -- Every item but the first in each slot sits `spacing` under the one
+        -- before it, unless a divider sits between them (the divider's own gaps
+        -- replace the spacing).
+        local tops, bottoms = 0, 0
+        for _, id in ipairs(list) do
+            if items[id].slot == "bottom" then bottoms = bottoms + 1 else tops = tops + 1 end
+        end
+        local joins = math.max(tops - 1, 0) + math.max(bottoms - 1, 0)
+        h = h + (joins - dividersUsed) * spacing + dividersUsed * (DIVIDER_GAP * 2 + 1)
+        return h
+    end
 
     -- Re-resolve labels and accents (a language change, an accent that moved).
     function rail:Refresh(instant)

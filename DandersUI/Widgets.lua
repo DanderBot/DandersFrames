@@ -1093,6 +1093,7 @@ end
 --   iconSize    art size (= size)    rotation  -- radians, so one arrow texture
 --                                    can serve both directions
 --   color       rest tint (C_TEXT_DIM)          hoverColor (white)
+--   tooltip may also be a function returning either form, read on each hover
 --
 -- Returns the button with .Icon plus:
 --   :SetGlyph(texture, color)  re-point the art for a state change. The colour
@@ -1164,6 +1165,9 @@ function UI:CreateGlyphButton(parent, opts)
     -- because the title only restates the glyph you are already looking at.
     local function GlyphTooltipSpec()
         local t = opts.tooltip
+        -- A function is resolved at hover time, for a glyph whose meaning flips
+        -- with its state (an on / off toggle says what a click will do).
+        if type(t) == "function" then t = t() end
         if type(t) == "table" then return t end
         if type(t) == "string" and t ~= "" then return { title = t } end
         return nil

@@ -380,7 +380,6 @@ L["reset settings window size/position"] = true
 -- the ☠ note at the top of this file before adding any of them back.
 -- Test-panel raid-grey reason for the Targeted List. Replaces the old shared
 -- string, which explained the group cast-fingerprint matching that no longer exists.
-L["The Targeted List is a party-only feature, so it does nothing in raid mode."] = true
 L["Search..."] = true
 L["Search Results"] = true
 L["Search unavailable during combat"] = true
@@ -1740,7 +1739,6 @@ L["Party frames are disabled. Enable them in General settings to use party test 
 L["Party Pinned %d"] = true
 L["Party Slot %d"] = true
 L["Party to Raid"] = true
-L["Party-only feature"] = true
 L["Paste a filter string to import:"] = true
 L["Performance"] = true
 L["Permanent Mover"] = true
@@ -2618,7 +2616,6 @@ L["Buffs:"] = true
 L["Click to copy texture path"] = true
 L["Click to open settings"] = true
 L["Debuffs:"] = true
-L["Defensives:"] = true
 L["Disable Test Mode"] = true
 L["Enable Test Mode"] = true
 L["Expand sections to toggle features. Click label text to jump to its settings page."] = true
@@ -2627,7 +2624,6 @@ L["Full"] = true
 L["Full changelog"] = true
 L["Indicators & Icons"] = true
 L["Missing Buff"] = true
-L["QUICK PRESETS"] = true
 L["Selection"] = true
 L["Show Auras"] = true
 L["Show Pets"] = true

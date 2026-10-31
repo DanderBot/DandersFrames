@@ -358,6 +358,7 @@ eq(fi.glow.h, 74, "fill rects: bounding height + 8")
 
 -- ---- party/raid call sites use the builder ---------------------------
 local n = 0
-for _ in src:gmatch("frame%.restedIndicator = DF:CreateRestedIndicator%(frame%.contentOverlay, frame%)") do n = n + 1 end
-eq(n, 2, "rested: both party/raid build sites use the builder")
+for _ in src:gmatch('frame%.restedIndicator = DF:CreateRestedIndicator%(frame%.contentOverlay, frame, { glowStyle = "OUTER" }%)') do n = n + 1 end
+eq(n, 2, "rested: both party/raid build sites use the builder, with the OUTER glow")
+check(not src:find("DF:CreateRestedIndicator(frame.contentOverlay, frame)", 1, true), "rested: no party/raid site left on the FILL wash")
 check(not src:find('frame.restedIndicator = CreateFrame(', 1, true), "rested: no hand-rolled copy left")

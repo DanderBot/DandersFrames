@@ -49,6 +49,8 @@ end
 -- Fields: scale, width, height, point, relPoint, x, y, lastModule, lastTab. All optional;
 -- every reader supplies its own fallback. lastModule/lastTab: where the window was last
 -- (written by the options companion's GUI:SyncSelectedModule).
+-- testPopup = { mode, sections = { [modeId] = sectionId } }: the test popup's last
+-- mode and each mode's last section (DandersFrames_Options/TestMode/TestMode.lua).
 --
 -- ★ THE MODULE RAIL WIDENED THE WINDOW (5.7.0). The default went 640 -> 700 and the floor
 -- 520 -> 580 (GUI.WindowDefaults). A saved width still AT the old default is moved to the

@@ -1616,7 +1616,9 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- ========================================
     -- RESTED INDICATOR (solo mode) - Custom animated ZZZ with glow
     -- ========================================
-    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame)
+    -- The soft OUTER glow round the frame. Party/raid frames carry no portrait,
+    -- so the frame's own rect is the whole outline (SetGlowExtents 0,0,0,0).
+    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame, { glowStyle = "OUTER" })
     frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)  -- Half on, half off corner
     frame.restedGlow = frame.restedIndicator.glow
     
@@ -1924,7 +1926,9 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     -- RESTED INDICATOR (solo mode) - Custom animated ZZZ with glow
     -- ========================================
-    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame)
+    -- The soft OUTER glow round the frame. Party/raid frames carry no portrait,
+    -- so the frame's own rect is the whole outline (SetGlowExtents 0,0,0,0).
+    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame, { glowStyle = "OUTER" })
     frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)  -- Half on, half off corner
     frame.restedGlow = frame.restedIndicator.glow
     
