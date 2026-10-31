@@ -296,8 +296,31 @@ local function ReactionColor(key)
     return c
 end
 
--- r, g, b for `unit` under REACTION or CLASS_REACTION.
-function DF:GetReactionHealthColor(unit, mode)
+-- Test frames carry real unit tokens, so their answer comes from the stamps the
+-- test painter writes (dfClassToken, dfTestTapped, dfTestReaction) instead of
+-- from whoever that token really is. No stamped reaction = neutral.
+local function TestReactionColor(frame, mode)
+    if mode == "CLASS_REACTION" and frame.dfClassToken then
+        local cc = DF:GetClassColor(frame.dfClassToken)
+        if cc then return cc.r, cc.g, cc.b end
+    end
+    local key = "neutral"
+    if frame.dfTestTapped then
+        key = "tapped"
+    else
+        local reaction = frame.dfTestReaction
+        if type(reaction) == "number" then
+            if reaction <= 3 then key = "hostile" elseif reaction >= 5 then key = "friendly" end
+        end
+    end
+    local c = ReactionColor(key)
+    return c.r, c.g, c.b
+end
+
+-- r, g, b for `unit` under REACTION or CLASS_REACTION. `frame` (optional) lets a
+-- test frame answer from its stamps.
+function DF:GetReactionHealthColor(unit, mode, frame)
+    if frame and frame.dfIsTestFrame then return TestReactionColor(frame, mode) end
     if not unit then
         local c = ReactionColor("neutral")
         return c.r, c.g, c.b
@@ -379,7 +402,7 @@ function DF:ApplyHealthColors(frame)
     elseif mode == "REACTION" or mode == "CLASS_REACTION" then
         -- Reaction / tapped colours (standalone frames; see REACTION / TAPPED HEALTH
         -- COLOURS above). Same channels and alpha rule as the CLASS branch below.
-        local r, g, b = DF:GetReactionHealthColor(unit, mode)
+        local r, g, b = DF:GetReactionHealthColor(unit, mode, frame)
         frame.healthBar:SetStatusBarColor(r, g, b)
         local tex = frame.healthBar:GetStatusBarTexture()
         if tex then
