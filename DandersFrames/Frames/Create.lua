@@ -1573,7 +1573,7 @@ function DF:CreateFrameElementsExtended(frame, db)
     
     frame.leaderIcon.texture = frame.leaderIcon:CreateTexture(nil, "OVERLAY")
     frame.leaderIcon.texture:SetAllPoints()
-    frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+    DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-LeaderIcon")
     frame.leaderIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
@@ -1881,7 +1881,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     
     frame.leaderIcon.texture = frame.leaderIcon:CreateTexture(nil, "OVERLAY")
     frame.leaderIcon.texture:SetAllPoints()
-    frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+    DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-LeaderIcon")
     frame.leaderIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================

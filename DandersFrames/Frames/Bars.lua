@@ -3133,12 +3133,10 @@ function DF:UpdateLeaderIcon(frame)
     local isAssist = UnitIsGroupAssistant(unit) and not isLeader
     
     if isLeader then
-        frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
-        frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
+        DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-LeaderIcon")
         frame.leaderIcon:Show()
     elseif isAssist then
-        frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
-        frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
+        DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-AssistantIcon")
         frame.leaderIcon:Show()
     else
         frame.leaderIcon:Hide()
