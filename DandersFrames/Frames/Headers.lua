@@ -812,8 +812,9 @@ function DF:InitializeHeaderChild(frame)
                 DF:RosterDebugCount("OnAttributeChanged(unit)-SKIPPED-same-guid")
                 -- Update unitFrameMap: remove old entry only if this frame owns it
                 -- Skip for pinned frames - they share units with main frames
-                -- and must not overwrite or remove main frame entries
-                if not self.isPinnedFrame or self.isPinnedBossFrame then
+                -- and must not overwrite or remove main frame entries.
+                -- Standalone frames (DF:InitStandaloneFrame) never enter the map.
+                if not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame) then
                     if unitFrameMap[oldUnit] == self then
                         unitFrameMap[oldUnit] = nil
                     end
@@ -858,7 +859,8 @@ function DF:InitializeHeaderChild(frame)
             if oldUnit then
                 -- Remove from unitFrameMap (only if this frame owns the entry)
                 -- Skip for pinned frames - they must not remove main frame entries
-                if (not self.isPinnedFrame or self.isPinnedBossFrame) and unitFrameMap[oldUnit] == self then
+                if not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame)
+                    and unitFrameMap[oldUnit] == self then
                     unitFrameMap[oldUnit] = nil
                 end
                 -- Clear legacy DF.playerFrame if this frame was the player
@@ -904,7 +906,8 @@ function DF:InitializeHeaderChild(frame)
                 -- Clear phased cache for new unit (force fresh evaluation)
                 if DF.ResetPhasedCache then DF:ResetPhasedCache(actualUnit) end
                 -- Skip unitFrameMap for pinned frames (except boss-type pinned frames)
-                if not self.isPinnedFrame or self.isPinnedBossFrame then
+                -- and for standalone frames, which dispatch their own unit events.
+                if not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame) then
                     unitFrameMap[actualUnit] = self
                 end
                 local cacheGuid = UnitGUID(actualUnit)
@@ -926,8 +929,9 @@ function DF:InitializeHeaderChild(frame)
                     -- setting secure paths and swap frame refs on it, and
                     -- UpdateAllFrames drives its unit watch and its click-cast
                     -- registration from it. A pinned frame must NEVER be adopted
-                    -- here -- it hands all of that the wrong frame.
-                    if not self.isPinnedFrame then
+                    -- here -- it hands all of that the wrong frame. Nor a standalone
+                    -- frame, for the same reason.
+                    if not self.isPinnedFrame and not self.dfStandalone then
                         DF.playerFrame = self
                     end
                 end
@@ -967,23 +971,26 @@ function DF:InitializeHeaderChild(frame)
             -- changes, ASSIGNEDROLE re-sorts) that ApplyPartyGroupSorting cannot
             -- cover due to combat lockdown. Coalesced per sortType per frame so
             -- Blizzard reshuffling N children only produces one callback.
-            local sortType
-            if self.isArenaFrame then
-                sortType = "arena"
-            elseif self.isRaidFrame then
-                sortType = "raid"
-            else
-                sortType = "party"
-            end
-            DF._sortCallbackPending = DF._sortCallbackPending or {}
-            if not DF._sortCallbackPending[sortType] then
-                DF._sortCallbackPending[sortType] = true
-                C_Timer.After(0, function()
-                    DF._sortCallbackPending[sortType] = nil
-                    if DF.FireAPICallback then
-                        DF:FireAPICallback("OnFramesSorted", sortType)
-                    end
-                end)
+            -- A standalone frame is in no group, so it has no sort to report.
+            if not self.dfStandalone then
+                local sortType
+                if self.isArenaFrame then
+                    sortType = "arena"
+                elseif self.isRaidFrame then
+                    sortType = "raid"
+                else
+                    sortType = "party"
+                end
+                DF._sortCallbackPending = DF._sortCallbackPending or {}
+                if not DF._sortCallbackPending[sortType] then
+                    DF._sortCallbackPending[sortType] = true
+                    C_Timer.After(0, function()
+                        DF._sortCallbackPending[sortType] = nil
+                        if DF.FireAPICallback then
+                            DF:FireAPICallback("OnFramesSorted", sortType)
+                        end
+                    end)
+                end
             end
         end
     end)
@@ -994,7 +1001,7 @@ function DF:InitializeHeaderChild(frame)
         frame.unit = currentUnit
         -- Skip unitFrameMap for pinned frames - they share units with main frames
         -- (boss-type pinned frames are allowed: boss1-8 units are only in these frames)
-        if not frame.isPinnedFrame or frame.isPinnedBossFrame then
+        if not frame.dfStandalone and (not frame.isPinnedFrame or frame.isPinnedBossFrame) then
             unitFrameMap[currentUnit] = frame
         end
         local num = currentUnit:match("%d+")
@@ -1122,7 +1129,7 @@ function DF:InitializeHeaderChild(frame)
         -- can dispatch to this frame the instant it becomes visible.
         -- Without this, frames shown after RebuildUnitFrameMap() are
         -- invisible to event dispatch until the next rebuild.
-        if self.unit and (not self.isPinnedFrame or self.isPinnedBossFrame) then
+        if self.unit and not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame) then
             unitFrameMap[self.unit] = self
         end
 
@@ -1202,6 +1209,61 @@ function DF:InitializeHeaderChild(frame)
     if DF:DebugActive("HEADERS") then
         headerDebug("Initialized child frame:", frame:GetName(), "Size:", frameWidth, "x", frameHeight)
     end
+end
+
+-- ============================================================
+-- STANDALONE FRAMES
+-- A frame built from DandersUnitButtonTemplate that is NOT a group-header child:
+-- it shows one fixed unit and reads its own settings table. The template's OnLoad
+-- runs InitializeHeaderChild inside CreateFrame, before the caller can say what
+-- the frame is, so the caller marks it straight after creation:
+--
+--   local f = CreateFrame("Button", name, parent, "DandersUnitButtonTemplate,SecureUnitButtonTemplate")
+--   DF:InitStandaloneFrame(f, myDB)
+--   f:SetAttribute("unit", unit)
+--
+-- What it changes:
+--   * DF:GetFrameDB(f) returns `db` (frame.dfDB), so every updater reads it;
+--   * the parent-name classification is undone -- never raid, arena or pinned;
+--   * the frame never enters unitFrameMap (the shared roster dispatch) and is
+--     never adopted as DF.playerFrame -- the caller dispatches its own unit
+--     events -- and its unit changes fire no OnFramesSorted;
+--   * the resource bar's role gates do not apply (DF:ShouldShowResourceBar).
+-- ⚠ `.unit` stays where it is. The ping mixin (PingableType_UnitFrameMixin) reads
+-- `self.unit or self:GetAttribute("unit")`, so it is the field the mixin wants,
+-- and every header child and pinned boss frame already carries it.
+-- ============================================================
+function DF:InitStandaloneFrame(frame, db)
+    if not frame or type(db) ~= "table" then
+        DF:DebugError("LAYOUT", "InitStandaloneFrame: needs a frame and a settings table")
+        return nil
+    end
+    frame.dfStandalone = true
+    frame.dfDB = db
+    frame.isRaidFrame = false
+    frame.isArenaFrame = false
+    frame.isPinnedFrame = false
+    frame.isPinnedBossFrame = nil
+    frame.dfIsRaidCombinedChild = false
+    if DF.raidFrameRegistry then DF.raidFrameRegistry[frame] = nil end
+    -- Anything the template's init claimed before the caller could mark the frame
+    -- (only possible when a unit attribute was already set at OnLoad).
+    local released = false
+    for unit, f in pairs(unitFrameMap) do
+        if f == frame then
+            unitFrameMap[unit] = nil
+            released = true
+        end
+    end
+    if DF.playerFrame == frame then DF.playerFrame = nil end
+    if released and DF.RebuildUnitFrameMap then DF:RebuildUnitFrameMap() end
+    -- The creation-time size and elements came from the party table; lay the
+    -- frame out again from its own. Size is protected, so not in combat.
+    if DF.ApplyFrameLayout and not InCombatLockdown() then
+        DF:ApplyFrameLayout(frame)
+    end
+    DF:Debug("LAYOUT", "InitStandaloneFrame: %s", frame.GetName and frame:GetName() or "?")
+    return frame
 end
 
 

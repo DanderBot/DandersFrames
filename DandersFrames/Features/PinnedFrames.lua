@@ -1260,10 +1260,10 @@ function PinnedFrames:UpdateBossHandlerConfig(setIndex)
             if f then
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
-                -- ☠ `dfPinnedEffDB` IS the Hide Auras / Hide Icons mechanism: BuildPinnedEffDB forces
+                -- ☠ `dfDB` IS the Hide Auras / Hide Icons mechanism: BuildPinnedEffDB forces
                 -- showBuffs/showDebuffs/defensiveIconEnabled/missingBuffIconEnabled false on it and every
                 -- updater reads it through DF:GetFrameDB. There is no separate hide flag to change.
-                f.dfPinnedEffDB = effDB
+                f.dfDB = effDB
                 -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset;
                 -- the resolver falls back to FrameMode when the stamp is nil).
                 f.dfAuraPresetOverride = set.auraDesignerPreset
@@ -1855,7 +1855,7 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
             -- sizes from the shared per-mode db) keeps this set's Match/Custom size.
             child.dfPinnedWidth, child.dfPinnedHeight = frameWidth, frameHeight
             child.dfPinnedBorderDB = borderDB
-            child.dfPinnedEffDB = effDB   -- the Hide Auras/Icons mechanism; see the note at the boss site
+            child.dfDB = effDB   -- the Hide Auras/Icons mechanism; see the note at the boss site
             -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset).
             child.dfAuraPresetOverride = set.auraDesignerPreset
             child.dfTextPresetOverride = set.textDesignerPreset
@@ -3653,7 +3653,7 @@ function PinnedFrames:EnsurePlayerTestFramePool(setIndex, count, isRaidMode, isB
             local fw, fh = GetSetFrameSize(setDB, db)
             pool[i].dfPinnedWidth, pool[i].dfPinnedHeight = fw, fh
             pool[i].dfPinnedBorderDB = GetSetBorderDB(setDB, GetSetBaselineDB(setDB, db))
-            pool[i].dfPinnedEffDB = setDB and BuildPinnedEffDB(db, setDB.hideAuras, setDB.hideIcons) or nil
+            pool[i].dfDB = setDB and BuildPinnedEffDB(db, setDB.hideAuras, setDB.hideIcons) or nil
             pool[i].dfAuraPresetOverride = setDB and setDB.auraDesignerPreset
             pool[i].dfTextPresetOverride = setDB and setDB.textDesignerPreset
             pool[i]:SetSize(fw, fh)
@@ -3710,7 +3710,7 @@ function PinnedFrames:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
             if i <= n then
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
-                f.dfPinnedEffDB = effDB
+                f.dfDB = effDB
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
                 DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)

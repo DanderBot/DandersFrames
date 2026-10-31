@@ -63,11 +63,14 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOve
         end
     end
 
-    -- Role filter
+    -- Role filter. ★ A STANDALONE FRAME (DF:InitStandaloneFrame) has no group role to
+    -- filter on -- it shows one fixed unit -- so the role and solo gates do not apply.
     local roleAllowed = false
     local hasAnyRoleFilter = db.resourceBarShowHealer or db.resourceBarShowTank or db.resourceBarShowDPS
 
-    if hasAnyRoleFilter then
+    if frame and frame.dfStandalone then
+        roleAllowed = true
+    elseif hasAnyRoleFilter then
         -- ☠ DF:GetUnitRole, not UnitGroupRolesAssigned. The raw call returns
         -- "NONE" for the player whenever the group has not assigned a role --
         -- solo, open world, and inside a delve until a spec change forces one --
