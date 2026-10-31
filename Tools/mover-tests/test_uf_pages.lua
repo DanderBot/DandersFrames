@@ -78,6 +78,7 @@ DandersFrames = DF
 CreateFrame = nil        -- the companion's file-scope event wiring is skipped
 local UF = {}
 load_uf_file_into("Core.lua", UF)
+load_uf_file_into("Links.lua", UF)
 load_uf_file_into("Defaults.lua", UF)
 CreateFrame = MakeCreateFrame()
 DF.db = { unitframes = deepcopy(UF.ProfileDefaults) }
@@ -487,6 +488,9 @@ do
         return d
     end
     function G:StyleButton() end
+    -- The link banner over every unit page (hidden while nothing is linked).
+    function G:CreateInfoBanner(_, opts) local b = Frame(); b.bannerOpts = opts; return b end
+    function G:CreateLabelNative(_, opts) local l = Frame(); l.text = opts and opts.text; return l end
     function G:CreateSeeAlso(parent, links) local f = Frame(); f.links = links; return f end
     function G:CreateButtonRow(parent, buttons) local f = Frame(); f.buttons = buttons; return f end
     function G:CreatePopoutPageTools() return nil end
@@ -517,18 +521,22 @@ do
     check(built.frameSpacing.hideOn and built.frameSpacing.hideOn(), "Frame Spacing is hidden for every unit")
     check(built.frameFadeSplitCombat.hideOn and built.frameFadeSplitCombat.hideOn(), "a control not relevant to ToT is hidden")
     check(Search.EntryFilter == nil, "the search filter is lifted after the build")
-    check(added[1].w.dfUnitRow ~= nil, "the party copy row is swapped for the unit row")
-    eq(added[1].col, 2, "...in the party row's column")
+    check(added[1].w.dfLinkBanner, "the page opens with the link banner...")
+    eq(added[1].col, "both", "...across both columns")
+    check(added[1].w.hideOn and added[1].w.hideOn(), "...hidden while nothing on the page is linked")
+    check(added[2].w.dfUnitRow ~= nil, "the party copy row is swapped for the unit row")
+    eq(added[2].col, 2, "...in the party row's column")
     eq(UFO.prefixes.frame[1], "frame", "...taking the party row's key prefixes")
-    local see = added[3].w
+    local see = added[4].w
     eq(see.links and #see.links, 1, "See Also keeps only links to pages this unit has")
     eq(see.links and see.links[1].pageId, "uf_targettarget_health", "...pointed at the unit's own page")
-    eq(#added, 3, "no card of the module's own joins a party builder's page (its pins would be retired)")
+    eq(#added, 4, "no card of the module's own joins a party builder's page (its pins would be retired)")
 
-    -- The row's two pickers.
-    local copyDD, syncDD = dropdowns[1], dropdowns[2]
+    -- The row's one picker: keeping units in step is a link now, not a per-page sync.
+    local copyDD = dropdowns[1]
+    eq(#dropdowns, 1, "the row has Copy to... only (no Sync with...)")
     eq(copyDD.caption, "Copy to...", "Copy: a fixed caption")
-    eq(syncDD.caption, "Sync with...", "Sync: a fixed caption while unlinked")
+    check(added[2].w.dfUnitRow.sync == nil, "...and no sync picker behind it")
     local order = table.concat(copyDD.options._order, ",")
     eq(order, "player,target,focus,focustarget,pet,boss", "Copy: every OTHER unit that has the page")
 
@@ -548,12 +556,16 @@ do
     sp.builder(sp, UF:GetGlobalDB(), Add, noop, noop)
     local cards = {}
     for _, a in ipairs(added) do if a.w.cardKey then cards[#cards + 1] = a.w.cardKey end end
-    eq(table.concat(cards, ","), "uf_module,uf_preview,uf_movers,uf_source,uf_blizzard",
-       "Settings: Unit Frames, Preview, Position, Frame Source, Blizzard Frames")
-    eq(#dropdowns, #UF.SPAWNED_UNITS, "Settings: one source dropdown per frame this build draws")
+    eq(table.concat(cards, ","), "uf_module,uf_preview,uf_movers,uf_source,uf_blizzard,uf_links",
+       "Settings: Unit Frames, Preview, Position, Frame Source, Blizzard Frames, Linked Frames")
+    local sources = {}
+    for _, d in ipairs(dropdowns) do if d.opts and d.opts.optionsFunc and d.options and d.options.DF then sources[#sources + 1] = d end end
+    eq(#sources, #UF.SPAWNED_UNITS, "Settings: one source dropdown per frame this build draws")
     eq(dropdowns[1].label, "Player", "...labelled by unit")
     eq(dropdowns[1].get(), "DF", "...reading the unit's source")
-    eq(#rows, #UF.SPAWNED_UNITS, "Settings: an Edit in Mover / Reset Position row per frame")
+    local moverRows = {}
+    for _, r in ipairs(rows) do if r.buttons[1].label == "Edit in Mover" then moverRows[#moverRows + 1] = r end end
+    eq(#moverRows, #UF.SPAWNED_UNITS, "Settings: an Edit in Mover / Reset Position row per frame")
     eq(rows[1].buttons[1].label, "Edit in Mover", "...Edit in Mover first")
     eq(rows[1].buttons[2].label, "Reset Position", "...then Reset Position")
     local castbar
@@ -597,7 +609,7 @@ do
         for _, x in ipairs(added) do if x.w.cardKey then cardKeys[#cardKeys + 1] = x.w.cardKey end end
         for _, c in ipairs(checks) do keys[#keys + 1] = c.key end
         eq(table.concat(cardKeys, ","), "uf_vis_show,uf_vis_hide", unit .. " Visibility: Show When, Hide When")
-        check(added[1].w.dfUnitRow ~= nil, unit .. " Visibility: the unit row (Reset / Sync / Copy)")
+        check(added[2].w.dfUnitRow ~= nil and added[1].w.dfLinkBanner, unit .. " Visibility: the link banner, then the unit row (Reset / Copy)")
         local want = (unit == "player")
             and "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHasTarget,visHasEnemyTarget,visHidePetBattle,visHideVehicle,visHideMounted,visHideSkyriding"
             or "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHidePetBattle,visHideMounted,visHideSkyriding"
@@ -609,7 +621,7 @@ do
             eq(combat.disableOn({ visAlways = false }), false, "...Always off: live")
         end
     end
-    eq(UFO.Prefixes("visibility")[1], "vis", "Visibility: Reset / Sync / Copy act on the vis keys")
+    eq(UFO.Prefixes("visibility")[1], "vis", "Visibility: Reset / Copy act on the vis keys")
 
     -- ---- the pages new in Stage F, built for real -------------------------------
     -- Every factory records the key it binds; the tools record each card and its
@@ -669,7 +681,7 @@ do
     local cards, keys, byKey, pAdded = BuildPage("player", "castbar")
     eq(cards, "uf_cb_settings,uf_cb_size,uf_cb_position,uf_cb_style,uf_cb_colors,uf_cb_icon,uf_cb_border,uf_cb_spell,uf_cb_timer",
        "Cast Bar: Settings, Size, Position, Bar Style, Colors, Icon, Border, Spell Name, Timer")
-    check(pAdded[1].w.dfUnitRow ~= nil, "Cast Bar: the unit row (Reset / Sync / Copy)")
+    check(pAdded[2].w.dfUnitRow ~= nil and pAdded[1].w.dfLinkBanner, "Cast Bar: the link banner, then the unit row (Reset / Copy)")
     eq(toggles.uf_cb_settings and toggles.uf_cb_settings.key, "castbarEnabled", "Cast Bar: Enable is the Settings card's header tick")
     eq(toggles.uf_cb_icon and toggles.uf_cb_icon.key, "castbarShowIcon", "...Show Icon on the Icon card")
     eq(toggles.uf_cb_border and toggles.uf_cb_border.key, "castbarBorderEnabled", "...the cast bar's OWN border key")
@@ -693,7 +705,7 @@ do
     check(has(keys, "castbarShowTarget"), "target: Show Spell Target")
     cards, keys = BuildPage("pet", "castbar")
     check(not has(keys, "castbarShowTarget"), "pet: no Spell Target (the card does not reach it)")
-    eq(table.concat(UFO.Prefixes("castbar"), ","), "castbar", "Cast Bar: Reset / Sync / Copy act on the castbar keys")
+    eq(table.concat(UFO.Prefixes("castbar"), ","), "castbar", "Cast Bar: Reset / Copy act on the castbar keys")
     cards, keys = BuildPage("boss", "castbar")
     check(not has(keys, "castbarDetached"), "boss: no Detach (five bars, one record)")
     check(has(keys, "castbarKickTick") and has(keys, "castbarShowTarget"), "boss: kick-ready mark and Spell Target stay")
@@ -701,7 +713,7 @@ do
     print("-- Stage G pages: Boss Layout")
     cards, keys, byKey, pAdded = BuildPage("boss", "bosslayout")
     eq(cards, "uf_boss_arrangement,uf_boss_behaviour", "Boss Layout: Arrangement, Behaviour")
-    check(pAdded[1].w.dfUnitRow ~= nil, "Boss Layout: the unit row (Reset / Sync / Copy)")
+    check(pAdded[2].w.dfUnitRow ~= nil and pAdded[1].w.dfLinkBanner, "Boss Layout: the link banner, then the unit row (Reset / Copy)")
     eq(table.concat(keys, ","), "bossGrowth,bossSpacing,bossUnitsPerRow,bossRowSpacing,bossPreviewCount,bossPreviewNum",
        "Boss Layout: growth, spacing, per row, row spacing, test-mode placeholders, preview count")
     check(not has(keys, "bossRangeFade") and not has(keys, "bossRangeAlpha"),
@@ -717,7 +729,7 @@ do
     local editRow
     for _, x in ipairs(built) do if x.kind == "buttons" then editRow = x end end
     check(editRow and editRow.args[1][1].label == "Edit in Mover", "Arrangement: Edit in Mover")
-    eq(table.concat(UFO.Prefixes("bosslayout"), ","), "boss", "Boss Layout: Reset / Sync / Copy act on the boss keys")
+    eq(table.concat(UFO.Prefixes("bosslayout"), ","), "boss", "Boss Layout: Reset / Copy act on the boss keys")
 
     print("-- Stage F pages: Class Power")
     cards, keys, byKey = BuildPage("player", "classpower")
@@ -748,7 +760,7 @@ do
     eq(cards, "uf_icon_pvp,uf_icon_classification", "target Unit Icons: PvP, Elite / Rare")
     check(has(keys, "classificationStyle"), "...Elite / Rare: icon or text")
     eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification",
-       "Unit Icons: Reset / Sync / Copy act on the three icons' keys")
+       "Unit Icons: Reset / Copy act on the three icons' keys")
 
     print("-- Stage F: Hide Blizzard Player Cast Bar follows ours until set")
     built = {}
@@ -812,30 +824,65 @@ do
     tgt.source = nil
     UFO.prefixes.frame = nil
 
-    -- Sync: both ways, re-applied after a write from the unit being edited.
-    UFO.SyncPage("health", "target", "focus")
-    eq(UFO.SyncPartner("health", "target"), "focus", "sync: linked")
-    eq(UFO.SyncPartner("health", "focus"), "target", "sync: ...both ways")
-    eq(foc.healthTexture, "Flat", "sync: copied once on linking")
+    -- Links replace the per-page sync: a write on a linked unit reaches its partner
+    -- after the drain, from the unit being edited (Links.lua does the copying;
+    -- test_uf_links.lua covers the engine, this is the settings side).
+    check(UFO.SyncPage == nil and UFO.SyncPartner == nil and UFO.ApplySyncs == nil,
+          "the per-page sync API is gone")
+    local Lk, root = UF.Links, DF.db.unitframes
+    root.global.unitLinks = {}
+    Lk:SetLink(root, "focus", "target", { health = { layout = "same", look = "same" } })
+    eq(UFO.Partner("focus"), "target", "link: the follower's partner")
+    eq(UFO.Partner("target"), "focus", "link: ...and the leader's")
+    eq(foc.healthTexture, "Flat", "link: the leader's settings are copied once on linking")
     tgt.healthTexture = "Smooth"
     G.ModuleView, UFO.unit = "units", "target"
     for _, fn in ipairs(postDrains) do fn() end
-    eq(foc.healthTexture, "Smooth", "sync: a write on the linked unit follows after the drain")
+    eq(foc.healthTexture, "Smooth", "link: a write on the linked unit follows after the drain")
     UFO.unit = "player"
     tgt.healthTexture = "Glass"
     for _, fn in ipairs(postDrains) do fn() end
-    eq(foc.healthTexture, "Smooth", "sync: ...from the unit being edited only")
-    UFO.SyncPage("health", "player", "focus")
-    eq(UFO.SyncPartner("health", "target"), nil, "sync: one partner per unit per page (re-linking drops the old)")
-    UFO.Unsync("health", "focus")
-    eq(UFO.SyncPartner("health", "player"), nil, "unsync: both sides")
+    eq(foc.healthTexture, "Smooth", "link: ...from the unit being edited only")
+    UFO.unit = "target"
 
-    -- Reset: back to the unit's own defaults for that page only.
+    -- What the page says about it.
+    check(UFO.PageLinked("health", "target"), "the Health Bar page is linked on Target")
+    check(not UFO.PageLinked("frame", "target"), "...the Frame page is not")
+    local text = UFO.LinkBannerText("health", "target")
+    check(text and text:find("Focus", 1, true) and text:find("layout and look shared", 1, true),
+          "banner: names the partner and how the page is linked")
+    eq(UFO.LinkBannerText("frame", "target"), nil, "banner: nothing on a page that is not linked")
+    eq(UFO.PageMark("uf_target_health"), UFO.ROW_MARK, "sidebar: a linked page's row carries the link mark")
+    eq(UFO.PageMark("uf_target_frame"), nil, "sidebar: ...an unlinked one does not")
+    eq(UFO.PageMark("uf_settings"), nil, "sidebar: the module page never does")
+    eq(UFO.TabMark("target"), UFO.TAB_MARK, "deck tab: a linked unit's tab carries it")
+    eq(UFO.TabMark("player"), nil, "deck tab: ...an unlinked unit's does not")
+    check(UFO.TAB_MARK.grow == true and UFO.ROW_MARK.grow == false, "the tab may widen for it, a row never")
+    local msg = UFO.ResetMessage("health", "target", "Health Bar")
+    check(msg:find("Focus", 1, true) and msg:find("linked settings", 1, true),
+          "reset on a linked page: the confirmation says the partner resets too")
+    check(not UFO.ResetMessage("frame", "target", "Frame"):find("linked", 1, true),
+          "reset on an unlinked page: the plain confirmation")
+
+    -- Reset: back to the unit's own defaults for that page only -- and, linked,
+    -- the partner's shared settings with it.
+    tgt.healthTexture = "Glass"
+    for _, fn in ipairs(postDrains) do fn() end
+    eq(foc.healthTexture, "Glass", "(linked and in step)")
     tgt.frameWidth = 300
     UFO.ResetPage("health", "target")
     eq(tgt.healthTexture, nil, "reset: the page's keys go")
     eq(tgt.healthColor, nil, "reset: ...all of them")
     eq(tgt.frameWidth, 300, "reset: another page's keys stay")
+    eq(foc.healthTexture, nil, "reset: the linked partner's shared settings reset too")
+    -- Copy to a linked unit: its partner follows.
+    ply.healthTexture = "Copied"
+    UFO.CopyPage("health", "player", "target")
+    eq(foc.healthTexture, "Copied", "copy into a linked unit: its partner follows")
+    Lk:Unlink(root, "focus")
+    eq(UFO.Partner("target"), nil, "unlink: both sides free")
+    eq(UFO.TabMark("target"), nil, "...and the mark goes")
+    ply.healthTexture, tgt.healthTexture, foc.healthTexture = nil, nil, nil
     tgt.frameWidth = nil
     G.ModuleView = nil
 end
@@ -949,6 +996,140 @@ do
 end
 
 -- ============================================================
+-- 7b. THE LINKED FRAMES CARD (module Settings page), built for real
+-- ============================================================
+print("-- The Linked Frames card")
+do
+    local Lk, root = UF.Links, DF.db.unitframes
+    root.global.unitLinks = nil
+    Lk:Ensure(root)                         -- the default link: Target follows Player
+    local bands, dds, buttonRows = {}, {}, {}
+    local saved2 = { G.CreateDropdown, G.CreateCheckbox, G.CreateLabel, G.CreateButtonRow,
+                     G.CreatePopoutPageTools, G.CreateLabelNative }
+    function G:CreateDropdown(parent, label, options, db, key, cb, get, set, opts)
+        local d = Frame(); d.label, d.options, d.get, d.set, d.opts, d.parent = label, options, get, set, opts, parent
+        dds[#dds + 1] = d
+        return d
+    end
+    function G:CreateCheckbox() return Frame() end
+    function G:CreateLabel() return Frame() end
+    function G:CreateLabelNative(_, o) local l = Frame(); l.text = o and o.text; return l end
+    function G:CreateButtonRow(_, buttons) local f = Frame(); f.buttons = buttons; buttonRows[#buttonRows + 1] = f; return f end
+    function G:CreatePopoutPageTools()
+        return {
+            OpenSection = function(_, label, key, col, summary)
+                local b = Frame(); b.cardKey, b.summary, b.col, b.kids = key, summary, col, {}
+                b.AddWidget = function(self, w) self.kids[#self.kids + 1] = w; return w end
+                bands[key] = b
+                return b
+            end,
+            CloseSection = function() end,
+        }
+    end
+    local sp = made.pages.uf_settings
+    sp.children = {}
+    local refreshed = 0
+    sp.RefreshStates = function() refreshed = refreshed + 1 end
+    sp.builder(sp, UF:GetGlobalDB(), function(w) return w end, noop, noop)
+    local card = bands.uf_links
+    check(card ~= nil, "Settings: the Linked Frames card")
+    eq(card and card.col, 2, "...in column 2")
+    eq(card and card.summary(), "Target + Player", "...its summary lists the links")
+
+    local frameDD, linkDD
+    for _, d in ipairs(dds) do
+        if d.label == "Frame" then frameDD = d end
+        if d.label == "Linked To" then linkDD = d end
+    end
+    check(frameDD and linkDD, "the card: a Frame picker and a Linked To picker")
+    UFO.linkUnit = nil
+    UFO.unit = "target"
+    eq(frameDD.get(), "target", "Frame: the tab's unit until one is picked")
+    eq(linkDD.get(), "player", "Linked To: Target's partner")
+    eq(table.concat(linkDD.opts.optionsFunc()._order, ","), "_none,player,targettarget,focus,focustarget,pet,boss",
+       "Linked To: None, then every other unit")
+
+    -- One row per element; shown only where both units have it.
+    local rows = {}
+    for _, w in ipairs(card.kids) do
+        local id = rawget(w, "dfLinkElement")
+        if id then rows[id] = w end
+    end
+    eq(#Lk.ELEMENTS, (function() local n = 0 for _ in pairs(rows) do n = n + 1 end return n end)(),
+       "a row per element")
+    eq(rows.health.hideOn(), false, "Target + Player: Health Bar shows")
+    eq(rows.classpower.hideOn(), true, "...Class Power does not (Target has none)")
+    eq(rows.bosslayout.hideOn(), true, "...Boss Layout does not")
+    check(rows.health.dfLinkLayout and rows.health.dfLinkLook, "Health Bar: a Layout and a Look picker")
+    eq(rows.border.dfLinkLayout, nil, "Border: Look only (no layout aspect)")
+    eq(rows.health.dfLinkLayout.get(), "mirror", "Health Bar layout: Mirrored (the default link)")
+    eq(rows.health.dfLinkLook.get(), "same", "Health Bar look: Same")
+    eq(table.concat(rows.health.dfLinkLayout.options._order, ","), "same,mirror,own", "Layout: Same / Mirrored / Own")
+    eq(table.concat(rows.health.dfLinkLook.options._order, ","), "same,own", "Look: Same / Own")
+
+    -- Making an aspect own copies nothing: no question asked.
+    popups = {}
+    rows.tooltips.dfLinkLook.set("own")
+    eq(#popups, 0, "Own: applied without a confirmation")
+    -- Sharing one asks first, and only Link applies it.
+    rows.tooltips.dfLinkLook.set("same")
+    eq(#popups, 1, "Same: asks first")
+    eq(Lk:ElementLinked(root, "target", "tooltips"), false, "...nothing changes before the answer")
+    local function click(cfg, label)
+        for _, b in ipairs(cfg.buttons) do if b.label == label then if b.onClick then b.onClick() end return true end end
+    end
+    click(popups[1], "Link")
+    eq(select(2, Lk:Aspects(root, "target", "tooltips")), "same", "Link: the look is shared")
+    rows.tooltips.dfLinkLook.set("own")
+
+    -- Re-linking to another unit asks, says it replaces, and moves the link.
+    popups = {}
+    linkDD.set("focus")
+    eq(#popups, 1, "Linked To another unit: asks first")
+    check(popups[1].message:find("replaces", 1, true), "...and says it replaces the current link")
+    click(popups[1], "Cancel")
+    eq(UFO.Partner("target"), "player", "Cancel: nothing changes")
+    popups = {}
+    linkDD.set("focus")
+    click(popups[1], "Link")
+    eq(UFO.Partner("target"), "focus", "Link: Target now follows Focus")
+    eq(UFO.Partner("player"), nil, "...and Player is free")
+    local link = root.global.unitLinks.target
+    check(link.elements.health and link.elements.health.layout == "same" and link.elements.health.look == "same",
+          "a new link (not the Player pair) starts with everything shared")
+    eq(link.except, nil, "...and keeps nothing apart")
+
+    -- Unlink: asks, then frees both.
+    local unlink
+    for _, r in ipairs(buttonRows) do if r.buttons[1].label == "Unlink" then unlink = r end end
+    check(unlink ~= nil, "an Unlink button")
+    eq(unlink.hideOn(), false, "...shown while linked")
+    popups = {}
+    unlink.buttons[1].onClick()
+    click(popups[1], "Unlink")
+    eq(UFO.Partner("target"), nil, "Unlink: Target is free")
+    eq(unlink.hideOn(), true, "...and the button hides")
+    eq(rows.health.hideOn(), true, "...as do the element rows")
+    eq(card.summary(), "Off", "the summary: no links")
+    eq(type(root.global.unitLinks), "table", "the link table stays: the default is never made again")
+
+    -- Player + Target again, from Player's side: the default pair keeps its shape.
+    UFO.linkUnit = "player"
+    popups = {}
+    linkDD.set("target")
+    click(popups[1], "Link")
+    link = root.global.unitLinks.player
+    check(link and link.to == "target", "Player follows Target (it was picked from Player's side)")
+    eq(link and link.elements.health.layout, "mirror", "...as the mirrored pair")
+    check(link and link.except and link.except.healthColorMode, "...each keeping its deliberate own defaults")
+    Lk:Unlink(root, "player")
+    UFO.linkUnit = nil
+
+    G.CreateDropdown, G.CreateCheckbox, G.CreateLabel, G.CreateButtonRow, G.CreatePopoutPageTools, G.CreateLabelNative =
+        saved2[1], saved2[2], saved2[3], saved2[4], saved2[5], saved2[6]
+end
+
+-- ============================================================
 -- 8. WIRING (source shape)
 -- ============================================================
 print("-- Wiring")
@@ -993,6 +1174,22 @@ do
     local ind = options_file_source("GUI/Pages/Indicators.lua")
     local _, n = ind:gsub("DF:IsAuraDesignerEnabledForDB%(d%)", "")
     eq(n, 3, "Buff Bar: its three AD banners ask the page's own table")
+    -- Every string the unit frame pages and the link elements show is a real key.
+    local en = df_file_source("Locales/enUS.lua")
+    local known = {}
+    for k in en:gmatch('\nL%["(.-)"%] = true') do known[k] = true end
+    local missing = {}
+    for k in options_file_source("UnitFrames/Pages.lua"):gmatch('L%["(.-)"%]') do
+        if not known[k] then missing[#missing + 1] = k end
+    end
+    for _, e in ipairs(UF.Links.ELEMENTS) do
+        if not known[e.title] then missing[#missing + 1] = e.title end
+    end
+    eq(table.concat(missing, " | "), "", "every L key the pages and elements use is in enUS")
+    check(not en:find('L["Sync with..."]', 1, true) and not en:find('L["Stop Syncing"]', 1, true),
+          "the per-page sync's own strings are gone")
+    local pages = options_file_source("UnitFrames/Pages.lua")
+    check(not pages:find("syncedPages", 1, true), "the settings pages no longer touch syncedPages")
     local ufcore = uf_file_source("Core.lua")
     check(ufcore:find("if stored == nil or (mt and mt.__realTable == stored) then return eff end", 1, true),
           "companion: a cached unit table is dropped when the profile under it moved")
