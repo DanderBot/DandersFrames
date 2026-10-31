@@ -2743,11 +2743,28 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     opts = opts or {}
     local segW = opts.segmentWidth or 26
     local h = opts.height or 18
-    local pad = 1   -- track lip around the buttons
+    -- opts.rounded: ONE rounded track (radius 6, the darker inset ground, a 1px
+    -- ring) with each choice a rounded pill inside it (radius 4, StyleButton's
+    -- `segment` look: nothing at rest, a neutral plate on hover, the accent tint
+    -- when selected), a 2px lip and 2px between pills. Absent: the square boxed
+    -- buttons it always drew, unchanged.
+    local rounded = opts.rounded and true or false
+    local pad = rounded and 2 or 1   -- track lip around the buttons
+    local segGap = rounded and 2 or 0
 
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetSize(segW * #segments + pad * 2, h + pad * 2)
-    CreateElementBackdrop(container)   -- the recessed track behind every segment
+    container:SetSize(segW * #segments + segGap * math.max(#segments - 1, 0) + pad * 2, h + pad * 2)
+    if rounded then
+        local ground, edge = GUI.Colors.background, C_BORDER
+        GUI:CreateRoundedSurface(container, {
+            radius = 6, borderWidth = 1,
+            fill   = { ground.r, ground.g, ground.b, 1 },
+            border = { edge.r, edge.g, edge.b, 1 },
+        })
+    else
+        CreateElementBackdrop(container)   -- the recessed track behind every segment
+    end
+    container.dfSegmentRounded = rounded
 
     -- One read/write pair for both pathways, so the click handler and Refresh
     -- can't drift apart. Explicit ifs, not `a and b or c` — a stored value of
@@ -2779,9 +2796,13 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     local buttons = {}
     for i, seg in ipairs(segments) do
         local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-        GUI:StyleButton(btn, { width = segW, height = h, text = seg.label, accent = seg.accent })
+        -- A rounded track's pills keep the width they were given (fitText off): the
+        -- caller sized the track, and a grown pill would run into its neighbour.
+        local look = { width = segW, height = h, text = seg.label, accent = seg.accent }
+        if rounded then look.segment, look.rounded, look.fitText = true, 4, false end
+        GUI:StyleButton(btn, look)
         GUI:SetSettingsFont(btn.Text, opts.fontSize or 9, "")
-        btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * segW, -pad)
+        btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * (segW + segGap), -pad)
         btn.value = seg.value
         if seg.tooltip then
             btn:HookScript("OnEnter", function(self)

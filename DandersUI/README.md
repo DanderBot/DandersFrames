@@ -175,7 +175,7 @@ its commit stays on OK/Apply.
 
 | Call | Purpose |
 |---|---|
-| `UI:StyleButton(btn, opts)`, `UI:StyleCheckButton(cb, opts)`, `UI:StyleEditBox(eb, opts)` | Apply the house look to a frame you built yourself |
+| `UI:StyleButton(btn, opts)`, `UI:StyleCheckButton(cb, opts)`, `UI:StyleEditBox(eb, opts)` | Apply the house look to a frame you built yourself. `StyleButton` `opts.segment`: one choice in a segmented track -- nothing at rest, a neutral plate on hover, an accent-tinted pill when `SetActive(true)` (`opts.accent` pins a neutral one); pair with `rounded` |
 | `UI:ShowTooltip(owner, { title, lines, tone, anchor, anchorX, anchorY, icons, iconSize })`, `UI:HideTooltip()`, `UI:AttachTooltip(widget, label, labelRegion)` | The house tooltip. Never use raw `GameTooltip` for your own tooltips. `icons` = `{ { texture (path or atlas), coords, inset, color, desaturate }, ... }` draws a row of swatches under the title, `iconSize` each (24) |
 | `widget.disableReason` | A string, or `function(db) -> string`, on any widget built with a label hover (`AttachTooltip`). While the grey sweep has the widget greyed (it stamps `widget.dfGreyed` beside its `SetEnabled` call), the hover shows the reason as the first line under the widget's title, ahead of its own tooltip. A host's own page-level sweep should stamp `dfGreyed` the same way |
 | `UI:ShowPopupAlert(config)`, `UI:ShowPopupInput(config)`, `UI:IsPopupShown()` | One shared modal dialog. A second call while one is open takes the frame over |
