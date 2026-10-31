@@ -360,8 +360,10 @@ end
 -- (UFO.OnApplyDrain), which a drag never reaches.
 -- ============================================================
 UF.LIVE_ELEMENTS = {
-    castbar = { "CastBar" }, classpower = { "ClassPower" },
-    -- The portrait's rect is also the resting glow's (Include Portrait).
+    castbar = { "CastBar" },
+    -- The portrait's and the attached class power bar's rects are also the
+    -- resting glow's (Include Portrait; IN.GlowExtents).
+    classpower = { "ClassPower", "Indicators" },
     portrait = { "Portrait", "Indicators" }, unitIcons = { "Indicators" },
 }
 UF.LIVE_AURAS = { buffs = true, debuffs = true, defensive = true, dispel = true }

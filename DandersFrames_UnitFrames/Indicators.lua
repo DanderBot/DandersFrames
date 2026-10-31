@@ -97,14 +97,48 @@ function IN:Enabled(db, key)
     return db and db[IN.PREFIX[key] .. "Enabled"] and true or false
 end
 
+-- How far an attached class power bar reaches past the frame's edges: left,
+-- right, top, bottom. From the settings ClassPower.lua's Layout places it by, so
+-- the glow surrounds the bar instead of the bar sitting on top of the glow.
+-- Off, detached, or on a unit without one: 0s.
+function IN.ClassPowerBox(f, db)
+    local CP = UF.ClassPower
+    if not (db and db.classPowerEnabled and CP) or (CP.IsDetached and CP:IsDetached(f, db)) then
+        return 0, 0, 0, 0
+    end
+    if not (f and f.dfUFClassPower) then return 0, 0, 0, 0 end
+    local fw = K.FrameWidth(f, db)
+    local w = db.classPowerMatchWidth ~= false and fw or (tonumber(db.classPowerWidth) or 220)
+    local h = tonumber(db.classPowerHeight) or 6
+    local x, y = tonumber(db.classPowerX) or 0, tonumber(db.classPowerY) or 0
+    local border = 0
+    if db.classPowerBorderEnabled ~= false then
+        border = tonumber(db.classPowerBorderSize) or 1
+        if border < 1 then border = 1 end
+    end
+    local half = (w - fw) / 2 + border
+    local left, right = half - x, half + x
+    local reach = y + h + border
+    if reach < 0 then reach = 0 end
+    local top, bottom = reach, 0
+    if db.classPowerPosition == "BOTTOM" then top, bottom = 0, reach end
+    return (left > 0) and left or 0, (right > 0) and right or 0, top, bottom
+end
+
 -- How far the resting glow reaches past the frame (left, right, top, bottom):
--- round an outside portrait too while Include Portrait is on, else the frame only.
+-- round an attached class power bar always, and an outside portrait too while
+-- Include Portrait is on. One box round them all: the larger reach per edge.
 function IN.GlowExtents(f, db)
+    local l, r, t, b = IN.ClassPowerBox(f, db)
     local PO = UF.Portrait
     if db and db.restingIconGlowPortrait ~= false and PO and PO.OutsideBox then
-        return PO.OutsideBox(f, db)
+        local pl, pr, pt, pb = PO.OutsideBox(f, db)
+        if pl > l then l = pl end
+        if pr > r then r = pr end
+        if pt > t then t = pt end
+        if pb > b then b = pb end
     end
-    return 0, 0, 0, 0
+    return l, r, t, b
 end
 
 function IN:Layout(f)

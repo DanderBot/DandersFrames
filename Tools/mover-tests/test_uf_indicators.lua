@@ -177,6 +177,25 @@ pdb.restingIconGlowPortrait = nil
 UF.Portrait = nil
 IN:Layout(P)
 
+-- The attached class power bar sits inside the glow, not on top of it.
+local function gbox() return table.concat({ IN.GlowExtents(P, pdb) }, ",") end
+eq(gbox(), "0,0,0,0", "class power off: the frame only")
+local heldCP, heldBar = UF.ClassPower, P.dfUFClassPower
+UF.ClassPower = { IsDetached = function(_, _, d) return d.classPowerDetached and true or false end }
+P.dfUFClassPower = {}
+pdb.classPowerEnabled = true
+eq(gbox(), "1,1,9,0", "on top, full width: 2 gap + 6 tall + 1 border above, 1 border each side")
+pdb.classPowerPosition = "BOTTOM"
+eq(gbox(), "1,1,0,9", "below the frame: the reach moves to the bottom")
+pdb.classPowerMatchWidth, pdb.classPowerX = false, 4
+pdb.classPowerWidth = UF.Elements.Kit.FrameWidth(P, pdb) + 20
+eq(gbox(), "7,15,0,9", "wider by 20 and moved right 4")
+pdb.classPowerDetached = true
+eq(gbox(), "0,0,0,0", "detached: not part of the frame")
+pdb.classPowerEnabled, pdb.classPowerPosition, pdb.classPowerMatchWidth = nil, nil, nil
+pdb.classPowerWidth, pdb.classPowerX, pdb.classPowerDetached = nil, nil, nil
+UF.ClassPower, P.dfUFClassPower = heldCP, heldBar
+
 print("-- PvP")
 pvp = true
 IN:Update(P)
