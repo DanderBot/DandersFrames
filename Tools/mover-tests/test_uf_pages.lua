@@ -813,6 +813,72 @@ do
     cards, keys = BuildPage("pet", "portrait")
     check(not has(keys, "portraitNpcMode") and not has(keys, "portraitDesatDead"), "pet: no NPC style, no desaturate")
 
+    print("-- Phase 5.1 pages: Text Designer / Aura Designer templates")
+    do
+        local heldA, heldT, heldD, heldC, heldI = DF.GetAuraDesignerPresets, DF.GetTextDesignerPresets,
+            DF.DuplicateDesignerPreset, DF.CreateDesignerPreset, DF.InvalidateAuraLayout
+        local alib = { Default = {}, Party = {}, Mine = {} }
+        local tlib = { Default = {}, ["Unit Frames"] = {}, ["Unit Frames (Small)"] = {} }
+        function DF:GetAuraDesignerPresets() return alib end
+        function DF:GetTextDesignerPresets() return tlib end
+        local dup = {}
+        function DF:DuplicateDesignerPreset(kind, src, name)
+            dup[#dup + 1] = kind .. ":" .. tostring(src) .. ">" .. name
+            return name
+        end
+        function DF:CreateDesignerPreset(_, name) return name end
+        local invalidated = 0
+        function DF:InvalidateAuraLayout() invalidated = invalidated + 1 end
+
+        local cards, keys, byKey = BuildPage("player", "auradesigner")
+        eq(cards, "uf_auradesigner", "Aura Designer page: one card")
+        check(has(keys, "auraDesignerEnabled"), "...its own enable")
+        local dd, row
+        for _, w in ipairs(built) do
+            if w.kind == "dropdown" then dd = w end
+            if w.kind == "buttons" then row = w end
+        end
+        check(dd and dd.label == "Template:", "...a Template picker")
+        eq(dd.args[2]._order[1], UFO.FOLLOW_PARTY, "...Same as Party Frames first")
+        eq(dd.args[2][UFO.FOLLOW_PARTY], "Same as Party Frames", "...labelled so")
+        check(has(dd.args[2]._order, "Mine"), "...then the library")
+        local db = UF:GetStoredUnit("player")
+        eq(dd.args[6](), UFO.FOLLOW_PARTY, "unset: shows Same as Party Frames")
+        dd.args[7]("Mine")
+        eq(db.auraDesignerPreset, "Mine", "pick: stores the name")
+        dd.args[5]()
+        eq(invalidated, 1, "...and the aura layout re-syncs")
+        dd.args[7](UFO.FOLLOW_PARTY)
+        eq(db.auraDesignerPreset, nil, "Same as Party Frames: stores nothing")
+        check(row and row.args[1][1].label == "Make Own Template", "a Make Own Template button")
+        DF.GetModeDesignerPresetName = function() return "Party" end
+        row.args[1][1].onClick()
+        eq(dup[#dup], "aura:Party>Player", "...copies the template it draws (Party's) as Player")
+        eq(db.auraDesignerPreset, "Player", "...and picks it")
+        DF.GetModeDesignerPresetName = nil
+
+        cards = BuildPage("pet", "text")
+        eq(cards, "uf_text_template", "Text page: one card")
+        for _, w in ipairs(built) do if w.kind == "buttons" then row = w end end
+        row.args[1][1].onClick()
+        eq(dup[#dup], "text:Unit Frames (Small)>Pet", "Text: Make Own Template copies the unit's template")
+        eq(UF:GetStoredUnit("pet").textDesignerPreset, "Pet", "...and picks it")
+        db.auraDesignerPreset, UF:GetStoredUnit("pet").textDesignerPreset = nil, nil
+
+        DF.GetAuraDesignerPresets, DF.GetTextDesignerPresets, DF.DuplicateDesignerPreset,
+            DF.CreateDesignerPreset, DF.InvalidateAuraLayout = heldA, heldT, heldD, heldC, heldI
+    end
+
+    print("-- Unit Icons: Show Tail")
+    do
+        local _, keys, byKey = BuildPage("boss", "unitIcons")
+        check(has(keys, "classDragonShowTail"), "Elite Dragon: a Show Tail tick")
+        local tail = byKey.classDragonTailX
+        check(tail and tail.disableOn and tail.disableOn({ classDragonEnabled = true, classDragonShowTail = false })
+              and not tail.disableOn({ classDragonEnabled = true, classDragonShowTail = true }),
+              "...Tail Offset X greys while the tail is off")
+    end
+
     print("-- Stage F pages: Unit Icons")
     cards, keys, byKey = BuildPage("player", "unitIcons")
     eq(cards, "uf_icon_resting,uf_icon_pvp", "player Unit Icons: Resting, PvP")

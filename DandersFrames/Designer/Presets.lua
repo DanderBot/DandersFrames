@@ -301,6 +301,47 @@ local function UniquePresetName(lib, base)
     return base .. " " .. i
 end
 
+-- ============================================================
+-- OTHER REFERENCE CARRIERS
+-- A module outside the party / raid tables (the unit frames companion: every unit
+-- names its own Text Designer and Aura Designer template) holds designer refs
+-- too. It registers a WALKER: walker(profile, fn) calls
+-- fn(tbl, holder, label[, uses]) for every table in `profile` -- the live profile
+-- OR an import payload, so the walker must read the table it is handed, never
+-- DF.db -- that may hold a <kind>Preset ref. `holder` is the carrier's own word
+-- ("unit"); `label` is what the "also used by" list shows; `uses(refKey)`, when
+-- given, names the template the carrier DRAWS with where an unset ref means
+-- "follow another" (asked by the users list only: rename and delete must see the
+-- stored ref, or a following carrier would be pinned to a name). What each walk
+-- does with them:
+--   rename      repoints them (ForEachDesignerRef)
+--   delete      CLEARS them: like a pinned set, a cleared ref falls back to the
+--               carrier's own default, not onto the empty Default template
+--   users list  names them (DF:ListDesignerPresetUsers)
+--   pruning     counts them as references (PresetReferenced)
+--   import      repoints them inside the payload (UniquifyImportedDesignerPresets)
+-- Nothing registered = exactly the walks before this hook existed.
+-- ============================================================
+DF.DesignerRefCarriers = DF.DesignerRefCarriers or {}
+
+function DF:RegisterDesignerRefCarrier(walker)
+    if type(walker) ~= "function" then return end
+    for _, w in ipairs(DF.DesignerRefCarriers) do
+        if w == walker then return end
+    end
+    DF.DesignerRefCarriers[#DF.DesignerRefCarriers + 1] = walker
+end
+
+-- A walker that errors costs its own carriers, never the rename / delete / import
+-- that asked: the party and raid refs are repointed regardless.
+local function ForEachExtraCarrier(profile, fn)
+    if type(profile) ~= "table" then return end
+    for _, walker in ipairs(DF.DesignerRefCarriers) do
+        local ok, err = pcall(walker, profile, fn)
+        if not ok and DF.DebugError then DF:DebugError("Designer", "ref carrier: %s", tostring(err)) end
+    end
+end
+
 -- Invoke fn(overrideHolder) for every raid auto-layout entry that carries an
 -- `overrides` table (instanced/openWorld arrays + the single mythic profile).
 -- ★ PUBLISHED (DF.ForEachRaidLayoutOverride, below) because a per-KEY migration needs
@@ -466,6 +507,9 @@ local function PresetReferenced(profile, refKey, name)
     local found = false
     ForEachRaidLayoutOverride(profile, function(layout)
         if layout.overrides[refKey] == name then found = true end
+    end)
+    ForEachExtraCarrier(profile, function(t)
+        if t[refKey] == name then found = true end
     end)
     return found
 end
@@ -728,6 +772,7 @@ function DF:UniquifyImportedDesignerPresets(importData, categories)
                 ForEachRaidLayoutOverride(importData, function(layout)
                     repoint(layout.overrides)
                 end)
+                ForEachExtraCarrier(importData, repoint)
                 renamedAny = renamedAny or {}
                 renamedAny[kind] = renames
             end
@@ -769,6 +814,9 @@ local function ForEachDesignerRef(fn)
     -- too, or exiting re-installs a renamed/deleted name as the raid base.
     local apu = DF.AutoProfilesUI
     if apu and apu.globalSnapshot then fn(apu.globalSnapshot, "snapshot") end
+    -- Registered carriers (OTHER REFERENCE CARRIERS, above). Their holder word
+    -- is never "mode" or "snapshot", so a delete clears them.
+    ForEachExtraCarrier(prof, function(t, holder) fn(t, holder or "extra") end)
 end
 
 -- Pinned frames stamp their per-frame preset overrides (dfAuraPresetOverride/
@@ -964,6 +1012,10 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
             users[#users + 1] = layout.name and Kinded(layout.name, L["Auto Layout"])
                 or L["Auto Layouts"]
         end
+    end)
+    ForEachExtraCarrier(prof, function(t, _, label, uses)
+        local used = (type(uses) == "function" and uses(refKey)) or t[refKey]
+        if used == name and label then users[#users + 1] = label end
     end)
     return users
 end

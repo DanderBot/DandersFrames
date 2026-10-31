@@ -267,7 +267,7 @@ function UFO.Prefixes(kind)
             or (DF.SectionRegistry and DF.SectionRegistry[src]) or {}
     end
     if kind == "text" then return { "textDesignerPreset" } end
-    if kind == "auradesigner" then return { "auraDesignerEnabled" } end
+    if kind == "auradesigner" then return { "auraDesignerEnabled", "auraDesignerPreset" } end
     if kind == "visibility" then return { "vis" } end
     if kind == "castbar" then return { "castbar" } end
     if kind == "classpower" then return { "classPower" } end
@@ -1139,33 +1139,100 @@ local function RefreshFrames()
     if UF and UF.RequestRefresh then UF:RequestRefresh() end
 end
 
--- Q3: Text Designer only. The unit picks a template; the templates themselves are
--- edited in the Text Designer.
+-- ---- Text Designer / Aura Designer (spec 2026-11-01-uf-per-unit-designers.md) ---
+-- Phase 1: each unit names its own template of each designer (textDesignerPreset /
+-- auraDesignerPreset in its own table: Copy, Reset and Links cover them like any
+-- key of the page) and can make one of its own -- a copy of the template it uses
+-- now, named for the unit. The templates are still edited on the designers' own
+-- pages; editing one from here is phase 2.
+-- The Aura Designer's unset value follows the Party frames' current template
+-- (UF:AuraTemplateFor); the picker shows it as Same as Party Frames.
+UFO.FOLLOW_PARTY = "@party"
+
+-- After a template change: the aura layout version moves (the factory re-syncs
+-- every frame against its template), then the frames re-stamp and repaint.
+local function DesignerChanged(kind)
+    if kind == "aura" and DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+    RefreshFrames()
+end
+
+-- The template picker. Aura: Same as Party Frames first, then the library.
+function UFO.TemplateOptions(kind)
+    local opts = PresetOptions(kind)()
+    if kind == "aura" then
+        table.insert(opts._order, 1, UFO.FOLLOW_PARTY)
+        opts[UFO.FOLLOW_PARTY] = L["Same as Party Frames"]
+    end
+    return opts
+end
+
+function UFO.GetTemplate(db, kind)
+    if kind == "aura" then return (db and db.auraDesignerPreset) or UFO.FOLLOW_PARTY end
+    return db and db.textDesignerPreset
+end
+
+function UFO.SetTemplate(db, kind, name)
+    if not db then return end
+    if kind == "aura" then
+        db.auraDesignerPreset = (name ~= UFO.FOLLOW_PARTY) and name or nil
+    else
+        db.textDesignerPreset = name
+    end
+end
+
+-- Make Own Template: the unit's copy of its current template, picked at once.
+function UFO.MakeOwnTemplate(unit, kind)
+    local UF = DF.UnitFrames
+    local name = UF and UF.MakeOwnTemplate and UF:MakeOwnTemplate(unit, kind)
+    if not name then return nil end
+    UFO.PushLinks(unit)
+    DesignerChanged(kind)
+    AfterChange(unit)
+    return name
+end
+
+local function TemplateCard(self, db, Add, unit, kind, title, cardKey, cardKind, note, extra)
+    local Open, Close = Tools(self, Add)
+    local band = Open(title, cardKey, 1,
+        function(d)
+            local v = UFO.GetTemplate(d, kind)
+            return (v == UFO.FOLLOW_PARTY) and L["Same as Party Frames"] or (v or "")
+        end, cardKind)
+    if extra then extra(band) end
+    local function options() return UFO.TemplateOptions(kind) end
+    local dd = band:AddWidget(GUI:CreateDropdown(self.child, L["Template:"], options(), nil, nil,
+        function() DesignerChanged(kind) end,
+        function() return UFO.GetTemplate(db, kind) end,
+        function(v) UFO.SetTemplate(db, kind, v) end,
+        { optionsFunc = options }), 55)
+    band:AddWidget(GUI:CreateButtonRow(self.child, {
+        { label = L["Make Own Template"], width = 150,
+          onClick = function() UFO.MakeOwnTemplate(unit, kind) end },
+    }, { width = 250 }), 30)
+    band:AddWidget(GUI:CreateLabel(self.child, note, 250), 45)
+    Close(band)
+    return dd
+end
+
 function UFO.BuildTextPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
-    local Open, Close = Tools(self, Add)
-    local band = Open(L["Text Designer"], "uf_text_template", 1,
-        function(d) return d and d.textDesignerPreset or "" end, "text")
-    local options = PresetOptions("text")
-    band:AddWidget(GUI:CreateDropdown(self.child, L["Template:"], options(), db, "textDesignerPreset",
-        RefreshFrames, nil, nil, { optionsFunc = options }), 55)
-    Close(band)
+    TemplateCard(self, db, Add, unit, "text", L["Text Designer"], "uf_text_template", "text",
+        L["Pick a template, or make this frame one of its own. Templates are edited on the Text Designer page."])
 end
 
 -- Its own enable (DF:IsAuraDesignerEnabled: a standalone frame answers from its
--- own table); the template is the party frames'.
+-- own table, before the template stamp).
 function UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
-    local Open, Close = Tools(self, Add)
-    local band = Open(L["Aura Designer"], "uf_auradesigner", 1,
-        function(d) return (d and d.auraDesignerEnabled) and L["On"] or L["Off"] end, "effects")
-    band:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Aura Designer"], db, "auraDesignerEnabled", function()
-        local AD = DF.AuraDesigner
-        if AD and AD.Engine and AD.Engine.ForceRefreshAllFrames then AD.Engine:ForceRefreshAllFrames() end
-        RefreshFrames()
-    end), 30)
-    band:AddWidget(GUI:CreateLabel(self.child, L["Uses the Party frames' Aura Designer template."], 250), 30)
-    Close(band)
+    TemplateCard(self, db, Add, unit, "aura", L["Aura Designer"], "uf_auradesigner", "effects",
+        L["Pick a template, or make this frame one of its own. Templates are edited on the Aura Designer page."],
+        function(band)
+            band:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Aura Designer"], db, "auraDesignerEnabled", function()
+                local AD = DF.AuraDesigner
+                if AD and AD.Engine and AD.Engine.ForceRefreshAllFrames then AD.Engine:ForceRefreshAllFrames() end
+                RefreshFrames()
+            end), 30)
+        end)
 end
 
 -- ---- Visibility (a page new to unit frames) ---------------------------------

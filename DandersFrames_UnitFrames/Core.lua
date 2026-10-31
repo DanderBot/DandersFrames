@@ -307,7 +307,7 @@ end
 function UF:RefreshAll()
     if not UF.Units then return end
     for _, f in pairs(UF.frames) do
-        f.dfTextPresetOverride = f.dfDB and f.dfDB.textDesignerPreset or nil
+        UF:StampDesigners(f)
         -- The follower of a mirrored Text link draws the shared template mirrored.
         f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(f.dfUFUnit) or false
         UF:RunOutOfCombat("layout:" .. tostring(f.dfUFKey or f.dfUFUnit), function() UF.Units:ApplyLayout(f) end)
@@ -522,6 +522,95 @@ function UF:ResetProfile()
     DF:Say(string.format(L["%s reset to defaults in profile %s."], L["Unit Frames"], name))
     return true, DrawState() ~= before
 end
+
+-- ============================================================
+-- PER-UNIT DESIGNER TEMPLATES (spec 2026-11-01-uf-per-unit-designers.md, phase 1)
+-- Every unit names its own Text Designer template (textDesignerPreset, defaults
+-- "Unit Frames" / "Unit Frames (Small)") and Aura Designer template
+-- (auraDesignerPreset). An AURA template left unset follows the Party frames'
+-- CURRENT one -- what the page always said -- rather than the template literally
+-- named "Party", DandersFrames' fallback for a standalone frame with no name.
+-- Both reach the frame as its per-frame stamp (dfTextPresetOverride /
+-- dfAuraPresetOverride), which DandersFrames' resolver reads first. The enable
+-- stays the unit's own (DF:IsAuraDesignerEnabled asks a standalone frame's table
+-- before the stamp).
+-- ============================================================
+UF.DESIGNER_KINDS = { text = "textDesignerPreset", aura = "auraDesignerPreset" }
+-- Template names are library KEYS and travel in exports: never localised.
+UF.UNIT_TEMPLATE_NAMES = {
+    player = "Player", target = "Target", targettarget = "Target of Target",
+    focus = "Focus", focustarget = "Focus Target", pet = "Pet", boss = "Boss",
+}
+
+-- The Aura Designer template a unit's frames draw with (a name).
+function UF:AuraTemplateFor(db)
+    local name = db and db.auraDesignerPreset
+    if name then return name end
+    if DF.GetModeDesignerPresetName then return DF:GetModeDesignerPresetName("aura", "party") end
+    return nil
+end
+
+-- The template `unit` uses for designer `kind` ("text" | "aura").
+function UF:UnitTemplate(unit, kind)
+    local db = UF:GetUnitDB(unit)
+    if kind == "aura" then return UF:AuraTemplateFor(db) end
+    return db and db.textDesignerPreset
+end
+
+-- Stamp a frame with its unit's templates (build, refresh, preview paint).
+function UF:StampDesigners(f, db)
+    db = db or f.dfDB
+    f.dfTextPresetOverride = db and db.textDesignerPreset or nil
+    f.dfAuraPresetOverride = UF:AuraTemplateFor(db)
+end
+
+-- A template of the unit's own: a copy of the one it uses now, named for the
+-- unit ("Target", "Target 2", ...), and the unit pointed at it. Returns the name.
+function UF:MakeOwnTemplate(unit, kind)
+    local key = UF.DESIGNER_KINDS[kind]
+    if not (key and DF.DuplicateDesignerPreset and DF.CreateDesignerPreset) then return nil end
+    local from = UF:UnitTemplate(unit, kind)
+    local base = UF.UNIT_TEMPLATE_NAMES[unit] or tostring(unit)
+    local name = from and DF:DuplicateDesignerPreset(kind, from, base) or nil
+    if not name then name = DF:CreateDesignerPreset(kind, base) end
+    if not name then return nil end
+    UF:GetUnitDB(unit)[key] = name
+    return name
+end
+
+-- DandersFrames' rename / delete / import / "also used by" walks reach the unit
+-- tables (DF:RegisterDesignerRefCarrier). The LIVE profile's units are walked
+-- through their effective tables, so a unit on its default template counts as a
+-- user of it and a rename stores the new name; one following Party's Aura template
+-- is listed as a user of it (`uses`) but keeps following through a rename or a
+-- delete. Any other profile (an import payload) is walked raw.
+function UF.DesignerRefWalker(profile, fn)
+    local root = type(profile) == "table" and profile.unitframes
+    if type(root) ~= "table" or type(root.units) ~= "table" then return end
+    local live = (root == Root())
+    local L = DF.L
+    for _, unit in ipairs(UF.UNITS) do
+        local stored = root.units[unit]
+        if type(stored) == "table" then
+            local label
+            if L then
+                label = string.format(L["%s (%s)"], L[UF.UNIT_TEMPLATE_NAMES[unit] or unit], L["Unit Frames"])
+            end
+            if live then
+                local eff = UF:GetUnitDB(unit)
+                -- What it draws with: an unset Aura template follows Party's.
+                local function uses(refKey)
+                    if refKey == UF.DESIGNER_KINDS.aura then return UF:AuraTemplateFor(eff) end
+                    return eff[refKey]
+                end
+                fn(eff, "unit", label, uses)
+            else
+                fn(stored, "unit", label)
+            end
+        end
+    end
+end
+if DF.RegisterDesignerRefCarrier then DF:RegisterDesignerRefCarrier(UF.DesignerRefWalker) end
 
 -- ============================================================
 -- START-UP
