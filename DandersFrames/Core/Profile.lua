@@ -74,6 +74,129 @@ function DF:GetWindowState()
 end
 
 -- ============================================================
+-- PROFILE-ROOT TABLE REGISTRY
+-- ============================================================
+-- A table that lives at the profile root (DF.db.<key>) and wants what party and
+-- raid get for free: defaults on every profile, a migration hook, a fresh copy in
+-- a new or reset profile, and a ride in export / import.
+--
+--   DF:RegisterProfileRootTable("myTable", {
+--       defaults       = { ... },          -- seeded into a profile without the table,
+--                                          -- and any ABSENT top-level key filled
+--       migrate        = function(tbl, profile) end,  -- runs on an existing table,
+--                                          -- BEFORE the fill (pcall-protected)
+--       exportable     = true,             -- default true: full export / import
+--       exportCategory = "categoryId",     -- selective export / import: the
+--                                          -- category id that carries it
+--   })
+--
+-- Consumers: the login defaults pass (Core.lua), ActivateProfile, NewProfileTable
+-- (so ResetFullProfile too), ExportProfile, ValidatePayloadShape and
+-- ApplyImportedProfile. A payload holding only registered tables is a valid
+-- payload. Keys a payload carries that nobody registered are ignored, as they
+-- always were -- a string from a newer build still imports.
+--
+-- ⚠ THE FILL IS ONE LEVEL DEEP, like party/raid's: a nested table that already
+-- exists is left alone, so a sparse table stays sparse. Deeper changes belong in
+-- `migrate`.
+-- ⚠ Registering late (after the saved variables loaded) seeds every stored
+-- profile at once; registering earlier leaves it to the login pass.
+-- An empty registry changes nothing anywhere.
+-- ============================================================
+DF.ProfileRootTables = DF.ProfileRootTables or {}           -- key -> spec
+DF.ProfileRootTableOrder = DF.ProfileRootTableOrder or {}   -- keys, registration order
+
+-- The profile's own root keys (and the payload's envelope). Nobody may take one.
+local RESERVED_ROOT_KEYS = {
+    party = true, raid = true, raidAutoProfiles = true, linkedSections = true,
+    classColors = true, powerColors = true, roleColors = true, dispelColors = true,
+    auraBlacklist = true, filterPresetOverrides = true, filterMutedSpellIDs = true,
+    customAuraFilters = true, auraDesignerPresets = true, textDesignerPresets = true,
+    partyEnabled = true, raidEnabled = true, settingsFont = true, settingsFontOutline = true,
+    fontSlug = true, version = true, profileName = true, sourceFlavor = true, categories = true,
+}
+
+local function RootTableError(fmt, ...)
+    if DF.DebugError then DF:DebugError("PROFILE", fmt, ...) end
+end
+
+-- Migrate, then fill, one registered table on one stored profile.
+function DF:ApplyProfileRootTable(profile, key)
+    local spec = DF.ProfileRootTables[key]
+    if not spec or type(profile) ~= "table" then return end
+    local t = profile[key]
+    if type(t) == "table" and spec.migrate then
+        local ok, err = pcall(spec.migrate, t, profile)
+        if not ok then RootTableError("profile-root table %s: migrate failed: %s", key, tostring(err)) end
+    end
+    t = profile[key]
+    if type(t) ~= "table" then
+        profile[key] = DF:DeepCopy(spec.defaults or {})
+    elseif spec.defaults then
+        for k, v in pairs(spec.defaults) do
+            if t[k] == nil then t[k] = DF:DeepCopy(v) end
+        end
+    end
+end
+
+-- Every registered table on one stored profile.
+function DF:ApplyProfileRootDefaults(profile)
+    for _, key in ipairs(DF.ProfileRootTableOrder) do
+        DF:ApplyProfileRootTable(profile, key)
+    end
+end
+
+function DF:RegisterProfileRootTable(key, spec)
+    if type(key) ~= "string" or key == "" or key:sub(1, 1) == "_" or RESERVED_ROOT_KEYS[key] then
+        RootTableError("RegisterProfileRootTable: '%s' cannot be registered", tostring(key))
+        return false
+    end
+    if spec ~= nil and type(spec) ~= "table" then
+        RootTableError("RegisterProfileRootTable: '%s' needs a spec table", key)
+        return false
+    end
+    spec = spec or {}
+    if spec.defaults ~= nil and type(spec.defaults) ~= "table" then
+        RootTableError("RegisterProfileRootTable: '%s' defaults must be a table", key)
+        return false
+    end
+    if spec.migrate ~= nil and type(spec.migrate) ~= "function" then
+        RootTableError("RegisterProfileRootTable: '%s' migrate must be a function", key)
+        return false
+    end
+    if not DF.ProfileRootTables[key] then
+        table.insert(DF.ProfileRootTableOrder, key)
+    end
+    DF.ProfileRootTables[key] = {
+        defaults = spec.defaults,
+        migrate = spec.migrate,
+        exportable = spec.exportable ~= false,
+        exportCategory = spec.exportCategory,
+    }
+    if DF.db and DandersFramesDB_v2 and type(DandersFramesDB_v2.profiles) == "table" then
+        for _, profile in pairs(DandersFramesDB_v2.profiles) do
+            DF:ApplyProfileRootTable(profile, key)
+        end
+    end
+    return true
+end
+
+-- Does a payload (or any table shaped like a profile) carry a registered table?
+local function HasProfileRootTable(data)
+    for _, key in ipairs(DF.ProfileRootTableOrder) do
+        if type(data[key]) == "table" then return true end
+    end
+    return false
+end
+
+-- Does this registered table travel with this export / import? categorySet nil = full.
+local function RootTableTravels(spec, categorySet)
+    if not spec.exportable then return false end
+    if categorySet == nil then return true end
+    return spec.exportCategory ~= nil and categorySet[spec.exportCategory] == true
+end
+
+-- ============================================================
 -- SETTINGS PANEL FONT
 -- ============================================================
 -- The panel's font and outline live at the profile root, and every path that
@@ -350,6 +473,8 @@ function DF:NewProfileTable()
         settingsFont = "DF Roboto SemiBold",
         settingsFontOutline = "NONE",
     }
+    -- Registered profile-root tables, from their defaults (none registered: nothing).
+    DF:ApplyProfileRootDefaults(profile)
     -- Born from current defaults => every one-time migration is already done.
     -- Without this, the unconditional frame-level / container-position shifts
     -- fired on the new profile and moved values that were already correct.
@@ -408,6 +533,8 @@ function DF:ActivateProfile(name, message)
     if p.raidEnabled         == nil then p.raidEnabled         = true end
     if p.settingsFont        == nil then p.settingsFont        = "DF Roboto SemiBold" end
     if p.settingsFontOutline == nil or p.settingsFontOutline == "" then p.settingsFontOutline = "NONE" end
+    -- Registered profile-root tables (migrate, then fill).
+    DF:ApplyProfileRootDefaults(p)
 
     -- Switch to the profile (update both account-wide and per-character)
     DandersFramesDB_v2.currentProfile = name
@@ -907,6 +1034,32 @@ local function ApplyProfileRootScalars(importData)
     end
 end
 
+-- Registered profile-root tables into an export (categorySet nil = full export).
+-- An empty table is left out, as the palettes are.
+local function ExportProfileRootTables(exportData, categorySet)
+    if not DF.db then return end
+    for _, key in ipairs(DF.ProfileRootTableOrder) do
+        local spec = DF.ProfileRootTables[key]
+        local t = DF.db[key]
+        if spec and RootTableTravels(spec, categorySet) and type(t) == "table" and next(t) then
+            exportData[key] = DF:DeepCopy(t)
+        end
+    end
+end
+
+-- ...and back out of a payload: each one that travels replaces the profile's.
+-- Types were checked by ValidatePayloadShape; the migrate and fill run once, with
+-- the defaults backfill near the end of ApplyImportedProfile.
+local function ImportProfileRootTables(importData, categorySet)
+    if not DF.db then return end
+    for _, key in ipairs(DF.ProfileRootTableOrder) do
+        local spec = DF.ProfileRootTables[key]
+        if spec and RootTableTravels(spec, categorySet) and type(importData[key]) == "table" then
+            DF.db[key] = importData[key]
+        end
+    end
+end
+
 function DF:ExportProfile(categories, frameTypes, profileName)
     local L = DF.L
     -- Selective export reads the category tables, which live in the companion
@@ -1009,6 +1162,8 @@ function DF:ExportProfile(categories, frameTypes, profileName)
             exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
         end
         CopyProfileRootScalars(exportData)
+        -- Registered profile-root tables (DF:RegisterProfileRootTable), when not empty.
+        ExportProfileRootTables(exportData, nil)
         exportData.categories = nil
     else
         -- Selective category export
@@ -1065,6 +1220,8 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         -- ⚠ DF:AuditExportCategories cannot catch this class: it walks PartyDefaults and
         -- RaidDefaults only, so it is structurally blind to profile-root keys. Anything
         -- added at the root has to be wired here by hand.
+        -- Registered profile-root tables whose exportCategory was asked for.
+        ExportProfileRootTables(exportData, categorySet)
         if categorySet.colors then
             if DF.db.classColors  and next(DF.db.classColors)  then exportData.classColors  = DF:DeepCopy(DF.db.classColors)  end
             if DF.db.powerColors  and next(DF.db.powerColors)  then exportData.powerColors  = DF:DeepCopy(DF.db.powerColors)  end
@@ -1073,7 +1230,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         end
     end
 
-    if not exportData.party and not exportData.raid then
+    if not exportData.party and not exportData.raid and not HasProfileRootTable(exportData) then
         DF:Err(L["No data to export"])
         return nil
     end
@@ -1126,7 +1283,17 @@ local function ValidatePayloadShape(data)
             return nil, "Corrupt data"
         end
     end
-    if type(data.party) ~= "table" and type(data.raid) ~= "table" then
+    -- Registered profile-root tables are assigned to DF.db.<key> the same way, so
+    -- the same rule: a table if present. Keys nobody registered are not looked at
+    -- (a newer build's extra tables import as nothing, not as an error).
+    for _, key in ipairs(DF.ProfileRootTableOrder) do
+        local v = data[key]
+        if v ~= nil and type(v) ~= "table" then
+            return nil, "Corrupt data"
+        end
+    end
+    -- Something to apply: a mode table, or a registered profile-root table.
+    if type(data.party) ~= "table" and type(data.raid) ~= "table" and not HasProfileRootTable(data) then
         return nil, "No profile data found"
     end
 
@@ -1515,6 +1682,11 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- profile's (and a shared table reference), and FC.AfterImport stamps _flavor below.
         newProfile._parkedAD = nil
         newProfile._flavor = nil
+        -- Registered profile-root tables: a copy of current, like everything above.
+        for _, key in ipairs(DF.ProfileRootTableOrder) do
+            local cur = DF.db[key]
+            if type(cur) == "table" then newProfile[key] = DF:DeepCopy(cur) end
+        end
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
@@ -1815,6 +1987,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             DF.db.linkedSections = importData.linkedSections
         end
         ApplyProfileRootScalars(importData)
+        ImportProfileRootTables(importData, nil)
     else
         -- Selective import: merge only selected categories
         local categoriesToImport = selectedCategories or importInfo.detectedCategories
@@ -1841,6 +2014,8 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         end
         -- Module toggles and settings font: same category as the flags above.
         if importCategorySet.other then ApplyProfileRootScalars(importData) end
+        -- Registered profile-root tables whose exportCategory is being imported.
+        ImportProfileRootTables(importData, importCategorySet)
         -- ☠ PROFILE-ROOT PALETTES, GATED ON PRESENCE. MergeCategorySettings only walks the MODE
         -- tables, so classColors/powerColors/roleColors need naming here by hand, and `colors`
         -- has no entry in DF.ExportCategories (deliberately -- see the note at the top of that
@@ -2045,6 +2220,8 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
 
     backfillDefaults(DF.db and DF.db.party, DF.PartyDefaults)
     backfillDefaults(DF.db and DF.db.raid, DF.RaidDefaults)
+    -- Registered profile-root tables the payload did not bring (or brought old).
+    if DF.db then DF:ApplyProfileRootDefaults(DF._realProfile or DF.db) end
 
     -- ☠ CLEAR THE GATE FLAGS FIRST, or the passes below are no-ops on imported data.
     --

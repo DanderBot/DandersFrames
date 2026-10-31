@@ -5292,6 +5292,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end
                     end
                 end
+                -- Registered profile-root tables (Core/Profile.lua, PROFILE-ROOT TABLE
+                -- REGISTRY): migrate, then fill. Nothing registered: nothing happens.
+                DF:ApplyProfileRootDefaults(profile)
                 -- Dispel colours are account-wide (per profile, mode-independent — edited on the Colors
                 -- page; sibling of classColors). Seed ONCE from the profile's v4 colours so any
                 -- customisation carries over; otherwise the game palette. No None key — the

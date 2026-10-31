@@ -161,7 +161,9 @@ do
         check(chunk ~= nil, "export: the lifted code parses (" .. tostring(err) .. ")")
         local captured
         local XDF = { L = setmetatable({}, { __index = function(_, k) return k end }), VERSION = "5.7.0",
-                      CLIENT_FLAVOR = "retail", ExportCategories = {} }
+                      CLIENT_FLAVOR = "retail", ExportCategories = {},
+                      -- The profile-root table registry, empty: nothing registered.
+                      ProfileRootTables = {}, ProfileRootTableOrder = {} }
         function XDF:DeepCopy(t)
             if type(t) ~= "table" then return t end
             local c = {}
@@ -180,6 +182,8 @@ do
             end,
             StripInternalKeys = function(t) return t end,
             EmbedCustomFilterData = function() end,
+            HasProfileRootTable = function() return false end,
+            RootTableTravels = function() return false end,
         }, { __index = _G })
         if chunk then
             setfenv(chunk, env)
