@@ -103,3 +103,23 @@ local page = options_file_source("GUI/Pages/Auras.lua")
 local modes = page:match("local colorModes = (%b{})")
 check(modes ~= nil, "found the party/raid Health Bar mode list")
 check(modes and not modes:find("REACTION", 1, true), "the party/raid dropdown does not offer the new modes")
+
+print("-- Test frames answer from their stamps, never from the real token")
+-- A test frame carries a REAL token ("target", "player"): reading it would colour
+-- the preview by whoever that really is.
+units.target = { player = true, class = "MAGE", reaction = 6 }
+local tf = { dfIsTestFrame = true, dfTestReaction = 2 }
+eq(rgb(DF:GetReactionHealthColor("target", "REACTION", tf)), col(D.hostile), "stamped hostile, real unit friendly: hostile")
+tf.dfTestTapped = true
+eq(rgb(DF:GetReactionHealthColor("target", "REACTION", tf)), col(D.tapped), "stamped tapped: grey")
+local pf = { dfIsTestFrame = true, dfClassToken = "MAGE", dfTestReaction = 5 }
+eq(rgb(DF:GetReactionHealthColor("target", "CLASS_REACTION", pf)), "0.1,0.2,0.9", "stamped class: class colour")
+eq(rgb(DF:GetReactionHealthColor("target", "REACTION", pf)), col(D.friendly), "...REACTION ignores the class")
+eq(rgb(DF:GetReactionHealthColor("target", "REACTION", { dfIsTestFrame = true })), col(D.neutral),
+   "no stamps: neutral")
+eq(rgb(DF:GetReactionHealthColor("target", "REACTION", { })), col(D.friendly), "a live frame: the real unit, as before")
+check(EA:find("GetReactionHealthColor(unit, colorMode, frame)", 1, true), "ElementAppearance passes the frame")
+check(SRC:find("GetReactionHealthColor(unit, mode, frame)", 1, true), "ApplyHealthColors passes the frame")
+local tm = options_file_source("TestMode/TestMode.lua")
+check(tm:find("frame.dfTestReaction = testData.reaction", 1, true), "the test painter stamps the reaction")
+check(tm:find("frame.dfTestTapped = testData.isTapped or nil", 1, true), "...and tapped")
