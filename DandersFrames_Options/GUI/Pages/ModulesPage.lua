@@ -230,7 +230,7 @@ local function MakeRow(sub)
     end
 
     local open = CreateFrame("Button", nil, row, "BackdropTemplate")
-    GUI:StyleButton(open, { text = L["Open"], width = 62, height = 24 })
+    GUI:StyleButton(open, { text = L["Open"], width = 62, height = 24, rounded = true })
     open:SetPoint("RIGHT", row, "RIGHT", -10, 0)
     open:SetScript("OnClick", function(self)
         -- A locked module (Auto Layout editing) is refused, as on the rail.

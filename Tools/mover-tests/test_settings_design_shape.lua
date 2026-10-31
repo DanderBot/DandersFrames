@@ -96,3 +96,17 @@ check(PANEL:find("if GUI.ProfilesView and GUI.CurrentAccent then GUI:SetAccent(G
       "accent: SelectTab moves the accent with the page, before the page shows")
 check(REG:find("if GUI.ProfilesView and GUI.CurrentAccent then return GUI.CurrentAccent() end", 1, true) ~= nil,
       "accent: the rail item and deck 2's crumb follow it")
+
+print("-- Settings design: buttons on Home and Modules are rounded")
+do
+    local W = ui_file_source("Widgets.lua"):gsub("\r\n", "\n")
+    check(W:find("if opts.rounded and not rawget(btn, \"RoundedSurface\") then", 1, true) ~= nil,
+          "kit: StyleButton takes opts.rounded")
+    check(W:find("btn.SetBackdropColor = function(_, r, g, b, a) surf:SetFillColor(r, g, b, a) end", 1, true) ~= nil,
+          "kit: ...and every backdrop paint lands on the rounded surface")
+    local H, M = src("GUI/Pages/Home.lua"), src("GUI/Pages/ModulesPage.lua")
+    check(H:find('text = L["Manage modules"], height = 24, tinted = true, rounded = true,', 1, true) ~= nil,
+          "home: Manage modules is a rounded button")
+    check(H:find('width = 80, height = 24, rounded = true', 1, true) ~= nil, "home: attention fix buttons are rounded")
+    check(M:find('width = 62, height = 24, rounded = true', 1, true) ~= nil, "modules: Open buttons are rounded")
+end

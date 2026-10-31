@@ -103,12 +103,12 @@ function UI:CreateIconRail(parent, opts)
         btn:SetAlpha(isOff and DISABLED_ALPHA or 1)
         if isSel then
             local r, g, b = Unpack(AccentOf(id), 1, 1, 1)
-            btn.Plate:SetVertexColor(r, g, b, 0.18)
+            btn.Plate:SetColorTexture(r, g, b, 0.18)
             btn.Plate:Show()
             btn.Icon:SetVertexColor(r, g, b)
             btn.Label:SetTextColor(r, g, b)
         elseif btn.hovered and not isOff then
-            btn.Plate:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.75)
+            btn.Plate:SetColorTexture(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.75)
             btn.Plate:Show()
             btn.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -144,8 +144,13 @@ function UI:CreateIconRail(parent, opts)
         btn:SetSize(width, itemH)
         btn:RegisterForClicks("LeftButtonUp")
 
+        -- A colour texture, not WHITE8x8 + SetVertexColor: on the window's
+        -- first show the selected plate drew at full alpha with a white label
+        -- until the item was hovered (author's /fstack, 2026-10-31). The
+        -- colour and alpha live in the texture itself now, and the rail
+        -- repaints every item once it is actually on screen (OnShow below).
         local plate = btn:CreateTexture(nil, "BACKGROUND")
-        plate:SetTexture(WHITE)
+        plate:SetColorTexture(1, 1, 1, 0)
         plate:SetAllPoints(btn)
         plate:Hide()
         btn.Plate = plate
@@ -255,6 +260,17 @@ function UI:CreateIconRail(parent, opts)
         end
         for n = used + 1, #dividers do dividers[n]:Hide() end
     end
+
+    local function RepaintAll()
+        for _, id in ipairs(list) do
+            local b = buttons[id]
+            if b then Paint(b) end
+        end
+    end
+    rail:SetScript("OnShow", function()
+        RepaintAll()
+        if C_Timer and C_Timer.After then C_Timer.After(0, RepaintAll) end
+    end)
 
     function rail:SetItems(newItems)
         items, list = {}, {}

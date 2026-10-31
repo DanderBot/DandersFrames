@@ -301,9 +301,11 @@ DF.DebugConsole = { SetEnabled = function(_, v) DandersFramesDB_v2.debug.enabled
 item.fix.run()
 check(find("debugLogging") == nil, "debug fix: turned off")
 DandersFramesDB_v2.profilerOnUpdateHook = true
-check(find("debugLogging") ~= nil, "debug: the profiler hook left on")
-find("debugLogging").fix.run()
-check(DandersFramesDB_v2.profilerOnUpdateHook == nil and find("debugLogging") == nil, "debug fix: hook off too")
+check(find("debugLogging") == nil, "debug: the profiler hook is NOT reported as debug logging")
+check(find("profilerHook") ~= nil, "profiler: the hook left on is its own item")
+eq(find("profilerHook").fix.combatSafe, true, "profiler fix: safe in combat (it only writes a flag)")
+find("profilerHook").fix.run()
+check(DandersFramesDB_v2.profilerOnUpdateHook == nil and find("profilerHook") == nil, "profiler fix: hook off")
 DF.DebugConsole = nil
 
 print("-- Attention: DandersMover missing")

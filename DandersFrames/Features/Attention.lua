@@ -464,15 +464,13 @@ Attention:Register{
     detail = function(version) return format(L["A newer version is available (%s). Get it on CurseForge."], tostring(version)) end,
 }
 
--- 8. Debug logging (or the profiler's OnUpdate hook) left on.
+-- 8. Debug logging left on. Only the LOG: the profiler hook is its own item
+-- (8b) -- one title for both read "logging is on" while the log was off.
 Attention:Register{
     id = "debugLogging", severity = 3, dismiss = "session",
     check = function()
         local sv = DandersFramesDB_v2
-        if type(sv) ~= "table" then return false end
-        local logging = type(sv.debug) == "table" and sv.debug.enabled == true
-        local hook = sv.profilerOnUpdateHook == true
-        return logging or hook
+        return type(sv) == "table" and type(sv.debug) == "table" and sv.debug.enabled == true
     end,
     title = function() return L["Debug logging is on"] end,
     detail = function() return L["It records extra data every session. Turn it off unless you are reporting a bug."] end,
@@ -486,6 +484,24 @@ Attention:Register{
             elseif type(sv) == "table" and type(sv.debug) == "table" then
                 sv.debug.enabled = false
             end
+        end,
+    },
+}
+
+-- 8b. The profiler's OnUpdate hook left on.
+Attention:Register{
+    id = "profilerHook", severity = 3, dismiss = "session",
+    check = function()
+        local sv = DandersFramesDB_v2
+        return type(sv) == "table" and sv.profilerOnUpdateHook == true
+    end,
+    title = function() return L["The profiler hook is on"] end,
+    detail = function() return L["It times every frame update. Turn it off unless you are measuring performance. Takes effect after a reload."] end,
+    fix = {
+        label = function() return L["Turn Off"] end,
+        combatSafe = true,
+        run = function()
+            local sv = DandersFramesDB_v2
             -- The hook is latched at load; this takes effect on the next reload.
             if type(sv) == "table" then sv.profilerOnUpdateHook = nil end
         end,

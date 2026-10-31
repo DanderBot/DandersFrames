@@ -489,7 +489,7 @@ end
 local function RowButton(r)
     if r.Fix then return r.Fix end
     local b = CreateFrame("Button", nil, r, "BackdropTemplate")
-    GUI:StyleButton(b, { text = "", width = 80, height = 24 })
+    GUI:StyleButton(b, { text = "", width = 80, height = 24, rounded = true })
     b:SetScript("OnClick", function(self)
         local fix = self.fix
         if not fix then return end
@@ -769,7 +769,7 @@ function GUI:RefreshHomeView()
     if not mb then
         mb = CreateFrame("Button", nil, body, "BackdropTemplate")
         GUI:StyleButton(mb, {
-            text = L["Manage modules"], height = 24, tinted = true,
+            text = L["Manage modules"], height = 24, tinted = true, rounded = true,
             accent = GUI.Colors.text,
             icon = { texture = ICONS .. "extension.png", size = 16 },
         })

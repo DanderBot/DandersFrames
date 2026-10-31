@@ -28,6 +28,7 @@ local function Region()
     function r:SetAlpha(a) self.alpha = a end
     function r:SetTexture(t) self.texture = t end
     function r:SetVertexColor(r_, g, b, a) self.color = { r_, g, b, a } end
+    function r:SetColorTexture(r_, g, b, a) self.color = { r_, g, b, a } end
     function r:SetTextColor(r_, g, b) self.color = { r_, g, b } end
     function r:SetText(t) self.text = t end
     function r:GetText() return self.text end

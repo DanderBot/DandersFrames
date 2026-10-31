@@ -196,6 +196,24 @@ function UI:StyleButton(btn, opts)
     end
     CreateElementBackdrop(btn)  -- mixes in BackdropTemplate if needed
 
+    -- Rounded corners (opts.rounded = true for radius 6, or 4 / 6 / 8). Every
+    -- paint below -- rest, hover, active, disabled, and any caller's own
+    -- SetBackdropColor -- goes through the backdrop methods, so routing those
+    -- two methods to a rounded surface rounds every state at once. The square
+    -- backdrop stays underneath, fully transparent.
+    if opts.rounded and not rawget(btn, "RoundedSurface") then
+        local radius = (type(opts.rounded) == "number") and opts.rounded or 6
+        local surf = host:CreateRoundedSurface(btn, { radius = radius, borderWidth = 1 })
+        if surf then
+            local setColor, setBorder = btn.SetBackdropColor, btn.SetBackdropBorderColor
+            if setColor then setColor(btn, 0, 0, 0, 0) end
+            if setBorder then setBorder(btn, 0, 0, 0, 0) end
+            btn.SetBackdropColor = function(_, r, g, b, a) surf:SetFillColor(r, g, b, a) end
+            btn.SetBackdropBorderColor = function(_, r, g, b, a) surf:SetBorderColor(r, g, b, a) end
+            btn.RoundedSurface = surf
+        end
+    end
+
     -- Optional label + leading icon. opts.icon = { texture, size (18),
     -- color {r,g,b}, gap (4) }. opts.align controls layout:
     --   "center" (default) — centre the icon+label as a GROUP (text-only centres
