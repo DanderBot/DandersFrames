@@ -8861,6 +8861,11 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- PLAYER_FLAGS_CHANGED: Update AFK icon
     if event == "PLAYER_FLAGS_CHANGED" then
         local unit = arg1
+        -- Text Designer's status text can include AFK; it refreshes with the
+        -- health category. No-op without the TD module.
+        if unit and DF.UpdateTextDesigner then
+            tdRefresh(unitFrameMap[unit], FindPinnedFrameForUnit(unit), "health")
+        end
         if unit and DF.UpdateAFKIcon then
             local frame = unitFrameMap[unit]
             if frame and frame.dfEventsEnabled ~= false then

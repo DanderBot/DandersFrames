@@ -34,6 +34,9 @@ local CONTENT_HINTS = {
     name              = "name",
     class             = "name",
     level             = "name",
+    level_difficulty  = "name",
+    classification    = "name",
+    target_name       = "name",
     race              = "name",
     faction           = "name",
     race_level_faction= "name",  -- legacy combined type (kept for migration)
@@ -46,6 +49,7 @@ local CONTENT_HINTS = {
     hp_deficit        = "health",
     hp_max_reduction  = "health",
     status_text       = "health",  -- legacy combined type (kept for migration)
+    status_afk        = "health",
     -- power
     power_current     = "power",
     power_percent     = "power",

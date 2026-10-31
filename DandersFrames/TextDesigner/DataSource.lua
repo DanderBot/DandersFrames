@@ -70,7 +70,28 @@ local MOCK_DATA = {
     aggroFlag        = 2,        -- "++"
     threatPercent    = 75,       -- "75%"
     isInRange        = true,
+    isAFK            = false,
+    -- Identity of the unit and of what it is targeting
+    classification   = "elite",  -- "+"
+    targetName       = "Thrall",
 }
+
+-- ============================================================
+-- LEVEL DIFFICULTY COLOUR
+-- The game's own difficulty colour for a level, relative to the player. A level
+-- the game hides (-1 / 0, shown as "??") is red, like the skull. Answers nil when
+-- there is no colour to give (no level, or the colour API is missing), and the
+-- element keeps its configured colour.
+-- ============================================================
+local function difficultyColor(level)
+    if type(level) ~= "number" then return nil end
+    if level <= 0 then return 1, 0.1, 0.1 end
+    local fn = _G.GetCreatureDifficultyColor or _G.GetQuestDifficultyColor
+    local c = fn and fn(level)
+    if type(c) ~= "table" then return nil end
+    return c.r, c.g, c.b
+end
+DataSource.DifficultyColor = difficultyColor
 
 -- ============================================================
 -- MOCK FACTORY
@@ -119,6 +140,10 @@ function MockSource:IsFeignDeath() return MOCK_DATA.isFeignDeath end
 function MockSource:GetAggroFlag() return MOCK_DATA.aggroFlag end
 function MockSource:GetThreatPercent() return MOCK_DATA.threatPercent end
 function MockSource:IsInRange() return MOCK_DATA.isInRange end
+function MockSource:IsAFK() return MOCK_DATA.isAFK end
+function MockSource:GetLevelColor() return difficultyColor(MOCK_DATA.level) end
+function MockSource:GetClassification() return MOCK_DATA.classification end
+function MockSource:GetTargetName() return MOCK_DATA.targetName end
 
 function DataSource.Mock()
     if not mockSourceInstance then
@@ -172,6 +197,33 @@ function LiveSource:GetLevel()
     if getMS().IsSecret(lvl) then return "??" end
     if not lvl or lvl <= 0 then return "??" end
     return lvl
+end
+
+-- Difficulty colour for GetLevel's answer. A secret level has none (it shows as
+-- "??" in the element's own colour); a hidden level (-1) is red.
+function LiveSource:GetLevelColor()
+    local lvl = UnitLevel(self.unit)
+    if getMS().IsSecret(lvl) then return nil end
+    return difficultyColor(lvl)
+end
+
+-- "elite" / "rare" / "rareelite" / "worldboss" / "normal" / "trivial" / "minus".
+-- A secret classification answers nil (shown as nothing).
+function LiveSource:GetClassification()
+    local c = UnitClassification(self.unit)
+    if getMS().IsSecret(c) then return nil end
+    return c
+end
+
+-- The name of whatever this unit is targeting ("" when nothing). May be a secret
+-- string; the resolver passes it straight through.
+function LiveSource:GetTargetName()
+    local unit = self.unit
+    if not unit then return "" end
+    local tu = unit .. "target"
+    if not UnitExists(tu) then return "" end
+    if DF.GetFrameName then return DF:GetFrameName(tu) end
+    return UnitName(tu) or ""
 end
 
 function LiveSource:GetRace()
@@ -309,6 +361,13 @@ function LiveSource:IsFeignDeath()
     return UnitIsFeignDeath(self.unit) or false
 end
 
+-- A secret answer counts as not AFK.
+function LiveSource:IsAFK()
+    local afk = UnitIsAFK(self.unit)
+    if getMS().IsSecret(afk) then return false end
+    return afk and true or false
+end
+
 function LiveSource:GetAggroFlag()
     -- Prefer the value stashed by UpdateHighlights (Features/Highlights.lua)
     -- so we don't call UnitThreatSituation a second time per refresh.
@@ -392,7 +451,18 @@ function TestSource:GetGroupNumber()
     if self.isRaid and self.index then return math.ceil(self.index / 5) end
     return nil
 end
-function TestSource:GetLevel() return tdata(self).level or UnitLevel("player") or 80 end
+function TestSource:GetLevel()
+    local lvl = tdata(self).level
+    if lvl and lvl <= 0 then return "??" end   -- a hidden (boss) level, as live shows it
+    return lvl or UnitLevel("player") or 80
+end
+function TestSource:GetLevelColor()
+    local lvl = tdata(self).level
+    if lvl then return difficultyColor(lvl) end
+    return difficultyColor(UnitLevel("player") or 80)
+end
+function TestSource:GetClassification() return tdata(self).classification end
+function TestSource:GetTargetName() return tdata(self).targetName or "" end
 function TestSource:GetRace() return tdata(self).race or "" end
 function TestSource:GetFaction() return tdata(self).faction or "" end
 
@@ -434,6 +504,7 @@ function TestSource:IsDead() return tdata(self).status == "Dead" end
 function TestSource:IsGhost() return tdata(self).status == "Ghost" end
 function TestSource:IsConnected() return tdata(self).status ~= "Offline" end
 function TestSource:IsFeignDeath() return tdata(self).status == "FD" end
+function TestSource:IsAFK() return tdata(self).isAFK and true or false end
 function TestSource:GetAggroFlag() return 0 end          -- threat not simulated in test
 function TestSource:GetThreatPercent() return nil end
 function TestSource:IsInRange() return not tdata(self).outOfRange end

@@ -114,6 +114,9 @@ local function RefreshLocaleStrings()
         { key = "class",             label = L["Class"],                      category = "identity" },
         { key = "group_number",      label = L["Group Number"],               category = "identity" },
         { key = "level",             label = L["Level"],                      category = "identity" },
+        { key = "level_difficulty",  label = L["Level (Difficulty Color)"],   category = "identity" },
+        { key = "classification",    label = L["Classification"],             category = "identity" },
+        { key = "target_name",       label = L["Target Name"],                category = "identity" },
         { key = "race",              label = L["Race"],                       category = "identity" },
         { key = "faction",           label = L["Faction"],                    category = "identity" },
         { key = "custom_static",     label = L["Custom Static Text"],         category = "identity" },
@@ -139,6 +142,7 @@ local function RefreshLocaleStrings()
         -- { key = "incoming_heal_mine",label = L["Incoming Heal From Me Only"], category = "shields"  },
         -- Status
         { key = "status_text",       label = L["Dead / Offline / Ghost"],     category = "status"   },
+        { key = "status_afk",        label = L["Dead / Offline / Ghost / AFK"], category = "status" },
         -- Threat & Range
         { key = "aggro_flag",        label = L["Aggro Flag"],                 category = "threat"   },
         { key = "threat_percent",    label = L["Threat on Current Target"],   category = "threat"   },
@@ -410,7 +414,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         place(hidePct, FIELD_ROW_HEIGHT)
 
     -- Name: length cap + truncate mode
-    elseif ct.key == "name" then
+    elseif ct.key == "name" or ct.key == "target_name" then
         elem.nameLength = elem.nameLength or 12
         local function lenCB()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end

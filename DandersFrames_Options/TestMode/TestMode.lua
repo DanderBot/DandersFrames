@@ -451,6 +451,9 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             isAFK = false,
             isPhased = false,
             inVehicle = false,
+            -- Text Designer: a boss shows a hidden level ("??") and the Boss tag.
+            level = -1,
+            classification = "worldboss",
         }
 
         -- Animate health if enabled on either DB
@@ -521,6 +524,9 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             inVehicle = inRaidSet("VEHICLE", i),
             isBGCarrier = inRaidSet("BGCARRIER", i),
             isInCombat = inRaidSet("COMBAT", i),
+            -- Text Designer's target name: healers target the first tank, everyone
+            -- else the boss; the dead target nothing.
+            targetName = (not isDead) and ((testRoles[i] == "HEALER") and testNames[1] or bossNames[1]) or nil,
             -- ☠ WHITELIST -- see the party branch's note. These four are the per-frame
             -- overrides; without them the raid preview ignores the unit allocation and drives the
             -- missing-buff strip on EVERY frame.
@@ -594,6 +600,9 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         inVehicle = data.inVehicle,
         isBGCarrier = data.isBGCarrier,
         isInCombat = data.isInCombat,
+        -- Text Designer's target name: healers target the first unit, everyone else
+        -- the boss; dead and offline units target nothing.
+        targetName = (not data.status) and ((data.role == "HEALER") and units[1].name or bossNames[1]) or nil,
         -- ☠ THIS TABLE IS A WHITELIST, NOT A COPY. Every field a consumer reads has to
         -- be listed here or it is silently dropped between DF.TestData.units and the
         -- drives — adding a field to a unit row alone does NOTHING, with no error to say

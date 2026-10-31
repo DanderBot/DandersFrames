@@ -107,14 +107,24 @@ local RESOLVERS = {}
 
 -- ───── Identity ─────
 
-RESOLVERS.name = function(elem, source)
-    local n = source:GetName()
+-- A name, truncated per the element's name settings.
+local function nameText(n, elem)
     if n == nil then return "" end
     -- Secret name: display verbatim (SetText accepts secrets). A `== ""` compare,
     -- or the #/sub truncation in applyNameTrunc, throws on a secret string.
     if getMS().IsSecret(n) then return getMS().SafeText(n) end
     if n == "" then return "" end
     return applyNameTrunc(getMS().SafeText(n), elem)
+end
+
+RESOLVERS.name = function(elem, source)
+    return nameText(source:GetName(), elem)
+end
+
+-- The name of what this unit is targeting, with the same length settings as Name.
+RESOLVERS.target_name = function(elem, source)
+    if not source.GetTargetName then return "" end
+    return nameText(source:GetTargetName(), elem)
 end
 
 RESOLVERS.class = function(elem, source)
@@ -137,6 +147,32 @@ RESOLVERS.level = function(elem, source)
     local lvl = source:GetLevel()
     if lvl == nil then return "" end
     return tostring(lvl)
+end
+
+-- The level in the game's difficulty colour (relative to the player). GetLevel has
+-- already turned a secret or hidden level into "??"; a hidden level is red, a
+-- secret one keeps the element's own colour.
+local levelColor = {}   -- scratch: colorize only reads it
+RESOLVERS.level_difficulty = function(elem, source)
+    local lvl = source:GetLevel()
+    if lvl == nil then return "" end
+    local text = tostring(lvl)
+    local r, g, b
+    if source.GetLevelColor then r, g, b = source:GetLevelColor() end
+    if not r then return text end
+    levelColor.r, levelColor.g, levelColor.b, levelColor.a = r, g, b, 1
+    return colorize(text, levelColor)
+end
+
+-- Elite "+", Rare, Rare Elite, Boss; nothing for an ordinary unit (or a secret).
+RESOLVERS.classification = function(elem, source)
+    local c = source.GetClassification and source:GetClassification()
+    if c == "elite" then return "+"
+    elseif c == "rareelite" then return L["Rare Elite"]
+    elseif c == "rare" then return L["Rare"]
+    elseif c == "worldboss" then return L["Boss"]
+    end
+    return ""
 end
 
 RESOLVERS.race = function(elem, source)
@@ -280,6 +316,14 @@ RESOLVERS.status_text = function(elem, source)
     -- Preview only: the mock unit is "alive", so show a sample status so the
     -- element is visible and stylable. NOT applied to test/live sources.
     if source._isPreviewSample and source:_isPreviewSample() then return L["Dead"] end
+    return ""
+end
+
+-- Dead / Offline / Ghost (status_text), and AFK when none of those applies.
+RESOLVERS.status_afk = function(elem, source)
+    local s = RESOLVERS.status_text(elem, source)
+    if s ~= "" then return s end
+    if source.IsAFK and source:IsAFK() then return L["AFK"] end
     return ""
 end
 
