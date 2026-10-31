@@ -59,6 +59,9 @@ local DATA_KEYS = {
     ThemeListeners = true, UpdateOverrideIndicators = true, tooltip = true,
     tooltipText = true, tooltipSubText = true, tooltipSpellID = true,
     searchEntry = true, disableReason = true, Text = true,
+    -- StyleButton's state fields (the segment pill section)
+    dfDisabled = true, dfActive = true, Icon = true, RoundedSurface = true, dfTabStripe = true,
+    isTab = true, isActive = true,
 }
 local function dataAwareMeta(_, k)
     if DATA_KEYS[k] then return nil end
@@ -215,6 +218,44 @@ do
     eq(row:GetWidth(), 180, "...and the row keeps the width its container gave it")
 
     eq(host:SetLabelMark(CreateFrame("Button"), { texture = "x" }), nil, "a button with no label: nothing")
+end
+
+-- ============================================================
+-- 3b. StyleButton's segment pill
+-- ============================================================
+print("-- Kit: a segment pill")
+do
+    local host = newHost({})
+    local function pill(accent)
+        local b = CreateFrame("Button")
+        b.SetBackdropColor = function(self, r, g, bb, a) self._bg = { r, g, bb, a } end
+        b.SetBackdropBorderColor = function(self, r, g, bb, a) self._edge = { r, g, bb, a } end
+        b.IsEnabled = function() return true end
+        local hlTex = FakeUIFrame()
+        b.GetHighlightTexture = function() return hlTex end
+        b._hl = hlTex
+        host:StyleButton(b, { text = "Same", width = 60, height = 22, segment = true, accent = accent })
+        return b
+    end
+    local b = pill()
+    eq(b._bg[4], 0, "at rest: no fill -- the track shows")
+    eq(b._edge[4], 0, "...and no ring")
+    eq(b._hl._vertex and b._hl._vertex.a, 0, "the square highlight wash is kept at zero")
+    b:SetActive(true)
+    eq(b._bg[1] .. "," .. b._bg[4], ACCENT.r .. ",0.22", "selected: the accent tint")
+    eq(b._edge[4], 0.55, "...with an accent ring")
+    b:SetActive(false)
+    b:GetScript("OnEnter")(b)
+    eq(b._bg[1] .. "," .. b._bg[4], UI.Colors.hover.r .. ",1", "hovered: the neutral plate")
+    b:GetScript("OnLeave")(b)
+    eq(b._bg[4], 0, "left: back to nothing")
+    b:SetActive(true)
+    b:GetScript("OnEnter")(b)
+    eq(b._bg[1] .. "," .. b._bg[4], ACCENT.r .. ",0.22", "a selected pill keeps its tint under the mouse")
+    local NEUTRAL = { r = 0.5, g = 0.5, b = 0.5 }
+    local n = pill(NEUTRAL)
+    n:SetActive(true)
+    eq(n._bg[1] .. "," .. n._bg[4], "0.5,0.22", "a pinned neutral accent: a grey pill")
 end
 
 -- ============================================================

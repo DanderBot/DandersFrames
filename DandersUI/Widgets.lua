@@ -462,6 +462,13 @@ function UI:StyleButton(btn, opts)
     -- neutral rest branch; active / primary / tinted keep their accent-derived
     -- borders, so the override can't fight a state the button is in.
     local restBorder = opts.restBorderColor
+    -- Segment pill (opts.segment): one choice in a segmented track. Nothing at rest
+    -- -- the track behind it shows -- and a dim label; hovered, a neutral C_HOVER
+    -- plate and a bright label; selected (SetActive), a pill tinted with the accent
+    -- (opts.accent, or the theme's) and a bright label. Pair it with `rounded` so
+    -- the plate and the pill are the rounded surface: the square HIGHLIGHT wash is
+    -- kept at zero, or its corners would show past the pill's.
+    local segment = opts.segment
     local hl = btn:GetHighlightTexture() or btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetTexture("Interface\\Buttons\\WHITE8x8")
     hl:SetAllPoints(btn)
@@ -490,6 +497,20 @@ function UI:StyleButton(btn, opts)
     -- panel colour for active tabs, otherwise the neutral element colour.
     local function restBackdrop(self, a)
         restColor.r, restColor.g, restColor.b = a.r, a.g, a.b
+        if segment then
+            if self.dfActive then
+                self:SetBackdropColor(a.r, a.g, a.b, 0.22)
+                self:SetBackdropBorderColor(a.r, a.g, a.b, 0.55)
+            else
+                self:SetBackdropColor(0, 0, 0, 0)
+                self:SetBackdropBorderColor(0, 0, 0, 0)
+            end
+            if self.Text then
+                local c = self.dfActive and C_TEXT or C_TEXT_DIM
+                self.Text:SetTextColor(c.r, c.g, c.b)
+            end
+            return
+        end
         if isTabStyle then
             -- Underline tab: a faint neutral cell when inactive (so every tab's
             -- bounds stay visible and the active one doesn't appear to "grow"),
@@ -557,7 +578,9 @@ function UI:StyleButton(btn, opts)
     -- border (computed live in OnEnter) over a party-blue fill. The border was
     -- always right; the wash simply wasn't asking again.
     local function applyWash(c)
-        if neutralHover then
+        if segment then
+            hl:SetVertexColor(c.r, c.g, c.b, 0)   -- the plate is the hover (see opts.segment)
+        elseif neutralHover then
             hl:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
         else
             hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
@@ -584,6 +607,8 @@ function UI:StyleButton(btn, opts)
             restBackdrop(btn, c)  -- faint cell / tinted fill; accent-coloured label
             if btn.Text then btn.Text:SetTextColor(c.r, c.g, c.b) end
             if btn.Icon then btn.Icon:SetVertexColor(c.r, c.g, c.b) end  -- icon matches the accent label
+        elseif segment then
+            restBackdrop(btn, c)  -- the pill (if selected) and the label's state colour
         elseif primary or btn.dfActive then
             restBackdrop(btn, c)  -- refresh persistent accent
         end
@@ -707,6 +732,17 @@ function UI:StyleButton(btn, opts)
     -- way: locking an already-hovered button is a no-op, and unlocking one still
     -- under the mouse leaves the client's own highlight up.
     local function applyHoverState(self, hovered, rest)
+        if segment then
+            if self.dfDisabled or not self:IsEnabled() then return end
+            if hovered and not self.dfActive then
+                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+                self:SetBackdropBorderColor(0, 0, 0, 0)
+                if self.Text then self.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end
+            else
+                restBackdrop(self, rest or accent or host:GetAccent())
+            end
+            return
+        end
         if not hovered then
             if isTabStyle or ghost then return end
             if self:IsEnabled() and not self.dfDisabled then

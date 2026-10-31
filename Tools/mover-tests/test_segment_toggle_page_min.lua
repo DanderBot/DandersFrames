@@ -23,8 +23,9 @@ local prevCreateFrame = CreateFrame
 -- ---- the segment toggle -------------------------------------------------------
 print("-- Segment toggle: per-segment tooltips, accents and a label size")
 do
-    local styled, fonts, shown, created = {}, {}, {}, {}
-    local GUI = {}
+    local styled, fonts, shown, created, surfaces = {}, {}, {}, {}, {}
+    local GUI = { Colors = { background = { r = 0.08, g = 0.08, b = 0.08, a = 0.95 } } }
+    function GUI:CreateRoundedSurface(frame, o) surfaces[#surfaces + 1] = { frame = frame, opts = o }; return {} end
     function GUI:StyleButton(btn, opts)
         styled[#styled + 1] = opts
         btn.Text = FakeUIFrame()
@@ -43,9 +44,10 @@ do
     end
     local C = { r = 1, g = 1, b = 1 }
     local src = options_file_source("GUI/SettingsWidgets.lua")
-    local chunk = "local GUI, CreateFrame, CreateElementBackdrop, C_TEXT, C_TEXT_DIM = ...\n"
+    local chunk = "local GUI, CreateFrame, CreateElementBackdrop, C_TEXT, C_TEXT_DIM, C_BORDER = ...\n"
         .. cut(src, "function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)", "end")
-    assert(loadstring(chunk))(GUI, CreateFrame, function() end, C, C)
+    local BORDER = { r = 0.25, g = 0.25, b = 0.25 }
+    assert(loadstring(chunk))(GUI, CreateFrame, function() end, C, C, BORDER)
 
     local value = "same"
     local named = "Player"
@@ -82,6 +84,31 @@ do
     fonts = {}
     GUI:CreateSegmentToggle(parent, { { value = 1, label = "s", tooltip = "Seconds" } }, { k = 1 }, "k")
     eq(fonts[1], 9, "no opts.fontSize: the terse 9 it always used")
+    eq(#surfaces, 0, "no opts.rounded: no rounded track (the square boxes, unchanged)")
+    eq(styled[#styled].segment, nil, "...square buttons, not pills")
+    eq(styled[#styled].fitText, nil, "...which still fit their text")
+
+    -- The rounded track.
+    styled, created = {}, {}
+    local r = GUI:CreateSegmentToggle(parent, {
+        { value = "same", label = "Same" }, { value = "mirror", label = "Mirrored" }, { value = "own", label = "Separate" },
+    }, nil, nil, nil, { segmentWidth = 60, height = 22, rounded = true,
+        customGet = function() return "own" end, customSet = function() end })
+    eq(#surfaces, 1, "opts.rounded: one rounded surface...")
+    eq(surfaces[1].frame, r, "...on the track itself")
+    eq(surfaces[1].opts.radius, 6, "...radius 6")
+    eq(surfaces[1].opts.borderWidth, 1, "...a 1px ring")
+    eq(surfaces[1].opts.fill[1], 0.08, "...filled with the darker ground (GUI.Colors.background)")
+    eq(surfaces[1].opts.fill[4], 1, "...opaque")
+    eq(surfaces[1].opts.border[1], BORDER.r, "...ringed in the border colour")
+    eq(r:GetWidth(), 3 * 60 + 2 * 2 + 2 * 2, "three pills, 2px apart, in a 2px lip")
+    eq(r:GetHeight(), 22 + 4, "...and the lip top and bottom")
+    eq(styled[1].segment, true, "each choice is a segment pill")
+    eq(styled[1].rounded, 4, "...rounded, radius 4")
+    eq(styled[1].fitText, false, "...that keeps the width it was given")
+    local _, _, _, x2 = created[3]:GetPoint(1)
+    eq(x2, 2 + 60 + 2, "the second pill sits one pill and one gap in")
+    eq(created[4]._active, true, "the stored value's pill is the selected one")
 end
 CreateFrame = prevCreateFrame
 
