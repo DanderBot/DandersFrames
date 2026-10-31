@@ -239,6 +239,7 @@ local ELEMENTS = {
     classDragonX = 0,
     classDragonY = 0,
     classDragonTailX = 0,           -- the bottom piece only, on top of X
+    classDragonShowTail = true,     -- the bottom piece at all (Boss: off)
     classDragonElite = true,
     classDragonRare = true,
     classDragonRareElite = true,
@@ -487,6 +488,21 @@ local PER_UNIT = {
         castbarEnabled = true,
         castbarHeight = 14,
         classificationEnabled = true,
+        -- The elite dragon (off by default here) on a boss frame, which has no
+        -- portrait, so it grips the frame's right end. Measured at the defaults
+        -- (180x40 frame, cast bar attached 2px under it, 14px tall + 1px border,
+        -- 40px between bosses):
+        --   * the tail would hang 14px under the frame (59x14 at 100%), wholly
+        --     inside the cast bar's 17px band -- covered while a cast shows (cast
+        --     bars draw above the dragon, CastBar.lua CB.LEVEL), bare when the
+        --     idle bar hides. Either side: the bar is as wide as the frame. So the
+        --     tail is off and the dragon is the top piece alone.
+        --   * the top piece rises above the frame into the 40px gap, whose upper
+        --     17px is the boss above's cast bar: 23px free. At 100% it is 21px
+        --     tall (2px clear); 80% -- Target's size -- makes it 53x16, 7px clear,
+        --     and still reads on a 180px frame.
+        classDragonShowTail = false,
+        classDragonSize = 80,
         -- Boss Layout page (Boss.lua). The inventory's Units Per Row and Preview
         -- Frames go up to 8; this build draws UF.BOSS_COUNT (5) slots, so both
         -- default to (and clamp at) that count -- every slot in one line, and all

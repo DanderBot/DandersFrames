@@ -491,12 +491,17 @@ end
 -- and the same left / right rules as the frame's ends. The art is wider than a
 -- square portrait, so on the OUTER edge the overhang falls INWARD, over the gap
 -- and the frame -- never out past the portrait's outer edge.
+IN.DRAGON_PIECES = { "TOP", "BOTTOM" }
+IN.DRAGON_TOP_ONLY = { "TOP" }
 function IN.DragonLayout(db, anchor)
     local D = IN.DRAGON
     local s = IN.DragonScale(db)
     local ox, oy = tonumber(db and db.classDragonX) or 0, tonumber(db and db.classDragonY) or 0
     local tx = tonumber(db and db.classDragonTailX) or 0
     local sides = IN.DragonSides(db, anchor)
+    -- Show Tail off: the top piece alone (Boss, where the cast bar under each
+    -- frame would cover the tail -- see Defaults.lua, boss).
+    local pieces = (db and db.classDragonShowTail == false) and IN.DRAGON_TOP_ONLY or IN.DRAGON_PIECES
     local rect = anchor and anchor.kind == "PORTRAIT" and anchor.rect
     local corner, base = nil, 0
     if rect then
@@ -509,7 +514,7 @@ function IN.DragonLayout(db, anchor)
         -- BOTH: the left end is the right end's mirror image.
         local x, t = ox, tx
         if side == "LEFT" and #sides == 2 then x, t = -ox, -tx end
-        for _, piece in ipairs({ "TOP", "BOTTOM" }) do
+        for _, piece in ipairs(pieces) do
             local a = D[piece]
             local u, v = a.w / D.CANVAS_W, a.h / D.CANVAS_H
             local e = { side = side, piece = piece, w = a.w * s, h = a.h * s, y = oy }

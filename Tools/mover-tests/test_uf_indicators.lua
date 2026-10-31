@@ -335,7 +335,9 @@ eq(UF:GetUnitDB("player").classDragonEnabled, false, "player: off (no classifica
 eq(UF:GetUnitDB("pet").classDragonEnabled, false, "pet: off")
 eq(UF:GetUnitDB("target").classDragonSize, 80, "target: size 80% (sized for its 46px portrait)")
 eq(UF:GetUnitDB("focus").classDragonSize, 65, "focus: 65% (the same reach on its 36px portrait)")
-eq(UF:GetUnitDB("boss").classDragonSize, 100, "boss: 100% (no portrait by default)")
+eq(UF:GetUnitDB("boss").classDragonSize, 80, "boss: 80% (clear of the boss above's cast bar)")
+eq(UF:GetUnitDB("boss").classDragonShowTail, false, "boss: no tail (its cast bar sits under the frame)")
+eq(UF:GetUnitDB("target").classDragonShowTail, true, "target: the tail shows")
 eq(UF:GetUnitDB("target").classDragonSide, "OUTER", "side: outer")
 eq(UF:GetUnitDB("target").classDragonAnchor, "PORTRAIT", "anchored to the portrait")
 eq(UF:GetUnitDB("boss").classDragonAnchor, "PORTRAIT", "...on every unit (falls back to the frame)")
@@ -381,6 +383,32 @@ print("-- Dragon: offsets, tail")
 local LO = byPiece(IN.DragonLayout({ classDragonX = 4, classDragonY = -3, classDragonTailX = -5 }))
 eq(LO.RIGHTTOP.x .. "," .. LO.RIGHTTOP.y, "4,-3", "X / Y move the top piece")
 eq(LO.RIGHTBOTTOM.x .. "," .. LO.RIGHTBOTTOM.y, "-3,-3", "...and the bottom, plus its own tail X (4 - 5 - 2)")
+
+print("-- Dragon: Show Tail off")
+local NT = byPiece(IN.DragonLayout({ classDragonShowTail = false, classDragonSide = "BOTH" }))
+check(NT.RIGHTTOP and NT.LEFTTOP and not NT.RIGHTBOTTOM and not NT.LEFTBOTTOM, "the top pieces only")
+eq(#IN.DragonLayout({ classDragonShowTail = false }), 1, "...one piece on one end")
+
+print("-- Dragon: the boss defaults fit the boss frame")
+do
+    -- Measured from the real defaults: the frame, its attached cast bar and the
+    -- gap to the next boss. The top piece rises into that gap, whose upper part is
+    -- the boss above's cast bar band.
+    local bd = UF:GetUnitDB("boss")
+    local band = bd.castbarGap + bd.castbarHeight + bd.castbarBorderSize
+    eq(band, 17, "boss: the cast bar band under each frame is 17px")
+    eq(bd.castbarDetached, false, "...attached")
+    eq(bd.castbarMatchWidth, true, "...as wide as the frame, so no side clears a tail")
+    local free = bd.bossSpacing - band
+    local list = IN.DragonLayout(bd)
+    eq(#list, 1, "boss: the top piece alone")
+    check(list[1].h < free - 4, "boss: the top piece clears the boss above's cast bar by over 4px")
+    check(list[1].w < bd.frameWidth / 3, "...and takes under a third of the frame's width")
+    local full = IN.DragonLayout({ classDragonSize = 100 })
+    local tail
+    for _, e in ipairs(full) do if e.piece == "BOTTOM" then tail = e end end
+    check(tail.h < band, "(a tail would sit wholly inside the cast bar band: why it is off)")
+end
 
 print("-- Dragon: LEFT mirrors")
 local LL = byPiece(IN.DragonLayout({ classDragonSide = "LEFT", classDragonX = -4, classDragonTailX = 5 }))

@@ -1706,8 +1706,12 @@ function UFO.BuildClassDecorationCards(self, db, Open, Close, changed, col)
     w.disableOn = dragonOff
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "classDragonY", changed), 55)
     w.disableOn = dragonOff
-    w = band:AddWidget(GUI:CreateSlider(self.child, L["Tail Offset X"], -50, 50, 1, db, "classDragonTailX", changed), 55)
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tail"], db, "classDragonShowTail", changed), 30)
     w.disableOn = dragonOff
+    w.tooltip = L["The lower piece, under the frame. Off on Boss frames, where each boss's cast bar sits under it."]
+    local tailOff = UFO.Gate(L["Show Tail"], function(d) return d and d.classDragonShowTail == false end, dragonOff)
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Tail Offset X"], -50, 50, 1, db, "classDragonTailX", changed), 55)
+    w.disableOn = tailOff
     w.tooltip = L["Moves the lower piece (the tail) left or right on its own."]
     Close(band)
 
