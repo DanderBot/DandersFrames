@@ -511,6 +511,29 @@ function UF.MigrateProfileTable(tbl)
     if type(tbl.version) ~= "number" or tbl.version < UF.DB_VERSION then
         tbl.version = UF.DB_VERSION
     end
+    -- Portrait size used to be an absolute size (0 = frame height) with the border
+    -- drawn on top; it is now relative to the frame's height, border included
+    -- (Portrait.lua PO.Size). A stored absolute size becomes the same outer size.
+    if not tbl.global.portraitSizeRelative then
+        for _, unit in ipairs(UF.UNITS) do
+            local u = tbl.units[unit]
+            local old = tonumber(u.portraitSize)
+            if old and old > 0 then
+                local base = UF.UnitDefaults and UF.UnitDefaults[unit] or {}
+                local fh = tonumber(u.frameHeight) or tonumber(base.frameHeight)
+                    or tonumber(DF.PartyDefaults and DF.PartyDefaults.frameHeight) or 40
+                local border = 0
+                local on = u.portraitBorderEnabled
+                if on == nil then on = base.portraitBorderEnabled end
+                if on ~= false then
+                    border = tonumber(u.portraitBorderSize) or tonumber(base.portraitBorderSize) or 1
+                    if border < 1 then border = 1 end
+                end
+                u.portraitSize = old + 2 * border - fh
+            end
+        end
+        tbl.global.portraitSizeRelative = true
+    end
     -- Linked frames: the old per-page sync becomes unit links, and a profile that
     -- never had links gets the default one (Links.lua ENSURE). Idempotent.
     if UF.Links and UF.Links.Ensure then UF.Links:Ensure(tbl) end

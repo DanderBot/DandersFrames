@@ -75,14 +75,27 @@ function PO:Model(p)
     return m
 end
 
+-- The portrait's own size (border excluded) and its border width. Size is set
+-- RELATIVE to the frame's height: 0 = the portrait, border included, exactly as
+-- tall as the frame; -10 = 10 smaller, 20 = 20 bigger. K.Border draws OUTSIDE
+-- the portrait, so the border comes off the size, never on top of it.
+function PO.Size(f, db)
+    local border = 0
+    if db.portraitBorderEnabled ~= false then
+        border = tonumber(db.portraitBorderSize) or 1
+        if border < 1 then border = 1 end    -- K.Border draws at least 1px
+    end
+    local size = K.FrameHeight(f, db) + (tonumber(db.portraitSize) or 0) - 2 * border
+    if size < 4 then size = 4 end
+    return size, border
+end
+
 function PO:Layout(f)
     local p = f and f.dfUFPortrait
     if not p then return end
     local db = K.DB(f)
     if not Enabled(db) then p:Hide(); return end
-    local fh = K.FrameHeight(f, db)
-    local size = tonumber(db.portraitSize) or 0
-    if size <= 0 then size = fh end
+    local size = PO.Size(f, db)
     p:SetSize(size, size)
     p:ClearAllPoints()
     local x, y = tonumber(db.portraitX) or 0, tonumber(db.portraitY) or 0
@@ -113,14 +126,8 @@ function PO.OutsideExtent(f, db)
     if not Enabled(db) then return 0, 0 end
     local side = db.portraitSide or "LEFT"
     if side ~= "LEFT" and side ~= "RIGHT" then return 0, 0 end
-    local size = tonumber(db.portraitSize) or 0
-    if size <= 0 then size = K.FrameHeight(f, db) end
+    local size, border = PO.Size(f, db)
     local x = tonumber(db.portraitX) or 0
-    local border = 0
-    if db.portraitBorderEnabled ~= false then
-        border = tonumber(db.portraitBorderSize) or 1
-        if border < 1 then border = 1 end    -- K.Border draws at least 1px
-    end
     if side == "RIGHT" then
         local r = 2 + x + size + border
         return 0, (r > 0) and r or 0
@@ -139,13 +146,7 @@ function PO.OutsideRect(f, db)
     local left, right = PO.OutsideExtent(f, db)
     if left == 0 and right == 0 then return nil end
     local fw, fh = K.FrameWidth(f, db), K.FrameHeight(f, db)
-    local size = tonumber(db.portraitSize) or 0
-    if size <= 0 then size = fh end
-    local border = 0
-    if db.portraitBorderEnabled ~= false then
-        border = tonumber(db.portraitBorderSize) or 1
-        if border < 1 then border = 1 end
-    end
+    local size, border = PO.Size(f, db)
     local x, y = tonumber(db.portraitX) or 0, tonumber(db.portraitY) or 0
     local cy = fh / 2 - y
     local half = size / 2 + border

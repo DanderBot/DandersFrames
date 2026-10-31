@@ -112,36 +112,36 @@ eq(PO:StyleFor({ portraitMode = "bogus" }, "player", "MAGE"), "3D", "an unknown 
 print("-- Layout: side and size")
 db.frameHeight = 40
 PO:Layout(P)
-eq(p._w, 40, "size 0: the frame's height")
+eq(p._w, 38, "size 0: the frame's height, its 1px border (drawn outside) included")
 local pt = p._points[#p._points]
 eq(pt and pt[1], "RIGHT", "Left: the portrait's right edge...")
 eq(pt and pt[3], "LEFT", "...against the frame's left edge")
 db.portraitSide = "INSIDE_RIGHT"
-db.portraitSize = 30
+db.portraitSize = -10
 PO:Layout(P)
 pt = p._points[#p._points]
 eq(pt and pt[1], "RIGHT", "Inside Right: right edge...")
 eq(pt and pt[3], "RIGHT", "...on the frame's right edge")
-eq(p._w, 30, "a set size")
+eq(p._w, 28, "size -10: 10 smaller than the frame, border included")
 db.portraitSide, db.portraitSize = nil, nil
 
 print("-- Reach outside the frame (the outer rect a frame beside it clears)")
 do
     local function reach(f) local l, r = PO.OutsideExtent(f); return l .. "," .. r end
-    eq(reach(P), "43,0", "Left, size = height (40): 2 gap + 40 + 1 border on the left")
+    eq(reach(P), "41,0", "Left, size = height (40, border included): 2 gap + 38 + 1 border")
     db.portraitSide = "RIGHT"
-    eq(reach(P), "0,43", "Right: the same on the right")
-    db.portraitSize = 60
-    eq(reach(P), "0,63", "a bigger portrait reaches further")
+    eq(reach(P), "0,41", "Right: the same on the right")
+    db.portraitSize = 20
+    eq(reach(P), "0,61", "20 bigger reaches further")
     db.portraitX = 5
-    eq(reach(P), "0,68", "...and moved out by X")
+    eq(reach(P), "0,66", "...and moved out by X")
     db.portraitX = -70
     eq(reach(P), "0,0", "...moved back over the frame: nothing (never negative)")
     db.portraitX = nil
     db.portraitBorderEnabled = false
-    eq(reach(P), "0,62", "no border")
+    eq(reach(P), "0,62", "no border: the whole 60 is portrait")
     db.portraitBorderEnabled, db.portraitBorderSize = nil, 3
-    eq(reach(P), "0,65", "a 3px border")
+    eq(reach(P), "0,59", "a 3px border comes off the size")
     db.portraitBorderSize = nil
     for _, side in ipairs({ "INSIDE_LEFT", "INSIDE_RIGHT" }) do
         db.portraitSide = side
@@ -154,15 +154,15 @@ do
     -- The portrait's own rect (the resting glow's Include Portrait), border
     -- included, from the frame's TOPLEFT with y down. The frame is 220 x 40.
     local function rect(f) local l, t, r, b = PO.OutsideRect(f); return l and table.concat({ l, t, r, b }, ",") or "nil" end
-    eq(rect(P), "-43,-1,-1,41", "rect: size = height, left of a 2px gap, its 1px border round it")
-    db.portraitSize = 60
-    eq(rect(P), "-63,-11,-1,51", "rect: a 60 portrait on a 40 frame pokes 10 + border each way")
+    eq(rect(P), "-41,0,-1,40", "rect: size = height, border included, left of a 2px gap")
+    db.portraitSize = 20
+    eq(rect(P), "-61,-10,-1,50", "rect: 20 bigger than a 40 frame pokes 10 each way")
     db.portraitY = 4
-    eq(rect(P), "-63,-15,-1,47", "rect: moved up 4")
-    db.portraitSize, db.portraitY = 20, nil
-    eq(rect(P), "-23,9,-1,31", "rect: a short portrait, centred")
+    eq(rect(P), "-61,-14,-1,46", "rect: moved up 4")
+    db.portraitSize, db.portraitY = -20, nil
+    eq(rect(P), "-21,10,-1,30", "rect: a short portrait, centred")
     db.portraitSide = "RIGHT"
-    eq(rect(P), "221,9,243,31", "rect: on the right")
+    eq(rect(P), "221,10,241,30", "rect: on the right")
     db.portraitSide = "INSIDE_LEFT"
     eq(rect(P), "nil", "rect: an inside portrait is not outside anything")
     db.portraitSide, db.portraitSize = nil, nil
@@ -170,9 +170,25 @@ do
     local T = Owner("target")
     local tdb = UF:GetUnitDB("target")
     tdb.portraitSide = "RIGHT"
-    eq(reach(T), "0,49", "target (46 high, portrait on the right): 49 past its right edge")
+    eq(reach(T), "0,47", "target (46 high, portrait on the right): 47 past its right edge")
     tdb.portraitSide = nil
     eq(UF:GetUnitDB("focus").portraitSide or "LEFT", "LEFT", "focus: its portrait on the left (out of a focus target's way)")
+end
+
+print("-- Old absolute portrait sizes become relative, once")
+if UF.MigrateProfileTable then
+    local t = { global = {}, units = { player = { portraitSize = 60, frameHeight = 40 },
+                                       target = { portraitSize = 0 },
+                                       focus = { portraitSize = 30, frameHeight = 30, portraitBorderEnabled = false } } }
+    UF.MigrateProfileTable(t)
+    eq(t.units.player.portraitSize, 22, "60 + its 1px border each side on a 40 frame: 22 bigger")
+    eq(t.units.target.portraitSize, 0, "0 (frame height) stays 0")
+    eq(t.units.focus.portraitSize, 0, "no border: 30 on a 30 frame is 0")
+    eq(t.global.portraitSizeRelative, true, "marked done")
+    UF.MigrateProfileTable(t)
+    eq(t.units.player.portraitSize, 22, "a second run changes nothing")
+else
+    check(false, "UF.MigrateProfileTable is loaded")
 end
 
 print("-- Painting")

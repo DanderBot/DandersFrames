@@ -1311,7 +1311,7 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
         LEFT = L["Left"], RIGHT = L["Right"], INSIDE_LEFT = L["Inside Left"], INSIDE_RIGHT = L["Inside Right"],
         _order = { "LEFT", "RIGHT", "INSIDE_LEFT", "INSIDE_RIGHT" } }, db, "portraitSide", changed), 55)
     w.disableOn = off
-    w = band:AddWidget(GUI:CreateSlider(self.child, L["Size (0 = frame height)"], 0, 150, 1, db, "portraitSize", changed), 55)
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Size (0 = frame height)"], -60, 100, 1, db, "portraitSize", changed), 55)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "portraitX", changed), 55)
     w.disableOn = off
