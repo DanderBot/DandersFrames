@@ -502,6 +502,10 @@ function DF:UpdateHealthBarAppearance(frame)
         elseif colorMode == "CUSTOM" then
             local c = db.healthColor or DEFAULT_COLOR_HEALTH
             tex:SetVertexColor(c.r, c.g, c.b)
+        elseif colorMode == "REACTION" or colorMode == "CLASS_REACTION" then
+            -- Standalone frames' reaction / tapped colours (Frames/Colors.lua), the
+            -- same answer ApplyHealthColors paints, so the two appliers agree.
+            tex:SetVertexColor(DF:GetReactionHealthColor(unit, colorMode))
         else
             -- Default fallback
             tex:SetVertexColor(0, 0.8, 0)
