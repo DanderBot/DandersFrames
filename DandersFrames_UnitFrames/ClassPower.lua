@@ -485,6 +485,9 @@ function CP:Preview(f)
     if not cp then return end
     local db = K.DB(f)
     if not Enabled(db) then cp:Hide(); return end
+    -- The units test panel's Class Power switch.
+    local P = UF.Preview
+    if P and P.TestOn and not P:TestOn("showClassPower") then cp:Hide(); return end
     local res = CP:Resolve(nil, nil, true, db) or { kind = "pips", power = "ComboPoints", token = "COMBO_POINTS", max = 5 }
     if res.kind == "stagger" then res = { kind = "pips", power = "Chi", token = "CHI", max = 5 } end
     if res.kind == "runes" then res = { kind = "pips", power = "Runes", token = "RUNES", max = 6 } end

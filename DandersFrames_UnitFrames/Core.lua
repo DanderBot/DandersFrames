@@ -136,9 +136,23 @@ function UF:GetGlobalSetting(key)
     return v
 end
 
--- "Include Unit Frames in Test Mode": DandersFrames' test mode turns the preview on.
-function UF:IncludeInTestMode()
-    return UF:GetGlobalSetting("includeInTestMode") ~= false
+-- The units test mode's own settings (its test panel): DF.db.unitframes.global.testMode,
+-- kept apart from the party and raid test settings. Missing keys are filled from
+-- UF.TestDefaults on every read, so the panel's controls and the preview always
+-- see a value (a table default is copied, never shared). nil before the profile
+-- exists.
+function UF:GetTestDB()
+    local g = UF:GetGlobalDB()
+    if not g then return nil end
+    local t = g.testMode
+    if type(t) ~= "table" then
+        t = {}
+        g.testMode = t
+    end
+    for k, v in pairs(UF.TestDefaults or {}) do
+        if t[k] == nil then t[k] = (type(v) == "table" and DF.DeepCopy) and DF:DeepCopy(v) or v end
+    end
+    return t
 end
 
 -- The default for one key of one unit (unit defaults, then party defaults).

@@ -415,9 +415,9 @@ check(not B.previewShown and not pc:IsShown(), "session over: the boss preview h
 db.bossPreviewCount = false
 P:SetOwner("test", true)
 check(not B.previewShown, "test mode with Show Placeholder Frames off: no boss preview")
-P:SetOwner("settings", true)
-check(B.previewShown, "...but the Settings page's Preview still shows them")
-P:SetOwner("settings", false)
+P:SetOwner("unlock", true)
+check(B.previewShown, "...but a mover session still shows them (something to drag)")
+P:SetOwner("unlock", false)
 check(not B.previewShown, "...and drops them again")
 db.bossPreviewCount = true
 P:Refresh()

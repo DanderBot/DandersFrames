@@ -58,6 +58,8 @@ load_uf_file_into("Links.lua", UF)
 load_uf_file_into("Defaults.lua", UF)
 load_uf_file_into("Preview.lua", UF)
 DF.db = { unitframes = deepcopy(UF.ProfileDefaults) }
+-- The units test panel's own settings (never the party / raid table's).
+local tdb = UF:GetTestDB()
 local P = UF.Preview
 
 -- ---- the real seam and the real window maths ----------------------------------
@@ -130,9 +132,10 @@ local function PaintAll()
 end
 
 -- ============================================================
-print("-- Test auras: Show Auras off (the default) shows none")
+print("-- Test auras: Show Auras off shows none")
 do
-    eq(party.testShowAuras, false, "the test panel's Show Auras is off by default")
+    eq(tdb.testShowAuras, true, "the units test panel's Show Auras is on by default")
+    tdb.testShowAuras = false
     local frames = PaintAll()
     for key, f in pairs(frames) do
         eq(Drawn(f, "buff"), nil, key .. ": no buff row")
@@ -142,7 +145,7 @@ end
 
 print("-- Test auras: Show Auras on, the counts honour each unit's max")
 do
-    party.testShowAuras, party.testBuffCount, party.testDebuffCount = true, 5, 5
+    tdb.testShowAuras, tdb.testBuffCount, tdb.testDebuffCount = true, 5, 5
     local frames = PaintAll()
     local function count(key, prefix)
         local d = Drawn(frames[key], prefix)
@@ -169,17 +172,17 @@ do
     frames = PaintAll()
     eq(count("target", "buff"), 2, "target with Max Buffs 2: 2 buffs")
     UF:GetStoredUnit("target").buffMax = nil
-    party.testBuffCount = 1
+    tdb.testBuffCount = 1
     frames = PaintAll()
     eq(count("target", "buff"), 1, "test count 1: 1 buff")
-    party.testDebuffCount = 0
+    tdb.testDebuffCount = 0
     frames = PaintAll()
     eq(count("target", "debuff"), 0, "test count 0: the debuff row is hidden, as on group frames")
 end
 
 print("-- Test auras: at the default count every debuff type, stacks and timers show")
 do
-    party.testBuffCount, party.testDebuffCount = 2, 2
+    tdb.testBuffCount, tdb.testDebuffCount = 2, 2
     local frames = PaintAll()
     local types, stacks, durations, windows = {}, 0, {}, {}
     local short, long, permanent = false, false, false
@@ -218,17 +221,17 @@ do
     check(Drawn(frames.target, "debuff") ~= nil, "...while its preview still draws samples")
 end
 
-print("-- Test auras: raid test mode's switches")
+print("-- Test auras: the party / raid test switches never reach the preview")
 do
-    party.testShowAuras = true
-    raid.testShowAuras = false
+    party.testShowAuras, raid.testShowAuras = false, false
+    party.testDebuffCount, raid.testDebuffCount = 5, 5
     DF.raidTestMode = true
+    tdb.testDebuffCount = 3
     local frames = PaintAll()
-    eq(Drawn(frames.target, "buff"), nil, "raid test mode up with its Show Auras off: no rows")
-    raid.testShowAuras, raid.testDebuffCount = true, 3
-    frames = PaintAll()
-    eq(#Drawn(frames.target, "debuff"), 3, "...on, with the raid table's count")
+    check(Drawn(frames.target, "debuff") ~= nil, "group Show Auras off: the preview still draws (its own switch is on)")
+    eq(#Drawn(frames.target, "debuff"), 3, "...with the units panel's count")
     DF.raidTestMode = nil
+    tdb.testDebuffCount = 2
 end
 
 print("-- Test auras: party and raid test frames are untouched")

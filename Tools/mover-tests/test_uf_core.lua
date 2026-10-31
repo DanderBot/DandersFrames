@@ -308,10 +308,13 @@ do
 
     local g = UF:GetGlobalDB()
     check(D:GetAdapter(g) ~= nil, "the module table registers one too")
-    g.includeInTestMode = false
-    check(D:IsModified(g, "includeInTestMode"), "the module table: a change shows")
-    D:ResetOverride(g, "includeInTestMode")
-    eq(rawget(g, "includeInTestMode"), nil, "...and resets")
+    -- (No module-wide key has a default today; one is lent for the check.)
+    UF.GlobalDefaults.testKey = true
+    g.testKey = false
+    check(D:IsModified(g, "testKey"), "the module table: a change shows")
+    D:ResetOverride(g, "testKey")
+    eq(rawget(g, "testKey"), nil, "...and resets")
+    UF.GlobalDefaults.testKey = nil
     check(rawget(target, "__dfDefaultsAdapter") == nil and rawget(stored, "__dfDefaultsAdapter") == nil,
           "nothing is written into the saved tables")
 

@@ -244,8 +244,9 @@ end
 -- ============================================================
 -- PREVIEW (spec §1.8): N sample bosses in a non-secure copy of the container.
 -- N = Preview Frames (clamped to the slot count). The "Show Placeholder Frames
--- in Test Mode" tick only gates DandersFrames' test mode: a mover session and
--- the Settings page's Preview always show them, or there is nothing to drag.
+-- in Test Mode" tick (also the Boss switch on the units test panel) only gates
+-- the units test mode: a mover session always shows them, or there is nothing
+-- to drag.
 -- ============================================================
 function B:PreviewCount(db)
     db = db or UF:GetUnitDB("boss")
@@ -256,7 +257,7 @@ function B:PreviewWanted()
     local P = UF.Preview
     if not (P and P.shown) then return false end
     if not B.container then return false end      -- source is not ours
-    if P:IsOwnedBy("unlock") or P:IsOwnedBy("settings") then return true end
+    if P:IsOwnedBy("unlock") then return true end
     return UF:GetUnitDB("boss").bossPreviewCount ~= false
 end
 

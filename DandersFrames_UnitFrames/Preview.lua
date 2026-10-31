@@ -20,16 +20,25 @@ local addonName, UF = ...
 --
 -- Owners -- the preview is up while ANY of them wants it (DandersFrames' test
 -- mode ownership model, TestMode/Shim.lua):
---   "unlock"    a DandersMover session (Mover.lua's Unlocked / Locked)
---   "test"      DandersFrames' test mode is on screen and the module-wide
---               "Include Unit Frames in Test Mode" is ticked (OnTestModeChanged)
---   "settings"  the Preview switch on the module's Settings page (this session)
+--   "unlock"    a DandersMover session (Mover.lua's Unlocked / Locked). Every
+--               preview shows, so there is something to drag.
+--   "test"      the UNITS TEST MODE (P:SetTestMode): the Test button on a Unit
+--               Frames page, its test panel, /df test units, the Test Mode switch
+--               on the module's Settings page. Its panel's Frames switches pick
+--               which previews show.
+--
+-- ★ THE UNITS TEST MODE AND DANDERSFRAMES' PARTY / RAID TEST MODE NEVER MIX.
+-- Turning this one on drops the user's party and raid claims (and closes their
+-- panel); the user claiming either of those turns this one off (the
+-- SetTestModeOwner hook in P:Init). Party and raid test mode never show unit
+-- frames. A mover session's own claims are left alone on both sides.
 -- ============================================================
 
 local DF = DandersFrames
 if not DF then return end
 
-local pairs, ipairs, type = pairs, ipairs, type
+local pairs, ipairs, type, pcall, tonumber = pairs, ipairs, type, pcall, tonumber
+local sin, max, min, floor, pi = math.sin, math.max, math.min, math.floor, math.pi
 
 local P = { owners = {}, frames = {}, shown = false, LEVEL_ABOVE_LIVE = 100 }
 UF.Preview = P
@@ -57,7 +66,7 @@ end
 
 local function SetHealth(t, pct)
     t.healthPercent = pct
-    t.currentHealth = math.floor(pct * t.maxHealth)
+    t.currentHealth = floor(pct * t.maxHealth)
 end
 
 function P:PlayerName()
@@ -76,6 +85,59 @@ end
 -- Health of the sample bosses, slot by slot.
 P.BOSS_HEALTH = { 0.92, 0.71, 0.55, 0.38, 0.2, 0.84, 0.63, 0.47 }
 
+-- ============================================================
+-- THE UNITS TEST SETTINGS (the test panel's; UF:GetTestDB, Defaults.lua)
+-- ============================================================
+
+-- The settings table, or the defaults before the profile exists.
+function P:TestDB()
+    return (UF.GetTestDB and UF:GetTestDB()) or UF.TestDefaults or {}
+end
+
+-- One switch: on unless switched off.
+function P:TestOn(key)
+    return P:TestDB()[key] ~= false
+end
+
+P.REACTION = { hostile = 2, neutral = 4, friendly = 5 }
+-- The classifications the frames draw (the Elite / Rare icon, the Text Designer's
+-- Classification token). "normal" draws none.
+P.CLASSIFICATIONS = { normal = true, elite = true, rare = true, rareelite = true, worldboss = true }
+-- The raid target icon each sample enemy wears (a boss slot wears its slot's).
+P.RAID_TARGET = { target = 8, focus = 7 }
+
+-- The animated health wave -- the party test mode's: the unit's own health +/-
+-- 15%, offset per frame. P.animPhase is nil while nothing animates.
+function P:AnimatedHealth(base, index)
+    if not P.animPhase then return base end
+    local wave = sin((P.animPhase + ((index or 1) * 0.13) % 1) * pi * 2)
+    return max(0.1, min(1, base + wave * 0.15))
+end
+
+-- The test panel's choices, laid over a sample unit.
+function P:ApplyTestSettings(t, unit, slot)
+    local tdb = P:TestDB()
+    if unit == "target" then
+        local c = tdb.classification
+        if P.CLASSIFICATIONS[c] then t.classification = (c ~= "normal") and c or nil end
+        t.reaction = P.REACTION[tdb.reaction] or t.reaction
+    end
+    if tdb.showRaidTarget ~= false then
+        if unit == "boss" then t.raidTarget = slot or 1 else t.raidTarget = P.RAID_TARGET[unit] end
+    end
+    if unit == "player" then
+        t.isLeader = tdb.showLeader ~= false
+        t.isInCombat = tdb.showCombat ~= false
+    end
+    local base = t.healthPercent
+    if tdb.fixedHealth then
+        local pct = tonumber(tdb.healthPercent) or 75
+        base = max(0.01, min(1, pct / 100))
+    end
+    t.baseHealth = base
+    SetHealth(t, tdb.testAnimateHealth and P:AnimatedHealth(base, t.index) or base)
+end
+
 -- Sample names are display-only stand-ins (like the test pool's), never stored.
 -- `slot` is the boss slot (boss previews only).
 function P:TestData(unit, slot)
@@ -86,15 +148,18 @@ function P:TestData(unit, slot)
     if unit == "player" or unit == "targettarget" or unit == "focustarget" then
         t.name, t.class, t.role = me, myClass, "DAMAGER"
         t.level = lvl
-        SetHealth(t, unit == "player" and 0.85 or 0.85)
-        t.absorbPercent = (unit == "player") and 0.10 or 0
-        t.isInCombat = true
+        SetHealth(t, 0.85)
+        if unit == "player" then
+            -- Something for each of the test panel's Bars switches to show.
+            t.absorbPercent, t.healAbsorbPercent, t.healPredictionPercent = 0.10, 0.08, 0.10
+        end
     elseif unit == "target" then
         t.index = 2
         t.name, t.reaction, t.classification = "Training Dummy", 2, "elite"
         t.level = lvl + 1
         SetHealth(t, 0.62)
         t.powerPercent = 0.4
+        t.absorbPercent = 0.12
         t.targetName = me
     elseif unit == "focus" then
         t.index = 3
@@ -121,6 +186,7 @@ function P:TestData(unit, slot)
         t.powerPercent = 0.5
         t.targetName = me
     end
+    P:ApplyTestSettings(t, unit, slot)
     return t
 end
 
@@ -131,27 +197,23 @@ end
 -- debuff rows, and the aura containers paint them from the test mode's sample
 -- pool (DF.TestData) with the unit's own layout, size, max and borders. A preview
 -- frame (dfPreview) is always in that preview shape, test mode on or not
--- (AuraContainer testShapeFor), so the mover session and the Preview switch show
--- them too. Nothing here makes auras of its own.
+-- (AuraContainer testShapeFor), so the mover session shows them too. Nothing
+-- here makes auras of its own.
 -- ============================================================
 
--- The test panel's AURAS switches -- Show Auras, the Buffs / Debuffs counts, Dispel
--- Overlay, Missing Buff, Aura Designer. They are stored in the PARTY or RAID table,
--- never a unit's, so a preview frame reads them from the test mode on screen (the
--- raid table while raid test mode is up, else the party table): the unit frames
--- follow the same switches as the group frames. Every other key is the unit's own.
+-- The keys DandersFrames' test painter reads off a frame's settings table
+-- (DF:UpdateTestFrame, DF:UpdateTestAuras, the status icon painter). A preview
+-- frame answers them from the UNITS test settings (UF:GetTestDB), never from the
+-- party or raid table: the units test panel is the one that moves them. Every
+-- other key is the unit's own.
 P.TEST_KEYS = {
     testShowAuras = true, testBuffCount = true, testDebuffCount = true,
-    testShowDispelGlow = true, testShowMissingBuff = true, testShowAuraDesigner = true,
+    testShowAbsorbs = true, testShowHealPrediction = true,
+    testShowStatusIcons = true, testAnimateHealth = true,
 }
 
-function P:TestModeDB()
-    if DF.raidTestMode and DF.GetRaidDB then return DF:GetRaidDB() end
-    return DF.GetDB and DF:GetDB() or nil
-end
-
 -- A preview frame's settings table: the unit's own (UF:GetUnitDB), with the keys
--- above read from the test mode's table. Writes go to the unit's table. One per
+-- above read from the units test settings. Writes go to the unit's table. One per
 -- unit, remade when the unit's table changes (a profile switch).
 local previewDBs = {}
 function P:PreviewDB(unit)
@@ -161,8 +223,7 @@ function P:PreviewDB(unit)
     local proxy = setmetatable({}, {
         __index = function(_, key)
             if P.TEST_KEYS[key] then
-                local t = P:TestModeDB()
-                local v = t and t[key]
+                local v = P:TestDB()[key]
                 if v ~= nil then return v end
             end
             return db[key]
@@ -194,10 +255,16 @@ end
 function P:IsOwnedBy(owner) return P.owners[owner] and true or false end
 
 function P:SetOwner(owner, wanted)
+    local had = P.owners[owner] and true or false
     P.owners[owner] = wanted and true or nil
-    P:Reconcile()
-    -- The boss preview depends on WHICH owners want it (Boss.lua PreviewWanted).
-    if P.shown and UF.Boss and UF.Boss.PreviewRefresh then UF.Boss:PreviewRefresh() end
+    if P.shown and P:IsActive() and had ~= (wanted and true or false) then
+        -- Still up, but WHICH previews show depends on the owners (a mover session
+        -- shows every one; the test mode only those its panel picks). Refresh
+        -- repaints the boss slots too (Boss.lua PreviewWanted).
+        P:Refresh()
+    else
+        P:Reconcile()
+    end
 end
 
 function P:Reconcile()
@@ -206,18 +273,104 @@ function P:Reconcile()
     elseif not want and P.shown then P:Hide() end
 end
 
--- DandersFrames' test mode: on screen in either scope, when the option allows.
-function P:SyncTestMode()
-    local on = DF.IsTestModeActive and (DF:IsTestModeActive("party") or DF:IsTestModeActive("raid"))
-    P:SetOwner("test", (on and UF:IncludeInTestMode()) and true or false)
+-- ============================================================
+-- THE UNITS TEST MODE
+-- ============================================================
+P.listeners = {}
+
+-- fn(on, reason): the test mode went on or off. reason: "user" (its own
+-- switches), "combat", or "group" (the party / raid test mode took over).
+function P:AddListener(fn)
+    if type(fn) == "function" then P.listeners[#P.listeners + 1] = fn end
+end
+
+local function Notify(on, reason)
+    for _, fn in ipairs(P.listeners) do pcall(fn, on, reason) end
+    if DF.GUI and DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
+end
+
+function P:IsTestMode() return P:IsOwnedBy("test") end
+
+-- The party / raid test mode the USER asked for. A mover session's claim is not
+-- the user's, and is left alone.
+local function GroupTestOwned()
+    if not DF.IsTestModeOwnedBy then return false end
+    return DF:IsTestModeOwnedBy("party", "user") or DF:IsTestModeOwnedBy("raid", "user")
+end
+
+local function ReleaseGroupTest()
+    -- Its panel releases both claims as it closes (TestMode.lua, the panel's OnHide).
+    if DF.TestPanel and DF.TestPanel.IsShown and DF.TestPanel:IsShown() then DF.TestPanel:Hide() end
+    if DF.SetTestModeOwner and GroupTestOwned() then
+        DF:SetTestModeOwner("party", "user", false, true)
+        DF:SetTestModeOwner("raid", "user", false, true)
+    end
+end
+
+-- Turn the units test mode on or off. Turning it on is refused in combat, the
+-- same as the party and raid test mode (whose combat entry ends it too -- see
+-- P:OnCombat). Returns whether the mode is now what was asked.
+function P:SetTestMode(on, reason)
+    on = on and true or false
+    if on == P:IsTestMode() then return true end
+    if on and InCombatLockdown and InCombatLockdown() then
+        local L = DF.L
+        if DF.Say and L then DF:Say(L["Cannot enter test mode during combat."]) end
+        return false
+    end
+    if on then
+        P.releasingGroup = true
+        ReleaseGroupTest()
+        P.releasingGroup = nil
+    end
+    P:SetOwner("test", on)
+    Notify(on, reason or "user")
+    return true
+end
+
+function P:ToggleTestMode()
+    return P:SetTestMode(not P:IsTestMode())
+end
+
+-- After DandersFrames' SetTestModeOwner ran: the USER claimed the party or raid
+-- test mode, so this one steps aside.
+local function OnGroupOwner(_, scope, owner, wanted)
+    if P.releasingGroup or owner ~= "user" or not wanted then return end
+    if P:IsTestMode() then P:SetTestMode(false, "group") end
+end
+
+-- Entering combat ends the test mode, as DandersFrames does to its own, with the
+-- same chat line. A mover session's preview is the mover's business.
+function P:OnCombat()
+    if not P:IsTestMode() then return end
+    P:SetTestMode(false, "combat")
+    local L = DF.L
+    if DF.Say and L then DF:Say(L["Test mode ended — entering combat."]) end
 end
 
 function P:Init()
     if P.initialised then return end
     P.initialised = true
-    if DF.RegisterCallback then
-        DF.RegisterCallback(P, "OnTestModeChanged", function() P:SyncTestMode() end)
+    if hooksecurefunc and type(DF.SetTestModeOwner) == "function" then
+        hooksecurefunc(DF, "SetTestModeOwner", OnGroupOwner)
     end
+    if CreateFrame then
+        local ev = CreateFrame("Frame")
+        ev:RegisterEvent("PLAYER_REGEN_DISABLED")
+        ev:SetScript("OnEvent", function() P:OnCombat() end)
+        P.eventFrame = ev
+    end
+end
+
+-- Does `unit`'s preview show? Every one during a mover session; under the test
+-- mode alone, the ones its panel's Frames switches leave on. (Boss: Boss.lua
+-- PreviewWanted.)
+P.SHOW_KEY = { player = "showPlayer", target = "showTarget", targettarget = "showTargetTarget",
+               focus = "showFocus", focustarget = "showFocusTarget", pet = "showPet" }
+function P:UnitWanted(unit)
+    if P:IsOwnedBy("unlock") then return true end
+    local key = P.SHOW_KEY[unit]
+    return not key or P:TestOn(key)
 end
 
 -- ============================================================
@@ -343,22 +496,47 @@ local function FadeLive(alpha)
 end
 
 -- ============================================================
--- FOLLOWING THE TEST PANEL
--- The test panel's aura switches (P.TEST_KEYS) repaint the GROUP test frames only:
--- DF:UpdateTestAuras per frame, or DF:UpdateAllTestDispelGlow / ...MissingBuff /
--- ...AuraDesigner. So the preview listens on those, and when the switches it reads
--- have moved since its last paint it repaints once, on the next frame. The compare
--- keeps it quiet on every other group repaint (a settings drag, a roster change).
--- Hooked once, after the painter (the options addon) has loaded.
+-- ANIMATED HEALTH (the units test panel's Animate Health)
+-- Its own ticker, at the party test mode's rhythm: 20 steps a second, health
+-- only (DF:UpdateTestFrameHealthOnly), each frame's own sample as the centre.
 -- ============================================================
-function P:TestKeysSig()
-    local t = P:TestModeDB()
-    if not t then return "" end
-    return tostring(t.testShowAuras) .. "|" .. tostring(t.testBuffCount) .. "|" .. tostring(t.testDebuffCount)
-        .. "|" .. tostring(t.testShowDispelGlow) .. "|" .. tostring(t.testShowMissingBuff)
-        .. "|" .. tostring(t.testShowAuraDesigner)
+local function EachShownFrame(fn)
+    for _, f in pairs(P.frames) do
+        if f:IsShown() then fn(f) end
+    end
+    local boss = UF.Boss and UF.Boss.preview
+    for _, f in pairs(boss or {}) do
+        if f:IsShown() then fn(f) end
+    end
 end
 
+local function AnimateFrame(f)
+    local d = f.dfTestData
+    if not (d and d.baseHealth) then return end
+    SetHealth(d, P:AnimatedHealth(d.baseHealth, d.index))
+    if DF.UpdateTestFrameHealthOnly then DF:UpdateTestFrameHealthOnly(f, f.index) end
+end
+
+function P:AnimateStep()
+    P.animPhase = ((P.animPhase or 0) + 0.02) % 1
+    EachShownFrame(AnimateFrame)
+end
+
+function P:SyncAnimation()
+    local want = (P.shown and P:TestDB().testAnimateHealth) and true or false
+    if want and not P.animTicker and C_Timer and C_Timer.NewTicker then
+        P.animPhase = 0
+        P.animTicker = C_Timer.NewTicker(0.05, function() P:AnimateStep() end)
+    elseif not want and P.animTicker then
+        P.animTicker:Cancel()
+        P.animTicker = nil
+        P.animPhase = nil
+    end
+end
+
+-- ============================================================
+-- SHOW / HIDE / REFRESH
+-- ============================================================
 function P:RequestRefresh()
     if not P.shown or P.refreshQueued then return end
     P.refreshQueued = true
@@ -368,17 +546,16 @@ function P:RequestRefresh()
     end)
 end
 
-local function OnGroupAurasPainted(_, frame)
-    if frame and frame.dfUFPreview then return end   -- our own paint
-    if P.shown and P:TestKeysSig() ~= P.testSig then P:RequestRefresh() end
-end
-
-function P:HookTestPanel()
-    if P.panelHooked or not hooksecurefunc or type(DF.UpdateTestAuras) ~= "function" then return end
-    P.panelHooked = true
-    hooksecurefunc(DF, "UpdateTestAuras", OnGroupAurasPainted)
-    for _, name in ipairs({ "UpdateAllTestDispelGlow", "UpdateAllTestMissingBuff", "UpdateAllTestAuraDesigner" }) do
-        if type(DF[name]) == "function" then hooksecurefunc(DF, name, OnGroupAurasPainted) end
+-- Show and paint the previews that are wanted (P:UnitWanted), hide the rest.
+function P:PaintUnits()
+    for _, unit in ipairs(P:Units()) do
+        if P:UnitWanted(unit) then
+            local f = P:Acquire(unit)
+            if not f:IsShown() then f:Show() end
+            P:Paint(f)
+        elseif P.frames[unit] then
+            P.frames[unit]:Hide()
+        end
     end
 end
 
@@ -388,24 +565,20 @@ function P:Show()
     if not DF._optionsAddonLoaded and DF.EnsureOptionsLoaded and not InCombatLockdown() then
         DF:EnsureOptionsLoaded()
     end
-    P:HookTestPanel()
     P.shown = true
-    P.testSig = P:TestKeysSig()
     -- The parent carries the DETACHED pieces too (a detached preview cast bar is
     -- parented here, not to its frame), so it is shown and hidden with the preview.
     P:GetParent():Show()
-    for _, unit in ipairs(P:Units()) do
-        local f = P:Acquire(unit)
-        f:Show()
-        P:Paint(f)
-    end
+    P:PaintUnits()
     if UF.Boss and UF.Boss.PreviewRefresh then UF.Boss:PreviewRefresh() end
     FadeLive(0)
+    P:SyncAnimation()
     UF.Debug("preview on")
 end
 
 function P:Hide()
     P.shown = false
+    P:SyncAnimation()
     for _, f in pairs(P.frames) do f:Hide() end
     if UF.Boss and UF.Boss.PreviewHide then UF.Boss:PreviewHide() end
     if P.parent then P.parent:Hide() end
@@ -416,14 +589,11 @@ function P:Hide()
     UF.Debug("preview off")
 end
 
--- Settings changed, or the profile did: repaint what is up.
+-- Settings changed, the profile did, or the test panel moved a switch: repaint
+-- what is up.
 function P:Refresh()
     if not P.shown then return end
-    P.testSig = P:TestKeysSig()
-    for _, unit in ipairs(P:Units()) do
-        local f = P:Acquire(unit)
-        if not f:IsShown() then f:Show() end
-        P:Paint(f)
-    end
+    P:PaintUnits()
     if UF.Boss and UF.Boss.PreviewRefresh then UF.Boss:PreviewRefresh() end
+    P:SyncAnimation()
 end

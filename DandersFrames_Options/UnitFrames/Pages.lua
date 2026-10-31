@@ -1457,30 +1457,24 @@ function UFO.ResetPosition(unit)
     if UF.Mover and UF.Mover.ApplyAll then UF.Mover:ApplyAll() end
 end
 
--- ---- preview ------------------------------------------------------------------
-function UFO.IsPreviewOn()
+-- ---- the units test mode (UF.Preview's "test" owner) ------------------------------
+-- Its own mode, apart from the party / raid test mode: the two never mix
+-- (Preview.lua). The panel is TestPanel.lua.
+function UFO.IsTestModeOn()
     local UF = DF.UnitFrames
     local P = UF and UF.Preview
-    return P and P:IsOwnedBy("settings") or false
+    return P and P.IsTestMode and P:IsTestMode() or false
 end
 
-function UFO.SetPreview(on)
+function UFO.SetTestMode(on)
     local UF = DF.UnitFrames
     local P = UF and UF.Preview
-    if P then P:SetOwner("settings", on) end
+    if P and P.SetTestMode then return P:SetTestMode(on) end
+    return false
 end
 
-function UFO.IncludeInTestMode()
-    local UF = DF.UnitFrames
-    return not (UF and UF.IncludeInTestMode) or UF:IncludeInTestMode()
-end
-
-function UFO.SetIncludeInTestMode(on)
-    local UF = DF.UnitFrames
-    local g = UF and UF:GetGlobalDB()
-    if not g then return end
-    g.includeInTestMode = on and true or false
-    if UF.Preview and UF.Preview.SyncTestMode then UF.Preview:SyncTestMode() end
+function UFO.ToggleTestMode()
+    return UFO.SetTestMode(not UFO.IsTestModeOn())
 end
 
 -- ⚠ NO CARD OF OUR OWN IS ADDED TO A PAGE A PARTY BUILDER DRAWS: a second
@@ -1589,16 +1583,14 @@ function UFO.BuildSettingsPage(self, db, Add)
         function(v) UFO.SetEnabled(v) end), 30)
     Close(band)
 
-    -- Preview: sample frames for every unit this build draws (UF.Preview). The
-    -- switch is for this session only; the test-mode option is saved.
-    band = Open(L["Preview"], "uf_preview", 1,
-        function() return UFO.IsPreviewOn() and L["On"] or L["Off"] end, "rendering")
-    band:AddWidget(GUI:CreateCheckbox(self.child, L["Preview"], nil, nil, nil,
-        function() return UFO.IsPreviewOn() end,
-        function(v) UFO.SetPreview(v); self:RefreshStates() end), 30)
-    band:AddWidget(GUI:CreateCheckbox(self.child, L["Include Unit Frames in Test Mode"], nil, nil, nil,
-        function() return UFO.IncludeInTestMode() end,
-        function(v) UFO.SetIncludeInTestMode(v) end), 30)
+    -- The units test mode: sample frames for every unit this build draws
+    -- (UF.Preview), apart from the party / raid test mode. For this session only;
+    -- its panel (the Test button on any Unit Frames page) holds its options.
+    band = Open(L["Test Mode"], "uf_preview", 1,
+        function() return UFO.IsTestModeOn() and L["On"] or L["Off"] end, "rendering")
+    band:AddWidget(GUI:CreateCheckbox(self.child, L["Test Mode"], nil, nil, nil,
+        function() return UFO.IsTestModeOn() end,
+        function(v) UFO.SetTestMode(v); self:RefreshStates() end), 30)
     Close(band)
 
     -- One row per frame this build draws: its name, Edit in Mover, Reset Position.
@@ -1762,6 +1754,14 @@ function UFO.RegisterModule()
         status = UFO.Status,
         description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
         reset = UFO.Reset,
+        -- The window's Test button follows this module: the units test mode and
+        -- its panel (TestPanel.lua), never the party / raid one.
+        testMode = {
+            isOn = function() return UFO.IsTestModeOn() end,
+            toggle = function() UFO.ToggleTestMode() end,
+            isPanelShown = function() return UFO.IsTestPanelShown and UFO.IsTestPanelShown() or false end,
+            togglePanel = function() if UFO.ToggleTestPanel then UFO.ToggleTestPanel() end end,
+        },
     })
 end
 

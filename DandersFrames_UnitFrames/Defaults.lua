@@ -29,8 +29,41 @@ if not DF then return end
 UF.DB_VERSION = 1
 
 UF.GlobalDefaults = {
-    -- DandersFrames' test mode (/df test) shows the unit frame preview too.
-    includeInTestMode = true,
+}
+
+-- ============================================================
+-- UNITS TEST MODE (Preview.lua, the test panel in DandersFrames_Options/UnitFrames/
+-- TestPanel.lua). Stored in DF.db.unitframes.global.testMode (UF:GetTestDB), apart
+-- from the party and raid test settings: the two test modes never share a switch.
+-- The test* keys are the ones DandersFrames' test painter reads off a frame's
+-- settings table; a preview frame's table answers them from here (P.TEST_KEYS).
+-- ============================================================
+UF.TestDefaults = {
+    -- Frames: which previews show (boss: its own page's "Show Placeholder Frames
+    -- in Test Mode", bossPreviewCount / bossPreviewNum on the boss table).
+    showPlayer = true, showTarget = true, showTargetTarget = true,
+    showFocus = true, showFocusTarget = true, showPet = true,
+    -- Target: the sample target's classification and reaction.
+    classification = "elite",   -- normal | elite | rare | rareelite | worldboss
+    reaction = "hostile",       -- hostile | neutral | friendly
+    -- Health: animated (the party test wave), or every preview at one value.
+    testAnimateHealth = false,
+    fixedHealth = false,
+    healthPercent = 75,
+    -- Bars
+    testShowAbsorbs = true,
+    testShowHealPrediction = true,
+    showCastBars = true,
+    showClassPower = true,
+    -- Auras
+    testShowAuras = true,
+    testBuffCount = 2,
+    testDebuffCount = 2,
+    -- Icons
+    testShowStatusIcons = true,
+    showRaidTarget = true,
+    showLeader = true,
+    showCombat = true,
 }
 
 -- Applied to every unit before its own overrides below.

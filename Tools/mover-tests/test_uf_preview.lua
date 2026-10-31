@@ -2,19 +2,19 @@ local NS = ...
 
 -- ============================================================
 -- UNIT FRAMES COMPANION -- PREVIEW
--- DandersFrames_UnitFrames/Preview.lua (+ the Mover.lua callbacks, the
--- Settings page switch, and DandersFrames' OnTestModeChanged hook)
+-- DandersFrames_UnitFrames/Preview.lua (+ the Mover.lua callbacks and the
+-- units test mode: its own mode, never mixed with DF's party / raid one)
 -- ------------------------------------------------------------
 -- Separate NON-SECURE frames, one per drawn unit, painted by DF's test painter
--- with their own fake unit (dfPreview, dfTestData). Owners: a mover session,
--- DF's test mode (when the module option allows), the Settings page switch.
+-- with their own fake unit (dfPreview, dfTestData). Owners: a mover session and
+-- the units test mode (its panel, the Test button on a Unit Frames page).
 -- The live secure buttons are never shown or hidden by any of it -- their
 -- holders are only faded (alpha is legal in combat).
 -- ============================================================
 
 local G, G_NAMES = {}, { "DandersFrames", "CreateFrame", "C_Timer", "RegisterUnitWatch", "RegisterStateDriver",
                      "ClickCastFrames", "UnitGUID", "UnitExists", "UnitHasVehicleUI", "IsInInstance", "LibStub",
-                     "UnitName", "UnitClass", "UnitLevel" }
+                     "UnitName", "UnitClass", "UnitLevel", "hooksecurefunc" }
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 
 local function deepcopy(t)
@@ -51,6 +51,12 @@ function DF:UpdateTestFrame(f, index)
 end
 function DF:EnsureOptionsLoaded() loads = loads + 1; DF._optionsAddonLoaded = true; return true end
 function DF:IsTestModeActive(scope) return self._testActive[scope] end
+-- DF's test mode ownership (TestMode/Shim.lua), as far as the units test mode reads it.
+DF._owners = { party = {}, raid = {} }
+function DF:IsTestModeOwnedBy(scope, owner) return self._owners[scope][owner] and true or false end
+function DF:SetTestModeOwner(scope, owner, wanted) self._owners[scope][owner] = wanted and true or nil end
+local said = {}
+function DF:Say(msg) said[#said + 1] = msg end
 DF.RegisterCallback = function(owner, event, fn) dfCallbacks[event] = { owner = owner, fn = fn } end
 DF.L = setmetatable({}, { __index = function(_, k) return k end })
 
@@ -66,6 +72,10 @@ IsInInstance = function() return false end
 UnitName = function() return "Danders" end
 UnitClass = function() return "Priest", "PRIEST" end
 UnitLevel = function() return 80 end
+hooksecurefunc = function(t, name, fn)
+    local orig = t[name]
+    t[name] = function(...) local r = orig(...); fn(...); return r end
+end
 
 local created = {}
 CreateFrame = function(kind, name, parent, template)
@@ -129,7 +139,7 @@ check(type(lib.defs[A .. ":target"].getRect) == "function", "elements report a r
 print("-- Off by default")
 eq(P:IsActive(), false, "no owner: off")
 eq(next(P.frames), nil, "no preview frames built until needed")
-check(type(dfCallbacks.OnTestModeChanged) == "table", "listens for DandersFrames' test mode")
+eq(dfCallbacks.OnTestModeChanged, nil, "DandersFrames' party / raid test mode never brings the preview up")
 check(type(lib.cbs.Unlocked) == "function" and type(lib.cbs.Locked) == "function", "listens for mover sessions")
 
 print("-- Mover session: Unlocked turns it on, Locked off")
@@ -201,34 +211,66 @@ for unit, h in pairs(Units.holders) do eq(h._alpha, 1, unit .. ": live holder ba
 eq(def.getFrame(), UF.frames.target, "getFrame: the live frame again")
 eq(def.getRect(), nil, "getRect: nothing while the live target is absent")
 
-print("-- DandersFrames test mode (/df test)")
-DF._testActive.party = true
-dfCallbacks.OnTestModeChanged.fn("OnTestModeChanged", "party", true)
-eq(P:IsOwnedBy("test"), true, "test mode on: the preview follows")
-eq(P:IsActive(), true, "...on")
-DF._testActive.party = false
-dfCallbacks.OnTestModeChanged.fn("OnTestModeChanged", "party", false)
-eq(P:IsActive(), false, "test mode off: off")
-UF:GetGlobalDB().includeInTestMode = false
-eq(UF:IncludeInTestMode(), false, "option off")
-DF._testActive.raid = true
-dfCallbacks.OnTestModeChanged.fn("OnTestModeChanged", "raid", true)
-eq(P:IsActive(), false, "option off: test mode leaves unit frames alone")
-UF:GetGlobalDB().includeInTestMode = nil
-eq(UF:IncludeInTestMode(), true, "unset: on (the default)")
-P:SyncTestMode()
-eq(P:IsActive(), true, "re-synced when the option changes (raid test still on)")
-DF._testActive.raid = false
-P:SyncTestMode()
-eq(P:IsActive(), false, "off again")
+print("-- The units test mode: its own mode")
+painted = {}
+eq(P:SetTestMode(true), true, "on")
+eq(P:IsTestMode(), true, "...the 'test' owner")
+eq(P:IsActive(), true, "...the preview is up")
+eq(#painted, 6, "every preview painted")
+eq(P:SetTestMode(false), true, "off")
+eq(P:IsActive(), false, "...down")
+
+print("-- It never mixes with the party / raid test mode")
+DF._owners.party.user = true
+DF._owners.party.unlock = true
+P:SetTestMode(true)
+eq(DF._owners.party.user, nil, "turning it on drops the user's party claim")
+eq(DF._owners.party.unlock, true, "...a mover session's claim is left alone")
+local heard = {}
+P:AddListener(function(on, reason) heard[#heard + 1] = tostring(on) .. ":" .. reason end)
+DF:SetTestModeOwner("raid", "user", true)
+eq(P:IsTestMode(), false, "the user claiming raid test mode turns it off")
+eq(heard[#heard], "false:group", "...and says why (its panel closes)")
+DF._owners.raid.user = nil
+P:SetTestMode(true)
+DF:SetTestModeOwner("party", "unlock", true)
+eq(P:IsTestMode(), true, "a mover session's party claim does not")
+DF:SetTestModeOwner("party", "user", false)
+eq(P:IsTestMode(), true, "...nor does a release")
+DF._owners.party.unlock = nil
+
+print("-- Combat: refused on, ended on entry (as DF's own)")
+IN_COMBAT = true
+P:OnCombat()
+eq(P:IsTestMode(), false, "entering combat ends it")
+eq(said[#said], "Test mode ended — entering combat.", "...with DF's chat line")
+eq(P:SetTestMode(true), false, "turning it on in combat is refused")
+eq(said[#said], "Cannot enter test mode during combat.", "...and says so")
+eq(P:IsActive(), false, "...still off")
+IN_COMBAT = false
+check(P.eventFrame and P.eventFrame._events.PLAYER_REGEN_DISABLED, "listens for combat entry")
 
 print("-- Owners stack")
-P:SetOwner("settings", true)
+P:SetTestMode(true)
 lib.cbs.Unlocked()
 lib.cbs.Locked()
-eq(P:IsActive(), true, "the session ending leaves the Settings switch's preview up")
-P:SetOwner("settings", false)
+eq(P:IsActive(), true, "the session ending leaves the test mode's preview up")
+P:SetTestMode(false)
 eq(P:IsActive(), false, "...until it is switched off too")
+
+print("-- The panel's Frames switches (not during a mover session)")
+local tdb = UF:GetTestDB()
+P:SetTestMode(true)
+tdb.showPet = false
+P:Refresh()
+eq(P.frames.pet:IsShown(), false, "Pet off: its preview hides")
+eq(P.frames.player:IsShown(), true, "...the others stay")
+lib.cbs.Unlocked()
+eq(P.frames.pet:IsShown(), true, "a mover session shows every preview (something to drag)")
+lib.cbs.Locked()
+eq(P.frames.pet:IsShown(), false, "...and the switch is back after it")
+tdb.showPet = true
+P:SetTestMode(false)
 
 print("-- The preview sits above the live frames (the mouse reaches it, not the faded buttons)")
 do
@@ -244,41 +286,37 @@ print("-- Combat: the preview never touches the secure buttons")
 IN_COMBAT = true
 local before = {}
 for unit, f in pairs(UF.frames) do before[unit] = f._shown end
-P:SetOwner("settings", true)
-eq(P:IsActive(), true, "the switch works in combat (plain frames)")
+lib.cbs.Unlocked()
+eq(P:IsActive(), true, "a mover session's preview works in combat (plain frames)")
 for unit, f in pairs(UF.frames) do eq(f._shown, before[unit], unit .. ": live button not shown or hidden") end
-P:SetOwner("settings", false)
+lib.cbs.Locked()
 for unit, f in pairs(UF.frames) do eq(f._shown, before[unit], unit .. ": ...nor on the way out") end
 IN_COMBAT = false
 
 print("-- Settings refresh repaints what is up")
-P:SetOwner("settings", true)
+P:SetTestMode(true)
 painted = {}
 UF:RefreshAll()
 eq(#painted, 6, "every preview frame repainted")
-P:SetOwner("settings", false)
+P:SetTestMode(false)
 painted = {}
 UF:RefreshAll()
 eq(#painted, 0, "nothing painted while off")
 
-print("-- Test auras: the preview reads the test panel's aura switches from the test mode on screen")
+print("-- Test settings: the units test panel's own, never the party / raid table's")
 do
-    local party = { testShowAuras = true, testBuffCount = 3, testDebuffCount = 4, frameWidth = 999 }
-    local raid = { testShowAuras = false, testBuffCount = 1, testDebuffCount = 1 }
+    local party = { testShowAuras = false, testBuffCount = 5, frameWidth = 999 }
     function DF:GetDB() return party end
-    function DF:GetRaidDB() return raid end
+    function DF:GetRaidDB() return party end
     local db = P:PreviewDB("target")
-    eq(db.testShowAuras, true, "Show Auras: the party table's")
-    eq(db.testBuffCount, 3, "...the buff count too")
-    eq(db.testDebuffCount, 4, "...and the debuff count")
+    eq(db.testShowAuras, true, "Show Auras: the units test setting (on by default)")
+    eq(db.testBuffCount, 2, "...the buff count too")
+    tdb.testDebuffCount = 4
+    eq(db.testDebuffCount, 4, "...and follows the units panel")
+    tdb.testDebuffCount = 2
+    eq(db.testShowAbsorbs, true, "Absorbs: the units test setting")
     eq(db.frameWidth, UF:GetUnitDB("target").frameWidth, "any other key: the unit's own (never the party table's)")
-    DF.raidTestMode = true
-    eq(db.testShowAuras, false, "raid test mode up: the raid table's")
-    eq(db.testBuffCount, 1, "...counts too")
-    DF.raidTestMode = nil
-    party.testDebuffCount = nil
-    eq(db.testDebuffCount, UF:GetUnitDB("target").testDebuffCount, "a switch the table lacks: the unit chain's default")
-    party.testDebuffCount = 4
+    eq(rawget(DF.db.unitframes.global, "testMode"), tdb, "stored under the module table (testMode)")
     db.buffMax = 6
     eq(UF:GetStoredUnit("target").buffMax, 6, "a write lands in the unit's own table")
     db.buffMax = nil
@@ -289,58 +327,74 @@ do
         check(not seen[n], u .. ": a seed of its own")
         seen[n] = true
     end
-
-    -- Following the panel: a group frame's aura repaint after an aura switch moved
-    -- repaints the preview once; any other group repaint does not.
-    local hooks = {}
-    local savedHook = hooksecurefunc
-    hooksecurefunc = function(t, name, fn)
-        local orig = t[name]
-        hooks[name] = true
-        t[name] = function(...) local r = orig(...); fn(...); return r end
-    end
-    function DF:UpdateTestAuras() end
-    function DF:UpdateAllTestDispelGlow() end
-    function DF:UpdateAllTestMissingBuff() end
-    function DF:UpdateAllTestAuraDesigner() end
-    P.panelHooked = nil
-    P:SetOwner("settings", true)
-    check(hooks.UpdateTestAuras and hooks.UpdateAllTestDispelGlow and hooks.UpdateAllTestMissingBuff
-        and hooks.UpdateAllTestAuraDesigner, "the preview listens on the panel's aura repaints")
-    painted = {}
-    DF:UpdateTestAuras({})
-    eq(#painted, 0, "a group repaint with the switches unchanged: no preview repaint")
-    party.testShowAuras = false
-    DF:UpdateTestAuras(P.frames.target)
-    eq(#painted, 0, "...the preview's own repaint never triggers one")
-    DF:UpdateTestAuras({})
-    eq(#painted, 6, "Show Auras switched: the preview repaints once")
-    painted = {}
-    DF:UpdateTestAuras({})
-    eq(#painted, 0, "...and is quiet again after")
-    party.testShowDispelGlow = true
-    DF:UpdateAllTestDispelGlow()
-    eq(#painted, 6, "a Dispel Overlay switch repaints it too")
-    P:SetOwner("settings", false)
-    painted = {}
-    party.testShowAuras = true
-    DF:UpdateTestAuras({})
-    eq(#painted, 0, "nothing while the preview is down")
-    hooksecurefunc = savedHook
-    DF.GetDB, DF.GetRaidDB, DF.UpdateTestAuras = nil, nil, nil
-    DF.UpdateAllTestDispelGlow, DF.UpdateAllTestMissingBuff, DF.UpdateAllTestAuraDesigner = nil, nil, nil
+    DF.GetDB, DF.GetRaidDB = nil, nil
 end
 
-print("-- The Settings page and DandersFrames' hook")
+print("-- Test settings shape the sample units")
+do
+    eq(P:TestData("target").classification, "elite", "target: elite by default")
+    tdb.classification = "normal"
+    eq(P:TestData("target").classification, nil, "Normal: no classification")
+    tdb.classification = "rareelite"
+    eq(P:TestData("target").classification, "rareelite", "Rare Elite")
+    tdb.reaction = "neutral"
+    eq(P:TestData("target").reaction, 4, "Neutral: reaction 4")
+    eq(P:TestData("focus").classification, "rare", "the focus keeps its own sample")
+    tdb.classification, tdb.reaction = "elite", "hostile"
+    eq(P:TestData("target").raidTarget, 8, "a raid target icon on the target")
+    eq(P:TestData("boss", 3).raidTarget, 3, "...a boss slot wears its slot's")
+    tdb.showRaidTarget = false
+    eq(P:TestData("target").raidTarget, nil, "Raid Target Icon off: none")
+    tdb.showRaidTarget = true
+    eq(P:TestData("player").isLeader, true, "player: leader")
+    eq(P:TestData("player").isInCombat, true, "...in combat")
+    tdb.showLeader, tdb.showCombat = false, false
+    eq(P:TestData("player").isLeader, false, "Leader Icon off")
+    eq(P:TestData("player").isInCombat, false, "Combat Icon off")
+    tdb.showLeader, tdb.showCombat = true, true
+    eq(P:TestData("target").healthPercent, 0.62, "health: the sample's own")
+    tdb.fixedHealth, tdb.healthPercent = true, 40
+    eq(P:TestData("target").healthPercent, 0.4, "Fixed Health: every preview at the slider's value")
+    eq(P:TestData("pet").healthPercent, 0.4, "...the pet too")
+    tdb.fixedHealth = false
+    eq(P:TestData("player").healAbsorbPercent > 0 and P:TestData("player").healPredictionPercent > 0, true,
+       "the player sample has a heal absorb and heal prediction to show")
+end
+
+print("-- Animate Health: its own ticker while the preview is up")
+do
+    local ticks = {}
+    local savedTicker = C_Timer.NewTicker
+    C_Timer.NewTicker = function(_, fn)
+        local t = { fn = fn, Cancel = function(self) self.cancelled = true end }
+        ticks[#ticks + 1] = t
+        return t
+    end
+    local healthOnly = 0
+    DF.UpdateTestFrameHealthOnly = function() healthOnly = healthOnly + 1 end
+    tdb.testAnimateHealth = true
+    P:SetTestMode(true)
+    eq(#ticks, 1, "a ticker starts")
+    ticks[1].fn()
+    eq(healthOnly, 6, "...and steps the health of every shown preview")
+    check(P.frames.target.dfTestData.healthPercent ~= 0.62, "...off the sample's own value")
+    P:SetTestMode(false)
+    eq(ticks[1].cancelled, true, "stops when the preview goes")
+    tdb.testAnimateHealth = false
+    C_Timer.NewTicker = savedTicker
+    DF.UpdateTestFrameHealthOnly = nil
+end
+
+print("-- The Settings page and the panel")
 local pages = options_file_source("UnitFrames/Pages.lua")
-check(pages:find('L["Include Unit Frames in Test Mode"]', 1, true), "Settings page: the test-mode option")
-check(pages:find('P:SetOwner("settings", on)', 1, true), "Settings page: Preview switch owns 'settings'")
-local shim = df_file_source("TestMode/Shim.lua")
-check(shim:find('FireAPICallback("OnTestModeChanged", scope, active)', 1, true), "DF fires OnTestModeChanged")
-check(shim:find("DF:NotifyTestModeChanged(scope)", 1, true), "...from ReconcileTestMode")
+check(not pages:find("Include Unit Frames in Test Mode", 1, true), "Settings page: no party test mode option any more")
+check(pages:find("UFO.SetTestMode(v)", 1, true), "Settings page: its Test Mode switch is the units test mode")
+check(pages:find("testMode = {", 1, true), "the module brings its own test mode (the Test button follows it)")
+local panelSrc = options_file_source("GUI/Panel.lua")
+check(panelSrc:find("GUI.ModuleTestRoute()", 1, true), "the window's Test button asks the module first")
+local toc = options_file_source("DandersFrames_Options.toc")
+check(toc:find("UnitFrames\\TestPanel.lua", 1, true), "the panel is in the options TOC")
 local tm = options_file_source("TestMode/TestMode.lua")
-local _, nNotify = tm:gsub("DF:NotifyTestModeChanged%(", "")
-eq(nNotify, 4, "...and from the four Show/Hide test-frame functions")
 check(tm:find("DF:GetTestDataForFrame(frame, index, isRaid, isBoss)", 1, true),
       "the test painter takes a frame's own data")
 

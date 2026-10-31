@@ -586,20 +586,15 @@ do
     eq(unlocked and unlocked.keys and unlocked.keys[1], "player", "...and to that unit")
     UF.Mover = nil
 
-    -- The Settings page's Preview card: the switch and the test-mode option.
-    local prevSwitch, inTest
+    -- The Settings page's Test Mode card: the units test mode's switch, and no
+    -- party / raid test mode option (the two modes never mix).
+    local testSwitch, inTest
     for _, c in ipairs(checks) do
-        if c.label == "Preview" then prevSwitch = c end
+        if c.label == "Test Mode" then testSwitch = c end
         if c.label == "Include Unit Frames in Test Mode" then inTest = c end
     end
-    check(prevSwitch and prevSwitch.get and prevSwitch.set, "Settings: a Preview switch (get/set, not a db key)")
-    check(inTest and inTest.get, "Settings: Include Unit Frames in Test Mode")
-    if inTest then
-        eq(inTest.get(), true, "...on by default")
-        inTest.set(false)
-        eq(DF.db.unitframes.global.includeInTestMode, false, "...saved module-wide")
-        inTest.set(true)
-    end
+    check(testSwitch and testSwitch.get and testSwitch.set, "Settings: a Test Mode switch (get/set, not a db key)")
+    check(inTest == nil, "Settings: no Include Unit Frames in Test Mode any more")
 
     -- The Visibility page, built for real.
     for _, unit in ipairs({ "player", "target" }) do

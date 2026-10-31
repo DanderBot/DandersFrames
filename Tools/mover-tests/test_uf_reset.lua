@@ -107,7 +107,7 @@ local function WorkedOn()
     t.units.player.frameWidth = 999
     t.units.player.position = { point = "TOPLEFT", x = 5, y = -5 }
     t.units.focus.frameScale = 1.5
-    t.global.includeInTestMode = false
+    t.global.testMode = { showPet = false }
     Links:Unlink(t, "target")
     return t
 end
@@ -149,7 +149,7 @@ do
     local pos = UF:GetPositionRecord("player")
     local dpos = UF.UnitDefaults.player.position
     check(type(pos) == "table" and pos.x == dpos.x and pos.y == dpos.y, "reset: the player frame is back at its default place")
-    eq(UF:GetGlobalSetting("includeInTestMode"), true, "reset: the module setting is back at its default")
+    eq(UF:GetTestDB().showPet, true, "reset: the units test settings are back at their defaults")
     local link, follower, leader = Links:LinkOf(root, "target")
     check(link ~= nil and follower == "target" and leader == "player",
           "reset: the default Player / Target link is made again")

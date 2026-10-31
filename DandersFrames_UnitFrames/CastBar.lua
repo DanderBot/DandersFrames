@@ -1044,8 +1044,10 @@ function CB:Preview(f)
     CB:Layout(f)
     if not Enabled(db) then cb:Hide(); return end
     CB:Halt(cb)
-    -- A preview frame marked idle (every sample boss but the first) shows no cast.
-    if f.dfUFPreviewIdle then
+    -- A preview frame marked idle (every sample boss but the first) shows no cast,
+    -- and neither does any while the units test panel's Cast Bar switch is off.
+    local P = UF.Preview
+    if f.dfUFPreviewIdle or (P and P.TestOn and not P:TestOn("showCastBars")) then
         CB:ShowIdle(cb)
         return
     end
