@@ -10,7 +10,7 @@ if not UI then return end
 -- two consumers cannot both own the screen modal at once, and whichever one
 -- called last supplies the locale and the accent.
 -- ============================================================
-local ipairs, tinsert, tremove, wipe = ipairs, table.insert, table.remove, table.wipe
+local ipairs, pairs, tinsert, tremove, wipe = ipairs, pairs, table.insert, table.remove, table.wipe
 local max, min = math.max, math.min
 local CreateFrame, UIParent = CreateFrame, UIParent
 local PlaySound, SOUNDKIT = PlaySound, SOUNDKIT
@@ -23,9 +23,13 @@ local C = UI.DialogColors
 -- STYLED BUTTON HELPER
 -- ============================================================
 
-local function CreatePopupButton(host, parent, text, width, height)
+-- tone ("danger" / "success", optional): StyleButton's toned button -- its hover in
+-- the tone's colour, and the label below in the tone's label colour. A button is
+-- built for ONE tone and kept for it (see the pool in ConfigureForAlert): StyleButton
+-- fixes its hover colour at construction.
+local function CreatePopupButton(host, parent, text, width, height, tone)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    host:StyleButton(btn, { width = width or 120, height = height or 28 })
+    host:StyleButton(btn, { width = width or 120, height = height or 28, tone = tone })
 
     btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     -- Anchor to both left and right edges (with a small inset) so SetWordWrap
@@ -36,7 +40,12 @@ local function CreatePopupButton(host, parent, text, width, height)
     btn.Text:SetJustifyV("MIDDLE")
     btn.Text:SetWordWrap(true)
     btn.Text:SetText(text)
-    btn.Text:SetTextColor(C.text.r, C.text.g, C.text.b)
+    local tl = tone and UI.ButtonToneLabel and UI.ButtonToneLabel[tone]
+    if tl then
+        btn.Text:SetTextColor(tl[1], tl[2], tl[3])
+    else
+        btn.Text:SetTextColor(C.text.r, C.text.g, C.text.b)
+    end
 
     btn:SetScript("OnClick", function(self)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -278,16 +287,23 @@ local function ConfigureForAlert(host, config)
     local desiredBarHeight = math.max(36, btnHeight + 10)
     f.ButtonBar:SetHeight(desiredBarHeight)
 
-    -- Hide old alert buttons
-    for _, btn in ipairs(f.alertButtonFrames) do
+    -- Hide old alert buttons. pairs, not ipairs: a toned button is pooled under a
+    -- string key (below).
+    for _, btn in pairs(f.alertButtonFrames) do
         btn:Hide()
     end
 
+    -- btnConfig.tone ("danger" / "success", optional) styles one button as a toned
+    -- button -- the destructive choice of a confirm, say. Toned buttons are pooled
+    -- apart from plain ones ("danger:2"), so a slot that was red in one dialog is
+    -- never handed to the next dialog's plain button with the red hover still on it.
     for i, btnConfig in ipairs(buttons) do
-        local btn = f.alertButtonFrames[i]
+        local tone = btnConfig.tone
+        local key = tone and (tone .. ":" .. i) or i
+        local btn = f.alertButtonFrames[key]
         if not btn then
-            btn = CreatePopupButton(host, f.ButtonBar, "", btnWidth, btnHeight)
-            f.alertButtonFrames[i] = btn
+            btn = CreatePopupButton(host, f.ButtonBar, "", btnWidth, btnHeight, tone)
+            f.alertButtonFrames[key] = btn
         end
 
         btn.Text:SetText(btnConfig.label or L["OK"])

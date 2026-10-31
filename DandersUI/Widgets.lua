@@ -227,6 +227,14 @@ function UI:AttachTooltip(widget, label, labelRegion, opts)
     return hit
 end
 
+-- A toned button's LABEL colour, by tone (StyleButton's `tone`). Published so a
+-- button that draws its own label -- the popup's, which wraps -- wears the same red
+-- or green as every other toned button rather than a second copy of the numbers.
+UI.ButtonToneLabel = UI.ButtonToneLabel or {
+    danger  = { 0.9, 0.45, 0.45 },
+    success = { 0.4, 0.85, 0.5 },
+}
+
 function UI:StyleButton(btn, opts)
     local host = self
     opts = opts or {}
@@ -283,8 +291,7 @@ function UI:StyleButton(btn, opts)
     -- label+icon — soft red for destructive, soft green for affirmative — plus the
     -- accent hover wash. A coloured-text button, NOT a filled CTA (the accent set
     -- below drives the hover). Mirrors each other so Delete/Save read as a pair.
-    local toneLabel = (opts.tone == "danger" and { 0.9, 0.45, 0.45 })
-        or (opts.tone == "success" and { 0.4, 0.85, 0.5 }) or nil
+    local toneLabel = opts.tone and UI.ButtonToneLabel[opts.tone] or nil
 
     if opts.text ~= nil then
         if not btn.Text then
