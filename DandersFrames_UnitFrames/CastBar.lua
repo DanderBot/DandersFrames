@@ -560,6 +560,7 @@ end
 function CB:SetInterruptible(cb, notInterruptible)
     cb.ni = notInterruptible
     AlphaFrom(cb.shield, notInterruptible, 1, 0)
+    if cb.kickOn then AlphaFrom(cb.clip, notInterruptible, 0, 1) end
     if cb.active then CB:PaintColor(cb, cb.kickReady) end
 end
 
@@ -868,8 +869,12 @@ function CB:UpdateKick(cb)
     if not ok2 then cb.kickHost:SetAlpha(0); return end
     pcall(function() cb.kickBar:SetValue(cd:GetRemainingDuration()) end)
     -- Visible while the kick is NOT ready, and never on a cast it cannot interrupt.
-    local shown = Pick(cb.ni, 0, 1)
-    AlphaFrom(cb.kickHost, ready, 0, shown)
+    -- ☠ TWO BOOLEANS, TWO FRAMES. Picking one alpha from the other flag
+    -- (Pick(cb.ni, 0, 1)) makes a possibly SECRET NUMBER, which must never reach
+    -- SetAlpha. So the clip frame carries "not interruptible" and the kick bar
+    -- "ready", each straight from its boolean; the alphas multiply.
+    AlphaFrom(cb.clip, cb.ni, 0, 1)
+    AlphaFrom(cb.kickHost, ready, 0, 1)
     cb.kickReady = ready
     CB:PaintColor(cb, ready)
 end

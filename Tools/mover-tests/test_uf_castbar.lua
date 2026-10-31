@@ -332,7 +332,10 @@ eq(cb.kickBar._last.SetValue and cb.kickBar._last.SetValue[1], remS, "kick bar: 
 local ka = cb.kickHost._last.SetAlphaFromBoolean
 eq(ka and ka[1], readyS, "tick alpha: SetAlphaFromBoolean(cooldown:IsZero())")
 eq(ka and ka[2], 0, "...hidden when the kick is ready")
-check(ka and issecretvalue(ka[3]), "...shown otherwise, unless not interruptible (picked from the secret flag)")
+eq(ka and ka[3], 1, "...shown otherwise: a plain number, never one picked from a secret")
+local ca = cb.clip._last.SetAlphaFromBoolean
+eq(ca and ca[1], niS, "not interruptible: the clip frame's own SetAlphaFromBoolean on the flag")
+check(ca and ca[2] == 0 and ca[3] == 1, "...hidden on a cast it cannot interrupt, plain numbers")
 ok, err = pcall(CB.OnUpdate, CB, cb, 0.2)
 check(ok, "per frame: no maths (" .. tostring(err) .. ")")
 check(issecretvalue(cb.positioner._last.SetValue[1]), "positioner follows the cast's elapsed time")
