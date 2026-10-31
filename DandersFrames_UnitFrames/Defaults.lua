@@ -212,6 +212,8 @@ local ELEMENTS = {
     restingIconAnimate = true,
     -- Off by default: a glow round the whole frame every time you rest is loud.
     restingIconGlow = false,
+    -- The glow surrounds an outside portrait too, as one rect with the frame.
+    restingIconGlowPortrait = true,
     pvpIconEnabled = false,
     pvpIconSize = 16,
     pvpIconAnchor = "TOPRIGHT",

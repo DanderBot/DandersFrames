@@ -129,6 +129,29 @@ function PO.OutsideExtent(f, db)
     return (l > 0) and l or 0, 0
 end
 
+-- The frame-plus-portrait rect as four reaches past the frame's edges, in the
+-- frame's units: left, right (PO.OutsideExtent), and how far an outside portrait
+-- pokes past the frame's top and bottom (taller than the frame, or moved up /
+-- down; its border included). All 0 without an outside portrait. Read by the
+-- resting glow (Indicators.lua) to surround the frame and its portrait as one.
+function PO.OutsideBox(f, db)
+    db = db or K.DB(f)
+    local left, right = PO.OutsideExtent(f, db)
+    if left == 0 and right == 0 then return 0, 0, 0, 0 end
+    local fh = K.FrameHeight(f, db)
+    local size = tonumber(db.portraitSize) or 0
+    if size <= 0 then size = fh end
+    local border = 0
+    if db.portraitBorderEnabled ~= false then
+        border = tonumber(db.portraitBorderSize) or 1
+        if border < 1 then border = 1 end
+    end
+    local y = tonumber(db.portraitY) or 0
+    local half = size / 2 + border - fh / 2
+    local top, bottom = half + y, half - y
+    return left, right, (top > 0) and top or 0, (bottom > 0) and bottom or 0
+end
+
 -- The unit's class token, or nil (an NPC, or a secret answer).
 local function UnitClassToken(unit)
     if not (UnitIsPlayer and UnitClass) then return nil end

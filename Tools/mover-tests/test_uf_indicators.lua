@@ -124,6 +124,9 @@ local R = P.dfUFIcons.resting
 eq(#R.zTexts, 3, "the shared builder's three Zs")
 check(R.glow ~= nil, "a glow built round the frame")
 eq(R.glow._parent, P, "...on the unit button itself (the frame's main rect)")
+eq(R.glowStyleName, "OUTER", "the soft outer glow, not the party wash")
+eq(#R.glow.pieces, 8, "...eight pieces outside the frame's edges")
+eq(pdb.restingIconGlowPortrait, true, "default: Include Portrait on")
 resting = true
 IN:Layout(P)
 check(R:IsShown(), "resting again: shown")
@@ -137,7 +140,7 @@ pdb.restingIconAnimate = false
 IN:Layout(P)
 eq(R:GetScript("OnUpdate"), nil, "still: no OnUpdate")
 eq(R.zTexts[1]:GetAlpha(), 1, "still: Zs at full alpha")
-eq(R.glow:GetAlpha(), 0.3, "still: glow at a fixed alpha")
+eq(R.glow:GetAlpha(), 0.75, "still: glow at a fixed alpha")
 pdb.restingIconSize = 32
 IN:Layout(P)
 eq(R.zTexts[3]._fontSize, 28, "size 32: the Zs scale with it")
@@ -148,6 +151,27 @@ resting = false
 IN:Update(P)
 check(not R:IsShown() and not R.glow:IsShown(), "not resting: ZZZ and glow both hidden")
 pdb.restingIconSize, pdb.restingIconAnimate, pdb.restingIconGlow = 16, true, false
+
+print("-- Resting glow: Include Portrait")
+local gp = R.glow._points
+eq(gp[1][1], "TOPLEFT", "no portrait module: the frame's own rect")
+eq(gp[1][4], 0, "...no reach left"); eq(gp[2][4], 0, "...or right")
+local boxCalls = 0
+UF.Portrait = { OutsideBox = function(f, db) boxCalls = boxCalls + 1; return 50, 0, 3, 2 end }
+IN:Layout(P)
+gp = R.glow._points
+eq(gp[1][4], -50, "an outside portrait on the left: the glow reaches past it")
+eq(gp[1][5], 3, "...and over a taller portrait's top")
+eq(gp[2][4], 0, "...right edge stays the frame's")
+eq(gp[2][5], -2, "...bottom too")
+pdb.restingIconGlowPortrait = false
+IN:Layout(P)
+gp = R.glow._points
+eq(gp[1][4], 0, "Include Portrait off: the frame only")
+eq(gp[1][5], 0, "...top")
+pdb.restingIconGlowPortrait = nil
+UF.Portrait = nil
+IN:Layout(P)
 
 print("-- PvP")
 pvp = true

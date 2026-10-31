@@ -796,6 +796,17 @@ do
         check(rw and rw.disableOn and rw.disableOn({ restingIconEnabled = false })
               and not rw.disableOn({ restingIconEnabled = true }), "..." .. k .. " greys while Resting is off")
     end
+    do
+        local gw = byKey.restingIconGlowPortrait
+        check(gw ~= nil, "Resting: an Include Portrait tick")
+        check(gw and type(gw.tooltip) == "string" and gw.tooltip ~= "", "...with a tooltip")
+        check(gw and gw.disableOn and gw.disableOn({ restingIconEnabled = true, restingIconGlow = false })
+              and gw.disableOn({ restingIconEnabled = false, restingIconGlow = true })
+              and not gw.disableOn({ restingIconEnabled = true, restingIconGlow = true }),
+              "...greys while Glow or Resting is off")
+        check(byKey.restingIconGlow and not tostring(byKey.restingIconGlow.tooltip):find("pulsing", 1, true),
+              "the Glow tooltip no longer says pulsing")
+    end
     check(not has(keys, "pvpIconAnimate") and not has(keys, "pvpIconGlow"), "...and only on the Resting card")
     eq(toggles.uf_icon_resting and toggles.uf_icon_resting.key, "restingIconEnabled", "...each icon's tick in its header")
     cards, keys = BuildPage("target", "unitIcons")

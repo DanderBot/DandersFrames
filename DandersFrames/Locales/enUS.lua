@@ -3640,4 +3640,8 @@ L["Raid Target Icon"] = true
 L["Shows sample unit frames. Party and raid test frames stay hidden while this is on."] = true
 L["toggle the unit frames test mode panel"] = true
 L["Unit Frames is not loaded."] = true
+-- Unit frames: the Resting icon's glow (DandersFrames_Options/UnitFrames/Pages.lua).
+L["Draw the glow around the portrait too when it sits beside the frame."] = true
+L["Include Portrait"] = true
+L["Show a soft gold glow around the outside of the frame."] = true
 --@end-do-not-package@

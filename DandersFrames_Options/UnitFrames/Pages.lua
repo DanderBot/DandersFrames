@@ -1379,7 +1379,13 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
                 w.tooltip = L["Fade the Zs in and out. Off shows them still."]
                 w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Glow"], db, "restingIconGlow", changed), 30)
                 w.disableOn = off
-                w.tooltip = L["Show a pulsing yellow glow around the frame."]
+                w.tooltip = L["Show a soft gold glow around the outside of the frame."]
+                -- Include Portrait: greys while Resting or Glow is off.
+                local glowOff = UFO.Gate(L["Glow"], function(d) return not (d and d.restingIconGlow) end, off)
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Include Portrait"], db,
+                    "restingIconGlowPortrait", changed), 30)
+                w.disableOn = glowOff
+                w.tooltip = L["Draw the glow around the portrait too when it sits beside the frame."]
             end
             Close(band)
         end

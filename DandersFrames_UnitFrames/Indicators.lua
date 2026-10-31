@@ -6,8 +6,9 @@ local addonName, UF = ...
 -- What DandersFrames' own status icons do not cover, as three small icons:
 --   Resting       the player, while resting: DandersFrames' own animated
 --                 ZZZ (DF:CreateRestedIndicator), optionally still, with an
---                 optional glow round the frame body (the unit button itself;
---                 a portrait beside the frame sits outside it)
+--                 optional soft glow OUTSIDE the frame's edges (the builder's
+--                 OUTER style), round the frame and, with Include Portrait, a
+--                 portrait beside it as one rect (Portrait.lua PO.OutsideBox)
 --   PvP           the player / target / focus while PvP flagged (faction crest,
 --                 or the free-for-all flag)
 --   Elite / Rare  target / focus / boss: an elite or rare dragon, or the word
@@ -82,7 +83,7 @@ function IN:Attach(f)
     for key, units in pairs(IN.ICONS) do
         if units[unit] then
             if key == "resting" then
-                icons[key] = DF:CreateRestedIndicator(host, f)
+                icons[key] = DF:CreateRestedIndicator(host, f, { glowStyle = "OUTER" })
             else
                 icons[key] = NewIcon(host)
             end
@@ -94,6 +95,16 @@ end
 
 function IN:Enabled(db, key)
     return db and db[IN.PREFIX[key] .. "Enabled"] and true or false
+end
+
+-- How far the resting glow reaches past the frame (left, right, top, bottom):
+-- round an outside portrait too while Include Portrait is on, else the frame only.
+function IN.GlowExtents(f, db)
+    local PO = UF.Portrait
+    if db and db.restingIconGlowPortrait ~= false and PO and PO.OutsideBox then
+        return PO.OutsideBox(f, db)
+    end
+    return 0, 0, 0, 0
 end
 
 function IN:Layout(f)
@@ -112,6 +123,7 @@ function IN:Layout(f)
                 icon:SetZScale(size / IN.RESTING_BASE_SIZE)
                 icon:SetFrameLevel(icons.host:GetFrameLevel() + 5)
                 icon:SetAnimated(db[pre .. "Animate"] ~= false)
+                if icon.SetGlowExtents then icon:SetGlowExtents(IN.GlowExtents(f, db)) end
             else
                 icon:SetSize(size, size)
             end

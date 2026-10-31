@@ -151,6 +151,19 @@ do
     db.portraitEnabled = false
     eq(reach(P), "0,0", "off: nothing")
     db.portraitEnabled, db.portraitSide, db.portraitSize = nil, nil, nil
+    -- The whole box (the resting glow's Include Portrait): left / right as above,
+    -- plus how far the portrait pokes past the frame's top and bottom.
+    local function box(f) return table.concat({ PO.OutsideBox(f) }, ",") end
+    eq(box(P), "43,0,1,1", "box: size = height, its 1px border pokes out top and bottom")
+    db.portraitSize = 60
+    eq(box(P), "63,0,11,11", "box: a 60 portrait on a 40 frame: 10 + border each way")
+    db.portraitY = 4
+    eq(box(P), "63,0,15,7", "box: moved up 4")
+    db.portraitSize, db.portraitY = 20, nil
+    eq(box(P), "23,0,0,0", "box: a short portrait stays inside the frame's height")
+    db.portraitSide = "INSIDE_LEFT"
+    eq(box(P), "0,0,0,0", "box: an inside portrait adds nothing")
+    db.portraitSide, db.portraitSize = nil, nil
     -- Target's portrait is Player's mirrored by the link (Links.lua, not loaded here).
     local T = Owner("target")
     local tdb = UF:GetUnitDB("target")

@@ -121,6 +121,8 @@ do
     eq(Links.OwnerOf("castbarSpellX"), "castbar", "a page new to unit frames owns its own prefix")
     eq(Links.OwnerOf("restingIconAnimate"), "unitIcons", "the resting ZZZ's Animate rides the Unit Icons link")
     eq(Links.OwnerOf("restingIconGlow"), "unitIcons", "...and its Glow")
+    eq(Links.OwnerOf("restingIconGlowPortrait"), "unitIcons", "...and the glow's Include Portrait")
+    eq(Links.Mirror("restingIconGlowPortrait", true), true, "...a boolean a mirror never touches")
     eq(Links.Aspect("restingIconAnimate"), "look", "...both look, not layout")
     eq(Links.Aspect("restingIconGlow"), "look", "...")
     eq(Links.Mirror("restingIconGlow", true), true, "a mirror never touches a boolean")
