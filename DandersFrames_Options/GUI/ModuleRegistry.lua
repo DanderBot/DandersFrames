@@ -186,10 +186,13 @@ end
 -- def.reset = {
 --   run()        -- does it; true when it ran, false when it refused (and said
 --                   why in chat). Owns its own refresh of frames and data.
---   covers()     -- { line, ... }: what goes back to its defaults, one line each.
---                   The tooltip and the warning list exactly these.
---   keeps()      -- optional { line, ... }: what a reader might expect it to touch
---                   and it leaves alone.
+--   covers()     -- { line, ... }: what goes back to its defaults. The tooltip and
+--                   the warning list exactly these, one bullet each.
+--   keeps()      -- optional { phrase, ... }: what a reader might expect it to
+--                   touch and it leaves alone -- say, that it stays on or off.
+--                   Each reads after "Not reset: " (lower-case start).
+-- ⚠ A FEW SHORT, GROUPED LINES -- two or three -- never one per setting: the
+-- warning is one popup, capped at 500px, and a list per key ran off its bottom.
 --   scope()      -- optional: the sentence saying whose settings these are. Default:
 --                   the current profile, named (GUI/Pages/ModulesPage.lua).
 --   available()  -- optional: false hides the button for now (e.g. not loaded).
@@ -612,20 +615,18 @@ GUI:RegisterModule({
     -- SelectTab's own switch: the view only; the caller picks the page.
     onEnterForPage = function() GUI:EnterView(false) end,
     -- DF:ResetGroupFrames (Core/Profile.lua) says exactly what is reset and kept.
+    -- ⚠ A FEW GROUPED LINES, not one per key: the warning has to fit the popup
+    -- (MODULE RESET above).
     reset = {
         covers = function()
             return {
-                L["Every Party and Raid setting: layout, bars, text, auras and indicators"],
-                L["Frame positions and pinned frames"],
-                L["Auto Layouts"],
+                L["All party and raid frame settings, including positions, pinned frames, auto layouts and synced sections"],
                 L["The Party and Raid Aura Designer and Text Designer setups"],
-                L["Sections synced between Party and Raid"],
             }
         end,
         keeps = function()
             return {
-                L["Settings on the Global tab, such as colors, aura filters and Blizzard frames"],
-                L["Aura Designer and Text Designer presets saved under other names"],
+                L["whether Party and Raid are on, settings on the Global page, and designer presets saved under other names"],
             }
         end,
         run = function() return DF:ResetGroupFrames() end,
@@ -708,13 +709,12 @@ GUI:RegisterModule({
         end,
         covers = function()
             return {
-                L["Every binding, custom macro and saved consumable in the profile"],
-                L["The profile's options: cast on key down, quick bind and smart resurrection"],
+                L["All bindings, custom macros and saved consumables in the profile, and its options"],
             }
         end,
         keeps = function()
             return {
-                L["Settings every click-casting profile shares, such as disable while mounted"],
+                L["whether click-casting is on, and the settings every click-casting profile shares"],
             }
         end,
         scope = function()

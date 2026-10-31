@@ -237,19 +237,20 @@ function GUI:ModuleResetBlocked()
     return nil
 end
 
--- The warning's body: what goes back to its defaults, what stays, whose settings
--- these are (the current profile, named, unless the module says otherwise), that
--- the module stays on or off, where to export a copy, and that it is final.
+-- The warning's body: what goes back to its defaults, what stays (the module's
+-- keeps say it stays on or off), whose settings these are (the current profile,
+-- named, unless the module says otherwise), where to export a copy, and that it
+-- is final.
+-- ⚠ IT HAS TO FIT ONE POPUP (capped at 500px): a module gives a few grouped
+-- lines, and this adds five of its own. test_module_reset.lua holds every
+-- built-in warning to a line budget.
 function GUI:ModuleResetMessage(def)
     local reset = GUI:GetModuleReset(def)
     if not reset then return nil end
     local out = { L["These go back to their defaults:"] }
     for _, line in ipairs(ResetLines(reset, "covers")) do out[#out + 1] = BULLET .. tostring(line) end
-    local keeps = ResetLines(reset, "keeps")
-    if #keeps > 0 then
-        out[#out + 1] = ""
-        out[#out + 1] = L["Not reset:"]
-        for _, line in ipairs(keeps) do out[#out + 1] = BULLET .. tostring(line) end
+    for _, line in ipairs(ResetLines(reset, "keeps")) do
+        out[#out + 1] = format(L["Not reset: %s"], tostring(line))
     end
     out[#out + 1] = ""
     local scope
@@ -259,7 +260,6 @@ function GUI:ModuleResetMessage(def)
     end
     out[#out + 1] = scope or format(L["Only the current profile, %s, is reset. Your other profiles are untouched."],
         tostring(DF.GetCurrentProfile and DF:GetCurrentProfile() or ""))
-    out[#out + 1] = L["The module stays on or off, as it is now."]
     out[#out + 1] = format(L["To keep a copy, export it first: %s > %s."], L["Profiles"], L["Import/Export"])
     out[#out + 1] = ""
     local last = L["This cannot be undone."]

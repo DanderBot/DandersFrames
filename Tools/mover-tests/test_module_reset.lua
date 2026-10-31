@@ -108,10 +108,9 @@ local msg = GUI:ModuleResetMessage("toy") or ""
 check(msg:find("These go back to their defaults:", 1, true) == 1, "text: it opens with what is reset")
 check(msg:find("\226\128\162 Toy setting one", 1, true) and msg:find("\226\128\162 Toy setting two", 1, true),
       "text: every covered line is listed, one bullet each")
-check(msg:find("Not reset:", 1, true) and msg:find("\226\128\162 Toy colours", 1, true), "text: what it keeps is listed")
+check(msg:find("\nNot reset: Toy colours\n", 1, true), "text: what it keeps reads after Not reset:")
 check(msg:find("Only the current profile, Raiding, is reset. Your other profiles are untouched.", 1, true),
       "text: names the current profile and says the others are untouched")
-check(msg:find("The module stays on or off, as it is now.", 1, true), "text: the on/off state stays")
 check(msg:find("To keep a copy, export it first: Profiles > Import/Export.", 1, true),
       "text: points at the export first")
 check(msg:find("This cannot be undone.", 1, true), "text: says it cannot be undone")
@@ -120,8 +119,12 @@ local cover, keep, scope = msg:find("Toy setting two", 1, true), msg:find("Toy c
 check(cover < keep and keep < scope, "text: covers, then keeps, then the scope")
 
 local gmsg = GUI:ModuleResetMessage("group") or ""
-check(gmsg:find("Raiding", 1, true) and gmsg:find("Auto Layouts", 1, true)
-      and gmsg:find("Frame positions and pinned frames", 1, true), "text: Group Frames lists its own covers")
+check(gmsg:find("Raiding", 1, true)
+      and gmsg:find("All party and raid frame settings, including positions, pinned frames, auto layouts and synced sections", 1, true)
+      and gmsg:find("The Party and Raid Aura Designer and Text Designer setups", 1, true),
+      "text: Group Frames lists its own covers, grouped")
+check(gmsg:find("Not reset: whether Party and Raid are on, settings on the Global page, and designer presets saved under other names", 1, true),
+      "text: ...says Party and Raid stay on or off, and what else it keeps")
 
 DF.ClickCast = { db = { enabled = true }, ResetActiveProfile = function() return true end,
                  GetActiveProfileName = function() return "Holy" end }
@@ -129,7 +132,31 @@ local cmsg = GUI:ModuleResetMessage("clicks") or ""
 check(cmsg:find("Only the current click-casting profile, Holy, is reset.", 1, true),
       "text: Click-Casting names ITS profile (its own scope line)")
 check(not cmsg:find("Raiding", 1, true), "text: ...and not the main profile, which it does not touch")
+check(cmsg:find("Not reset: whether click-casting is on", 1, true), "text: ...and says it stays on or off")
 DF.ClickCast = nil
+
+-- WILL IT FIT: the popup is 440 wide (400px of text) and capped at 500 tall, and
+-- 112px of that is its own chrome. Estimated pessimistically -- 55 characters a
+-- line (bytes, so a bullet counts three), 16px a line -- and held to 400, which
+-- leaves room for longer translations and the client's own wrap.
+local function PopupHeight(text)
+    local lines = 0
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+        lines = lines + math.max(1, math.ceil(#line / 55))
+    end
+    return 112 + 16 * lines, lines
+end
+for name, text in pairs({ toy = msg, group = gmsg, clicks = cmsg }) do
+    local h, lines = PopupHeight(text)
+    check(h <= 400, "fit: the " .. name .. " warning fits the popup with room to spare (~"
+          .. lines .. " lines, ~" .. h .. "px of 500)")
+end
+-- The guard has teeth: a list per setting, as the first draft had, does not pass.
+do
+    local long = { "These go back to their defaults:" }
+    for i = 1, 12 do long[#long + 1] = "\226\128\162 One setting area, listed on its own, long enough to wrap onto two lines " .. i end
+    check(PopupHeight(table.concat(long, "\n")) > 400, "fit: ...and a one-line-per-setting list would not")
+end
 
 -- ---- the page: a Reset button on every row with a reset ---------------
 print("-- Module reset: the Modules page rows")
