@@ -131,6 +131,9 @@ Frames\Pets.lua
 # live rendering calls into test mode, so the entry points must always exist.
 # ☠ It MUST load before TestMode.lua, which overwrites every stub.
 TestMode\Shim.lua
+# The test popup's mode registry. Resident so any module or addon can register a
+# mode at any time; the load-on-demand popup reads it when it builds.
+TestMode\Modes.lua
 
 # Features
 Features\Auras.lua
