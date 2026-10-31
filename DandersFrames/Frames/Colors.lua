@@ -330,7 +330,7 @@ function DF:GetReactionHealthColor(unit, mode, frame)
         if IsSecret(isPlayer) then isPlayer = false end
         if isPlayer then
             local _, class = UnitClass(unit)
-            if class and not IsSecret(class) then
+            if not IsSecret(class) and class then
                 local cc = DF:GetClassColor(class)
                 if cc then return cc.r, cc.g, cc.b end
             end

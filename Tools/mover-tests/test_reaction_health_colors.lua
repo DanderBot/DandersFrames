@@ -123,3 +123,20 @@ check(SRC:find("GetReactionHealthColor(unit, mode, frame)", 1, true), "ApplyHeal
 local tm = options_file_source("TestMode/TestMode.lua")
 check(tm:find("frame.dfTestReaction = testData.reaction", 1, true), "the test painter stamps the reaction")
 check(tm:find("frame.dfTestTapped = testData.isTapped or nil", 1, true), "...and tapped")
+
+print("-- The secret check comes BEFORE any truth test of the same value")
+-- A boolean test on a secret value errors in game; `x and not IsSecret(x)` tests
+-- x first. The mock above cannot catch that (a table is just truthy), so the
+-- order is checked on the source.
+local fs = SRC:find("\nfunction DF:GetReactionHealthColor(", 1, true)
+local fe = fs and SRC:find("\nend\n", fs, true)
+local body = fs and fe and SRC:sub(fs, fe) or ""
+check(body ~= "", "found GetReactionHealthColor's body")
+local late = {}
+for v in body:gmatch("IsSecret%((%w+)%)") do
+    if body:find("if " .. v .. " and[^\n]*IsSecret%(" .. v .. "%)")
+        or body:find("if " .. v .. " then[^\n]*\n[^\n]*IsSecret%(" .. v .. "%)") then
+        late[#late + 1] = v
+    end
+end
+eq(table.concat(late, ","), "", "no value is truth-tested before its secret check")

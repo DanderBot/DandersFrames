@@ -488,6 +488,17 @@ function DF:RegisterRaidFrame(frame)
     end
 end
 
+-- Set a frame's raid flag AND its registry entry together. For frames whose raid
+-- status can change after creation (pinned frames follow IsInRaid()): resetting
+-- only the field would leave a stale registry entry, and DF:IsRaidFrame would keep
+-- answering "raid" -- so a pinned frame created in a raid read raid settings in a party.
+function DF:SetRaidFrameFlag(frame, isRaid)
+    if not frame then return end
+    isRaid = isRaid and true or false
+    frame.isRaidFrame = isRaid
+    self.raidFrameRegistry[frame] = isRaid or nil
+end
+
 -- Check if a frame is a raid frame (checks external registry first, then field)
 function DF:IsRaidFrame(frame)
     if not frame then return false end
