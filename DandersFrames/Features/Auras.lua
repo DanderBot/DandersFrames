@@ -1842,10 +1842,12 @@ function DF:GetDebuffRowGroupCount(dbLike)
         end
         -- A standalone frame reading this very table answers for it.
         local standaloneDB = false
+        -- A preview frame (frame.dfPreview) shows test data under a real token, so it
+        -- marks the table as standalone but is never the frame asked.
         for f in pairs(DF.StandaloneFrames or {}) do
             if f.dfDB == dbLike then
                 standaloneDB = true
-                if f.unit then frame = f break end
+                if f.unit and not f.dfPreview then frame = f break end
             end
         end
         if not standaloneDB then

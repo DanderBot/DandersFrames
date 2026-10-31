@@ -300,6 +300,9 @@ do
         eq(n, #byMe, "group count: ...the ceiling instead")
         n, asked = countFor({ unit = "focus", dfDB = {} })
         eq(asked, party, "group count: a standalone frame on another table is ignored")
+        n, asked = countFor({ unit = "target", dfDB = d, dfPreview = true })
+        eq(asked, nil, "group count: a preview frame on the table is never the frame asked")
+        eq(n, #byMe, "group count: ...the ceiling instead (no party frame borrowed either)")
         local hdr = df_file_source("Frames/Headers.lua")
         check(hdr:find("DF.StandaloneFrames[frame] = true", 1, true) ~= nil,
               "group count: DF:InitStandaloneFrame records the frame (weak-keyed)")
