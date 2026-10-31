@@ -49,9 +49,11 @@ BH.FRAMES = {
     player = { "PlayerFrame" },
     target = { "TargetFrame" },
     targettarget = { "TargetFrameToT" },
-    -- FocusFrame carries its own target-of-focus inside it, hidden with it (no
-    -- focus-target frame of ours yet: that is a later unit).
+    -- FocusFrame carries its own target-of-focus inside it, hidden with it. On its
+    -- own (focus from Blizzard, focus target ours or hidden) only that is hidden.
+    -- ⚠ The global name FocusFrameToT is unverified in game on 12.x.
     focus = { "FocusFrame" },
+    focustarget = { "FocusFrameToT" },
     -- Hidden on its own, whatever the player's source (unverified in game whether
     -- 12.x still parents it to PlayerFrame; the claim + reparent works either way).
     pet = { "PetFrame" },

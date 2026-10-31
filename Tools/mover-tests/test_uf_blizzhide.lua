@@ -12,7 +12,7 @@ local NS = ...
 
 local G, G_NAMES = {}, { "DandersFrames", "CreateFrame", "C_Timer", "hooksecurefunc", "EditModeManagerFrame",
                      "PlayerFrame", "TargetFrame", "TargetFrameToT", "AlternatePowerBar", "MonkStaggerBar",
-                     "EvokerEbonMightBar", "DemonHunterSoulFragmentsBar" }
+                     "EvokerEbonMightBar", "DemonHunterSoulFragmentsBar", "FocusFrame", "FocusFrameToT" }
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 
 local function deepcopy(t)
@@ -197,6 +197,30 @@ PlayerCastingBarFrame = BlizzFrame("PlayerCastingBarFrame", "player")
 BH:ApplyAll()
 eq(reparented[PlayerCastingBarFrame], 1, "ApplyAll: hidden by default with the player frame")
 PlayerCastingBarFrame = heldCB
+
+print("-- Focus target (v1.1): FocusFrameToT")
+freshWorld()
+FocusFrame = BlizzFrame("FocusFrame", "focus")
+FocusFrameToT = BlizzFrame("FocusFrameToT", "focustarget")
+BH:ApplyAll()
+eq(claims.FocusFrame, "DandersFrames_UnitFrames", "FocusFrame claimed (its own target-of-focus goes with it)")
+eq(claims.FocusFrameToT, "DandersFrames_UnitFrames", "FocusFrameToT claimed for the focus target")
+eq(reparented[FocusFrameToT], 1, "...and hidden")
+freshWorld()
+FocusFrame = BlizzFrame("FocusFrame", "focus")
+FocusFrameToT = BlizzFrame("FocusFrameToT", "focustarget")
+UF:GetUnitDB("focus").source = "Blizzard"
+BH:ApplyAll()
+eq(claims.FocusFrame, nil, "a Blizzard focus: FocusFrame left alone")
+eq(reparented[FocusFrameToT], 1, "...but ours (or a hidden) focus target still hides Blizzard's")
+UF:GetUnitDB("focustarget").source = "Blizzard"
+freshWorld()
+FocusFrame = BlizzFrame("FocusFrame", "focus")
+FocusFrameToT = BlizzFrame("FocusFrameToT", "focustarget")
+BH:ApplyAll()
+eq(reparented[FocusFrameToT], nil, "a Blizzard focus target under a Blizzard focus: left alone")
+UF:GetUnitDB("focus").source = nil
+UF:GetUnitDB("focustarget").source = nil
 
 -- By NAME, not pairs(G): a global that was nil before is skipped by pairs and
 -- would leak this file's stub into every later suite.

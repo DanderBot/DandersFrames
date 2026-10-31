@@ -83,7 +83,7 @@ function P:TestData(unit, slot)
     local me, myClass = P:PlayerName(), P:PlayerClass()
     local lvl = (UnitLevel and UnitLevel("player")) or 80
     if type(lvl) ~= "number" or (issecretvalue and issecretvalue(lvl)) then lvl = 80 end
-    if unit == "player" or unit == "targettarget" then
+    if unit == "player" or unit == "targettarget" or unit == "focustarget" then
         t.name, t.class, t.role = me, myClass, "DAMAGER"
         t.level = lvl
         SetHealth(t, unit == "player" and 0.85 or 0.85)

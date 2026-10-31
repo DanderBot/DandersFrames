@@ -122,7 +122,8 @@ DF.db = { unitframes = deepcopy(DF.registered.unitframes.defaults) }
 print("-- Driver")
 check(Units.driver ~= nil, "a shared listener for unitless events")
 check(Units.driver._events.PLAYER_TARGET_CHANGED ~= nil, "...PLAYER_TARGET_CHANGED")
-eq(Units.driver._events.UNIT_TARGET and Units.driver._events.UNIT_TARGET[1], "target", "...UNIT_TARGET, for the target only")
+eq(Units.driver._events.UNIT_TARGET and table.concat(Units.driver._events.UNIT_TARGET, ","), "target,focus",
+   "...UNIT_TARGET, for the target and the focus only")
 
 print("-- Spawn: not in combat")
 IN_COMBAT = true
@@ -338,6 +339,46 @@ eq(n("FullFrameRefresh", "focus"), 1, "focus changed: focus repainted")
 eq(n("FullFrameRefresh", "target"), 0, "...the target is not")
 FC:Hide()
 eq(next(FC._events), nil, "focus hidden: unregistered")
+
+print("-- Focus target (v1.1): target of target's pattern on focus")
+local FT = UF.frames.focustarget
+check(FT ~= nil, "focus target spawned")
+eq(FT and FT._name, "DandersUnitFrameFocusTarget", "focus target: its global name")
+eq(FT._attrs.unit, "focustarget", "focus target: unit attribute")
+eq(watched[FT], true, "focus target: unit watch (shown only while the focus has a target)")
+eq(DF.ranged[FT], true, "focus target: in the range tick")
+eq(FT:GetParent(), Units.holders.focustarget, "focus target: its own holder")
+eq(DF.standalone[FT], UF:GetUnitDB("focustarget"), "focus target: standalone on its own table")
+eq(#Units:EventsFor("focustarget"), 0, "focus target: no events of its own (polled)")
+check(UF:GetUnitDB("focustarget").position.anchor.target == "DandersFrames_UnitFrames:focus",
+      "focus target: anchored to the focus frame by default")
+tickers = {}
+guids.focustarget = "F1"
+count = {}
+FT:Show()
+eq(#tickers, 1, "focus target shown: a ticker starts")
+eq(next(FT._events), nil, "...and no unit events are registered")
+count = {}
+tickers[1].fn()
+eq(n("FullFrameRefresh", "focustarget"), 0, "same GUID: no full repaint")
+eq(n("UpdateHealthFast", "focustarget"), 1, "...values only")
+guids.focustarget = "F2"
+count = {}
+tickers[1].fn()
+eq(n("FullFrameRefresh", "focustarget"), 1, "GUID changed: full repaint")
+count = {}
+Units:OnDriverEvent("PLAYER_FOCUS_CHANGED")
+eq(n("FullFrameRefresh", "focustarget"), 1, "focus changed: the focus target is re-polled at once")
+count = {}
+Units:OnDriverEvent("UNIT_TARGET", "focus")
+eq(n("FullFrameRefresh", "focustarget"), 1, "the focus's target changed: focus target repainted")
+eq(n("FullFrameRefresh", "targettarget"), 0, "...not the target of target")
+count = {}
+Units:OnDriverEvent("UNIT_TARGET", "target")
+eq(n("FullFrameRefresh", "focustarget"), 0, "the target's target changed: the focus target is left alone")
+FT:Hide()
+eq(tickers[1].cancelled, true, "focus target hidden: ticker cancelled")
+eq(FT.dfUFTicker, nil, "...and dropped")
 
 print("-- Pet: events and the vehicle swap")
 inVehicle, exists.vehicle = false, false

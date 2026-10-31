@@ -21,10 +21,11 @@ UF.DF = DF
 UF.ADDON = addonName
 
 -- Every unit the settings table knows. boss1-5 share one "boss" table.
-UF.UNITS = { "player", "target", "targettarget", "focus", "pet", "boss" }
+-- focustarget (v1.1): the focus's target, the target-of-target pattern on focus.
+UF.UNITS = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" }
 -- The units this build spawns. "boss" is a container of UF.BOSS_COUNT slots
 -- (Boss.lua), whose frames sit in UF.frames as boss1..bossN.
-UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "pet", "boss" }
+UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" }
 
 -- Built-in Text Designer presets (preset NAMES are db keys: never localised).
 UF.TEXT_PRESET = "Unit Frames"

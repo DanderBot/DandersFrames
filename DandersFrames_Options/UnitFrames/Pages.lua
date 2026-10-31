@@ -39,9 +39,17 @@ GUI.UnitFrameOptions = UFO
 
 UFO.ADDON = "DandersFrames_UnitFrames"
 UFO.MODULE = "units"
-UFO.UNITS = { "player", "target", "targettarget", "focus", "pet", "boss" }
+-- Every unit with pages of its own (its settings table).
+UFO.UNITS = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" }
+-- The deck-2 tabs. SIX, NOT SEVEN: the tab row (12 + 7 x 70 + 6 x 4 = 526 px)
+-- cannot hold a seventh tab at the window's 580 px minimum (deck 2 is 518 px wide
+-- beside the rail, before its Undo / Test / Unlock cluster). A unit with no tab
+-- lives on another unit's tab, in a sidebar category of its own (UFO.TAB_OF).
+UFO.TABS = { "player", "target", "targettarget", "focus", "pet", "boss" }
+-- unit -> the tab its pages sit on (absent: its own tab).
+UFO.TAB_OF = { focustarget = "focus" }
 UFO.unit = "player"          -- the deck-2 tab showing
-UFO.pageMeta = {}            -- page name -> { unit = u | nil (every tab), kind = k }
+UFO.pageMeta = {}            -- page name -> { unit = u | nil (every tab), tab = t, kind = k }
 UFO.pagesByUnit = {}         -- unit -> kind -> page name
 UFO.pageByKind = {}          -- kind -> its UnitFramePageData record
 UFO.prefixes = {}            -- kind -> key prefixes its Reset / Sync / Copy act on
@@ -59,6 +67,7 @@ function UFO.UnitLabel(unit)
     if unit == "target" then return L["Target"] end
     if unit == "targettarget" then return L["Target of Target"] end
     if unit == "focus" then return L["Focus"] end
+    if unit == "focustarget" then return L["Focus Target"] end
     if unit == "pet" then return L["Pet"] end
     if unit == "boss" then return L["Boss"] end
     return tostring(unit)
@@ -82,6 +91,23 @@ end
 function UFO.IsUnit(unit)
     for _, u in ipairs(UFO.UNITS) do if u == unit then return true end end
     return false
+end
+
+function UFO.IsTab(id)
+    for _, u in ipairs(UFO.TABS) do if u == id then return true end end
+    return false
+end
+
+-- The deck-2 tab a unit's pages sit on.
+function UFO.TabOf(unit) return UFO.TAB_OF[unit] or unit end
+
+-- The page's tab (a page of the module page set: every tab).
+local function MetaTab(m) return m and (m.tab or m.unit) or nil end
+
+-- The unit being edited: the page on screen's, else the tab's.
+function UFO.EditedUnit()
+    local m = UFO.pageMeta[GUI.CurrentPageName or ""]
+    return (m and m.unit) or UFO.unit
 end
 
 -- ============================================================
@@ -359,10 +385,11 @@ function UFO.ApplySyncs()
     local t = SyncTable(false)
     if not t then return 0 end
     local n = 0
+    local editing = UFO.EditedUnit()
     for kind, map in pairs(t) do
-        local partner = map[UFO.unit]
+        local partner = map[editing]
         if partner then
-            UFO.CopyPage(kind, UFO.unit, partner)
+            UFO.CopyPage(kind, editing, partner)
             UFO.InvalidateUnitPages(partner)
             n = n + 1
         end
@@ -1293,12 +1320,17 @@ end
 -- the mover per frame. Its table is the module's own (DF.db.unitframes.global).
 -- ============================================================
 UFO.SOURCES = { "DF", "Blizzard", "Hidden" }
+-- A unit whose Blizzard frame lives inside another's: it can be Blizzard's only
+-- while that one is.
+UFO.INSIDE = { targettarget = "target", focustarget = "focus" }
 
 function UFO.SourceOptions(unit)
     local opts = { DF = "DandersFrames", Blizzard = L["Blizzard"], Hidden = L["Hidden"],
                    _order = { "DF", "Blizzard", "Hidden" } }
-    -- Blizzard's target of target lives inside its target frame.
-    if unit == "targettarget" and UFO.GetSource("target") ~= "Blizzard" then
+    -- Blizzard's target of target lives inside its target frame (and the focus's
+    -- target inside the focus frame).
+    local inside = UFO.INSIDE[unit]
+    if inside and UFO.GetSource(inside) ~= "Blizzard" then
         opts.Blizzard = nil
         opts._order = { "DF", "Hidden" }
     end
@@ -1317,14 +1349,20 @@ function UFO.SetSource(unit, value)
     local stored = UF and UF:GetStoredUnit(unit)
     if not stored then return false end
     if value ~= "DF" and value ~= "Blizzard" and value ~= "Hidden" then return false end
-    if unit == "targettarget" and value == "Blizzard" and UFO.GetSource("target") ~= "Blizzard" then
+    local inside = UFO.INSIDE[unit]
+    if inside and value == "Blizzard" and UFO.GetSource(inside) ~= "Blizzard" then
         return false
     end
     local before = UFO.GetSource(unit)
     stored.source = value
-    -- Target off Blizzard takes a Blizzard target of target with it.
-    if unit == "target" and value ~= "Blizzard" and UFO.GetSource("targettarget") == "Blizzard" then
-        UF:GetStoredUnit("targettarget").source = "DF"
+    -- Target (focus) off Blizzard takes a Blizzard target of target (focus target)
+    -- with it.
+    if value ~= "Blizzard" then
+        for child, parent in pairs(UFO.INSIDE) do
+            if parent == unit and UFO.GetSource(child) == "Blizzard" then
+                UF:GetStoredUnit(child).source = "DF"
+            end
+        end
     end
     if before ~= value then
         UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
@@ -1396,6 +1434,7 @@ function UFO.BuildSettingsPage(self, db, Add)
             { optionsFunc = function() return UFO.SourceOptions(u) end }), 55)
     end
     band:AddWidget(GUI:CreateLabel(self.child, L["Target of Target can only be Blizzard when Target is."], 250), 30)
+    band:AddWidget(GUI:CreateLabel(self.child, L["Focus Target can only be Blizzard when Focus is."], 250), 30)
     Close(band)
 
     -- Q7: unset, the tick FOLLOWS the player cast bar (ticked while ours is on);
@@ -1417,7 +1456,7 @@ end
 -- ============================================================
 function UFO.UnitTabs()
     local tabs = {}
-    for _, unit in ipairs(UFO.UNITS) do
+    for _, unit in ipairs(UFO.TABS) do
         local u = unit
         tabs[#tabs + 1] = {
             id = u,
@@ -1441,14 +1480,13 @@ function UFO.RegisterModule()
         tabs = UFO.UnitTabs(),
         activeTab = function() return UFO.unit end,
         defaultTab = function() return UFO.unit end,
-        onTab = function(tabId) if UFO.IsUnit(tabId) then UFO.unit = tabId end end,
+        onTab = function(tabId) if UFO.IsTab(tabId) then UFO.unit = tabId end end,
         pageInView = function(name)
             local m = UFO.pageMeta[name]
-            return not m or m.unit == nil or m.unit == UFO.unit
+            return not m or m.unit == nil or MetaTab(m) == UFO.unit
         end,
         tabForPage = function(name)
-            local m = UFO.pageMeta[name]
-            return m and m.unit or nil
+            return MetaTab(UFO.pageMeta[name])
         end,
         pageForTab = function(tabId, from) return UFO.PageForTab(tabId, from) end,
         isEnabled = UFO.IsEnabled,
@@ -1479,6 +1517,11 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
     for _, cat in ipairs(data.categories) do
         CreateCategory("uf_" .. cat.id, L[cat.label])
     end
+    -- A unit without a tab of its own: one category of its own on its host tab,
+    -- after that tab's own categories (the focus target's pages on Focus).
+    for _, unit in ipairs(UFO.UNITS) do
+        if UFO.TAB_OF[unit] then CreateCategory("uf_" .. unit, UFO.UnitLabel(unit)) end
+    end
     for _, rec in ipairs(data.pages) do
         UFO.pageByKind[rec.kind] = rec
         if not rec.later then
@@ -1486,7 +1529,8 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                 if rec.units[unit] then
                     local u = unit
                     local name = UFO.PageName(u, rec.kind)
-                    local pg = CreateSubTab("uf_" .. rec.category, name, L[rec.title])
+                    local cat = UFO.TAB_OF[u] and ("uf_" .. u) or ("uf_" .. rec.category)
+                    local pg = CreateSubTab(cat, name, L[rec.title])
                     if pg then
                         pg.buildKey = function() return "uf:" .. u end
                         pg.buildDb = function() return UF and UF:GetUnitDB(u) end
@@ -1500,7 +1544,7 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                             pg.extraHealthColorModes = { REACTION = L["Reaction"], CLASS_REACTION = L["Class / Reaction"] }
                         end
                         GUI:SetPageModule(name, UFO.MODULE)
-                        UFO.pageMeta[name] = { unit = u, kind = rec.kind }
+                        UFO.pageMeta[name] = { unit = u, tab = UFO.TabOf(u), kind = rec.kind }
                         UFO.pagesByUnit[u] = UFO.pagesByUnit[u] or {}
                         UFO.pagesByUnit[u][rec.kind] = name
                         BuildPage(pg, UFO.PageBuilder(rec, u))

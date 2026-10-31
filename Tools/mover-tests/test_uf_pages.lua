@@ -221,7 +221,7 @@ eq(def.tabs[3].label(), "Target of Target", "ToT's tab: full name")
 eq(def.tabs[3].deckLabel(), "TOT", "...short on deck 2")
 eq(G:ModuleLabel(def), "Unit Frames", "label")
 eq(def.railLabel(), "Units", "rail label")
-eq(def.status(), "Player \194\183 Target \194\183 ToT \194\183 Focus \194\183 Pet \194\183 Boss", "status: the units it draws")
+eq(def.status(), "Player \194\183 Target \194\183 ToT \194\183 Focus \194\183 Focus Target \194\183 Pet \194\183 Boss", "status: the units it draws")
 load_options_file_into("GUI/Pages/ModulesPage.lua", NS)
 do
     local on = G:ModulesPageModel()
@@ -238,7 +238,8 @@ local WANT = {
     player = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,classpower,text,buffs,debuffs,defensive,dispel,auradesigner,icons,unitIcons,highlights",
     target = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     targettarget = "frame,tooltips,health,text,highlights",
-    focus = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
+    focustarget = "frame,tooltips,health,text,highlights",
+    focus ="frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     pet = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
     boss = "frame,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,highlights",
 }
@@ -375,6 +376,33 @@ G:SelectModule("units", nil, { forPage = "uf_pet_icons" })
 eq(def.activeTab(), "pet", "a search result on another unit moves the tab")
 check(table.concat(calls, ","):find("layout", 1, true), "...and re-lists the sidebar")
 
+print("-- Focus target (v1.1): a section on the Focus tab, not a seventh tab")
+eq(#def.tabs, 6, "still six deck-2 tabs (seven do not fit the 580 px window)")
+check(not UFO.IsTab("focustarget") and UFO.IsUnit("focustarget"), "a unit with pages, not a tab")
+eq(UFO.TabOf("focustarget"), "focus", "its pages sit on the Focus tab")
+eq(made.cats.uf_focustarget, "Focus Target", "...in a sidebar category of its own")
+local lastCat = made.catOrder[#made.catOrder]
+eq(lastCat, "uf_focustarget", "...after Focus's own categories")
+eq(made.pages.uf_focustarget_health.cat, "uf_focustarget", "every focus target page is in it")
+eq(made.pages.uf_focustarget_health.searchTabLabel, "Focus Target \194\183 Health Bar", "search names it")
+eq(def.tabForPage("uf_focustarget_health"), "focus", "a focus target page names the Focus tab")
+G:SelectModule("units", "focus")
+check(def.pageInView("uf_focustarget_health") and def.pageInView("uf_focus_health"),
+      "on Focus: the focus's pages and the focus target's")
+G:SelectModule("units", "target")
+check(not def.pageInView("uf_focustarget_health"), "on another tab: not listed")
+calls = {}
+G:SelectModule("units", nil, { forPage = "uf_focustarget_text" })
+eq(def.activeTab(), "focus", "a search result for it moves to the Focus tab")
+check(G.PageBuildDb(made.pages.uf_focustarget_health) == UF:GetUnitDB("focustarget"),
+      "its pages build against the focus target's own table")
+eq(G.PageBuildKey(made.pages.uf_focustarget_health), "uf:focustarget", "...one build per page, keyed on the unit")
+G.CurrentPageName = "uf_focustarget_health"
+eq(UFO.EditedUnit(), "focustarget", "editing on Focus's tab, the edited unit is the page's (the sync follows it)")
+G.CurrentPageName = "uf_focus_health"
+eq(UFO.EditedUnit(), "focus", "...and the focus's on its own pages")
+G.CurrentPageName = nil
+
 -- ============================================================
 -- 4. A UNIT PAGE BUILT FROM A PARTY PAGE
 -- ============================================================
@@ -466,7 +494,7 @@ do
     eq(copyDD.caption, "Copy to...", "Copy: a fixed caption")
     eq(syncDD.caption, "Sync with...", "Sync: a fixed caption while unlinked")
     local order = table.concat(copyDD.options._order, ",")
-    eq(order, "player,target,focus,pet,boss", "Copy: every OTHER unit that has the page")
+    eq(order, "player,target,focus,focustarget,pet,boss", "Copy: every OTHER unit that has the page")
 
     -- The module Settings page, built for real over the same stubs.
     local checks, labels, rows = {}, {}, {}
@@ -795,6 +823,16 @@ do
     UFO.SetSource("target", "DF")
     eq(UFO.GetSource("targettarget"), "DF", "target back to ours takes a Blizzard ToT with it")
     eq(UFO.SetSource("player", "Nonsense"), false, "an unknown source is refused")
+    -- The focus target follows the same rule against the focus.
+    check(not has(UFO.SourceOptions("focustarget"), "Blizzard"), "focus target may not be Blizzard's while focus is ours")
+    eq(UFO.SetSource("focustarget", "Blizzard"), false, "...and setting it is refused")
+    eq(UFO.SetSource("focus", "Blizzard"), true, "focus -> Blizzard")
+    eq(UFO.SetSource("focustarget", "Blizzard"), true, "now the focus target may be Blizzard's")
+    eq(UFO.GetSource("targettarget"), "DF", "...the target of target is untouched")
+    UFO.SetSource("focus", "DF")
+    eq(UFO.GetSource("focustarget"), "DF", "focus back to ours takes a Blizzard focus target with it")
+    check(options_file_source("UnitFrames/Pages.lua"):find('L["Focus Target can only be Blizzard when Focus is."]', 1, true),
+          "the Frame Source card says so")
 
     print("-- Q9: DF's Hide Blizzard Player Frame stands aside")
     check(type(G.PlayerFrameOwnerNote()) == "string", "player drawn by Unit Frames: the note shows")

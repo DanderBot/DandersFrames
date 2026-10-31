@@ -48,6 +48,7 @@ function M:Title(unit)
     if unit == "target" then return L["Target"] end
     if unit == "targettarget" then return L["Target of Target"] end
     if unit == "focus" then return L["Focus"] end
+    if unit == "focustarget" then return L["Focus Target"] end
     if unit == "pet" then return L["Pet"] end
     if unit == "boss" then return L["Boss"] end
     return unit
@@ -79,6 +80,9 @@ end
 M.EXTRA = {
     targettarget = {
         isRelevant = function() return UnitExists("target") and true or false end,
+    },
+    focustarget = {
+        isRelevant = function() return UnitExists("focus") and true or false end,
     },
 }
 

@@ -6,7 +6,8 @@ local addonName, UF = ...
 --     version = 1,
 --     global  = { ... },                  -- module-wide
 --     units   = { player = {...}, target = {...}, targettarget = {...},
---                 focus = {...}, pet = {...}, boss = {...} },   -- boss1-5 share one
+--                 focus = {...}, focustarget = {...}, pet = {...},
+--                 boss = {...} },                               -- boss1-5 share one
 -- }
 -- registered with DandersFrames as a profile-root table, so every profile gets
 -- it, and profile copy / reset / import / export carry it.
@@ -282,6 +283,19 @@ local PER_UNIT = {
         portraitEnabled = true,
         classificationEnabled = true,
     },
+    -- The focus's target: target of target's look, beside the focus's right edge
+    -- (x/y are the mover's solve for the default focus position, as for ToT).
+    focustarget = {
+        frameWidth = 110, frameHeight = 24,
+        healthColorMode = "CLASS_REACTION",
+        resourceBarEnabled = false,
+        showBuffs = false, showDebuffs = false,
+        oorEnabled = true,
+        textDesignerPreset = UF.TEXT_PRESET_SMALL,
+        position = { point = "CENTER", x = -131, y = -294,
+                     anchor = { target = "DandersFrames_UnitFrames:focus", edge = "right",
+                                align = "start", offsetX = 0, offsetY = 0 } },
+    },
     pet = {
         frameWidth = 110, frameHeight = 24,
         healthColorMode = "CLASS",
@@ -325,7 +339,7 @@ local ENEMY = { target = true, focus = true, boss = true }
 -- Frames that usually show a hostile unit. DF's aggro highlight reads the UNIT's
 -- own threat, which means nothing on an enemy (the spec's "your threat on the
 -- unit" reading is a later runtime change), so it starts off there.
-local HOSTILE_SHOWN = { target = true, targettarget = true, focus = true, boss = true }
+local HOSTILE_SHOWN = { target = true, targettarget = true, focus = true, focustarget = true, boss = true }
 
 UF.UnitDefaults = {}
 for _, unit in ipairs(UF.UNITS) do

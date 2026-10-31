@@ -119,6 +119,22 @@ lib.applied = {}
 M:ApplyAll()
 eq(#lib.applied, 3, "apply re-solves every registered element")
 
+print("-- Focus target (v1.1): its own element, anchored to focus")
+UF.frames.focus = fakeFrame("focus")
+UF.frames.focustarget = fakeFrame("focustarget")
+local FT = M:BuildDef("focustarget")
+check(FT ~= nil, "focus target: an element of its own (registered at Init like every spawned unit)")
+if FT then
+    eq(FT.title, "L:Focus Target", "focus target title")
+    eq(FT.getFrame(), UF.frames.focustarget, "its frame")
+    eq(FT.default.anchor and FT.default.anchor.target, A .. ":focus", "anchors to the focus frame")
+    eq(FT.default.anchor and FT.default.anchor.edge, "right", "...its right edge, like target of target")
+    exists.focus = false
+    eq(FT.isRelevant(), false, "irrelevant without a focus")
+    exists.focus = true
+    eq(FT.isRelevant(), true, "...relevant with one")
+end
+
 print("-- Lib absent")
 LibStub = function() return nil end
 local UF2 = {}

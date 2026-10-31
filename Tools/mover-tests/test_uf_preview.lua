@@ -140,7 +140,7 @@ lib.cbs.Unlocked()
 eq(P:IsActive(), true, "unlocked: on")
 eq(P:IsOwnedBy("unlock"), true, "...owned by the session")
 eq(loads, 1, "the options addon (the painter) is loaded")
-for _, unit in ipairs({ "player", "target", "targettarget", "focus", "pet" }) do
+for _, unit in ipairs({ "player", "target", "targettarget", "focus", "focustarget", "pet" }) do
     local f = P.frames[unit]
     check(f ~= nil, unit .. ": a preview frame")
     if f then
@@ -155,13 +155,15 @@ for _, unit in ipairs({ "player", "target", "targettarget", "focus", "pet" }) do
         eq(f._placed, UF:GetPositionRecord(unit), unit .. ": placed at the unit's record")
     end
 end
-eq(#built, 5, "elements built once per unit")
+eq(#built, 6, "elements built once per unit")
 for _, b in ipairs(built) do
     check(b.preview and b.standalone and b.test and b.db == UF:GetUnitDB(b.unit) and b.raid == false,
           b.unit .. ": marked standalone + preview BEFORE its elements were built")
 end
-eq(#painted, 5, "each painted by DF's test painter")
+eq(#painted, 6, "each painted by DF's test painter")
 eq(P.frames.target.dfTestData.reaction, 2, "target: a hostile sample")
+eq(P.frames.focustarget.dfTestData.name, P.frames.targettarget.dfTestData.name,
+   "focus target: the same sample as target of target (the focus targets you)")
 eq(P.frames.target.dfTestData.class, nil, "...an NPC (no class)")
 eq(P.frames.player.dfTestData.class, "PRIEST", "player: your own class")
 eq(P.frames.player.dfTestData.name, "Danders", "...and name")
@@ -241,7 +243,7 @@ print("-- Settings refresh repaints what is up")
 P:SetOwner("settings", true)
 painted = {}
 UF:RefreshAll()
-eq(#painted, 5, "every preview frame repainted")
+eq(#painted, 6, "every preview frame repainted")
 P:SetOwner("settings", false)
 painted = {}
 UF:RefreshAll()

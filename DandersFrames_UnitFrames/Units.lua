@@ -17,6 +17,9 @@ local addonName, UF = ...
 --                 repaint when the unit's GUID changes (a secret GUID counts as
 --                 changed)
 --   focus         as target; PLAYER_FOCUS_CHANGED repaints it
+--   focustarget   the focus's target: target of target's pattern on focus (unit
+--                 watch + ticker; PLAYER_FOCUS_CHANGED and the focus's UNIT_TARGET
+--                 re-poll it at once)
 --   pet           RegisterUnitWatch on "pet" (in a vehicle the vehicle holds the
 --                 pet slot, so the watch shows it then too). Blizzard's convention,
 --                 shared with player: in a vehicle the player frame shows the
@@ -50,6 +53,7 @@ local FRAME_NAMES = {
     target = "DandersUnitFrameTarget",
     targettarget = "DandersUnitFrameTargetTarget",
     focus = "DandersUnitFrameFocus",
+    focustarget = "DandersUnitFrameFocusTarget",
     pet = "DandersUnitFramePet",
     -- Boss.lua: the holder / container prefix; slot N is DandersUnitFrameBossN.
     boss = "DandersUnitFrameBoss",
@@ -57,11 +61,11 @@ local FRAME_NAMES = {
 Units.FRAME_NAMES = FRAME_NAMES
 
 -- Shown only while the unit exists (secure unit watch).
-local WATCHED = { target = true, targettarget = true, focus = true, pet = true, boss = true }
+local WATCHED = { target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true }
 -- No events of their own: polled by the ticker instead.
-local POLLED = { targettarget = true }
+local POLLED = { targettarget = true, focustarget = true }
 -- In DF's range tick (fade when out of range).
-local RANGED = { target = true, targettarget = true, focus = true, pet = true, boss = true }
+local RANGED = { target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true }
 -- Take part in the vehicle swap (toggleForVehicle on the button).
 local VEHICLE = { player = true, pet = true }
 Units.WATCHED, Units.RANGED, Units.VEHICLE = WATCHED, RANGED, VEHICLE
@@ -277,6 +281,13 @@ function Units:TickPolled(f)
     else
         Units:RepaintValues(f)
     end
+end
+
+-- A polled frame's unit is someone else now: forget the GUID and poll at once.
+function Units:RepollPolled(f)
+    if not f then return end
+    f.dfUFLastGUID = nil
+    if f:IsVisible() then Units:TickPolled(f) end
 end
 
 function Units:StartTicker(f)
@@ -533,6 +544,7 @@ function Units:OnDriverEvent(event, unit)
     elseif event == "PLAYER_FOCUS_CHANGED" then
         local fc = frames.focus
         if fc and fc:IsVisible() then Units:FullRefresh(fc) end
+        Units:RepollPolled(frames.focustarget)
     elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
         -- "In an Instance" has no macro condition: rebuild the visibility rules.
         for _, f in pairs(frames) do Units:ApplyVisibility(f) end
@@ -543,12 +555,10 @@ function Units:OnDriverEvent(event, unit)
             if f:IsVisible() then Elements("OnUnitEvent", f, event, nil) end
         end
     elseif event == "UNIT_TARGET" then
-        -- The target changed ITS target: the target-of-target is someone else now.
-        local tt = frames.targettarget
-        if tt and unit == "target" then
-            tt.dfUFLastGUID = nil
-            if tt:IsVisible() then Units:TickPolled(tt) end
-        end
+        -- The target (or focus) changed ITS target: the polled frame shows someone
+        -- else now.
+        if unit == "target" then Units:RepollPolled(frames.targettarget) end
+        if unit == "focus" then Units:RepollPolled(frames.focustarget) end
     elseif event == "RAID_TARGET_UPDATE" then
         if DF.UpdateRaidTargetIcon then
             for _, f in pairs(frames) do
@@ -582,7 +592,7 @@ if CreateFrame then
     driver:RegisterEvent("PLAYER_REGEN_ENABLED")
     driver:RegisterEvent("RAID_TARGET_UPDATE")
     if driver.RegisterUnitEvent then
-        driver:RegisterUnitEvent("UNIT_TARGET", "target")
+        driver:RegisterUnitEvent("UNIT_TARGET", "target", "focus")
     end
     driver:SetScript("OnEvent", function(_, event, unit) Units:OnDriverEvent(event, unit) end)
     Units.driver = driver

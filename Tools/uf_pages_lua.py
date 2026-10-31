@@ -28,7 +28,24 @@ SRC = ROOT / "docs" / "superpowers" / "specs" / "unitframes-build" / "uf-pages.j
 PAGES = ROOT / "DandersFrames_Options" / "GUI" / "Pages"
 OUT = ROOT / "DandersFrames_Options" / "UnitFrames" / "PageData.lua"
 
-UNITS = ["player", "target", "targettarget", "focus", "pet", "boss"]
+UNITS = ["player", "target", "targettarget", "focus", "focustarget", "pet", "boss"]
+
+# Units the inventory never listed that get exactly another unit's pages, cards and
+# hidden controls (v1.1 additions): unit -> the unit it mirrors.
+#   focustarget  the focus's target is target of target's pattern on focus
+MIRRORS = {"focustarget": "targettarget"}
+
+def mirror(obj):
+    """Every unit list in the inventory that names a mirrored unit's source names it too."""
+    if isinstance(obj, list):
+        out = [mirror(v) for v in obj]
+        for unit, src in MIRRORS.items():
+            if src in out and unit not in out:
+                out.append(unit)
+        return out
+    if isinstance(obj, dict):
+        return {k: mirror(v) for k, v in obj.items()}
+    return obj
 
 KIND = {
     "general_frame": "frame", "display_tooltips": "tooltips", "display_fading": "fading",
@@ -87,7 +104,7 @@ def lua_set(units):
     return "{ " + ", ".join(f"{u} = true" for u in UNITS if u in units) + " }"
 
 def main():
-    data = json.loads(SRC.read_text(encoding="utf-8"))
+    data = mirror(json.loads(SRC.read_text(encoding="utf-8")))
     pairs = section_keys()
     out = []
     errors = []
@@ -175,7 +192,7 @@ def main():
         pid = rec.get("source")
         if not pid:
             continue
-        uf = next(p for p in data["pages"] if p["pageId"] == pid)
+        uf = next(p for p in data["pages"] if p["pageId"] == pid)  # already mirrored
         for g in uf["groups"]:
             for c in g["cards"]:
                 if c.get("new"):

@@ -12,7 +12,7 @@ if not DF then return end
 -- laterCards: cards new to unit frames on a DF page, waiting for their runtime.
 -- ============================================================
 DF.UnitFramePageData = {
-    units = { "player", "target", "targettarget", "focus", "pet", "boss" },
+    units = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" },
     categories = {
         { id = "general", label = "General" },
         { id = "display", label = "Display" },
@@ -25,21 +25,21 @@ DF.UnitFramePageData = {
         {
             kind = "frame", category = "general", title = "Frame",
             source = "general_frame",
-            units = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
-                frame_size = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
-                frame_border = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+                frame_size = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                frame_border = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 frame_bordershadow = { player = true, target = true, focus = true, pet = true, boss = true },
-                frame_fade = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+                frame_fade = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             },
             hide = {
-                frameFadeAlphaInCombat = { targettarget = true, boss = true },
-                frameFadeAlphaOutOfCombat = { targettarget = true, boss = true },
-                frameFadeHoverScope = { player = true, targettarget = true, pet = true },
-                frameFadeHoverUsesCombat = { targettarget = true },
-                frameFadeInstanceUsesCombat = { targettarget = true, boss = true },
-                frameFadeSplitCombat = { targettarget = true, boss = true },
-                frameSpacing = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+                frameFadeAlphaInCombat = { targettarget = true, focustarget = true, boss = true },
+                frameFadeAlphaOutOfCombat = { targettarget = true, focustarget = true, boss = true },
+                frameFadeHoverScope = { player = true, targettarget = true, focustarget = true, pet = true },
+                frameFadeHoverUsesCombat = { targettarget = true, focustarget = true },
+                frameFadeInstanceUsesCombat = { targettarget = true, focustarget = true, boss = true },
+                frameFadeSplitCombat = { targettarget = true, focustarget = true, boss = true },
+                frameSpacing = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             },
             laterCards = { "Style Source", "Position" },
         },
@@ -73,9 +73,9 @@ DF.UnitFramePageData = {
         {
             kind = "tooltips", category = "display", title = "Tooltips",
             source = "display_tooltips",
-            units = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
-                tooltips_frame = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+                tooltips_frame = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 tooltips_binding = { player = true, target = true, focus = true, pet = true, boss = true },
                 tooltips_resurrection = { player = true },
                 tooltips_buff = { player = true, target = true, focus = true, pet = true, boss = true },
@@ -124,12 +124,12 @@ DF.UnitFramePageData = {
         {
             kind = "health", category = "bars", title = "Health Bar",
             source = "bars_health",
-            units = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
-                health_color = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
-                health_texture = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
-                health_gradient = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
-                health_background = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+                health_color = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                health_texture = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                health_gradient = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                health_background = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 health_missing = { player = true, target = true, focus = true, pet = true, boss = true },
                 health_missinggradient = { player = true, target = true, focus = true, pet = true, boss = true },
                 health_reduced = { player = true, target = true, focus = true },
@@ -229,7 +229,7 @@ DF.UnitFramePageData = {
         },
         {
             kind = "text", category = "text", title = "Text Designer",
-            units = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
         },
         {
             kind = "buffs", category = "auras", title = "Buff Bar",
@@ -360,10 +360,10 @@ DF.UnitFramePageData = {
         {
             kind = "highlights", category = "indicators", title = "Highlights",
             source = "indicators_highlights",
-            units = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
                 highlights_selection = { player = true, focus = true, pet = true, boss = true },
-                highlights_hover = { player = true, target = true, targettarget = true, focus = true, pet = true, boss = true },
+                highlights_hover = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 highlights_aggro = { player = true, target = true, focus = true, pet = true, boss = true },
                 highlights_threat = { player = true, target = true, focus = true, pet = true, boss = true },
             },

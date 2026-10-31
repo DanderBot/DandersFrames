@@ -47,8 +47,9 @@ load_uf_file_into("Defaults.lua", UF)
 print("-- Namespace")
 eq(DF.UnitFrames, UF, "DandersFrames.UnitFrames is the companion's namespace")
 eq(UF.ADDON, "DandersFrames_UnitFrames", "addon name from the varargs")
-eq(#UF.SPAWNED_UNITS, 6, "this build spawns six units (boss is a container of slots)")
-eq(UF.SPAWNED_UNITS[6], "boss", "...boss last")
+eq(#UF.SPAWNED_UNITS, 7, "this build spawns seven units (boss is a container of slots)")
+eq(UF.SPAWNED_UNITS[7], "boss", "...boss last")
+eq(UF.SPAWNED_UNITS[5], "focustarget", "...the focus target after focus (v1.1)")
 
 print("-- Registration")
 local spec = DF.registered.unitframes
