@@ -2380,6 +2380,17 @@ function DF:CreateGUI()
     -- OnShow handler is composed with, not replaced.
     frame:HookScript("OnShow", function() UpdateThemeColors() end)
 
+    -- The module showing's own test mode (GUI/ModuleRegistry.lua def.testMode), or
+    -- nil: the Test button is the party / raid test mode.
+    GUI.ModuleTestRoute = function()
+        local def = GUI.GetModule and GUI:GetModule()
+        local tm = def and def.testMode
+        if type(tm) == "table" and tm.isOn and tm.toggle and tm.isPanelShown and tm.togglePanel then
+            return tm
+        end
+        return nil
+    end
+
     -- Function to update test button state (called externally)
     UpdateTestButtonState = function()
         -- Both cues read the USER's claim -- the same thing the panel's toggle shows
@@ -2389,10 +2400,17 @@ function DF:CreateGUI()
         -- its OWN claim, and driving the glyph off that made a plain unlock look like
         -- the user had switched test mode on. Frames being visible during an unlock is
         -- unlock's business; the chat line explains it.
-        local panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
-        local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
-        local userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
-        btnTest:SetActive(panelOpen)
+        local panelOpen, userWants
+        local route = GUI.ModuleTestRoute()
+        if route then
+            -- A module with a test mode of its own (def.testMode, e.g. Unit Frames).
+            panelOpen, userWants = route.isPanelShown(), route.isOn()
+        else
+            panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
+            local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
+            userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
+        end
+        btnTest:SetActive(panelOpen and true or false)
         btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
             .. (userWants and "preview" or "preview_off") .. ".png")
         -- White text/icon in both states (state shown by the toggle border/fill).
@@ -2404,6 +2422,15 @@ function DF:CreateGUI()
     -- Test button scripts
     btnTest:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btnTest:SetScript("OnClick", function(self, button)
+        -- ★ THE BUTTON FOLLOWS THE MODULE. A module that brings its own test mode
+        -- (def.testMode -- Unit Frames' units test mode) gets this button while it
+        -- shows; everywhere else it is the party / raid test mode, as always.
+        local route = GUI.ModuleTestRoute()
+        if route then
+            if button == "RightButton" then route.toggle() else route.togglePanel() end
+            UpdateTestButtonState()
+            return
+        end
         if button == "RightButton" then
             -- Quick toggle test mode
             DF:ToggleTestMode()
