@@ -1387,6 +1387,16 @@ DF.ExportCategoryInfo = {
         order = 19,
         modeless = true,
     },
+    -- The Unit Frames companion's own profile table (DF.db.unitframes, registered
+    -- by DandersFrames_UnitFrames/Defaults.lua with exportCategory "unitframes").
+    -- No mode keys: the table travels whole, and only while the companion is loaded.
+    unitframes = {
+        name = "Unit Frames",
+        description = "Player, target, focus, pet and boss frames",
+        order = 20,
+        modeless = true,
+        rootTable = "unitframes",
+    },
 }
 
 -- ☠ Two optional fields on an entry above, both for a category carried by

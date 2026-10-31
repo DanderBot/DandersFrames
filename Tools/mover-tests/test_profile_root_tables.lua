@@ -260,4 +260,86 @@ local core = df_file_source("Core.lua"):gsub("\r\n", "\n")
 check(core:find("profile%.raid%[key%] = DF:DeepCopy%(value%)\n%s*end\n%s*end\n%s*end\n[^\n]*\n[^\n]*\n%s*DF:ApplyProfileRootDefaults%(profile%)"),
       "login: every stored profile, right after the party/raid backfill")
 
+-- ---- Unit Frames: a UF-only string, round trip ------------------------------
+-- The real companion registers its table (Defaults.lua); the real export, payload
+-- check, import info and root-table import carry it.
+print("-- Unit Frames category: a UF-only string round-trips")
+do
+    local heldDF, heldCF = DandersFrames, CreateFrame
+    DandersFrames, CreateFrame = DF, nil
+    function DF:Debug() end
+    DF.L = DF.L or setmetatable({}, { __index = function(_, k) return k end })
+    local UF = {}
+    load_uf_file_into("Core.lua", UF)
+    load_uf_file_into("Defaults.lua", UF)
+    CreateFrame = heldCF
+    check(DF.ProfileRootTables.unitframes and DF.ProfileRootTables.unitframes.exportCategory == "unitframes",
+          "the companion registers its table under the Unit Frames category")
+
+    -- The category entry and its two helpers (DandersFrames_Options/Core/ExportCategories.lua).
+    local catNS = {}
+    DF.ExportCategories, DF.ExportCategoryInfo = nil, nil
+    load_options_file_into("Core/ExportCategories.lua", catNS)
+    local ci = DF.ExportCategoryInfo.unitframes
+    check(ci and ci.name == "Unit Frames" and ci.rootTable == "unitframes" and ci.modeless,
+          "a Unit Frames category: carried by the unitframes table, not per mode")
+    check(DF.ExportCategories.unitframes == nil, "...with no mode keys of its own")
+    check(DF:IsExportCategoryAvailable("unitframes"), "offered while the companion's table is registered")
+    local spec = DF.ProfileRootTables.unitframes
+    DF.ProfileRootTables.unitframes = nil
+    check(not DF:IsExportCategoryAvailable("unitframes"), "...and not without it")
+    DF.ProfileRootTables.unitframes = spec
+    check(DF:IsExportCategoryAvailable("auras"), "a mode category is always offered")
+    check(DF:ExportCategoriesAreModeless({ "unitframes" }), "a Unit Frames-only pick needs no Party or Raid")
+    check(DF:ExportCategoriesAreModeless({ "unitframes", "colors" }), "...nor with Colors")
+    check(not DF:ExportCategoriesAreModeless({ "unitframes", "auras" }), "...but a mode category does")
+    check(not DF:ExportCategoriesAreModeless({}), "an empty pick is not modeless")
+
+    -- Sender: a profile with one unit change.
+    local sender = DF:NewProfileTable()
+    sender.party.frameWidth = 77
+    sender.unitframes.units.target.frameWidth = 333
+    DF.db = sender
+    captured = nil
+    DF:ExportProfile({ "unitframes" }, { party = true, raid = true })
+    local payload = captured
+    check(payload and payload.unitframes and payload.unitframes.units.target.frameWidth == 333,
+          "export: the unit's change is in the string")
+    check(payload and payload.party == nil and payload.raid == nil, "export: no Party or Raid settings ride along")
+    check(payload and payload.unitframes ~= sender.unitframes, "export: a copy")
+    check(ValidatePayloadShape(payload) ~= nil, "payload check: a UF-only string is accepted")
+    DF.ExportCategories = { other = { "frameWidth" } }
+    local inf = DF:GetImportInfo(payload)
+    check(not inf.hasParty and not inf.hasRaid, "import info: no Party, no Raid")
+    eq(table.concat(inf.detectedCategories, ","), "unitframes", "import info: the one category")
+
+    -- Receiver: a different profile; only the unit table moves.
+    local receiver = DF:NewProfileTable()
+    receiver.party.frameWidth = 5
+    DF.db = receiver
+    local set = {}
+    for _, c in ipairs(inf.detectedCategories) do set[c] = true end
+    ImportProfileRootTables(payload, set)
+    eq(receiver.unitframes.units.target.frameWidth, 333, "import: the unit's change landed")
+    eq(receiver.party.frameWidth, 5, "import: the receiver's party settings untouched")
+    UF.DF = DF
+    eq(UF:GetUnitDB("target").frameWidth, 333, "import: the unit reads it through its chain")
+    eq(UF:GetUnitDB("player").frameWidth, UF.UnitDefaults.player.frameWidth, "import: other units keep their defaults")
+
+    -- The page's wiring (DandersFrames_Options/GUI/Pages/Profiles.lua).
+    local page = options_file_source("GUI/Pages/Profiles.lua"):gsub("\r\n", "\n")
+    check(page:find("DF:IsExportCategoryAvailable(cat)", 1, true), "page: categories offered only when available")
+    check(page:find("and not (DF.ExportCategoriesAreModeless and DF:ExportCategoriesAreModeless(selectedCats))", 1, true),
+          "page: an import of modeless categories alone asks for no Party or Raid")
+    check(page:find("if enabled or (info and info.modeless) then cb:Enable()", 1, true),
+          "page: a modeless category stays tickable with no mode ticked")
+
+    DF.ProfileRootTables.unitframes = nil
+    for i, k in ipairs(DF.ProfileRootTableOrder) do
+        if k == "unitframes" then table.remove(DF.ProfileRootTableOrder, i) break end
+    end
+    DF.ExportCategories, DF.ExportCategoryInfo = heldCats, nil
+    DandersFrames = heldDF
+end
+
 DandersFramesDB_v2 = savedSV
