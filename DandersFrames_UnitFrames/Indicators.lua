@@ -360,8 +360,11 @@ function IN:Preview(f)
         IN:PaintPvP(icons.pvp, IN:Enabled(db, "pvp") and faction or nil)
     end
     if icons.classification then
+        -- The sample unit's own answer: the test panel's "Normal" is nil here and
+        -- draws no icon (no sample data at all: the elite sample).
         local data = f.dfTestData
-        local c = data and data.classification or "elite"
+        local c = "elite"
+        if data then c = data.classification end
         IN:PaintClassification(icons.classification, IN:Enabled(db, "classification") and c or nil,
             db and db.classificationStyle)
     end
@@ -391,7 +394,12 @@ end
 -- art at 46/136.35 (the source's placeholder bar was 136.35 art-px tall for a
 -- 46 px frame): the top piece ~66x21, the bottom ~59x14.
 -- LEFT end: both pieces flipped by texcoord (the head then faces right, in
--- over the frame) and their anchors mirrored. BOTH draws the two ends.
+-- over the frame) and their anchors mirrored. BOTH draws the two ends; OUTER
+-- (the default) the outside portrait's side, else the right end.
+-- ANCHOR TO (classDragonAnchor): PORTRAIT (the default) grips an outside
+-- portrait's rect, border included, exactly as it grips the frame -- so the
+-- dragon never meets the auras or cast bars round the frame; FRAME, or no
+-- outside portrait (off, or inside the frame), grips the frame.
 -- Offsets are SCREEN x/y (positive = right / up), so a mirrored link (which
 -- negates every ...X and swaps LEFT/RIGHT, Links.Mirror) lands the follower on
 -- the exact mirror image. With BOTH the left end is the right end's mirror
@@ -443,23 +451,59 @@ function IN.DragonScale(db)
     return pct / 100 * D.REF_SCALE
 end
 
--- The ends the dragon is drawn on.
-function IN.DragonSides(db)
+-- What the dragon grips, from the settings (spec: Anchor To). nil, or
+--   { kind = "FRAME" | "PORTRAIT", outer = "LEFT" | "RIGHT" | nil,
+--     rect = { l, t, r, b }, fw = frame width }        (rect / fw: PORTRAIT only)
+-- `outer` is the side an OUTSIDE portrait sits on (nil without one), whichever
+-- anchor is chosen: Side "Outer" resolves to it. The portrait anchor needs an
+-- outside portrait (PO.OutsideRect: its rect, border included, in the frame's
+-- units from its TOPLEFT, y down); off or inside the frame, it silently falls back
+-- to the frame.
+function IN.DragonAnchor(f, db)
+    local PO = UF.Portrait
+    local l, t, r, b
+    if PO and PO.OutsideRect and db then l, t, r, b = PO.OutsideRect(f, db) end
+    if not l then return { kind = "FRAME" } end
+    local outer = (db.portraitSide == "RIGHT") and "RIGHT" or "LEFT"
+    if db.classDragonAnchor == "FRAME" then return { kind = "FRAME", outer = outer } end
+    return { kind = "PORTRAIT", outer = outer, rect = { l, t, r, b }, fw = K.FrameWidth(f, db) }
+end
+
+-- The ends the dragon is drawn on. OUTER (the default): the outside portrait's
+-- side -- on the portrait, its edge away from the frame; on the frame, the
+-- frame's end beside the portrait -- or RIGHT without an outside portrait.
+function IN.DragonSides(db, anchor)
     local side = db and db.classDragonSide
     if side == "LEFT" then return { "LEFT" } end
     if side == "BOTH" then return { "RIGHT", "LEFT" } end
-    return { "RIGHT" }
+    if side == "RIGHT" then return { "RIGHT" } end
+    return { (anchor and anchor.outer) or "RIGHT" }
 end
 
 -- Where each piece goes, pure (no frames): a list of
 --   { side, piece = "TOP"|"BOTTOM", w, h, point, relPoint, x, y, coords = {l,r,t,b} }
--- the piece's `point` on the frame's `relPoint`.
-function IN.DragonLayout(db)
+-- the piece's `point` on the frame's `relPoint`. `anchor` (IN.DragonAnchor; nil =
+-- the frame): on the PORTRAIT the pieces take the portrait's rect for the frame's,
+-- placed from the frame's corner on the portrait's side (TOPRIGHT for a portrait
+-- on the right, TOPLEFT on the left) so they track the frame's real edge:
+--   top     its bottom edge on the portrait's top edge
+--   bottom  its top edge on the portrait's bottom edge
+-- and the same left / right rules as the frame's ends. The art is wider than a
+-- square portrait, so on the OUTER edge the overhang falls INWARD, over the gap
+-- and the frame -- never out past the portrait's outer edge.
+function IN.DragonLayout(db, anchor)
     local D = IN.DRAGON
     local s = IN.DragonScale(db)
     local ox, oy = tonumber(db and db.classDragonX) or 0, tonumber(db and db.classDragonY) or 0
     local tx = tonumber(db and db.classDragonTailX) or 0
-    local sides = IN.DragonSides(db)
+    local sides = IN.DragonSides(db, anchor)
+    local rect = anchor and anchor.kind == "PORTRAIT" and anchor.rect
+    local corner, base = nil, 0
+    if rect then
+        -- The frame corner the portrait's offsets are measured from.
+        corner = (anchor.outer == "RIGHT") and "TOPRIGHT" or "TOPLEFT"
+        if corner == "TOPRIGHT" then base = -(tonumber(anchor.fw) or 0) end
+    end
     local out = {}
     for _, side in ipairs(sides) do
         -- BOTH: the left end is the right end's mirror image.
@@ -479,6 +523,13 @@ function IN.DragonLayout(db)
                 e.point, e.relPoint = vert .. "LEFT", rel .. "LEFT"
                 e.coords = { u, 0, 0, v }     -- left > right: flipped
                 e.x = (piece == "TOP") and x or (x + t + D.TAIL_INSET)
+            end
+            if rect then
+                -- The portrait's edge for the frame's: x from its left / right
+                -- edge, y from its top / bottom edge (screen y is up).
+                e.relPoint = corner
+                e.x = e.x + base + ((side == "RIGHT") and rect[3] or rect[1])
+                e.y = e.y - ((piece == "TOP") and rect[2] or rect[4])
             end
             out[#out + 1] = e
         end
@@ -506,7 +557,7 @@ end
 function IN.LayoutDragon(f, d, db)
     d:SetFrameLevel(f:GetFrameLevel() + IN.DRAGON_LEVEL)
     local used = {}
-    for _, e in ipairs(IN.DragonLayout(db)) do
+    for _, e in ipairs(IN.DragonLayout(db, IN.DragonAnchor(f, db))) do
         local t = d.tex[e.side][e.piece]
         t:SetSize(e.w, e.h)
         t:ClearAllPoints()

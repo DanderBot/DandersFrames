@@ -69,6 +69,11 @@ EXTRA_HIDE = {"uf_castbar": {"castbarDetached": {"boss"}}}
 # New cards on a DF page that get a built page of their own instead:
 # source page id -> (kind, category, title) of the page that draws them.
 SPLIT_CARDS = {"indicators_icons": ("unitIcons", "indicators", "Unit Icons")}
+# Cards new since the inventory, added to a built page: kind -> [(card slug, units)].
+#   class_decorations  Elite Dragon / Classification Border / Classification Colors
+#                      (Indicators.lua): every unit with a classification, Boss
+#                      included -- Boss has no Elite / Rare icon card, only these.
+EXTRA_CARDS = {"unitIcons": [("class_decorations", {"target", "focus", "boss"})]}
 
 def slug(title):
     return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
@@ -178,6 +183,8 @@ def main():
                         hidden = [u for u in cu if u not in ct["units"]]
                         if hidden:
                             srec["hide"].setdefault(k, set()).update(hidden)
+            for key, us in EXTRA_CARDS.get(kind2, []):
+                srec["cards"].append((key, [u for u in UNITS if u in us]))
             srec["units"] = [u for u in UNITS if any(u in cu for _, cu in srec["cards"])]
             out.append(srec)
 

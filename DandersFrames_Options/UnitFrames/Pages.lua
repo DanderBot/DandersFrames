@@ -1392,9 +1392,9 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
             Close(band)
         end
     end
-    -- The dragon and the class border go wherever the Elite / Rare icon does
-    -- (the units with a classification).
-    if UFO.CardShown(rec, unit, "elite_rare") then
+    -- The dragon and the class border: every unit with a classification, Boss
+    -- included (Boss has no Elite / Rare icon card, only these).
+    if UFO.CardShown(rec, unit, "class_decorations") then
         UFO.BuildClassDecorationCards(self, db, Open, Close, changed, col)
     end
 end
@@ -1410,7 +1410,12 @@ UFO.CLASS_TYPES = {
 }
 
 function UFO.DragonSideOptions()
-    return { RIGHT = L["Right"], LEFT = L["Left"], BOTH = L["Both"], _order = { "RIGHT", "LEFT", "BOTH" } }
+    return { OUTER = L["Outer"], RIGHT = L["Right"], LEFT = L["Left"], BOTH = L["Both"],
+             _order = { "OUTER", "RIGHT", "LEFT", "BOTH" } }
+end
+
+function UFO.DragonAnchorOptions()
+    return { PORTRAIT = L["Portrait"], FRAME = L["Frame"], _order = { "PORTRAIT", "FRAME" } }
 end
 
 function UFO.BuildClassDecorationCards(self, db, Open, Close, changed, col)
@@ -1421,10 +1426,15 @@ function UFO.BuildClassDecorationCards(self, db, Open, Close, changed, col)
     local band = Open(L["Elite Dragon"], "uf_icon_dragon", col, function(d) return OnOff(d, "classDragonEnabled") end,
         "icons", { db = db, key = "classDragonEnabled", label = L["Show"], onChanged = changed,
                    tooltip = L["Draw a dragon gripping the end of the frame on elite, rare and boss units."] })
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], UFO.DragonAnchorOptions(), db,
+        "classDragonAnchor", changed), 55)
+    w.disableOn = dragonOff
+    w.tooltip = L["Portrait: on the portrait's top and bottom edges, clear of auras and cast bars. Uses the frame when the portrait is off or sits inside the frame."]
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Size"], 50, 200, 5, db, "classDragonSize", changed), 55)
     w.disableOn = dragonOff
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Side"], UFO.DragonSideOptions(), db, "classDragonSide", changed), 55)
     w.disableOn = dragonOff
+    w.tooltip = L["Outer: the portrait's side, on the edge away from the frame."]
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "classDragonX", changed), 55)
     w.disableOn = dragonOff
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "classDragonY", changed), 55)

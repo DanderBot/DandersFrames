@@ -232,7 +232,10 @@ local ELEMENTS = {
     -- ("Classification Colors") drives both the dragon and the border.
     classDragonEnabled = false,
     classDragonSize = 100,          -- percent: 100 = top piece ~66x21
-    classDragonSide = "RIGHT",      -- RIGHT | LEFT | BOTH
+    -- PORTRAIT | FRAME. On an outside portrait's top and bottom edges (clear of
+    -- the auras and cast bars round the frame); the frame without one.
+    classDragonAnchor = "PORTRAIT",
+    classDragonSide = "OUTER",      -- OUTER (the portrait's side) | RIGHT | LEFT | BOTH
     classDragonX = 0,
     classDragonY = 0,
     classDragonTailX = 0,           -- the bottom piece only, on top of X
@@ -386,6 +389,9 @@ local PER_UNIT = {
         pvpIconEnabled = true,
         classificationEnabled = true,
         classDragonEnabled = true,
+        -- Sized for the portrait it sits on: the top piece ~53px over the 46px
+        -- portrait, its head reaching ~5px past the 2px gap onto the frame.
+        classDragonSize = 80,
     },
     targettarget = {
         frameWidth = 110, frameHeight = 24,
@@ -420,6 +426,9 @@ local PER_UNIT = {
         portraitEnabled = true,
         classificationEnabled = true,
         classDragonEnabled = true,
+        -- Target's look scaled to Focus's 36px portrait: the same ~5px reach onto
+        -- the frame (top piece ~43px).
+        classDragonSize = 65,
     },
     -- The focus's target: target of target's look, beside the focus's right edge
     -- (x/y are the mover's solve for the default focus position, as for ToT). Focus's

@@ -344,11 +344,12 @@ DF.UnitFramePageData = {
         },
         {
             kind = "unitIcons", category = "indicators", title = "Unit Icons",
-            units = { player = true, target = true, focus = true },
+            units = { player = true, target = true, focus = true, boss = true },
             cards = {
                 resting_icon = { player = true },
                 pvp_icon = { player = true, target = true, focus = true },
                 elite_rare = { target = true, focus = true },
+                class_decorations = { target = true, focus = true, boss = true },
             },
             hide = {
                 eliteIconShowInInstances = { focus = true },

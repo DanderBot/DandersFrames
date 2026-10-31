@@ -333,8 +333,12 @@ eq(UF:GetUnitDB("focus").classDragonEnabled, true, "focus: dragon on")
 eq(UF:GetUnitDB("boss").classDragonEnabled, false, "boss: off (every boss frame is a boss)")
 eq(UF:GetUnitDB("player").classDragonEnabled, false, "player: off (no classification)")
 eq(UF:GetUnitDB("pet").classDragonEnabled, false, "pet: off")
-eq(UF:GetUnitDB("target").classDragonSize, 100, "size 100%")
-eq(UF:GetUnitDB("target").classDragonSide, "RIGHT", "the right end")
+eq(UF:GetUnitDB("target").classDragonSize, 80, "target: size 80% (sized for its 46px portrait)")
+eq(UF:GetUnitDB("focus").classDragonSize, 65, "focus: 65% (the same reach on its 36px portrait)")
+eq(UF:GetUnitDB("boss").classDragonSize, 100, "boss: 100% (no portrait by default)")
+eq(UF:GetUnitDB("target").classDragonSide, "OUTER", "side: outer")
+eq(UF:GetUnitDB("target").classDragonAnchor, "PORTRAIT", "anchored to the portrait")
+eq(UF:GetUnitDB("boss").classDragonAnchor, "PORTRAIT", "...on every unit (falls back to the frame)")
 eq(UF:GetUnitDB("target").classBorderEnabled, false, "class border: off")
 eq(UF:GetUnitDB("player").combatIconBorderEnabled, false, "combat icon border: off")
 for _, sfx in ipairs({ "Elite", "Rare", "RareElite", "Boss" }) do
@@ -395,6 +399,80 @@ check(LB.RIGHTTOP and LB.RIGHTBOTTOM and LB.LEFTTOP and LB.LEFTBOTTOM, "both end
 eq(LB.RIGHTTOP.x .. "," .. LB.RIGHTBOTTOM.x, "3,0", "right end: X 3, tail 3 - 1 - 2")
 eq(LB.LEFTTOP.x .. "," .. LB.LEFTBOTTOM.x, "-3,0", "left end: its mirror image")
 
+print("-- Dragon: OUTER")
+do
+    local function sides(db, anchor)
+        local o = {}
+        for _, e in ipairs(IN.DragonLayout(db, anchor)) do if e.piece == "TOP" then o[#o + 1] = e.side end end
+        return table.concat(o, ",")
+    end
+    eq(sides({}), "RIGHT", "no anchor: the right end")
+    eq(sides({ classDragonSide = "OUTER" }, { kind = "FRAME" }), "RIGHT", "frame, no outside portrait: right")
+    eq(sides({ classDragonSide = "OUTER" }, { kind = "FRAME", outer = "LEFT" }), "LEFT",
+       "frame, portrait on the left: the frame's left end")
+    eq(sides({ classDragonSide = "OUTER" }, { kind = "FRAME", outer = "RIGHT" }), "RIGHT", "...on the right: right")
+    eq(sides({}, { kind = "PORTRAIT", outer = "LEFT", rect = { -47, 0, -2, 46 }, fw = 220 }), "LEFT",
+       "portrait on the left: its left (outer) edge")
+    eq(sides({ classDragonSide = "RIGHT" }, { kind = "FRAME", outer = "LEFT" }), "RIGHT", "an explicit side wins")
+    eq(sides({ classDragonSide = "BOTH" }, { kind = "FRAME", outer = "LEFT" }), "RIGHT,LEFT", "...BOTH too")
+end
+
+print("-- Dragon: the portrait anchor (pure)")
+do
+    -- A 220x46 frame, a portrait on its RIGHT: 2px gap, 44 + 1px border each side.
+    local A = { kind = "PORTRAIT", outer = "RIGHT", rect = { 222, 0, 267, 46 }, fw = 220 }
+    local LP = byPiece(IN.DragonLayout({ classDragonSize = 100 }, A))
+    local t, b = LP.RIGHTTOP, LP.RIGHTBOTTOM
+    eq(t.point .. ">" .. t.relPoint .. ":" .. t.x .. "," .. t.y, "BOTTOMRIGHT>TOPRIGHT:47,0",
+       "top: its bottom-right on the portrait's top-right (47 past the frame's right edge)")
+    eq(b.point .. ">" .. b.relPoint .. ":" .. b.x .. "," .. b.y, "TOPRIGHT>TOPRIGHT:45,-46",
+       "bottom: its top-right on the portrait's bottom edge, 2px inside its right edge")
+    check(t.x - t.w < 2, "the overhang falls inward, over the gap and the frame")
+    -- Offsets add on top.
+    LP = byPiece(IN.DragonLayout({ classDragonX = 3, classDragonY = 2, classDragonTailX = -1 }, A))
+    eq(LP.RIGHTTOP.x .. "," .. LP.RIGHTTOP.y .. "/" .. LP.RIGHTBOTTOM.x .. "," .. LP.RIGHTBOTTOM.y, "50,2/47,-44",
+       "X / Y / tail X on top of the portrait's edges")
+    -- A taller portrait (size +10, centred): its own top / bottom.
+    A.rect = { 222, -5, 277, 51 }
+    LP = byPiece(IN.DragonLayout({}, A))
+    eq(LP.RIGHTTOP.y .. "," .. LP.RIGHTBOTTOM.y, "5,-51", "a taller portrait: the pieces follow its edges")
+    -- A portrait on the LEFT: measured from the frame's TOPLEFT, flipped.
+    local AL = { kind = "PORTRAIT", outer = "LEFT", rect = { -47, 0, -2, 46 }, fw = 220 }
+    LP = byPiece(IN.DragonLayout({}, AL))
+    eq(LP.LEFTTOP.point .. ">" .. LP.LEFTTOP.relPoint .. ":" .. LP.LEFTTOP.x .. "," .. LP.LEFTTOP.y,
+       "BOTTOMLEFT>TOPLEFT:-47,0", "left portrait: top on its top-left (outer) corner")
+    eq(LP.LEFTBOTTOM.point .. ">" .. LP.LEFTBOTTOM.relPoint .. ":" .. LP.LEFTBOTTOM.x .. "," .. LP.LEFTBOTTOM.y,
+       "TOPLEFT>TOPLEFT:-45,-46", "...bottom 2px inside its left edge")
+    check(LP.LEFTTOP.coords[2] == 0, "...flipped, head facing in over the frame")
+    -- BOTH on the portrait: both of its edges.
+    LP = byPiece(IN.DragonLayout({ classDragonSide = "BOTH" }, AL))
+    eq(LP.RIGHTTOP.x .. "," .. LP.LEFTTOP.x, "-2,-47", "BOTH: the portrait's right and left edges")
+end
+
+print("-- Dragon: IN.DragonAnchor")
+do
+    local saved = UF.Portrait
+    local rect
+    UF.Portrait = { OutsideRect = function() if rect then return rect[1], rect[2], rect[3], rect[4] end end }
+    local Fr = Owner("target")
+    local db = { frameWidth = 220, frameHeight = 46, portraitSide = "RIGHT" }
+    rect = { 222, 0, 267, 46 }
+    local a = IN.DragonAnchor(Fr, db)
+    eq(a.kind .. ":" .. a.outer .. ":" .. table.concat(a.rect, ","), "PORTRAIT:RIGHT:222,0,267,46",
+       "an outside portrait: its rect (PO.OutsideRect)")
+    db.classDragonAnchor = "FRAME"
+    a = IN.DragonAnchor(Fr, db)
+    eq(a.kind .. ":" .. tostring(a.outer) .. ":" .. tostring(a.rect), "FRAME:RIGHT:nil",
+       "Anchor To Frame: the frame, Outer still the portrait's side")
+    db.classDragonAnchor = nil
+    rect = nil
+    a = IN.DragonAnchor(Fr, db)
+    eq(a.kind .. ":" .. tostring(a.outer), "FRAME:nil", "portrait off / inside (no outside rect): the frame, silently")
+    db.portraitSide = "LEFT"; rect = { -47, 0, -2, 46 }
+    eq(IN.DragonAnchor(Fr, db).outer, "LEFT", "portrait on the left: outer = LEFT")
+    UF.Portrait = saved
+end
+
 print("-- Dragon: on the frame")
 class = "elite"
 local tdbD = UF:GetUnitDB("target")
@@ -454,6 +532,23 @@ tdbD.classDragonSize = 150; IN:Layout(T)
 check(near(D.tex.RIGHT.TOP._w, 197 * 1.5 * REF), "size 150 on the frame")
 tdbD.classDragonSize = nil
 IN:Layout(T)
+do
+    -- With an outside portrait the live pieces go on it.
+    local saved = UF.Portrait
+    UF.Portrait = { OutsideRect = function() return 222, 0, 267, 46 end }
+    tdbD.portraitSide = "RIGHT"
+    IN:Layout(T)
+    local pp = D.tex.RIGHT.TOP._points[#D.tex.RIGHT.TOP._points]
+    eq(pp and (pp[1] .. ">" .. pp[3] .. ":" .. pp[4] .. "," .. pp[5]), "BOTTOMRIGHT>TOPRIGHT:47,0",
+       "portrait on the right: the top piece on the portrait's top-right corner")
+    eq(pp and pp[2], T, "...placed from the unit button's corner")
+    tdbD.classDragonAnchor = "FRAME"; IN:Layout(T)
+    pp = D.tex.RIGHT.TOP._points[#D.tex.RIGHT.TOP._points]
+    eq(pp and (pp[3] .. ":" .. pp[4]), "TOPRIGHT:0", "Anchor To Frame: back on the frame's end")
+    tdbD.classDragonAnchor, tdbD.portraitSide = nil, nil
+    UF.Portrait = saved
+    IN:Layout(T)
+end
 
 print("-- Classification border")
 local CB = T.dfUFIcons.classBorder
@@ -522,11 +617,20 @@ TP.dfTestData = { classification = nil }
 IN:Preview(TP)
 check(not TP.dfUFIcons.dragon:IsShown(), "Classification: Normal -- no dragon")
 check(PV.dfUFIcons.dragon:IsShown(), "focus preview: the sample rare")
+TP.dfTestData = { classification = nil }
+IN:Preview(TP)
+check(not TP.dfUFIcons.classification:IsShown(), "Classification: Normal -- no Elite / Rare icon either")
+TP.dfTestData = nil
+IN:Preview(TP)
+check(TP.dfUFIcons.classification:IsShown(), "no sample data at all: the elite sample icon")
+eq(TP.dfUFIcons.classification.tex._atlas, IN.ART.elite, "...elite")
 local BP = Owner("boss")
 BP.dfUFPreview = true
 BP.dfTestData = { classification = "worldboss" }
 IN:Attach(BP)
 IN:Preview(BP)
+check(BP.dfUFIcons.classification:IsShown(), "boss preview: the boss icon still shows")
+eq(BP.dfUFIcons.classification.tex._atlas, IN.ART.elite, "...the elite art (a boss is drawn as elite)")
 check(not BP.dfUFIcons.dragon:IsShown(), "boss preview: off by default")
 UF:GetUnitDB("boss").classDragonEnabled = true
 IN:Preview(BP)

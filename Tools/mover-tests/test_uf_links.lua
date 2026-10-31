@@ -195,9 +195,9 @@ do
                          "portraitMirror", "textDesignerPreset", "healthColorMode", "visAlways" }) do
         eq(Links.Aspect(k), "look", "look: " .. k)
     end
-    -- 161 = 157 + the classification dragon's side, x, y and tail x (reviewed: all
-    -- four move with the frame's end).
-    eq(#layout, 161, "the layout set is the size it was reviewed at (161 keys); a change here wants a look")
+    -- 162 = 157 + the classification dragon's side, x, y and tail x (reviewed: all
+    -- four move with the frame's end) + its Anchor To (portrait / frame: where it sits).
+    eq(#layout, 162, "the layout set is the size it was reviewed at (162 keys); a change here wants a look")
 
     -- The classification dragon / border: the Unit Icons element, layout = where it sits.
     for _, k in ipairs({ "classDragonEnabled", "classDragonSize", "classDragonSide", "classDragonX",
@@ -205,7 +205,8 @@ do
                          "classBorderEnabled", "classBorderSize" }) do
         eq(Links.OwnerOf(k), "unitIcons", "Unit Icons owns " .. k)
     end
-    for _, k in ipairs({ "classDragonSide", "classDragonX", "classDragonY", "classDragonTailX" }) do
+    eq(Links.OwnerOf("classDragonAnchor"), "unitIcons", "Unit Icons owns classDragonAnchor")
+    for _, k in ipairs({ "classDragonAnchor", "classDragonSide", "classDragonX", "classDragonY", "classDragonTailX" }) do
         eq(Links.Aspect(k), "layout", "layout: " .. k)
     end
     for _, k in ipairs({ "classDragonEnabled", "classDragonSize", "classDragonRareElite",
@@ -238,6 +239,8 @@ do
     eq(M("classDragonSide", "RIGHT"), "LEFT", "the dragon: right end -> left end")
     eq(M("classDragonSide", "LEFT"), "RIGHT", "...left -> right")
     eq(M("classDragonSide", "BOTH"), "BOTH", "...both stays both")
+    eq(M("classDragonSide", "OUTER"), "OUTER", "...outer stays outer (already relative to the portrait)")
+    eq(M("classDragonAnchor", "PORTRAIT"), "PORTRAIT", "...the anchor copies unchanged")
     eq(M("classDragonX", 5), -5, "the dragon's x negates")
     eq(M("classDragonTailX", -2), 2, "...and the tail's")
     eq(M("classDragonY", 3), 3, "...its y never changes")

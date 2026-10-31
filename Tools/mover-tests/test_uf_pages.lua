@@ -261,7 +261,7 @@ local WANT = {
     focustarget = "frame,tooltips,health,text,highlights",
     focus ="frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     pet = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
-    boss = "frame,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,highlights",
+    boss = "frame,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
 }
 for _, unit in ipairs(UFO.UNITS) do
     local kinds = {}
@@ -837,7 +837,8 @@ do
        "Unit Icons: Reset / Copy act on the three icons' keys and the dragon / border")
     eq(toggles.uf_icon_dragon and toggles.uf_icon_dragon.key, "classDragonEnabled", "Elite Dragon: its tick in the header")
     eq(toggles.uf_icon_classborder and toggles.uf_icon_classborder.key, "classBorderEnabled", "Classification Border: likewise")
-    for _, k in ipairs({ "classDragonSize", "classDragonSide", "classDragonX", "classDragonY", "classDragonTailX" }) do
+    for _, k in ipairs({ "classDragonAnchor", "classDragonSize", "classDragonSide", "classDragonX", "classDragonY",
+                         "classDragonTailX" }) do
         local dw = byKey[k]
         check(dw ~= nil, "Elite Dragon: a control for " .. k)
         check(dw and dw.disableOn and dw.disableOn({ classDragonEnabled = false })
@@ -854,8 +855,19 @@ do
         check(cw and cw.disableOn({ classDragonEnabled = true, ["classDragon" .. sfx] = false })
               and not cw.disableOn({ classDragonEnabled = true }), "..." .. sfx .. "'s colour greys while its tick is off")
     end
+    check(byKey.classDragonAnchor and type(byKey.classDragonAnchor.tooltip) == "string",
+          "Anchor To explains the frame fallback")
+    eq(table.concat(UFO.DragonAnchorOptions()._order, ","), "PORTRAIT,FRAME", "Anchor To: Portrait, Frame")
+    eq(table.concat(UFO.DragonSideOptions()._order, ","), "OUTER,RIGHT,LEFT,BOTH", "Side: Outer first")
+    check(byKey.classDragonSide and type(byKey.classDragonSide.tooltip) == "string", "Side explains Outer")
     cards = BuildPage("player", "unitIcons")
     check(not cards:find("uf_icon_dragon", 1, true), "player: no dragon (no classification)")
+    cards, keys, byKey = BuildPage("boss", "unitIcons")
+    eq(cards, "uf_icon_dragon,uf_icon_classborder,uf_icon_classcolors",
+       "boss Unit Icons: Elite Dragon, Classification Border, Classification Colors only")
+    eq(toggles.uf_icon_dragon and toggles.uf_icon_dragon.db, UF:GetUnitDB("boss"), "...writing the boss's own settings")
+    check(byKey.classDragonSize and byKey.classDragonSize.args[5] == UF:GetUnitDB("boss"), "...its controls too")
+    check(not has(keys, "classificationStyle") and not has(keys, "pvpIconSize"), "...no icon cards boss frames lack")
     do
         -- The combat icon card on DF's Icons page: the unit frame border controls,
         -- handed in through the page (Modules.lua's combatIcon `after` hook).
