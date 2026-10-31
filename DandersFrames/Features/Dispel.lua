@@ -2981,7 +2981,7 @@ function DF:UpdateDispelOverlay(frame)
             end
         end
 
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(testIndex, frame.isRaidFrame)
+        local testData = DF:GetTestDataForFrame(frame, testIndex, frame.isRaidFrame)
 
         if testData and testData.dispelType then
             local overlay = CreateDispelOverlay(frame)

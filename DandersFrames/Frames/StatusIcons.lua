@@ -1292,7 +1292,7 @@ afkTickerFrame:SetScript("OnUpdate", function(self, elapsed)
                     for i = 1, #pool do
                         local frame = pool[i]
                         if frame and frame.dfTestIndex and frame.afkIcon and frame.afkIcon:IsShown() then
-                            local testData = DF:GetTestUnitData(frame.dfTestIndex, frame.isRaidFrame, frame.isPinnedBossFrame)
+                            local testData = DF:GetTestDataForFrame(frame, frame.dfTestIndex, frame.isRaidFrame, frame.isPinnedBossFrame)
                             if testData and testData.isAFK then
                                 DF:UpdateTestStatusIcons(frame, testData)
                             end

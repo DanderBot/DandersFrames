@@ -140,7 +140,7 @@ function DF:ApplyFrameLayout(frame)
         if newFill ~= prevFill then
             local isTest = DF:FrameInTestScope(frame, "any") and frame.dfIsTestFrame
             local ti = nil
-            if isTest and DF.GetTestUnitData and frame.index ~= nil then
+            if isTest and (frame.dfTestData or frame.index ~= nil) then
                 -- ☠ A PINNED test frame is NOT a pool slot, and asking with pool arguments
                 -- answers about the wrong unit. The party/raid pools are 0- and 1-based
                 -- respectively and carry no boss flag; a pinned set is 1-based and may be
@@ -152,9 +152,9 @@ function DF:ApplyFrameLayout(frame)
                 -- the main pools, which is what it has always meant there.
                 if frame.isPinnedFrame then
                     local pIdx = frame.dfTestIndex or frame.index
-                    ti = DF:GetTestUnitData(pIdx, false, frame.isPinnedBossFrame)
+                    ti = DF:GetTestDataForFrame(frame, pIdx, false, frame.isPinnedBossFrame)
                 else
-                    ti = DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+                    ti = DF:GetTestDataForFrame(frame, frame.index, frame.isRaidFrame)
                 end
             end
             if not isTest or ti then

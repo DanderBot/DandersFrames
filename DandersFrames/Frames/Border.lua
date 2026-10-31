@@ -440,7 +440,7 @@ function Border:ResolveClassColor(unit, fallback, frame)
 
     local classToken
     if frame and frame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+        local testData = DF:GetTestDataForFrame(frame)
         classToken = testData and testData.class
     elseif unit and UnitExists and UnitExists(unit) then
         classToken = select(2, UnitClass(unit))
@@ -468,7 +468,7 @@ function Border:ResolveRoleColor(unit, fallback, roleColors, frame)
 
     local role
     if frame and frame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+        local testData = DF:GetTestDataForFrame(frame)
         role = testData and testData.role
     else
         -- Player falls back to the spec role when the group assigned none;

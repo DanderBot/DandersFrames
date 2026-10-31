@@ -450,8 +450,11 @@ function DataSource.Test(frame)
         instance.isRaid = frame and frame.isRaidFrame or false
         instance.isBoss = false
     end
-    if DF.GetTestUnitData and instance.index ~= nil then
-        instance.data = DF:GetTestUnitData(instance.index, instance.isRaid, instance.isBoss)
+    -- A frame carrying its own test data (frame.dfTestData) is read from that.
+    if frame and frame.dfTestData then
+        instance.data = frame.dfTestData
+    elseif DF.GetTestUnitData and instance.index ~= nil then
+        instance.data = DF:GetTestDataForFrame(frame, instance.index, instance.isRaid, instance.isBoss)
     end
     return instance
 end

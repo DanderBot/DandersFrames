@@ -530,6 +530,28 @@ function DF:FrameInTestScope(frame, scope)
     return DF.testMode and true or false
 end
 
+-- ============================================================
+-- TEST DATA FOR A FRAME
+-- The fake unit a test frame paints. A frame that carries its own
+-- (frame.dfTestData, a table shaped like DF:GetTestUnitData's answer) gets that;
+-- every other frame gets the shared test-unit lookup.
+--
+--   DF:GetTestDataForFrame(frame)             the frame's own pool slot:
+--       GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+--   DF:GetTestDataForFrame(frame, index, ...) the lookup with exactly those
+--       arguments, for callers that resolve the slot themselves
+--
+-- ⚠ GetTestUnitData lives in the options companion; TestMode/Shim.lua stubs it to
+-- nil until that loads, so this answers nil then (unless the frame has its own).
+-- ============================================================
+function DF:GetTestDataForFrame(frame, ...)
+    if frame and frame.dfTestData then return frame.dfTestData end
+    if not DF.GetTestUnitData then return nil end
+    if select("#", ...) > 0 then return DF:GetTestUnitData(...) end
+    if not frame then return nil end
+    return DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+end
+
 -- Helper to get correct DB based on frame type
 function DF:GetFrameDB(frame)
     -- ★ A FRAME MAY CARRY ITS OWN SETTINGS TABLE (frame.dfDB), and then that is the

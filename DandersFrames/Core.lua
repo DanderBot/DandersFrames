@@ -2173,7 +2173,7 @@ function DF:GetFrameBorderColor(frame, db)
     if source == "CLASS" then
         local class
         if frame.dfIsTestFrame then
-            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+            local testData = DF:GetTestDataForFrame(frame)
             class = testData and testData.class
         elseif frame.unit and UnitExists(frame.unit) then
             -- No UnitIsPlayer gate: class-based NPC party members (e.g.
@@ -2193,7 +2193,7 @@ function DF:GetFrameBorderColor(frame, db)
         local rc = DF.db and DF.db.roleColors
         local role
         if frame.dfIsTestFrame then
-            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+            local testData = DF:GetTestDataForFrame(frame)
             role = testData and testData.role
         else
             -- Player falls back to the spec role when the group assigned none;

@@ -174,7 +174,7 @@ function DF:ShowBindingTooltip(anchorFrame)
     local unit = anchorFrame.unit
     local isDead = false
     if anchorFrame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(anchorFrame.index, anchorFrame.isRaidFrame)
+        local testData = DF:GetTestDataForFrame(anchorFrame, anchorFrame.index, anchorFrame.isRaidFrame)
         isDead = testData and testData.status == "Dead"
     elseif unit and UnitExists(unit) then
         isDead = UnitIsDeadOrGhost(unit)
@@ -1893,7 +1893,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         local inTestMode = DF:FrameInTestScope(self, self.isRaidFrame and "raid" or "party")
 
         if inTestMode then
-            local testData = DF:GetTestUnitData(self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))
+            local testData = DF:GetTestDataForFrame(self, self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))
             if testData then
                 PositionFrameTooltip(self)
                 GameTooltip:AddLine(testData.name, 1, 1, 1)

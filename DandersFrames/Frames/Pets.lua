@@ -1103,9 +1103,7 @@ function DF:UpdatePetFrameTestMode(frame)
     -- Colour through the LIVE renderer, supplying only the two values a fabricated
     -- pet token cannot answer: the health fraction and the owner's class. This used
     -- to hardcode a flat green and every pet health-colour setting was invisible here.
-    local ownerTest = frame.ownerFrame and DF.GetTestUnitData
-        and DF:GetTestUnitData(frame.ownerFrame.index, frame.ownerFrame.isRaidFrame,
-            frame.ownerFrame.isPinnedBossFrame)
+    local ownerTest = frame.ownerFrame and DF:GetTestDataForFrame(frame.ownerFrame)
     DF:ApplyPetHealthColor(frame, DF:GetFrameDB(frame), frame.ownerUnit, frame.unit,
         { pct = healthPercent, class = ownerTest and ownerTest.class })
 
