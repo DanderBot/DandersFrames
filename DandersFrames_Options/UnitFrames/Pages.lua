@@ -1495,29 +1495,63 @@ end
 -- GUI:CreatePopoutPageTools in the same build retires the first one's popout
 -- holders, taking the party cards' pins with it. Moving frames lives on the
 -- module Settings page instead (Position card), one row per unit.
+-- ============================================================
+-- LIVE SLIDERS (drag previews)
+-- The settings kit runs a slider's `lightweight` callback once per rendered
+-- frame while it is dragged, and its own callback only on release; a slider
+-- with no lightweight previews nothing until then. Every slider built for a
+-- unit page -- ours and the party builders' alike -- gets the unit's own live
+-- path (UF:LiveApply: the one element, on that unit's frames) in place of
+-- whatever it brought: a party builder's lightweight re-lays out PARTY frames,
+-- never these. Done by standing in for GUI:CreateSlider for the length of the
+-- build, so no builder needs to know about it.
+-- ============================================================
+function UFO.LiveSlider(unit, key, kind)
+    return function()
+        local UF = DF.UnitFrames
+        if UF and UF.LiveApply then UF:LiveApply(unit, key, kind) end
+    end
+end
+
+function UFO.WithLiveSliders(rec, unit, build, ...)
+    local orig = GUI.CreateSlider
+    GUI.CreateSlider = function(g, parent, label, lo, hi, step, dbTable, dbKey, callback, _, ...)
+        local key = (type(dbKey) == "string") and dbKey or nil
+        return orig(g, parent, label, lo, hi, step, dbTable, dbKey, callback,
+            UFO.LiveSlider(unit, key, rec.kind), ...)
+    end
+    local ok, err = pcall(build, ...)
+    GUI.CreateSlider = orig
+    if not ok then error(err, 0) end
+end
+
 function UFO.PageBuilder(rec, unit)
     return function(self, db, Add, AddSpace, AddSyncPoint)
-        if rec.source then
-            UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
-        elseif rec.kind == "text" then
-            UFO.BuildTextPage(self, db, Add, rec, unit)
-        elseif rec.kind == "auradesigner" then
-            UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
-        elseif rec.kind == "visibility" then
-            UFO.BuildVisibilityPage(self, db, Add, rec, unit)
-        elseif rec.kind == "castbar" then
-            UFO.BuildCastBarPage(self, db, Add, rec, unit)
-        elseif rec.kind == "classpower" then
-            UFO.BuildClassPowerPage(self, db, Add, rec, unit)
-        elseif rec.kind == "portrait" then
-            UFO.BuildPortraitPage(self, db, Add, rec, unit)
-        elseif rec.kind == "unitIcons" then
-            UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
-        elseif rec.kind == "bosslayout" then
-            UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
-        end
+        UFO.WithLiveSliders(rec, unit, UFO.BuildPageBody, self, db, Add, AddSpace, AddSyncPoint, rec, unit)
         -- Every gated control says why it is grey (GREYED CONTROLS SAY WHY).
         UFO.ApplyDisableReasons(self.children)
+    end
+end
+
+function UFO.BuildPageBody(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
+    if rec.source then
+        UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
+    elseif rec.kind == "text" then
+        UFO.BuildTextPage(self, db, Add, rec, unit)
+    elseif rec.kind == "auradesigner" then
+        UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
+    elseif rec.kind == "visibility" then
+        UFO.BuildVisibilityPage(self, db, Add, rec, unit)
+    elseif rec.kind == "castbar" then
+        UFO.BuildCastBarPage(self, db, Add, rec, unit)
+    elseif rec.kind == "classpower" then
+        UFO.BuildClassPowerPage(self, db, Add, rec, unit)
+    elseif rec.kind == "portrait" then
+        UFO.BuildPortraitPage(self, db, Add, rec, unit)
+    elseif rec.kind == "unitIcons" then
+        UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
+    elseif rec.kind == "bosslayout" then
+        UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
     end
 end
 

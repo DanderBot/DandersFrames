@@ -339,6 +339,111 @@ function UF:RequestRefresh()
     if C_Timer and C_Timer.After then C_Timer.After(0, run) else run() end
 end
 
+-- ============================================================
+-- LIVE (a settings slider mid-drag)
+-- One rendered frame's worth of repaint for ONE setting of ONE unit, called by
+-- the unit frame pages' sliders while they are dragged (the kit's lightweight
+-- callback, DandersFrames_Options/UnitFrames/Pages.lua UFO.LiveSlider). Only the
+-- element the key belongs to (Links.OwnerOf, or the page's kind) is re-applied,
+-- on that unit's frames: the live one(s), and the preview while it is up. The
+-- full UF:RefreshAll still runs once, on release (the slider's own callback).
+--   * A unit-frame element (cast bar, class power, portrait, unit icons): its
+--     own Layout (+ Preview on a preview frame). Plain frames: combat-safe.
+--   * DandersFrames' pieces: DF:ApplyFrameLayout on the one frame (the Frame
+--     page: the frame's whole layout, scale and size included). It sizes the
+--     unit button, which is SECURE: a live frame is skipped in combat.
+--   * Auras: DandersFrames' aura layout version (re-drives every row).
+--   * Highlights / Fading: their own per-frame updaters.
+--   * Boss Layout: the container (secure: skipped in combat) / the preview's.
+-- A preview frame is never secure: it is repainted in full (P:Paint, one frame).
+-- ⚠ Linked followers catch up on release: links are pushed on the apply drain
+-- (UFO.OnApplyDrain), which a drag never reaches.
+-- ============================================================
+UF.LIVE_ELEMENTS = {
+    castbar = { "CastBar" }, classpower = { "ClassPower" },
+    -- The portrait's rect is also the resting glow's (Include Portrait).
+    portrait = { "Portrait", "Indicators" }, unitIcons = { "Indicators" },
+}
+UF.LIVE_AURAS = { buffs = true, debuffs = true, defensive = true, dispel = true }
+
+local function InCombat()
+    local f = _G.InCombatLockdown
+    return f and f() and true or false
+end
+
+-- fn(f, isPreview) for every frame drawing `unit`.
+function UF:EachFrameOf(unit, fn)
+    for _, f in pairs(UF.frames) do
+        if f.dfUFUnit == unit then fn(f, false) end
+    end
+    local P = UF.Preview
+    if not (P and P.shown) then return end
+    local pf = P.frames and P.frames[unit]
+    if pf and pf:IsShown() then fn(pf, true) end
+    local B = UF.Boss
+    if unit == "boss" and B and B.preview then
+        for _, bf in pairs(B.preview) do
+            if bf:IsShown() then fn(bf, true) end
+        end
+    end
+end
+
+-- `key` may be nil (a slider with no db key of its own): `kind`, the page's
+-- element, answers then.
+function UF:LiveApply(unit, key, kind)
+    if not (unit and UF.Units) then return end
+    local Links = UF.Links
+    local elem = (key and Links and Links.OwnerOf and Links.OwnerOf(key)) or kind
+    if elem == "tooltips" then return end
+
+    if elem == "bosslayout" then
+        local B = UF.Boss
+        if not B then return end
+        if B.container and not InCombat() then B:LayoutContainer(B.container, B.frames) end
+        if B.previewShown and B.PreviewRefresh then B:PreviewRefresh() end
+        return
+    end
+
+    local mods = elem and UF.LIVE_ELEMENTS[elem]
+    if mods then
+        UF:EachFrameOf(unit, function(f, preview)
+            for _, name in ipairs(mods) do
+                local m = UF[name]
+                if m and m.Layout then m:Layout(f) end
+                if preview and m and m.Preview then m:Preview(f) end
+            end
+        end)
+        return
+    end
+
+    if UF.LIVE_AURAS[elem] then
+        if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+    end
+    local combat = InCombat()
+    UF:EachFrameOf(unit, function(f, preview)
+        if preview then
+            if UF.Preview.Paint then UF.Preview:Paint(f) end
+            return
+        end
+        if elem == "highlights" then
+            if DF.UpdateHighlights then DF:UpdateHighlights(f) end
+            return
+        elseif elem == "fading" then
+            if DF.UpdateRange then DF:UpdateRange(f) end
+            if DF.UpdateHealthFade then DF:UpdateHealthFade(f) end
+            return
+        elseif UF.LIVE_AURAS[elem] or combat then
+            return
+        elseif elem == "frame" then
+            UF.Units:ApplyLayout(f)
+        elseif DF.ApplyFrameLayout then
+            DF:ApplyFrameLayout(f)
+        end
+        -- Bar sizes and fills follow the new layout at once.
+        if f:IsVisible() and UF.Units.RepaintValues then UF.Units:RepaintValues(f) end
+    end)
+end
+
 -- A profile switch, reset or import: new tables underneath every frame.
 function UF:OnProfileChanged()
     if UF.Links then UF.Links:Ensure(Root()) end

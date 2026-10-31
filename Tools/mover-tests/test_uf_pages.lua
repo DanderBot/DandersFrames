@@ -640,6 +640,7 @@ do
     end
     G.CreateCheckbox = Collect("check", 3)
     G.CreateSlider = Collect("slider", 6)
+    local sliderStub = G.CreateSlider
     G.CreateDropdown = Collect("dropdown", 4)
     G.CreateColorPicker = Collect("color", 3)
     G.CreateTextureDropdown = Collect("texture", 3)
@@ -692,6 +693,25 @@ do
     check(not has(keys, "castbarKickTick"), "player: no kick-ready mark (an enemy-frame setting)")
     check(has(keys, "castbarDetached"), "Cast Bar: the Detach tick")
     check(not has(keys, "frameBorderSize"), "Cast Bar: never the frame's own border keys")
+    do
+        -- Every slider drags live: its lightweight is the unit's own live path.
+        local calls = {}
+        local heldLive = UF.LiveApply
+        UF.LiveApply = function(_, u, k, kind) calls[#calls + 1] = u .. ":" .. tostring(k) .. ":" .. tostring(kind) end
+        local sliders = 0
+        for _, sw in ipairs(built) do
+            if sw.kind == "slider" then
+                sliders = sliders + 1
+                check(type(sw.args[8]) == "function", "Cast Bar slider " .. tostring(sw.key) .. ": a lightweight")
+                if type(sw.args[8]) == "function" then sw.args[8]() end
+            end
+        end
+        check(sliders > 5, "Cast Bar: sliders found (" .. sliders .. ")")
+        eq(#calls, sliders, "...each one's drag reaches UF:LiveApply")
+        eq(calls[1], "player:castbarWidth:castbar", "...with the unit, its key and the page's element")
+        eq(G.CreateSlider, sliderStub, "the build's stand-in is gone again")
+        UF.LiveApply = heldLive
+    end
     local w = byKey.castbarLatency
     check(w and w.disableOn and w.disableOn({ castbarEnabled = false }) and not w.disableOn({ castbarEnabled = true }),
           "Cast Bar: controls grey while the cast bar is off")
