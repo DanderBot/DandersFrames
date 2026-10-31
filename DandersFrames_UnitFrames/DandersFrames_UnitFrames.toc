@@ -1,6 +1,6 @@
 ## Interface: 120105, 16001
 ## Title: DandersFrames |cffa66bffUnit Frames|r
-## Notes: Player, target, target of target, focus and pet frames, drawn and configured by DandersFrames.
+## Notes: Player, target, target of target, focus, pet and boss frames, drawn and configured by DandersFrames.
 ## Author: Danders
 ## Version: v5.7.0-alpha.1
 ## Category: Danders
@@ -20,7 +20,7 @@
 # Load order: Core (namespace, db accessors) -> Defaults (registers the profile
 # table) -> Units (spawning, events) -> Elements (the registry + kit the next four
 # register into) -> Portrait / CastBar / ClassPower / Indicators -> Preview
-# (sample frames) -> BlizzardHide -> Mover.
+# (sample frames) -> Boss (the boss container) -> BlizzardHide -> Mover.
 
 Core.lua
 Defaults.lua
@@ -31,5 +31,6 @@ CastBar.lua
 ClassPower.lua
 Indicators.lua
 Preview.lua
+Boss.lua
 BlizzardHide.lua
 Mover.lua

@@ -307,6 +307,16 @@ local PER_UNIT = {
         castbarEnabled = true,
         castbarHeight = 14,
         classificationEnabled = true,
+        -- Boss Layout page (Boss.lua). The inventory's Units Per Row and Preview
+        -- Frames go up to 8; this build draws UF.BOSS_COUNT (5) slots, so both
+        -- default to (and clamp at) that count -- every slot in one line, and all
+        -- five sample bosses in the preview.
+        bossGrowth = "DOWN",
+        bossSpacing = 40,
+        bossUnitsPerRow = 5,
+        bossRowSpacing = 4,
+        bossPreviewCount = true,
+        bossPreviewNum = 5,
     },
 }
 

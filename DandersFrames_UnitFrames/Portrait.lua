@@ -231,7 +231,7 @@ function PO:SetActive(f, on)
     for _, ev in ipairs(PO.EVENTS) do
         if on then
             if pair then pcall(p.listener.RegisterUnitEvent, p.listener, ev, pair[1], pair[2])
-            else pcall(p.listener.RegisterUnitEvent, p.listener, ev, unit) end
+            else pcall(p.listener.RegisterUnitEvent, p.listener, ev, f.unit or unit) end   -- the frame's own token (boss3)
         else
             pcall(p.listener.UnregisterEvent, p.listener, ev)
         end

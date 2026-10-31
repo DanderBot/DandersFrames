@@ -22,6 +22,8 @@ local addonName, UF = ...
 --                 shared with player: in a vehicle the player frame shows the
 --                 vehicle and the pet frame shows the player; toggleForVehicle
 --                 makes clicks follow the same swap
+--   boss1..N      Boss.lua: one container of slots, each built here (Units:Build)
+--                 on the shared "boss" table; RegisterUnitWatch per slot
 --
 -- Each button sits in a holder of its own: the holder carries the unit's
 -- Visibility state driver (Units:VisibilityMacro), so the unit watch on the
@@ -49,15 +51,17 @@ local FRAME_NAMES = {
     targettarget = "DandersUnitFrameTargetTarget",
     focus = "DandersUnitFrameFocus",
     pet = "DandersUnitFramePet",
+    -- Boss.lua: the holder / container prefix; slot N is DandersUnitFrameBossN.
+    boss = "DandersUnitFrameBoss",
 }
 Units.FRAME_NAMES = FRAME_NAMES
 
 -- Shown only while the unit exists (secure unit watch).
-local WATCHED = { target = true, targettarget = true, focus = true, pet = true }
+local WATCHED = { target = true, targettarget = true, focus = true, pet = true, boss = true }
 -- No events of their own: polled by the ticker instead.
 local POLLED = { targettarget = true }
 -- In DF's range tick (fade when out of range).
-local RANGED = { target = true, targettarget = true, focus = true, pet = true }
+local RANGED = { target = true, targettarget = true, focus = true, pet = true, boss = true }
 -- Take part in the vehicle swap (toggleForVehicle on the button).
 local VEHICLE = { player = true, pet = true }
 Units.WATCHED, Units.RANGED, Units.VEHICLE = WATCHED, RANGED, VEHICLE
@@ -73,13 +77,16 @@ local UNIT_EVENTS = {
 local PLAYER_EVENTS = { "UNIT_ENTERED_VEHICLE", "UNIT_EXITED_VEHICLE", "PLAYER_FLAGS_CHANGED" }
 -- UNIT_PET arrives for the OWNER ("player") when the pet is summoned or swapped.
 local PET_EVENTS = { "UNIT_ENTERED_VEHICLE", "UNIT_EXITED_VEHICLE", "UNIT_PET" }
+-- A boss token can turn untargetable (phase) and back: the engage settle (Boss.lua).
+local BOSS_EVENTS = { "UNIT_TARGETABLE_CHANGED" }
 
 -- The event list a unit's frame registers (empty for a polled unit).
 function Units:EventsFor(unit)
     if POLLED[unit] then return {} end
     local list = {}
     for _, ev in ipairs(UNIT_EVENTS) do list[#list + 1] = ev end
-    local extra = (unit == "player" and PLAYER_EVENTS) or (unit == "pet" and PET_EVENTS) or nil
+    local extra = (unit == "player" and PLAYER_EVENTS) or (unit == "pet" and PET_EVENTS)
+        or (unit == "boss" and BOSS_EVENTS) or nil
     for _, ev in ipairs(extra or {}) do list[#list + 1] = ev end
     return list
 end
@@ -203,6 +210,7 @@ local HANDLERS = {
     UNIT_HEAL_ABSORB_AMOUNT_CHANGED = function(f) if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(f) end end,
     UNIT_HEAL_PREDICTION = function(f) if DF.UpdateHealPrediction then DF:UpdateHealPrediction(f) end end,
     UNIT_THREAT_SITUATION_UPDATE = function(f) if DF.UpdateHighlights then DF:UpdateHighlights(f) end end,
+    UNIT_TARGETABLE_CHANGED = function(f) if UF.Boss then UF.Boss:Settle(f) end end,
 }
 Units.HANDLERS = HANDLERS
 
@@ -239,13 +247,15 @@ function Units:SetEventsEnabled(f, on)
     end
     -- pcall'd: a client without one of these events (the Forever build) refuses
     -- to register it, and that must cost one event, not the rest of the list.
+    -- The token is the frame's own (boss3), not the settings unit (boss).
+    local token = f.unit or unit
     for _, ev in ipairs(Units:EventsFor(unit)) do
         if on then
             local pair = VEHICLE_PAIR[unit]
             if pair then
                 pcall(f.RegisterUnitEvent, f, ev, pair[1], pair[2])
             else
-                pcall(f.RegisterUnitEvent, f, ev, unit)
+                pcall(f.RegisterUnitEvent, f, ev, token)
             end
         else
             pcall(f.UnregisterEvent, f, ev)
@@ -321,12 +331,19 @@ function Units:ApplyLayout(f)
     if not f or InCombatLockdown() then return end
     if DF.ApplyFrameLayout then DF:ApplyFrameLayout(f) end
     local db = f.dfDB
-    f:SetScale((db and db.frameScale) or 1)
+    -- A boss slot's scale is its container's (Boss.lua), so the slot offsets and
+    -- the container's size stay in one set of units.
+    if f.dfUFSlot then f:SetScale(1) else f:SetScale((db and db.frameScale) or 1) end
     Elements("Layout", f)
 end
 
 function Units:ApplyPosition(f)
     if not f or InCombatLockdown() then return end
+    -- A boss slot is placed by its container; the container is what has a record.
+    if f.dfUFSlot then
+        if UF.Boss then UF.Boss:ApplyPosition() end
+        return
+    end
     Units:PlaceAt(f, UF:GetPositionRecord(f.dfUFUnit))
 end
 
@@ -423,6 +440,7 @@ end
 local function OnShow(self)
     Units:SetEventsEnabled(self, true)
     if VEHICLE[self.dfUFUnit] then Units:UpdateVehicle(self) end
+    if self.dfUFSlot and UF.Boss then UF.Boss:NoteIdentity(self) end
     Elements("SetActive", self, true)
     Units:FullRefresh(self)
 end
@@ -430,28 +448,24 @@ end
 local function OnHide(self)
     Units:SetEventsEnabled(self, false)
     Elements("SetActive", self, false)
+    self.dfUFLastGUID = nil
 end
 
-function Units:Spawn(unit)
-    if UF.frames[unit] then return UF.frames[unit] end
-    if not FRAME_NAMES[unit] then
-        DF:DebugError("UF", "Spawn: no frame for unit %s", tostring(unit))
-        return nil
-    end
-    if InCombatLockdown() then
-        DF:DebugWarn("UF", "Spawn %s: in combat, cannot create a secure frame", unit)
-        return nil
-    end
+-- Build one unit button. `key` is its UF.frames key, `unit` the settings unit
+-- (the table it reads), `token` the unit it shows, `slot` its boss slot (nil for
+-- every other unit). Layout, position and visibility are the caller's.
+function Units:Build(key, unit, token, name, parent, slot)
     local db = UF:GetUnitDB(unit)
-    local holder = Units:GetHolder(unit)
-    local f = CreateFrame("Button", FRAME_NAMES[unit], holder,
+    local f = CreateFrame("Button", name, parent,
         "DandersUnitButtonTemplate,SecureUnitButtonTemplate")
     DF:InitStandaloneFrame(f, db)
     f.dfUFUnit = unit
+    f.dfUFKey = key
+    f.dfUFSlot = slot
     f.dfTextPresetOverride = db.textDesignerPreset
     if VEHICLE[unit] then f:SetAttribute("toggleForVehicle", true) end
-    f:SetAttribute("unit", unit)
-    f.unit = f.unit or unit
+    f:SetAttribute("unit", token)
+    f.unit = f.unit or token
     if WATCHED[unit] then
         -- Hidden until the unit watch says the unit exists, so a target-less login
         -- never paints (or registers events for) a missing unit.
@@ -463,8 +477,24 @@ function Units:Spawn(unit)
     f:SetScript("OnEvent", Units.OnEvent)
     if ClickCastFrames then ClickCastFrames[f] = true end
     if RANGED[unit] and DF.RegisterRangeFrame then DF:RegisterRangeFrame(f) end
-    UF.frames[unit] = f
+    UF.frames[key] = f
     Elements("Attach", f)
+    return f
+end
+
+function Units:Spawn(unit)
+    -- Boss is a container of slots (Boss.lua); it answers with the container.
+    if unit == "boss" then return UF.Boss and UF.Boss:Spawn() or nil end
+    if UF.frames[unit] then return UF.frames[unit] end
+    if not FRAME_NAMES[unit] then
+        DF:DebugError("UF", "Spawn: no frame for unit %s", tostring(unit))
+        return nil
+    end
+    if InCombatLockdown() then
+        DF:DebugWarn("UF", "Spawn %s: in combat, cannot create a secure frame", unit)
+        return nil
+    end
+    local f = Units:Build(unit, unit, unit, FRAME_NAMES[unit], Units:GetHolder(unit))
     Units:ApplyLayout(f)
     Units:ApplyPosition(f)
     Units:ApplyVisibility(f)

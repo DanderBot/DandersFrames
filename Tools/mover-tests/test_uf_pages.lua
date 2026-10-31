@@ -221,7 +221,7 @@ eq(def.tabs[3].label(), "Target of Target", "ToT's tab: full name")
 eq(def.tabs[3].deckLabel(), "TOT", "...short on deck 2")
 eq(G:ModuleLabel(def), "Unit Frames", "label")
 eq(def.railLabel(), "Units", "rail label")
-eq(def.status(), "Player \194\183 Target \194\183 ToT \194\183 Focus \194\183 Pet", "status: the units it draws")
+eq(def.status(), "Player \194\183 Target \194\183 ToT \194\183 Focus \194\183 Pet \194\183 Boss", "status: the units it draws")
 load_options_file_into("GUI/Pages/ModulesPage.lua", NS)
 do
     local on = G:ModulesPageModel()

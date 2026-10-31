@@ -237,6 +237,19 @@ eq(P.dfUFCastBar.listener._events.UNIT_SPELLCAST_START and table.concat(P.dfUFCa
    "player,vehicle", "player: player and vehicle (the frame shows the vehicle in one)")
 CB:SetActive(T, true)
 
+print("-- Boss slots: the slot's own token, never detached")
+local BS = Owner("boss")
+BS.unit, BS.dfUFSlot = "boss3", 3
+CB:Attach(BS)
+check(BS.dfUFCastBar ~= nil, "boss: a cast bar")
+CB:SetActive(BS, true)
+eq(BS.dfUFCastBar.listener._events.UNIT_SPELLCAST_START and table.concat(BS.dfUFCastBar.listener._events.UNIT_SPELLCAST_START, ","),
+   "boss3", "boss slot 3 registers for boss3, not the settings unit")
+UF:GetUnitDB("boss").castbarDetached = true
+eq(CB:IsDetached(BS), false, "a boss slot's cast bar never detaches (one record, five bars)")
+UF:GetUnitDB("boss").castbarDetached = nil
+CB:SetActive(BS, false)
+
 print("-- A secret enemy cast: the client owns the fill, the text and the colour")
 local nameS, texS, niS, spellS = Secret("name"), Secret("texture"), Secret("notInterruptible"), Secret("spellID")
 cast = { nameS, nil, texS, Secret("start"), Secret("end"), false, Secret("castID"), niS, spellS }
@@ -458,6 +471,13 @@ local pdur = PV.dfUFCastBar.bar._last.SetTimerDuration and PV.dfUFCastBar.bar._l
 check(pdur and pdur.total == CB.PREVIEW_TOTAL, "...driven by a plain sample duration")
 eq(pdur and pdur.start, NOW - CB.PREVIEW_ELAPSED, "...started part-way through")
 check(PV.dfUFCastBar:IsShown(), "...shown")
+local PI = Owner("boss")
+PI.dfUFPreview, PI.dfUFPreviewIdle = true, true
+CB:Attach(PI)
+UF:GetUnitDB("boss").castbarHideIdle = true
+CB:Preview(PI)
+check(not PI.dfUFCastBar:IsShown(), "an idle preview (a sample boss but the first) shows no cast")
+UF:GetUnitDB("boss").castbarHideIdle = nil
 
 print("-- Source: no maths or decimal formats on cast times outside PLAYER ONLY")
 local src = uf_file_source("CastBar.lua")

@@ -305,7 +305,10 @@ local function PlaceText(fs, cb, anchor, x, y)
     else fs:SetJustifyH("CENTER") end
 end
 
+-- ⚠ A boss slot's cast bar never detaches: five bars and one shared record would
+-- stack on one spot. Its Detach control is hidden on the Boss page.
 function CB:IsDetached(f, db)
+    if f and f.dfUFSlot then return false end
     db = db or K.DB(f)
     return db and db.castbarDetached and true or false
 end
@@ -433,7 +436,8 @@ function CB:SetActive(f, on)
             if pair then
                 pcall(cb.listener.RegisterUnitEvent, cb.listener, ev, pair[1], pair[2])
             else
-                pcall(cb.listener.RegisterUnitEvent, cb.listener, ev, unit)
+                -- The frame's own token (boss3), not the settings unit (boss).
+                pcall(cb.listener.RegisterUnitEvent, cb.listener, ev, f.unit or unit)
             end
         else
             pcall(cb.listener.UnregisterEvent, cb.listener, ev)
@@ -1005,6 +1009,11 @@ function CB:Preview(f)
     CB:Layout(f)
     if not Enabled(db) then cb:Hide(); return end
     CB:Halt(cb)
+    -- A preview frame marked idle (every sample boss but the first) shows no cast.
+    if f.dfUFPreviewIdle then
+        CB:ShowIdle(cb)
+        return
+    end
     local dur = SampleDuration(CB.PREVIEW_TOTAL, CB.PREVIEW_ELAPSED)
     cb.active, cb.channel, cb.kind, cb.dur, cb.ni = true, false, "cast", dur, false
     if not (dur and CB.ApplyTimer(cb.bar, dur, false)) then

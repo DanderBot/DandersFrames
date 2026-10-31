@@ -22,15 +22,16 @@ UF.ADDON = addonName
 
 -- Every unit the settings table knows. boss1-5 share one "boss" table.
 UF.UNITS = { "player", "target", "targettarget", "focus", "pet", "boss" }
--- The units this build spawns. Boss comes in a later stage; its settings already
--- exist so profiles and exports are shaped for it.
-UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "pet" }
+-- The units this build spawns. "boss" is a container of UF.BOSS_COUNT slots
+-- (Boss.lua), whose frames sit in UF.frames as boss1..bossN.
+UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "pet", "boss" }
 
 -- Built-in Text Designer presets (preset NAMES are db keys: never localised).
 UF.TEXT_PRESET = "Unit Frames"
 UF.TEXT_PRESET_SMALL = "Unit Frames (Small)"
 
--- Spawned frames by unit.
+-- Spawned frames by key: the unit for most, boss1..bossN for the boss slots.
+-- ⚠ The key is not always the settings unit: read f.dfUFUnit for that.
 UF.frames = UF.frames or {}
 
 local function Debug(fmt, ...) DF:Debug("UF", fmt, ...) end
@@ -159,8 +160,8 @@ end
 -- Drop every cached proxy (profile switch, import, reset).
 function UF:RebuildUnitDBs()
     for k in pairs(effCache) do effCache[k] = nil end
-    for unit, f in pairs(UF.frames) do
-        f.dfDB = UF:GetUnitDB(unit)
+    for _, f in pairs(UF.frames) do
+        f.dfDB = UF:GetUnitDB(f.dfUFUnit)
     end
 end
 
@@ -249,13 +250,17 @@ function UF:RefreshAll()
     if not UF.Units then return end
     for _, f in pairs(UF.frames) do
         f.dfTextPresetOverride = f.dfDB and f.dfDB.textDesignerPreset or nil
-        UF:RunOutOfCombat("layout:" .. tostring(f.dfUFUnit), function() UF.Units:ApplyLayout(f) end)
+        UF:RunOutOfCombat("layout:" .. tostring(f.dfUFKey or f.dfUFUnit), function() UF.Units:ApplyLayout(f) end)
         -- The unit-frame-only pieces are plain frames: their layout follows at once,
         -- in combat too (ApplyLayout repeats it with the frame's own, later).
         if UF.Elements then UF.Elements:Call("Layout", f) end
         if UF.Units.ApplyVisibility then UF.Units:ApplyVisibility(f) end
         -- A hidden frame (no target) has nothing to paint; it repaints when it shows.
         if f:IsVisible() then UF.Units:FullRefresh(f) end
+    end
+    -- The boss container: slot positions, size and scale (secure).
+    if UF.Boss and UF.Boss.container then
+        UF:RunOutOfCombat("layout:bosscontainer", function() UF.Boss:ApplyLayout() end)
     end
     if UF.Preview and UF.Preview.Refresh then UF.Preview:Refresh() end
 end
@@ -275,8 +280,9 @@ end
 function UF:OnProfileChanged()
     UF:RebuildUnitDBs()
     UF:EnsureTextPresets()
-    for unit, f in pairs(UF.frames) do
-        UF:RunOutOfCombat("position:" .. unit, function() UF.Units:ApplyPosition(f) end)
+    for _, f in pairs(UF.frames) do
+        local unit = f.dfUFUnit
+        UF:RunOutOfCombat("position:" .. tostring(unit), function() UF.Units:ApplyPosition(f) end)
     end
     if UF.Mover and UF.Mover.ApplyAll then UF.Mover:ApplyAll() end
     UF:RefreshAll()

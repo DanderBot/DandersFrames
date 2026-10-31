@@ -73,8 +73,12 @@ function P:PlayerClass()
     return class
 end
 
+-- Health of the sample bosses, slot by slot.
+P.BOSS_HEALTH = { 0.92, 0.71, 0.55, 0.38, 0.2, 0.84, 0.63, 0.47 }
+
 -- Sample names are display-only stand-ins (like the test pool's), never stored.
-function P:TestData(unit)
+-- `slot` is the boss slot (boss previews only).
+function P:TestData(unit, slot)
     local t = Base()
     local me, myClass = P:PlayerName(), P:PlayerClass()
     local lvl = (UnitLevel and UnitLevel("player")) or 80
@@ -105,6 +109,17 @@ function P:TestData(unit)
         t.level = lvl
         SetHealth(t, 0.9)
         t.powerPercent = 0.6
+    elseif unit == "boss" then
+        -- A hidden level (-1, drawn "??") and the world-boss classification, the way
+        -- an encounter's bosses report themselves.
+        slot = slot or 1
+        t.index = 4 + slot
+        local L = DF.L
+        t.name = string.format("%s %d", (L and L["Boss"]) or "Boss", slot)
+        t.reaction, t.classification, t.level = 2, "worldboss", -1
+        SetHealth(t, P.BOSS_HEALTH[slot] or 0.5)
+        t.powerPercent = 0.5
+        t.targetName = me
     end
     return t
 end
@@ -124,6 +139,8 @@ function P:IsOwnedBy(owner) return P.owners[owner] and true or false end
 function P:SetOwner(owner, wanted)
     P.owners[owner] = wanted and true or nil
     P:Reconcile()
+    -- The boss preview depends on WHICH owners want it (Boss.lua PreviewWanted).
+    if P.shown and UF.Boss and UF.Boss.PreviewRefresh then UF.Boss:PreviewRefresh() end
 end
 
 function P:Reconcile()
@@ -167,12 +184,11 @@ local function OnLeave(self)
     if DF.UpdateHighlights then DF:UpdateHighlights(self) end
 end
 
-function P:Acquire(unit)
-    local f = P.frames[unit]
-    if f then return f end
-    local names = UF.Units and UF.Units.FRAME_NAMES
+-- One preview frame on `unit`'s settings, named `name`, under `parent`. `slot`:
+-- the boss slot it stands for (Boss.lua builds those), nil otherwise.
+function P:Build(unit, name, parent, slot)
     local db = UF:GetUnitDB(unit)
-    f = CreateFrame("Button", names and names[unit] and (names[unit] .. "Preview") or nil, P:GetParent())
+    local f = CreateFrame("Button", name, parent)
     -- Marked BEFORE the elements are built, so everything they read resolves to the
     -- unit's own table and to test scope.
     f.dfIsTestFrame = true
@@ -181,10 +197,11 @@ function P:Acquire(unit)
     f.dfStandalone = true
     f.dfDB = db
     f.dfUFUnit = unit
+    f.dfUFSlot = slot
     f.dfUFPreview = true
     f.isRaidFrame = false
-    f.unit = unit
-    f.dfTestData = P:TestData(unit)
+    f.unit = slot and (unit .. slot) or unit
+    f.dfTestData = P:TestData(unit, slot)
     f.index = f.dfTestData.index
     f:EnableMouse(true)
     if DF.CreateFrameElements then DF:CreateFrameElements(f, false) end
@@ -196,6 +213,14 @@ function P:Acquire(unit)
     f:SetScript("OnEnter", OnEnter)
     f:SetScript("OnLeave", OnLeave)
     f:Hide()
+    return f
+end
+
+function P:Acquire(unit)
+    local f = P.frames[unit]
+    if f then return f end
+    local names = UF.Units and UF.Units.FRAME_NAMES
+    f = P:Build(unit, names and names[unit] and (names[unit] .. "Preview") or nil, P:GetParent())
     P.frames[unit] = f
     return f
 end
@@ -212,10 +237,15 @@ function P:Paint(f)
     local db = UF:GetUnitDB(f.dfUFUnit)
     f.dfDB = db
     f.dfTextPresetOverride = db.textDesignerPreset
-    f.dfTestData = P:TestData(f.dfUFUnit)
+    f.dfTestData = P:TestData(f.dfUFUnit, f.dfUFSlot)
     if DF.ApplyFrameLayout then DF:ApplyFrameLayout(f) end
-    f:SetScale(db.frameScale or 1)
-    P:ApplyPosition(f.dfUFUnit)
+    if f.dfUFSlot then
+        -- A boss slot: scaled and placed by its container (Boss.lua).
+        f:SetScale(1)
+    else
+        f:SetScale(db.frameScale or 1)
+        P:ApplyPosition(f.dfUFUnit)
+    end
     if DF._optionsAddonLoaded and DF.UpdateTestFrame then
         DF:UpdateTestFrame(f, f.index)
     elseif DF.FullFrameRefresh then
@@ -225,11 +255,12 @@ function P:Paint(f)
     if UF.Elements then UF.Elements:Call("Preview", f) end
 end
 
--- The units that get a preview: those this build draws itself.
+-- The units that get a preview: those this build draws itself. Boss has its own
+-- (a container of slots, Boss.lua).
 function P:Units()
     local list = {}
     for _, unit in ipairs(UF.SPAWNED_UNITS) do
-        if UF.frames[unit] then list[#list + 1] = unit end
+        if unit ~= "boss" and UF.frames[unit] then list[#list + 1] = unit end
     end
     return list
 end
@@ -254,6 +285,7 @@ function P:Show()
         f:Show()
         P:Paint(f)
     end
+    if UF.Boss and UF.Boss.PreviewRefresh then UF.Boss:PreviewRefresh() end
     FadeLive(0)
     UF.Debug("preview on")
 end
@@ -261,6 +293,7 @@ end
 function P:Hide()
     P.shown = false
     for _, f in pairs(P.frames) do f:Hide() end
+    if UF.Boss and UF.Boss.PreviewHide then UF.Boss:PreviewHide() end
     if P.parent then P.parent:Hide() end
     FadeLive(1)
     -- The live frames missed nothing (they kept their events), but a repaint costs
@@ -277,4 +310,5 @@ function P:Refresh()
         if not f:IsShown() then f:Show() end
         P:Paint(f)
     end
+    if UF.Boss and UF.Boss.PreviewRefresh then UF.Boss:PreviewRefresh() end
 end

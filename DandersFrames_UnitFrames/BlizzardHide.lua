@@ -22,6 +22,11 @@ local addonName, UF = ...
 --     power) sit under PlayerFrame: their events are unregistered and they are
 --     NEVER reparented themselves (Edit-Mode managed; reparenting them taints).
 --
+-- Boss (spec §1.6): ONLY the container (BossTargetFrameContainer) is reparented.
+-- The individual boss frames (Boss1TargetFrame..) have their events stripped and
+-- are hidden where they stand: reparenting them breaks the container's layout.
+-- Every Blizzard boss frame is hidden, including any beyond our slot count.
+--
 -- Target of target rides inside TargetFrame: hiding the target hides it too. On
 -- its own (target from Blizzard, target of target ours or hidden) only
 -- TargetFrameToT is hidden. A "Blizzard" target of target under a hidden target
@@ -51,6 +56,24 @@ BH.FRAMES = {
     -- 12.x still parents it to PlayerFrame; the claim + reparent works either way).
     pet = { "PetFrame" },
 }
+
+-- Blizzard's boss frames. ⚠ Names taken from the live 12.x client's FrameXML as
+-- other addons use them (ElvUI hides the same two); not yet checked in game here.
+BH.BOSS_CONTAINER = "BossTargetFrameContainer"
+BH.BOSS_FRAME = "Boss%dTargetFrame"
+
+-- How many Blizzard boss frames there are (MAX_BOSS_FRAMES; our count otherwise).
+function BH:BossFrameCount()
+    local n = tonumber(MAX_BOSS_FRAMES)
+    if not n or n < (UF.BOSS_COUNT or 5) then n = UF.BOSS_COUNT or 5 end
+    return n
+end
+
+function BH:BossFrameNames()
+    local list = {}
+    for i = 1, BH:BossFrameCount() do list[#list + 1] = string.format(BH.BOSS_FRAME, i) end
+    return list
+end
 
 BH.ALT_POWER_BARS = { "AlternatePowerBar", "MonkStaggerBar", "EvokerEbonMightBar", "DemonHunterSoulFragmentsBar" }
 
@@ -142,6 +165,26 @@ function BH:HideFrame(name)
     return true
 end
 
+-- Boss: strip + hide each boss frame in place, reparent only the container.
+-- Out of combat only (the caller queues).
+function BH:HideBoss()
+    if InCombatLockdown() then return false end
+    for _, name in ipairs(BH:BossFrameNames()) do
+        local frame = _G[name]
+        if type(frame) == "table" then
+            BH:StripFrame(frame)
+            if frame.Hide then pcall(frame.Hide, frame) end
+        end
+    end
+    local c = _G[BH.BOSS_CONTAINER]
+    if type(c) == "table" then
+        Reparent(c)
+        HookParent(c)
+    end
+    UF.Debug("hid Blizzard boss frames")
+    return true
+end
+
 -- Events only, combat-legal; never reparented.
 function BH:DisableAltPowerBars()
     for _, name in ipairs(BH.ALT_POWER_BARS) do
@@ -151,6 +194,14 @@ end
 
 -- Claim, then hide (now or after combat).
 function BH:HideUnit(unit)
+    if unit == "boss" then
+        if DF.ClaimBlizzardFrame then
+            DF:ClaimBlizzardFrame(BH.BOSS_CONTAINER, BH.OWNER)
+            for _, name in ipairs(BH:BossFrameNames()) do DF:ClaimBlizzardFrame(name, BH.OWNER) end
+        end
+        UF:RunOutOfCombat("hide:boss", function() BH:HideBoss() end)
+        return
+    end
     local names = BH.FRAMES[unit]
     if not names then return end
     for _, name in ipairs(names) do

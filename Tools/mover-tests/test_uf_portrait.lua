@@ -178,6 +178,18 @@ PO:SetActive(T, true)
 eq(T.dfUFPortrait.listener._events.UNIT_MODEL_CHANGED[1], "target", "target: its own unit")
 PO:SetActive(T, false)
 eq(next(T.dfUFPortrait.listener._events), nil, "hidden: dropped")
+do
+    local bdb = UF:GetUnitDB("boss")
+    bdb.portraitEnabled = true
+    local BS = Owner("boss")
+    BS.unit, BS.dfUFSlot = "boss2", 2
+    PO:Attach(BS)
+    PO:SetActive(BS, true)
+    eq(BS.dfUFPortrait.listener._events.UNIT_MODEL_CHANGED and BS.dfUFPortrait.listener._events.UNIT_MODEL_CHANGED[1],
+       "boss2", "boss slot 2: its own token")
+    PO:SetActive(BS, false)
+    bdb.portraitEnabled = nil
+end
 db.portraitEnabled = false
 PO:SetActive(P, false)
 PO:SetActive(P, true)

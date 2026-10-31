@@ -18,6 +18,9 @@ local addonName, UF = ...
 --   targettarget   beside target's right edge      relevant only while you have a target
 --   focus          CENTER (-280, -300)
 --   pet            under player's bottom edge
+--   boss           CENTER (480, 120)               the boss container (Boss.lua):
+--                                                  rect = union of the shown slots
+--   boss.slot1..N  anchor targets only             partOf "boss", no snap zones
 --
 -- While the preview is up (UF.Preview: a mover session turns it on), each
 -- element measures and reports the PREVIEW frame, so an absent unit (no target,
@@ -46,6 +49,7 @@ function M:Title(unit)
     if unit == "targettarget" then return L["Target of Target"] end
     if unit == "focus" then return L["Focus"] end
     if unit == "pet" then return L["Pet"] end
+    if unit == "boss" then return L["Boss"] end
     return unit
 end
 
@@ -188,6 +192,8 @@ end
 function M:WantsChild(unit, kind)
     local spec = M.CHILDREN[kind]
     if not spec or not (M.registered and M.registered[unit]) then return false end
+    -- Boss cast bars never detach (CastBar.lua IsDetached): no child element.
+    if unit == "boss" then return false end
     local db = UF:GetUnitDB(unit)
     return (db[spec.enabled] and db[spec.detached]) and true or false
 end
@@ -255,7 +261,13 @@ function M:Init()
         icon  = "Interface\\AddOns\\DandersFrames\\Media\\DF_Icon",
     })
     for _, unit in ipairs(UF.SPAWNED_UNITS) do
-        if UF.frames[unit] then
+        if unit == "boss" then
+            -- The container and its slot targets (Boss.lua).
+            if UF.Boss and UF.Boss:RegisterMover(Lib, M.ADDON_KEY) then
+                M.registered = M.registered or {}
+                M.registered.boss = true
+            end
+        elseif UF.frames[unit] then
             Lib:Register(M.ADDON_KEY, unit, M:BuildDef(unit))
             M.registered = M.registered or {}
             M.registered[unit] = true
