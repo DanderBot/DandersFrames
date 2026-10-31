@@ -53,9 +53,9 @@ IN.RESTING_BASE_SIZE = 16
 
 IN.ART = {
     pvp = {
-        Horde = { file = "Interface\\TargetingFrame\\UI-PVP-Horde", coords = { 0.08, 0.58, 0.045, 0.545 } },
-        Alliance = { file = "Interface\\TargetingFrame\\UI-PVP-Alliance", coords = { 0.07, 0.58, 0.06, 0.57 } },
-        FFA = { file = "Interface\\TargetingFrame\\UI-PVP-FFA", coords = { 0.05, 0.605, 0.015, 0.57 } },
+        Horde = { atlas = "UI-HUD-UnitFrame-Player-PVP-HordeIcon", file = "Interface\\TargetingFrame\\UI-PVP-Horde", coords = { 0.08, 0.58, 0.045, 0.545 } },
+        Alliance = { atlas = "UI-HUD-UnitFrame-Player-PVP-AllianceIcon", file = "Interface\\TargetingFrame\\UI-PVP-Alliance", coords = { 0.07, 0.58, 0.06, 0.57 } },
+        FFA = { atlas = "UI-HUD-UnitFrame-Player-PVP-FFAIcon", file = "Interface\\TargetingFrame\\UI-PVP-FFA", coords = { 0.05, 0.605, 0.015, 0.57 } },
     },
     elite = "nameplates-icon-elite-gold",
     rare = "nameplates-icon-elite-silver",
@@ -261,8 +261,15 @@ function IN:PaintPvP(icon, state)
     if not a then icon:Hide(); return end
     icon.text:Hide()
     icon.tex:Show()
-    icon.tex:SetTexture(a.file)
-    icon.tex:SetTexCoord(a.coords[1], a.coords[2], a.coords[3], a.coords[4])
+    -- The modern crest atlas when the client has it, else the legacy file's crop.
+    local info = C_Texture and C_Texture.GetAtlasInfo
+    if a.atlas and info and info(a.atlas) then
+        icon.tex:SetTexCoord(0, 1, 0, 1)    -- SetAtlas keeps an earlier crop
+        icon.tex:SetAtlas(a.atlas)
+    else
+        icon.tex:SetTexture(a.file)
+        icon.tex:SetTexCoord(a.coords[1], a.coords[2], a.coords[3], a.coords[4])
+    end
     icon:Show()
 end
 

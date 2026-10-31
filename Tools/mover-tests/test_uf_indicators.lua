@@ -241,7 +241,14 @@ print("-- PvP")
 pvp = true
 IN:Update(P)
 check(P.dfUFIcons.pvp:IsShown(), "flagged: shown")
-eq(P.dfUFIcons.pvp.tex._texture, IN.ART.pvp.Horde.file, "...the faction crest")
+eq(P.dfUFIcons.pvp.tex._texture, IN.ART.pvp.Horde.file, "...the faction crest (no atlas: the legacy file)")
+do
+    local heldCT = C_Texture
+    C_Texture = { GetAtlasInfo = function(name) return name == IN.ART.pvp.Horde.atlas and {} or nil end }
+    IN:Update(P)
+    eq(P.dfUFIcons.pvp.tex._atlas, "UI-HUD-UnitFrame-Player-PVP-HordeIcon", "...the modern crest atlas when the client has it")
+    C_Texture = heldCT
+end
 ffa = true
 eq(IN:PvPState("player"), "FFA", "free-for-all wins")
 ffa = Secret("ffa")
