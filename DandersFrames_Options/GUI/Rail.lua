@@ -124,15 +124,17 @@ local function BuildDeckTabs(def)
         -- The +1 lifts the 24px button off deck 2's centre onto the row
         -- the header has always used.
         if prev then
-            b:SetPoint("LEFT", prev, "RIGHT", GUI.SnapLen(b, 4), 0)
+            b:SetPoint("LEFT", prev, "RIGHT", GUI.SnapLen(b, GUI.DECK_TAB_GAP), 0)
         else
-            b:SetPoint("LEFT", deckFrame, "LEFT", GUI.SnapLen(b, 12), 1)
+            b:SetPoint("LEFT", deckFrame, "LEFT", GUI.SnapLen(b, GUI.DECK_TAB_LEFT), 1)
         end
         GUI:StyleButton(b, {
             tab = true, tabStripe = false,
             text = Resolve(tab.deckLabel or tab.label),
             accent = Resolve(tab.accent),
-            width = 70, height = 24, font = "DFFontHighlight",
+            -- A tab's own width, else the module's, else 70. A module with many
+            -- tabs narrows them (fitText still grows a label that would clip).
+            width = tab.width or def.tabWidth or 70, height = 24, font = "DFFontHighlight",
         })
         local moduleId, tabId = def.id, tab.id
         b:SetScript("OnClick", function() GUI:SelectModule(moduleId, tabId) end)
@@ -140,6 +142,54 @@ local function BuildDeckTabs(def)
         def._deckTabs[tabId] = b
         prev = b
     end
+end
+
+-- ============================================================
+-- DECK-2 MINIMUM WIDTH for a module's view: its tab row on the left, the
+-- Undo / Redo / Test / Unlock cluster on the right, and a gap between, so the
+-- window can never be dragged narrow enough for the two to overlap. Measured
+-- from the built buttons, so a translated label that grew a tab (fitText) or
+-- the cluster is covered. def.minWindowWidth is a floor on top (a measurement
+-- taken before the font resolved reads short). nil: nothing to protect.
+-- ============================================================
+GUI.DECK_TAB_LEFT, GUI.DECK_TAB_GAP, GUI.DECK_ROW_GAP = 12, 4, 12
+-- Deck 2's right edge to Unlock's (window margin + override marker), and the
+-- gaps Test->Unlock, Redo->Test, Undo->Redo (GUI/Panel.lua, DECK 2 RIGHT CLUSTER).
+GUI.DECK_CLUSTER_MARGIN, GUI.DECK_CLUSTER_GAP, GUI.DECK_UNDO_GAP = 33, 4, 12
+
+function GUI:ModuleDeckTabsWidth(def)
+    local tabs = def and def.tabs and def._deckTabs
+    if not tabs then return 0 end
+    local w, n = GUI.DECK_TAB_LEFT, 0
+    for _, tab in ipairs(def.tabs) do
+        local b = tabs[tab.id]
+        if b then
+            w = w + (b:GetWidth() or 0)
+            n = n + 1
+        end
+    end
+    if n == 0 then return 0 end
+    return w + GUI.DECK_TAB_GAP * (n - 1)
+end
+
+function GUI:DeckClusterWidth()
+    local lock, test = GUI.LockButton, GUI.TestButton
+    if not (lock and test) then return 0 end
+    local w = GUI.DECK_CLUSTER_MARGIN + lock:GetWidth() + GUI.DECK_CLUSTER_GAP + test:GetWidth()
+    local undo, redo = GUI.UndoButton, GUI.RedoButton
+    if undo and redo and undo:IsShown() then
+        w = w + GUI.DECK_UNDO_GAP + redo:GetWidth() + GUI.DECK_CLUSTER_GAP + undo:GetWidth()
+    end
+    return w
+end
+
+function GUI:ModuleDeckMinWidth(def)
+    local tabs = GUI:ModuleDeckTabsWidth(def)
+    local floor = def and def.minWindowWidth
+    if tabs <= 0 then return floor end
+    local want = (GUI.RailWidth or 0) + tabs + GUI.DECK_ROW_GAP + GUI:DeckClusterWidth()
+    if floor and floor > want then want = floor end
+    return math.ceil(want)
 end
 
 -- ============================================================

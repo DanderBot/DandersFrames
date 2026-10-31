@@ -2832,6 +2832,12 @@ function DF:CreateGUI()
     -- Returns whether the page is a wide one, and whether the window just widened.
     local function ApplyPageWidthBounds(name)
         local wanted = WIDE_PAGES[name] and wideMinWidth or normalMinWidth
+        -- A sidebar module's view (Unit Frames) can carry more deck-2 tabs than the
+        -- 580 minimum leaves room for beside the Undo / Test / Unlock cluster:
+        -- its measured row (GUI:ModuleDeckMinWidth, GUI/Rail.lua) raises the floor.
+        local view = GUI.ModuleView and GUI.GetModule and GUI:GetModule(GUI.ModuleView)
+        local deckMin = view and GUI.ModuleDeckMinWidth and GUI:ModuleDeckMinWidth(view)
+        if deckMin and deckMin > wanted then wanted = deckMin end
         frame:SetResizeBounds(wanted, minHeight, maxWidth, maxHeight)
         local widened = false
         if frame:GetWidth() < wanted then
