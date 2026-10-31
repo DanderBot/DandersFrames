@@ -12,7 +12,11 @@ local NS = ...
 --   3. static: no OnUpdate, Zs at alpha 1 and base size, glow at 0.3;
 --   4. SetZScale scales sizes, offsets and the container;
 --   5. the OUTER style: a frame of eight sliced pieces hanging outside the
---      host, its own pulse range, and SetGlowExtents widening its rect.
+--      host, its own pulse range, and SetGlowExtents widening its rect;
+--   6. the outline of several rects (DF.GlowOutlinePieces / SetGlowRects):
+--      one rect = the old eight pieces, an L / step traced without glowing an
+--      empty corner, small gaps bridged, inside corners not drawn twice, and
+--      the texture pool not growing on relayout.
 -- ============================================================
 
 local src = df_file_source("Frames/Create.lua")
@@ -163,6 +167,194 @@ eq(spread.glow.pieces[1].w, 6, "outer: glowSpread honoured")
 ind:SetGlowExtents(10, 0, 0, 0)
 eq(ind.glow.points[1][4], -14, "fill: extents add to the 4px outset")
 eq(fakeDF:CreateRestedIndicator(parent, host).glowStyleName, "FILL", "fill: the default style")
+
+-- ---- 6. outline of several rects -------------------------------------
+local GOP = fakeDF.GlowOutlinePieces
+check(type(GOP) == "function", "outline: DF.GlowOutlinePieces exposed")
+local function count(pieces, kind)
+    local n = 0
+    for _, p in ipairs(pieces) do if not kind or p[1] == kind then n = n + 1 end end
+    return n
+end
+local function pstr(p) return table.concat({ p[1], p[2], p[3], p[4], p[5] }, ",") end
+local function has(pieces, want)
+    for _, p in ipairs(pieces) do if pstr(p) == want then return true end end
+    return false
+end
+local function dump(pieces)
+    local t = {}
+    for _, p in ipairs(pieces) do t[#t + 1] = pstr(p) end
+    return table.concat(t, " | ")
+end
+-- No piece may sit on a rect the caller passed (the glow stays outside).
+local function noneInside(pieces, rects, label)
+    for _, p in ipairs(pieces) do
+        for _, r in ipairs(rects) do
+            local ix = math.min(p[2] + p[4], r[3]) - math.max(p[2], r[1])
+            local iy = math.min(p[3] + p[5], r[4]) - math.max(p[3], r[2])
+            if ix > 0 and iy > 0 then
+                check(false, label .. ": " .. pstr(p) .. " overlaps a rect")
+                return
+            end
+        end
+    end
+    check(true, label .. ": no piece on the shape")
+end
+-- Pieces must not overlap each other (ADD blend would double them).
+local function noOverlaps(pieces, label)
+    for a = 1, #pieces do
+        for b = a + 1, #pieces do
+            local p, q = pieces[a], pieces[b]
+            -- a band (a strip carried past a cut inside corner) may overlap
+            -- the step's outside corner by design
+            local ix = math.min(p[2] + p[4], q[2] + q[4]) - math.max(p[2], q[2])
+            local iy = math.min(p[3] + p[5], q[3] + q[5]) - math.max(p[3], q[3])
+            if ix > 0 and iy > 0 and not (p[7] or q[7]) then
+                check(false, label .. ": " .. pstr(p) .. " overlaps " .. pstr(q))
+                return
+            end
+        end
+    end
+    check(true, label .. ": no two pieces overlap")
+end
+local function nIn(pieces)
+    return count(pieces, "IN_TL") + count(pieces, "IN_TR") + count(pieces, "IN_BL") + count(pieces, "IN_BR")
+end
+local function nOut(pieces)
+    return count(pieces, "OUT_TL") + count(pieces, "OUT_TR") + count(pieces, "OUT_BL") + count(pieces, "OUT_BR")
+end
+
+-- one rect = the old nine-slice: four strips, four outside corners
+local one = GOP({ { 0, 0, 100, 40 } }, 10)
+eq(count(one), 8, "one rect: eight pieces")
+for _, w in ipairs({ "TOP,0,-10,100,10", "BOTTOM,0,40,100,10", "LEFT,-10,0,10,40", "RIGHT,100,0,10,40",
+                     "OUT_TL,-10,-10,10,10", "OUT_TR,100,-10,10,10", "OUT_BL,-10,40,10,10", "OUT_BR,100,40,10,10" }) do
+    check(has(one, w), "one rect: " .. w)
+end
+eq(count(GOP({}, 10)), 0, "no rects: nothing")
+eq(count(GOP(nil, 10)), 0, "nil rects: nothing")
+eq(count(GOP({ { 5, 5, 5, 20 } }, 10)), 0, "a zero-width rect is ignored")
+check(has(GOP({ { 0.4, -0.4, 99.6, 40.4 } }, 10), "TOP,0,-10,100,10"), "fractions round to whole units")
+
+-- The screenshot: portrait on the left, taller than the frame; a class bar
+-- across the top of the frame only (2px gap), reaching higher than the portrait.
+local frameR, portR, barR = { 0, 0, 200, 40 }, { -62, -6, -2, 46 }, { 0, -20, 200, -2 }
+local L = GOP({ frameR, portR, barR }, 10)
+noneInside(L, { frameR, portR, barR }, "L")
+noOverlaps(L, "L")
+for _, p in ipairs(L) do
+    if p[3] < -16 and p[2] < -10 then
+        check(false, "L: nothing glows in the empty corner above the portrait (" .. pstr(p) .. ")")
+    end
+end
+check(has(L, "TOP,0,-30,200,10"), "L: the bar's top strip spans the bar only")
+check(has(L, "TOP,-62,-16,52,10"), "L: the portrait's top strip stops short of the inside corner")
+check(has(L, "IN_TL,-10,-16,10,10"), "L: an inside-corner piece where the portrait meets the bar")
+check(has(L, "LEFT,-10,-20,10,4"), "L: the bar's left strip stops short of it too")
+check(has(L, "OUT_TL,-10,-30,10,10"), "L: the bar's own top-left corner")
+check(has(L, "OUT_TL,-72,-16,10,10"), "L: the portrait's top-left corner")
+check(has(L, "IN_BR,-2,40,10,6"), "L: inside corner under the frame by the lower portrait, cut to the 6px step")
+eq(dump(L):find("BOTTOM,8,40,192,10", 1, true) ~= nil, true, "L: the frame's bottom strip stops short of it")
+eq(nIn(L), 2, "L: two inside corners")
+for _, p in ipairs(L) do
+    if p[1] == "IN_BR" then
+        eq(table.concat(p[6], ","), "1,0,1,0.4", "L: the cut corner's art is mirrored and cropped to its 6px")
+    end
+end
+eq(nOut(L), 6, "L: six outside corners")
+
+-- the same with the bar on the BOTTOM: mirrored
+local barB = { 0, 42, 200, 60 }
+local LB = GOP({ frameR, portR, barB }, 10)
+noneInside(LB, { frameR, portR, barB }, "bar below")
+noOverlaps(LB, "bar below")
+check(has(LB, "BOTTOM,0,60,200,10"), "bar below: its bottom strip spans the bar only")
+check(has(LB, "IN_BL,-10,46,10,10"), "bar below: an inside corner under the portrait")
+check(has(LB, "IN_TR,0,-16,10,10") == false, "bar below: nothing stray")
+eq(nIn(LB), 2, "bar below: two inside corners")
+
+-- a bar wider than frame and portrait together: one straight top edge
+local wide = { -90, -20, 230, -2 }
+local W = GOP({ frameR, portR, wide }, 10)
+noneInside(W, { frameR, portR, wide }, "wide bar")
+noOverlaps(W, "wide bar")
+eq(count(W, "TOP"), 1, "wide bar: one top strip")
+check(has(W, "TOP,-90,-30,320,10"), "wide bar: the bar's full width")
+
+-- portrait shorter than the frame: the frame's own top / bottom run straight
+local shortP = { -42, 8, -2, 32 }
+local SP = GOP({ frameR, shortP }, 10)
+noneInside(SP, { frameR, shortP }, "short portrait")
+noOverlaps(SP, "short portrait")
+check(has(SP, "TOP,0,-10,200,10") and has(SP, "BOTTOM,0,40,200,10"), "short portrait: the frame's top and bottom whole")
+eq(nIn(SP), 2, "short portrait: two inside corners beside it")
+
+-- a small gap is bridged: one shape, as if the rects touched
+local gapped = GOP({ { 0, 0, 100, 40 }, { 0, -16, 100, -8 } }, 10)
+eq(count(gapped), 8, "8px gap: bridged into one shape (" .. dump(gapped) .. ")")
+check(has(gapped, "TOP,0,-26,100,10"), "8px gap: the glow tops the bar")
+for _, p in ipairs(gapped) do
+    check(not (p[3] > -16 and p[3] < 0 and p[4] > 10), "8px gap: nothing squeezed into the gap (" .. pstr(p) .. ")")
+end
+eq(count(GOP({ { 0, 0, 100, 40 }, { 0, -10, 100, -2 } }, 10)), 8, "2px gap: one shape")
+eq(count(GOP({ { 0, 0, 100, 40 }, { -60, 0, -1, 40 } }, 10)), 8, "a 1px side gap: one shape")
+-- a gap wider than two spreads: two shapes, each glowing whole
+eq(count(GOP({ { 0, 0, 100, 40 }, { 0, -60, 100, -30 } }, 10)), 16, "30px gap: two separate glows")
+-- small jogs (a border poking 1px past its neighbour) snap straight
+eq(count(GOP({ { 0, 0, 100, 40 }, { -1, -9, 101, -1 } }, 10)), 8, "1px jog: one straight-edged box")
+-- a rect inside another (portrait drawn inside the frame) adds nothing
+eq(count(GOP({ frameR, { 2, 2, 38, 38 } }, 10)), 8, "a rect inside another adds nothing")
+
+-- ---- SetGlowRects on the indicator ---------------------------------------
+local rh = newRegion("Frame"); rh.level = 3
+local ri = fakeDF:CreateRestedIndicator(parent, rh, { glowStyle = "OUTER" })
+local rg = ri.glow
+ri:SetGlowRects({ frameR, portR, barR })
+eq(rg.outlineCount, #L, "rects: one texture per outline piece")
+for i = 1, 8 do eq(rg.pieces[i].shown, false, "rects: nine-slice piece " .. i .. " hidden") end
+local poolN = #rg.outlinePool
+eq(poolN, #L, "rects: pool sized to the outline")
+local innerTex = 0
+for i = 1, rg.outlineCount do
+    local t = rg.outlinePool[i]
+    eq(t.shown, true, "rects: piece " .. i .. " shown")
+    eq(t.blend, "ADD", "rects: piece " .. i .. " additive")
+    eq(t.vertex[2], 0.82, "rects: piece " .. i .. " gold")
+    if t.texture == "Interface\\AddOns\\DandersFrames\\Media\\DF_OuterGlowInner" then innerTex = innerTex + 1 end
+end
+eq(innerTex, 2, "rects: inside corners use the inside-corner art")
+eq(rg.points[1][2], rh, "rects: glow frame on the host")
+local first = rg.outlinePool[1]
+eq(first.points[1][1], "TOPLEFT", "rects: pieces anchor by TOPLEFT")
+eq(first.points[1][4], L[1][2], "rects: x offset as computed")
+eq(first.points[1][5], -L[1][3], "rects: y down becomes WoW's negative offset")
+for _ = 1, 5 do ri:SetGlowRects({ frameR, portR, barR }) end
+eq(#rg.outlinePool, poolN, "rects: relayout reuses the pool")
+ri:SetGlowRects({ frameR })
+eq(#rg.outlinePool, poolN, "rects: a smaller outline keeps the pool")
+eq(rg.outlineCount, 8, "rects: one rect = eight pieces")
+local shownN = 0
+for _, t in ipairs(rg.outlinePool) do if t.shown then shownN = shownN + 1 end end
+eq(shownN, 8, "rects: the spares are hidden")
+ri:SetGlowExtents(0, 0, 0, 0)
+for i = 1, 8 do eq(rg.pieces[i].shown, true, "extents again: nine-slice piece " .. i .. " back") end
+shownN = 0
+for _, t in ipairs(rg.outlinePool) do if t.shown then shownN = shownN + 1 end end
+eq(shownN, 0, "extents again: outline pieces hidden")
+eq(rg.points[1][4], 0, "extents again: anchored as before")
+ri:SetGlowRects({ frameR, barR })
+ri:SetGlowRects(nil)
+eq(rg.outlineCount, nil, "rects nil: back to the host's own rect")
+rg:Show()
+ri:GetScript("OnUpdate")(ri, 0.3)
+check(rg.alpha >= 0.5 and rg.alpha <= 1, "rects: pulse unchanged")
+-- FILL: the rects' bounding box, outset 4
+local fi = fakeDF:CreateRestedIndicator(parent, rh)
+fi:SetGlowRects({ frameR, portR, barR })
+eq(fi.glow.points[1][4], -66, "fill rects: left = leftmost - 4")
+eq(fi.glow.points[1][5], 24, "fill rects: top = topmost + 4 (WoW up)")
+eq(fi.glow.w, 270, "fill rects: bounding width + 8")
+eq(fi.glow.h, 74, "fill rects: bounding height + 8")
 
 -- ---- party/raid call sites use the builder ---------------------------
 local n = 0

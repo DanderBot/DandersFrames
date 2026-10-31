@@ -660,7 +660,8 @@ local RegisterUnitWatch = RegisterUnitWatch
 --         the party/raid player-frame look
 --   OUTER a soft glow hanging OUTSIDE the host's edges (DF_OuterGlow,
 --         a nine-slice whose centre is never drawn), so nothing on the
---         frame covers it; :SetGlowExtents widens it past the host
+--         frame covers it; :SetGlowExtents widens it past the host, and
+--         :SetGlowRects traces the outline of several rects instead
 -- Animated: the Zs fade/scale in a staggered loop and the glow
 -- pulses. Static: all Zs at full alpha and base size, glow at a
 -- fixed alpha, no OnUpdate running.
@@ -706,6 +707,7 @@ local OUTER_GLOW_PIECES = {
 local function CreateOuterGlow(host, spread)
     local glow = CreateFrame("Frame", nil, host)
     glow:SetFrameLevel(host:GetFrameLevel())
+    glow.spread = spread
     glow.pieces = {}
     for i, p in ipairs(OUTER_GLOW_PIECES) do
         local t = glow:CreateTexture(nil, "ARTWORK")
@@ -726,6 +728,305 @@ local function CreateOuterGlow(host, spread)
     end
     glow:Hide()
     return glow
+end
+
+-- ------------------------------------------------------------
+-- OUTER glow along the outline of several rects
+-- The glow can follow the union of a few axis-aligned rects (an L or a step,
+-- say) instead of one box round them all. The union's outline is found on a
+-- grid made from the rects' edges:
+--   1. snap: edge values within GLOW_SNAP px of each other merge, growing a
+--      rect outwards by at most that much, so a 1-2px jog (a border poking
+--      past its neighbour) is a straight edge, not a corner pair;
+--   2. bridge: an empty run of cells with covered cells on BOTH sides (a gap
+--      between two rects, or a narrow notch) is filled when it is no wider
+--      than twice the spread -- the two glows would only overlap in it;
+--   3. every cell side between covered and empty is an edge; collinear runs
+--      merge into one strip. Each grid vertex is checked per empty quadrant:
+--      both neighbours covered = an inside corner (DF_OuterGlowInner, and the
+--      two strips stop short of it, so nothing is drawn twice); neither
+--      covered but the diagonal = an outside corner (the nine-slice's own).
+-- Rects are { left, top, right, bottom } in host units from the host's
+-- TOPLEFT, x to the right and y DOWNWARDS (the host itself = {0, 0, w, h}).
+-- ------------------------------------------------------------
+local OUTER_GLOW_INNER_FILE = "Interface\\AddOns\\DandersFrames\\Media\\DF_OuterGlowInner"
+local GLOW_SNAP = 3
+local floor, sort = math.floor, table.sort
+
+-- Texcoords per piece kind: edge strips and outside corners off DF_OuterGlow,
+-- inside corners off DF_OuterGlowInner (mirrored per quadrant).
+local GLOW_COORDS = {
+    TOP    = { OG_LO, OG_HI, 0, OG_LO },
+    BOTTOM = { OG_LO, OG_HI, OG_HI, 1 },
+    LEFT   = { 0, OG_LO, OG_LO, OG_HI },
+    RIGHT  = { OG_HI, 1, OG_LO, OG_HI },
+    OUT_TL = { 0, OG_LO, 0, OG_LO },
+    OUT_TR = { OG_HI, 1, 0, OG_LO },
+    OUT_BL = { 0, OG_LO, OG_HI, 1 },
+    OUT_BR = { OG_HI, 1, OG_HI, 1 },
+    IN_TL  = { 0, 1, 0, 1 },
+    IN_TR  = { 1, 0, 0, 1 },
+    IN_BL  = { 0, 1, 1, 0 },
+    IN_BR  = { 1, 0, 1, 0 },
+}
+
+local function Round(v) return floor(v + 0.5) end
+
+-- Merge same-facing edge values on one axis (field = the rect field) that sit
+-- within GLOW_SNAP of the run's first value. Low edges (left / top) take the
+-- run's least value, high edges its greatest, so rects only ever grow. Low and
+-- high edges are snapped apart: a gap between two rects is the bridge's job.
+local function SnapEdges(rects, field, low)
+    local vals = {}
+    for _, r in ipairs(rects) do vals[#vals + 1] = r[field] end
+    sort(vals)
+    local to = {}
+    local i = 1
+    while i <= #vals do
+        local j = i
+        while j < #vals and vals[j + 1] - vals[i] <= GLOW_SNAP do j = j + 1 end
+        for k = i, j do to[vals[k]] = low and vals[i] or vals[j] end
+        i = j + 1
+    end
+    for _, r in ipairs(rects) do r[field] = to[r[field]] end
+end
+
+local function UniqueSorted(rects, a, b)
+    local seen, out = {}, {}
+    for _, r in ipairs(rects) do
+        for _, v in ipairs({ r[a], r[b] }) do
+            if not seen[v] then seen[v] = true; out[#out + 1] = v end
+        end
+    end
+    sort(out)
+    return out
+end
+
+-- Fill empty runs bounded by covered cells on both sides and no longer than
+-- maxLen, along one axis. cells[i][j]; along = "x" walks i, "y" walks j.
+local function Bridge(cells, nx, ny, xs, ys, maxLen, along)
+    local changed = false
+    local outer, inner = (along == "x") and ny or nx, (along == "x") and nx or ny
+    local coords = (along == "x") and xs or ys
+    for o = 1, outer do
+        local function get(n) if along == "x" then return cells[n][o] end return cells[o][n] end
+        local function set(n) if along == "x" then cells[n][o] = true else cells[o][n] = true end end
+        local n = 1
+        while n <= inner do
+            if not get(n) then
+                local s = n
+                while n <= inner and not get(n) do n = n + 1 end
+                -- empty run s .. n-1
+                if s > 1 and n <= inner and coords[n] - coords[s] <= maxLen then
+                    for k = s, n - 1 do set(k) end
+                    changed = true
+                end
+            else
+                n = n + 1
+            end
+        end
+    end
+    return changed
+end
+
+-- The pieces that glow the outline of the rects' union, spread px wide:
+-- a list of { kind, x, y, w, h [, texcoords [, band]] } (host units, y
+-- downwards; kind keys GLOW_COORDS, which a cut piece overrides; band = the
+-- carry-on of a strip past a cut inside corner, the one piece that may overlap
+-- another -- a step's outside corner). nil / empty rects = none.
+local function GlowOutlinePieces(rects, spread)
+    local work = {}
+    for _, r in ipairs(rects or {}) do
+        local l, t, rr, b = Round(r[1]), Round(r[2]), Round(r[3]), Round(r[4])
+        if rr > l and b > t then work[#work + 1] = { l, t, rr, b } end
+    end
+    if #work == 0 then return {} end
+    SnapEdges(work, 1, true); SnapEdges(work, 3, false)
+    SnapEdges(work, 2, true); SnapEdges(work, 4, false)
+
+    local xs, ys = UniqueSorted(work, 1, 3), UniqueSorted(work, 2, 4)
+    local nx, ny = #xs - 1, #ys - 1
+    local xi, yi = {}, {}
+    for i, v in ipairs(xs) do xi[v] = i end
+    for j, v in ipairs(ys) do yi[v] = j end
+    local cells = {}
+    for i = 1, nx do cells[i] = {} end
+    for _, r in ipairs(work) do
+        for i = xi[r[1]], xi[r[3]] - 1 do
+            for j = yi[r[2]], yi[r[4]] - 1 do cells[i][j] = true end
+        end
+    end
+    local maxGap = spread * 2
+    for _ = 1, 4 do
+        local a = Bridge(cells, nx, ny, xs, ys, maxGap, "x")
+        local b = Bridge(cells, nx, ny, xs, ys, maxGap, "y")
+        if not (a or b) then break end
+    end
+
+    local function C(i, j) return i >= 1 and i <= nx and j >= 1 and j <= ny and cells[i][j] == true end
+
+    local s = spread
+
+    -- How far the outline edge leaving vertex (i, j) along the empty quadrant
+    -- q's side runs (capped at s): horizontally (the edge on y = ys[j]) or
+    -- vertically (the edge on x = xs[i]).
+    local function EdgeRun(i, j, right, down, horizontal)
+        local len = 0
+        if horizontal then
+            local jq, jo = down and j or j - 1, down and j - 1 or j
+            local c, step = right and i or i - 1, right and 1 or -1
+            while len < s and C(c, jo) and not C(c, jq) do
+                len = len + xs[c + 1] - xs[c]; c = c + step
+            end
+        else
+            local iq, io = right and i or i - 1, right and i - 1 or i
+            local r, step = down and j or j - 1, down and 1 or -1
+            while len < s and C(io, r) and not C(iq, r) do
+                len = len + ys[r + 1] - ys[r]; r = r + step
+            end
+        end
+        return (len < s) and len or s
+    end
+
+    -- Corners first (the strips need the inside ones to stop short).
+    -- An inside-corner piece is cut to the edges beside it when they are
+    -- shorter than the spread (a step smaller than the glow), so it never
+    -- runs past an edge into the next corner's piece.
+    local pieces, inner = {}, {}
+    for i = 1, nx + 1 do
+        for j = 1, ny + 1 do
+            local TL, TR, BL, BR = C(i - 1, j - 1), C(i, j - 1), C(i - 1, j), C(i, j)
+            local vx, vy = xs[i], ys[j]
+            -- quadrant, covered?, its horizontal / vertical / diagonal neighbours, right?, down?
+            local quads = {
+                { "TL", TL, TR, BL, BR, false, false },
+                { "TR", TR, TL, BR, BL, true,  false },
+                { "BL", BL, BR, TL, TR, false, true },
+                { "BR", BR, BL, TR, TL, true,  true },
+            }
+            for _, q in ipairs(quads) do
+                if not q[2] then
+                    local right, down = q[6], q[7]
+                    if q[3] and q[4] then
+                        local w = EdgeRun(i, j, right, down, true)
+                        local h = EdgeRun(i, j, right, down, false)
+                        if w > 0 and h > 0 then
+                            -- canonical art: the corner at its bottom-right
+                            local u0, v0 = 1 - w / s, 1 - h / s
+                            local l, r = u0, 1
+                            if right then l, r = 1, u0 end
+                            local t, b = v0, 1
+                            if down then t, b = 1, v0 end
+                            pieces[#pieces + 1] = { "IN_" .. q[1], right and vx or vx - w, down and vy or vy - h, w, h, { l, r, t, b } }
+                            inner[vx .. "," .. vy .. q[1]] = { w, h }
+                            -- Cut short by a step: the long edge's glow carries on
+                            -- past the cut (its outer band only), so it does not
+                            -- end in a hard seam beside the step's corner piece.
+                            if h < s then
+                                local c = GLOW_COORDS[down and "BOTTOM" or "TOP"]
+                                local f = h / s
+                                local bt, bb
+                                if down then bt, bb = c[3] + (c[4] - c[3]) * f, c[4]
+                                else bt, bb = c[3], c[4] - (c[4] - c[3]) * f end
+                                pieces[#pieces + 1] = { down and "BOTTOM" or "TOP", right and vx or vx - w,
+                                    down and (vy + h) or (vy - s), w, s - h, { c[1], c[2], bt, bb }, true }
+                            end
+                            if w < s then
+                                local c = GLOW_COORDS[right and "RIGHT" or "LEFT"]
+                                local f = w / s
+                                local bl, br
+                                if right then bl, br = c[1] + (c[2] - c[1]) * f, c[2]
+                                else bl, br = c[1], c[2] - (c[2] - c[1]) * f end
+                                pieces[#pieces + 1] = { right and "RIGHT" or "LEFT", right and (vx + w) or (vx - s),
+                                    down and vy or vy - h, s - w, h, { bl, br, c[3], c[4] }, true }
+                            end
+                        end
+                    elseif not q[3] and not q[4] and q[5] then
+                        pieces[#pieces + 1] = { "OUT_" .. q[1], right and vx or vx - s, down and vy or vy - s, s, s }
+                    end
+                end
+            end
+        end
+    end
+    -- A strip stops short of an inside corner by that piece's extent along it.
+    local function Trim(x, y, quad, horizontal)
+        local c = inner[x .. "," .. y .. quad]
+        if not c then return 0 end
+        return horizontal and c[1] or c[2]
+    end
+
+    -- Horizontal edges: at ys[j], between row j-1 (above) and row j (below).
+    for j = 1, ny + 1 do
+        local i = 1
+        while i <= nx do
+            local above, below = C(i, j - 1), C(i, j)
+            if above ~= below then
+                local side = below and "TOP" or "BOTTOM"
+                local s0 = i
+                while i + 1 <= nx and C(i + 1, j - 1) == above and C(i + 1, j) == below do i = i + 1 end
+                local x1, x2, y = xs[s0], xs[i + 1], ys[j]
+                local qa, qb = "TR", "TL"
+                if side == "BOTTOM" then qa, qb = "BR", "BL" end
+                x1, x2 = x1 + Trim(x1, y, qa, true), x2 - Trim(x2, y, qb, true)
+                if x2 > x1 then
+                    pieces[#pieces + 1] = { side, x1, (side == "TOP") and (y - s) or y, x2 - x1, s }
+                end
+            end
+            i = i + 1
+        end
+    end
+    -- Vertical edges: at xs[i], between column i-1 (left) and column i (right).
+    for i = 1, nx + 1 do
+        local j = 1
+        while j <= ny do
+            local left, right = C(i - 1, j), C(i, j)
+            if left ~= right then
+                local side = right and "LEFT" or "RIGHT"
+                local s0 = j
+                while j + 1 <= ny and C(i - 1, j + 1) == left and C(i, j + 1) == right do j = j + 1 end
+                local y1, y2, x = ys[s0], ys[j + 1], xs[i]
+                local qa, qb = "BL", "TL"
+                if side == "RIGHT" then qa, qb = "BR", "TR" end
+                y1, y2 = y1 + Trim(x, y1, qa, false), y2 - Trim(x, y2, qb, false)
+                if y2 > y1 then
+                    pieces[#pieces + 1] = { side, (side == "LEFT") and (x - s) or x, y1, s, y2 - y1 }
+                end
+            end
+            j = j + 1
+        end
+    end
+    return pieces
+end
+DF.GlowOutlinePieces = GlowOutlinePieces
+
+-- Lay the pieces out on the glow frame from its texture pool (the pool only
+-- grows to the largest outline seen; spares are hidden).
+local function ApplyOutlinePieces(glow, host, pieces)
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+    for _, t in ipairs(glow.pieces) do t:Hide() end
+    local pool = glow.outlinePool
+    if not pool then pool = {}; glow.outlinePool = pool end
+    for n, p in ipairs(pieces) do
+        local t = pool[n]
+        if not t then
+            t = glow:CreateTexture(nil, "ARTWORK")
+            t:SetVertexColor(1, 0.82, 0, 1)
+            t:SetBlendMode("ADD")
+            pool[n] = t
+        end
+        local kind = p[1]
+        t:SetTexture(kind:sub(1, 3) == "IN_" and OUTER_GLOW_INNER_FILE or OUTER_GLOW_FILE)
+        local c = p[6] or GLOW_COORDS[kind]
+        t:SetTexCoord(c[1], c[2], c[3], c[4])
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", glow, "TOPLEFT", p[2], -p[3])
+        t:SetSize(p[4], p[5])
+        t:Show()
+    end
+    for n = #pieces + 1, #pool do pool[n]:Hide() end
+    glow.outlineCount = #pieces
 end
 
 local function RestedIndicator_OnUpdate(self, elapsed)
@@ -820,6 +1121,40 @@ local function RestedIndicator_SetGlowExtents(self, left, right, top, bottom)
     glow:ClearAllPoints()
     glow:SetPoint("TOPLEFT", host, "TOPLEFT", -(o + (left or 0)), o + (top or 0))
     glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", o + (right or 0), -(o + (bottom or 0)))
+    -- back from an outline (SetGlowRects): the nine-slice's own pieces again
+    if glow.outlinePool then
+        for _, t in ipairs(glow.outlinePool) do t:Hide() end
+        for _, t in ipairs(glow.pieces) do t:Show() end
+        glow.outlineCount = nil
+    end
+end
+
+-- Glow along the outline of several rects' union instead of one box: each
+-- rect { left, top, right, bottom } in host units from the host's TOPLEFT,
+-- x right, y DOWN (the host = {0, 0, width, height}). OUTER traces the
+-- outline (GlowOutlinePieces); FILL washes the rects' bounding box. nil or
+-- empty = the host's own rect (SetGlowExtents(0, 0, 0, 0)).
+local function RestedIndicator_SetGlowRects(self, rects)
+    local glow, host = self.glow, self.glowHost
+    if not (glow and host) then return end
+    if not rects or #rects == 0 then return self:SetGlowExtents(0, 0, 0, 0) end
+    local o = self.glowStyle.outset
+    if self.glowStyleName ~= "OUTER" then
+        local l, t, r, b
+        for _, rc in ipairs(rects) do
+            l = (l and l < rc[1]) and l or rc[1]
+            t = (t and t < rc[2]) and t or rc[2]
+            r = (r and r > rc[3]) and r or rc[3]
+            b = (b and b > rc[4]) and b or rc[4]
+        end
+        glow:ClearAllPoints()
+        glow:SetPoint("TOPLEFT", host, "TOPLEFT", l - o, -(t - o))
+        glow:SetSize(r - l + 2 * o, b - t + 2 * o)
+        return
+    end
+    local grown = {}
+    for n, rc in ipairs(rects) do grown[n] = { rc[1] - o, rc[2] - o, rc[3] + o, rc[4] + o } end
+    ApplyOutlinePieces(glow, host, GlowOutlinePieces(grown, glow.spread))
 end
 
 -- parent:   frame the Zs live on (frame level parent + 5)
@@ -849,6 +1184,7 @@ function DF:CreateRestedIndicator(parent, glowHost, opts)
     ind.glowStyleName = styleName
     ind.glowStyle = RESTED_GLOW[styleName]
     ind.SetGlowExtents = RestedIndicator_SetGlowExtents
+    ind.SetGlowRects = RestedIndicator_SetGlowRects
     if glowHost then
         local glow
         if styleName == "OUTER" then
