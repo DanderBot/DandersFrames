@@ -177,8 +177,25 @@ do
     eq(#popups, 1, "switch on: the reload prompt (it is not loaded yet)")
     eq(popups[1] and popups[1].title, "Reload Required", "...titled as DF's reload prompt")
     eq(def.isEnabled(), true, "switch on: isEnabled follows the enable state")
+    -- Switched on, not reloaded: the rail item's panel says so, with the reload.
+    eq(def.placeholderNote(), "Reload to finish turning on Unit Frames.", "on, not loaded: the panel says reload")
+    local act = def.placeholderAction()
+    eq(act and act.label, "Reload Now", "...with a Reload button")
+    local reloaded = 0
+    local heldReload = ReloadUI
+    ReloadUI = function() reloaded = reloaded + 1 end
+    if act then act.onClick() end
+    ReloadUI = heldReload
+    eq(reloaded, 1, "...that reloads")
     def.setEnabled(false)
     eq(addon.enabled, false, "switch off: DisableAddOn")
+    eq(def.placeholderNote(), nil, "off: no reload note")
+    eq(def.placeholderAction(), nil, "off: no button")
+    local rail = options_file_source("GUI/Rail.lua")
+    check(rail:find("local note = def.placeholderNote and def.placeholderNote()", 1, true)
+          and rail:find("panel.Note:SetText(note or L[\"Coming in a later update.\"])", 1, true)
+          and rail:find("local act = def.placeholderAction and def.placeholderAction()", 1, true),
+          "the placeholder panel shows a module's own note and action")
 end
 
 -- ============================================================

@@ -185,6 +185,7 @@ L["Profiles include both Party and Raid settings. Exporting and importing always
 L["Raid container position writes (jumping/stuck-position bug)"] = true
 L["Range fading checks and cache decisions"] = true
 L["Reload separators and init confirmation"] = true
+L["Reload to finish turning on Unit Frames."] = true
 L["Renamed profile: %s → %s"] = true
 L["Reset bindings to defaults (Target + Menu). %d custom binding(s) removed."] = true
 L["Role icon show/hide decisions and combat transitions"] = true

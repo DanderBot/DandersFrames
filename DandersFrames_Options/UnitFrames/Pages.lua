@@ -1589,8 +1589,25 @@ function UFO.ApplyInstallState()
     def.isEnabled = UFO.IsEnabled
     def.setEnabled = UFO.SetEnabled
     def.status = UFO.Status
+    -- Switched on but not loaded yet: its rail item says so, with the reload.
+    def.placeholderNote = UFO.PlaceholderNote
+    def.placeholderAction = UFO.PlaceholderAction
     GUI:RegisterModule(def)
     return true
+end
+
+function UFO.WaitingForReload()
+    return UFO.IsEnabled() and not UFO.IsLoaded()
+end
+
+function UFO.PlaceholderNote()
+    if UFO.WaitingForReload() then return L["Reload to finish turning on Unit Frames."] end
+    return nil
+end
+
+function UFO.PlaceholderAction()
+    if not UFO.WaitingForReload() then return nil end
+    return { label = L["Reload Now"], onClick = function() ReloadUI() end }
 end
 
 -- ============================================================
