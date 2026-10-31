@@ -124,6 +124,12 @@ check(Units.driver ~= nil, "a shared listener for unitless events")
 check(Units.driver._events.PLAYER_TARGET_CHANGED ~= nil, "...PLAYER_TARGET_CHANGED")
 eq(Units.driver._events.UNIT_TARGET and table.concat(Units.driver._events.UNIT_TARGET, ","), "target,focus",
    "...UNIT_TARGET, for the target and the focus only")
+do
+    local UNITS = uf_file_source("Units.lua"):gsub("\r\n", "\n")
+    local drv = UNITS:match("local driver = CreateFrame%(\"Frame\"%)(.-)driver:SetScript")
+    check(drv and not drv:find("driver:RegisterEvent(", 1, true) and drv:find("pcall(driver.RegisterEvent, driver, ev)", 1, true),
+          "every unitless event registers through its own pcall (a client without one loses only that one)")
+end
 
 print("-- Spawn: not in combat")
 IN_COMBAT = true
@@ -258,7 +264,7 @@ TT:Show()
 eq(#tickers, 1, "shown: a ticker starts")
 eq(tickers[1] and tickers[1].interval, UF.TOT_INTERVAL, "...at the polling interval")
 check(UF.TOT_INTERVAL >= 0.2 and UF.TOT_INTERVAL <= 0.5, "interval within 0.2-0.5 s")
-eq(n("FullFrameRefresh", "targettarget"), 2, "first tick: identity repaint (plus the show repaint)")
+eq(n("FullFrameRefresh", "targettarget"), 1, "shown: ONE full repaint (the ticker start's; OnShow does not add a second)")
 count = {}
 tickers[1].fn()
 eq(n("FullFrameRefresh", "targettarget"), 0, "same GUID: no full repaint")
@@ -272,7 +278,21 @@ guids.targettarget = SECRET
 count = {}
 tickers[1].fn()
 tickers[1].fn()
-eq(n("FullFrameRefresh", "targettarget"), 2, "a secret GUID counts as changed, every tick")
+eq(n("FullFrameRefresh", "targettarget"), 0, "a secret GUID: no full repaint (no portrait reset / aura rebuild per tick)")
+eq(n("UpdateUnitFrame", "targettarget"), 2, "...but name / health / colours repaint every tick")
+count = {}
+Units:OnDriverEvent("UNIT_TARGET", "target")
+eq(n("FullFrameRefresh", "targettarget"), 1, "secret GUID + a real change signal (UNIT_TARGET): full repaint")
+count = {}
+tickers[1].fn()
+eq(n("FullFrameRefresh", "targettarget"), 0, "...and the next secret tick is light again")
+guids.targettarget = "G2"
+count = {}
+tickers[1].fn()
+eq(n("FullFrameRefresh", "targettarget"), 1, "readable again: compared afresh, full repaint")
+count = {}
+tickers[1].fn()
+eq(n("FullFrameRefresh", "targettarget"), 0, "...then values only")
 TT:Show()
 eq(#tickers, 1, "showing again does not start a second ticker")
 TT:Hide()

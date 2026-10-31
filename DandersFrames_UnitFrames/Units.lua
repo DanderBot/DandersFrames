@@ -270,30 +270,52 @@ end
 -- ============================================================
 -- TARGET OF TARGET TICKER
 -- ============================================================
-function Units:TickPolled(f)
+-- What a tick may repaint when it cannot tell whether the unit changed (secret
+-- GUID): everything read off the unit -- health, power, name, colours, the Text
+-- Designer -- but NOT the portrait model or the auras.
+function Units:RepaintIdentityLight(f)
+    if DF.UpdateUnitFrame then DF:UpdateUnitFrame(f, "PolledSecretGUID") end
+    TD(f, "all")
+end
+
+-- ☠ THE SECRET-GUID RULE. A secret GUID cannot be compared, so a tick cannot tell
+-- "same unit" from "someone else". Treating it as "changed" (as this once did)
+-- meant a full repaint 4x a second -- the 3D portrait's ClearModel/SetUnit and an
+-- aura rebuild every tick, for as long as it stayed secret. So a tick with a
+-- secret GUID repaints only the cheap, read-off-the-unit parts (RepaintIdentityLight);
+-- the full repaint (portrait, auras) happens only on a NON-secret signal that the
+-- unit changed: a readable GUID that differs, or `force` -- the ticker start and
+-- RepollPolled, which UNIT_TARGET, PLAYER_TARGET_CHANGED and PLAYER_FOCUS_CHANGED
+-- drive.
+function Units:TickPolled(f, force)
     if not f:IsVisible() then return end
     local guid = UnitGUID(f.unit)
-    -- ☠ A secret GUID may not be compared: it counts as changed, every tick.
     local secret = IsSecret(guid)
-    if guid == nil or secret or guid ~= f.dfUFLastGUID then
+    if force then
         f.dfUFLastGUID = (not secret) and guid or nil
+        Units:FullRefresh(f)
+    elseif secret then
+        f.dfUFLastGUID = nil
+        Units:RepaintIdentityLight(f)
+    elseif guid == nil or guid ~= f.dfUFLastGUID then
+        f.dfUFLastGUID = guid
         Units:FullRefresh(f)
     else
         Units:RepaintValues(f)
     end
 end
 
--- A polled frame's unit is someone else now: forget the GUID and poll at once.
+-- A polled frame's unit is someone else now: forget the GUID and repaint in full.
 function Units:RepollPolled(f)
     if not f then return end
     f.dfUFLastGUID = nil
-    if f:IsVisible() then Units:TickPolled(f) end
+    if f:IsVisible() then Units:TickPolled(f, true) end
 end
 
 function Units:StartTicker(f)
     if f.dfUFTicker then return end
     f.dfUFLastGUID = nil
-    Units:TickPolled(f)
+    Units:TickPolled(f, true)
     f.dfUFTicker = C_Timer.NewTicker(UF.TOT_INTERVAL, function() Units:TickPolled(f) end)
 end
 
@@ -449,11 +471,16 @@ function Units:ApplyVisibility(f)
 end
 
 local function OnShow(self)
+    -- A polled unit's ticker start repaints in full (TickPolled, force): a second
+    -- FullRefresh here would paint everything twice on every show.
+    local hadTicker = self.dfUFTicker
     Units:SetEventsEnabled(self, true)
     if VEHICLE[self.dfUFUnit] then Units:UpdateVehicle(self) end
     if self.dfUFSlot and UF.Boss then UF.Boss:NoteIdentity(self) end
     Elements("SetActive", self, true)
-    Units:FullRefresh(self)
+    if not (POLLED[self.dfUFUnit] and self.dfUFTicker and not hadTicker) then
+        Units:FullRefresh(self)
+    end
 end
 
 local function OnHide(self)
@@ -530,11 +557,7 @@ function Units:OnDriverEvent(event, unit)
     if event == "PLAYER_TARGET_CHANGED" then
         local t = frames.target
         if t and t:IsVisible() then Units:FullRefresh(t) end
-        local tt = frames.targettarget
-        if tt then
-            tt.dfUFLastGUID = nil
-            if tt:IsVisible() then Units:TickPolled(tt) end
-        end
+        Units:RepollPolled(frames.targettarget)
         -- Selection highlight: any of our frames may be the new or old target.
         if DF.UpdateHighlights then
             for _, f in pairs(frames) do
@@ -584,15 +607,15 @@ end
 
 if CreateFrame then
     local driver = CreateFrame("Frame")
-    driver:RegisterEvent("PLAYER_TARGET_CHANGED")
-    driver:RegisterEvent("PLAYER_FOCUS_CHANGED")
-    driver:RegisterEvent("PLAYER_ENTERING_WORLD")
-    driver:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    driver:RegisterEvent("PLAYER_REGEN_DISABLED")
-    driver:RegisterEvent("PLAYER_REGEN_ENABLED")
-    driver:RegisterEvent("RAID_TARGET_UPDATE")
+    -- pcall'd one by one: a client without one of these events (the Forever
+    -- build) refuses to register it, and that must cost one event, not the rest.
+    for _, ev in ipairs({ "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED", "PLAYER_ENTERING_WORLD",
+                          "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+                          "RAID_TARGET_UPDATE" }) do
+        pcall(driver.RegisterEvent, driver, ev)
+    end
     if driver.RegisterUnitEvent then
-        driver:RegisterUnitEvent("UNIT_TARGET", "target", "focus")
+        pcall(driver.RegisterUnitEvent, driver, "UNIT_TARGET", "target", "focus")
     end
     driver:SetScript("OnEvent", function(_, event, unit) Units:OnDriverEvent(event, unit) end)
     Units.driver = driver
