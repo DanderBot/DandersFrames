@@ -763,11 +763,25 @@ function GUI:RefreshHomeView()
     -- ASCII letters, so a translated title keeps its other characters.
     W.secTitle:SetText(string.upper(L["Your modules"]))
     W.secCount:SetText(format(L["%d of %d on"], #on, total))
-    local secLink = ShrinkLink(LinkFor("modules", body, LinkMarkup("dfModules", L["Manage modules"]),
-        function() GUI:SelectModule("modules") end, 300))
-    secLink:ClearAllPoints()
-    secLink:SetPoint("TOPRIGHT", body, "TOPRIGHT", -(w - x0 - cw), -y)
-    y = y + 16 + 8
+    -- A real button, not a text link: turning modules on and off is easy to
+    -- miss otherwise (author, 2026-10-31). Tinted so it reads as the way in.
+    local mb = W.manageBtn
+    if not mb then
+        mb = CreateFrame("Button", nil, body, "BackdropTemplate")
+        GUI:StyleButton(mb, {
+            text = L["Manage modules"], height = 24, tinted = true,
+            accent = GUI.Colors.text,
+            icon = { texture = ICONS .. "extension.png", size = 16 },
+        })
+        mb:SetScript("OnClick", function()
+            if not GUI:IsModulePickLocked("modules") then GUI:SelectModule("modules") end
+        end)
+        W.manageBtn = mb
+    end
+    mb:ClearAllPoints()
+    mb:SetPoint("RIGHT", body, "TOPRIGHT", -(w - x0 - cw), -(y + 8))
+    mb:Show()
+    y = y + 24 + 8
 
     local list = {}
     for _, def in ipairs(on) do list[#list + 1] = { def = def } end
