@@ -1492,6 +1492,10 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                         pg.buildDb = function() return UF and UF:GetUnitDB(u) end
                         pg.searchTabLabel = format("%s%s%s", UFO.UnitLabel(u), SEP, L[rec.title])
                         pg.ufUnit, pg.ufKind = u, rec.kind
+                        -- ~90 unit pages, each a full party page builder: they join
+                        -- the search index only once a search is typed or the
+                        -- Unit Frames ledger is asked for (Search DEFERRED PAGES).
+                        pg.deferIndex = true
                         if rec.kind == "health" then
                             pg.extraHealthColorModes = { REACTION = L["Reaction"], CLASS_REACTION = L["Class / Reaction"] }
                         end
@@ -1534,9 +1538,54 @@ function UFO.OnApplyDrain()
     if UFO.ApplySyncs() > 0 then RefreshFrames() end
 end
 
+-- ============================================================
+-- CHANGED SETTINGS: a Unit Frames scope (Profiles > Changed Settings)
+-- Every unit page against its unit's own table (UF:GetUnitDB, which answers
+-- DF.Defaults through its adapter -- Core.lua), the module page against the
+-- module table. Grouped by page, in unit order: all of Player's pages, then
+-- Target's, ... One row per unit and key.
+-- ============================================================
+function UFO.ChangedPageOrder()
+    local order = { "uf_settings" }
+    for _, unit in ipairs(UFO.UNITS) do
+        local pages = UFO.pagesByUnit[unit]
+        if pages then
+            for _, rec in ipairs(UFO.data and UFO.data.pages or {}) do
+                if pages[rec.kind] then order[#order + 1] = pages[rec.kind] end
+            end
+        end
+    end
+    return order
+end
+
+function UFO.ChangedScope()
+    return {
+        label = function() return L["Unit Frames"] end,
+        owns = function(tab) return UFO.pageMeta[tab] ~= nil end,
+        dbFor = function(tab)
+            local UF = DF.UnitFrames
+            local m = UFO.pageMeta[tab]
+            if not (UF and m) then return nil end
+            if m.unit then return UF:GetUnitDB(m.unit) end
+            return UF:GetGlobalDB()
+        end,
+        pageOrder = UFO.ChangedPageOrder,
+        rowKey = function(e)
+            local m = UFO.pageMeta[e.tab]
+            return tostring(m and m.unit or "module") .. ":" .. tostring(e.dbKey)
+        end,
+        prepare = function()
+            if DF.Search and DF.Search.IncludeDeferredPages then DF.Search:IncludeDeferredPages() end
+        end,
+        available = UFO.IsLoaded,
+    }
+end
+
 function UFO.Init()
     UFO.ApplyInstallState()
     if not UFO.IsLoaded() then return false end
+    local CS = DF.ChangedSettings
+    if CS and CS.RegisterScope then CS:RegisterScope(UFO.MODULE, UFO.ChangedScope()) end
     DF.GUIPageProviders = DF.GUIPageProviders or {}
     DF.GUIPageProviders[#DF.GUIPageProviders + 1] = UFO.Provider
     GUI.PlayerFrameOwnerNote = UFO.PlayerFrameOwnerNote

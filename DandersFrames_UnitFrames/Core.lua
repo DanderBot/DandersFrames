@@ -76,11 +76,53 @@ function UF:GetStoredUnit(unit)
     return t
 end
 
+-- ============================================================
+-- DEFAULTS ADAPTERS (spec D9)
+-- DandersFrames' modified dots, Changed Settings and override hooks ask
+-- DF.Defaults, which only understands the party/raid tables. A unit's effective
+-- table and the module-wide table register how they answer: the default is the
+-- chain's (UF:GetUnitDefault / UF.GlobalDefaults), "overridden" means the stored
+-- table holds a value of its own, and a reset drops that value. Kept by DF in a
+-- weak-keyed table, so nothing reaches the saved variables.
+-- ⚠ The closures hold the STORED table and the unit, never the proxy they are
+-- registered for (a weak-keyed entry whose value holds its key is never freed).
+-- ============================================================
+local function RegisterUnitAdapter(eff, unit, stored)
+    local D = DF.Defaults
+    if not (D and D.RegisterAdapter) then return end
+    D:RegisterAdapter(eff, {
+        getDefault = function(key) return UF:GetUnitDefault(unit, key) end,
+        isOverride = function(key) return rawget(stored, key) ~= nil end,
+        getStored = function(key) return rawget(stored, key) end,
+        resetOverride = function(key) stored[key] = nil end,
+    })
+end
+
+-- The module-wide table: the spec reads the LIVE profile's (never a captured one),
+-- so one spec serves every profile's table.
+local function LiveGlobal()
+    local root = Root()
+    return root and type(root.global) == "table" and root.global or nil
+end
+local GLOBAL_ADAPTER = {
+    getDefault = function(key) return UF.GlobalDefaults and UF.GlobalDefaults[key] end,
+    isOverride = function(key) local g = LiveGlobal(); return g ~= nil and rawget(g, key) ~= nil end,
+    getStored = function(key) local g = LiveGlobal(); return g and rawget(g, key) end,
+    resetOverride = function(key) local g = LiveGlobal(); if g then g[key] = nil end end,
+}
+
+local function RegisterGlobalAdapter(g)
+    local D = DF.Defaults
+    if not (D and D.RegisterAdapter) or D:GetAdapter(g) then return end
+    D:RegisterAdapter(g, GLOBAL_ADAPTER)
+end
+
 -- The module-wide table (DF.db.unitframes.global), or nil before the profile exists.
 function UF:GetGlobalDB()
     local root = Root()
     if not root then return nil end
     if type(root.global) ~= "table" then root.global = {} end
+    RegisterGlobalAdapter(root.global)
     return root.global
 end
 
@@ -148,6 +190,7 @@ function UF:GetUnitDB(unit)
     end
     eff = BuildEffective(unit, stored)
     effCache[unit] = eff
+    RegisterUnitAdapter(eff, unit, stored)
     return eff
 end
 

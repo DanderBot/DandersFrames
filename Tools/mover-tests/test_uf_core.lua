@@ -264,6 +264,55 @@ for _, c2 in ipairs(calls) do has[c2] = true end
 check(has["position:player"] and has["moverApply"] and has["refresh:target"],
       "positions re-applied, the mover re-solved, frames repainted")
 
+print("-- D9: the unit tables answer DandersFrames' defaults engine")
+do
+    -- The real engine (DandersFrames/Core/Defaults.lua), on this file's DF.
+    load_df_file_into("Core/Defaults.lua", DF)
+    local D = DF.Defaults
+    UF:RebuildUnitDBs()
+    local target = UF:GetUnitDB("target")
+    check(D:GetAdapter(target) ~= nil, "a unit's table registers an adapter")
+    local stored = UF:GetStoredUnit("target")
+    for k in pairs(stored) do stored[k] = nil end
+    check(not D:IsModified(target, "frameWidth"), "unset: not modified (its default answers)")
+    eq(D:GetDefaultFor(target, "frameWidth"), UF.UnitDefaults.target.frameWidth,
+       "the default is the unit's own default...")
+    eq(D:GetDefaultFor(target, "onlyParty"), "p", "...then the party DEFAULTS")
+    target.frameWidth = 999
+    check(D:IsModified(target, "frameWidth"), "an own value that differs: modified (the amber dot)")
+    target.healthColorMode = UF.UnitDefaults.target.healthColorMode
+    check(not D:IsModified(target, "healthColorMode"), "an own value equal to the default: not modified")
+    local _ = target.frameBorderColor    -- copy-on-read of a table default
+    check(rawget(stored, "frameBorderColor") ~= nil and not D:IsModified(target, "frameBorderColor"),
+          "a copied-on-read table default is not a change")
+    local diff = D:DiffKeys(target, { "frameWidth", "healthColorMode", "frameBorderColor" })
+    check(diff.frameWidth and not diff.healthColorMode and not diff.frameBorderColor,
+          "DiffKeys (Changed Settings): only the real change")
+    check(D:ResetOverride(target, "frameWidth"), "reset drops the unit's own value")
+    eq(rawget(stored, "frameWidth"), nil, "...from the stored table, which stays sparse")
+    eq(target.frameWidth, UF.UnitDefaults.target.frameWidth, "...and the chain answers again")
+    local player = UF:GetUnitDB("player")
+    player.frameWidth = 1
+    check(not D:IsModified(UF:GetUnitDB("target"), "frameWidth"), "one unit's change is not another's")
+    check(not D:IsModified(DF.db.party or {}, "frameWidth"), "...nor the party table's")
+
+    local g = UF:GetGlobalDB()
+    check(D:GetAdapter(g) ~= nil, "the module table registers one too")
+    g.includeInTestMode = false
+    check(D:IsModified(g, "includeInTestMode"), "the module table: a change shows")
+    D:ResetOverride(g, "includeInTestMode")
+    eq(rawget(g, "includeInTestMode"), nil, "...and resets")
+    check(rawget(target, "__dfDefaultsAdapter") == nil and rawget(stored, "__dfDefaultsAdapter") == nil,
+          "nothing is written into the saved tables")
+
+    -- A profile switch: the new proxy registers; the old one is no longer asked.
+    DF.db = { unitframes = deepcopy(UF.ProfileDefaults) }
+    UF:RebuildUnitDBs()
+    local fresh = UF:GetUnitDB("target")
+    check(fresh ~= target and D:GetAdapter(fresh) ~= nil, "a new profile's proxy has its own adapter")
+    check(not D:IsModified(fresh, "frameWidth"), "...over the new profile's table")
+end
+
 eq(#errors, 0, "no errors logged (" .. table.concat(errors, "; ") .. ")")
 
 DandersFrames, CreateFrame, C_Timer = saved.DandersFrames, saved.CreateFrame, saved.C_Timer

@@ -281,6 +281,52 @@ eq(made.pages.uf_target_health.searchTabLabel, "Target \194\183 Health Bar", "se
 eq(made.pages.uf_targettarget_frame.searchTabLabel, "Target of Target \194\183 Frame", "...every unit")
 eq(made.pages.uf_settings.searchTabLabel, "Unit Frames \194\183 Settings", "...and the module page")
 
+print("-- Loaded: unit pages join the search index lazily")
+do
+    local n, lazy = 0, 0
+    for name, p in pairs(made.pages) do
+        if name ~= "uf_settings" then
+            n = n + 1
+            if p.deferIndex == true then lazy = lazy + 1 end
+            check(not p.skipSearchIndex, name .. ": indexed (once a search is typed), not skipped")
+        end
+    end
+    check(n > 80, "the module adds " .. n .. " unit pages")
+    eq(lazy, n, "every unit page defers joining the index (Search DEFERRED PAGES)")
+    check(not made.pages.uf_settings.deferIndex, "the one module page is indexed as usual")
+end
+
+print("-- Loaded: a Unit Frames scope in Changed Settings")
+do
+    local scope = UFO.ChangedScope()
+    eq(scope.label(), "Unit Frames", "scope: labelled Unit Frames")
+    check(scope.owns("uf_target_health") and scope.owns("uf_settings") and not scope.owns("bars_health"),
+          "scope: the module's pages, and only those")
+    check(scope.dbFor("uf_target_health") == UF:GetUnitDB("target"), "scope: a unit page against its unit's table")
+    check(scope.dbFor("uf_settings") == UF:GetGlobalDB(), "scope: the module page against the module table")
+    local order = scope.pageOrder()
+    eq(order[1], "uf_settings", "scope order: the module page first")
+    eq(order[2], "uf_player_frame", "scope order: then all of Player's pages...")
+    local firstTarget, lastPlayer
+    for i, name in ipairs(order) do
+        if name:find("^uf_player_") then lastPlayer = i end
+        if not firstTarget and name:find("^uf_target_") then firstTarget = i end
+    end
+    check(lastPlayer and firstTarget and lastPlayer < firstTarget, "scope order: ...grouped by unit")
+    eq(scope.rowKey({ tab = "uf_target_health", dbKey = "frameWidth" }), "target:frameWidth",
+       "scope: one row per unit and key")
+    local included = 0
+    local heldSearch = DF.Search
+    DF.Search = { IncludeDeferredPages = function() included = included + 1 end }
+    scope.prepare()
+    DF.Search = heldSearch
+    eq(included, 1, "scope: asking for it brings the deferred unit pages into the index")
+    check(scope.available(), "scope: offered while the companion is loaded")
+    local src = options_file_source("UnitFrames/Pages.lua")
+    check(src:find("CS:RegisterScope(UFO.MODULE, UFO.ChangedScope())", 1, true) ~= nil,
+          "scope: registered when the companion is loaded")
+end
+
 print("-- Loaded: one build per page, bound to the unit's own table")
 local pt = made.pages.uf_target_health
 eq(G.PageBuildKey(pt), "uf:target", "build key: the unit")
