@@ -24,3 +24,4 @@ Core.lua
 Defaults.lua
 Units.lua
 BlizzardHide.lua
+Mover.lua

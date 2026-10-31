@@ -360,6 +360,7 @@ L["Spec Default"] = true
 L["Spells"] = true
 L["Sync from WoW"] = true
 L["Target"] = true
+L["Target of Target"] = true
 L["Target Type:"] = true
 L["Target Unit"] = true
 L["Target on cast"] = true
