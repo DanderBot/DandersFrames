@@ -15,7 +15,7 @@ local G, G_NAMES = {}, { "DandersFrames", "CreateFrame", "C_Timer", "issecretval
                      "GetSpecialization", "GetSpecializationInfo", "GetShapeshiftFormID", "UnitPower",
                      "UnitPowerMax", "GetUnitChargedPowerPoints", "GetRuneCooldown", "UnitStagger",
                      "UnitHealthMax", "C_DurationUtil", "GetTime", "RAID_CLASS_COLORS", "PowerBarColor",
-                     "C_CurveUtil" }
+                     "C_CurveUtil", "UnitAffectingCombat", "InCombatLockdown" }
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 local ENUM_HELD = { PowerType = Enum.PowerType, StatusBarTimerDirection = Enum.StatusBarTimerDirection,
                     StatusBarInterpolation = Enum.StatusBarInterpolation }
@@ -282,6 +282,27 @@ UF.Units.InVehicle = function() return true end
 CP:Update(P)
 check(not cp:IsShown(), "vehicle: no class power")
 UF.Units.InVehicle = function() return false end
+CP:Update(P)
+check(cp:IsShown(), "out of the vehicle: back")
+
+print("-- Hide Out of Combat follows the PLAYER's combat, not lockdown")
+-- PLAYER_REGEN_DISABLED fires before lockdown starts: reading InCombatLockdown
+-- there kept the bar hidden through the pull.
+db.classPowerHideOOC = true
+local fighting = false
+UnitAffectingCombat = function(u) return u == "player" and fighting end
+InCombatLockdown = function() return false end
+CP:Update(P)
+check(not cp:IsShown(), "out of combat: hidden")
+fighting = true
+CP:Update(P)
+check(cp:IsShown(), "pull (in combat, lockdown not yet on): shown")
+fighting = false
+InCombatLockdown = function() return true end
+CP:Update(P)
+check(not cp:IsShown(), "combat over, lockdown lingering: hidden")
+db.classPowerHideOOC = nil
+UnitAffectingCombat, InCombatLockdown = G.UnitAffectingCombat, G.InCombatLockdown
 
 print("-- Preview: half full")
 local PV = Owner("player")

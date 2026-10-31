@@ -294,7 +294,9 @@ function CP:Update(f)
         cp:Hide()
         return
     end
-    if db.classPowerHideOOC and not (InCombatLockdown and InCombatLockdown()) then
+    -- UnitAffectingCombat, not InCombatLockdown: on PLAYER_REGEN_DISABLED lockdown
+    -- is not active yet, so the bar stayed hidden through the pull.
+    if db.classPowerHideOOC and not UnitAffectingCombat("player") then
         cp:Hide()
         return
     end
