@@ -174,6 +174,30 @@ TargetFrameToT = nil
 eq(BH:HideFrame("TargetFrameToT"), false, "a frame the client does not have: nothing happens")
 TargetFrameToT = saveTF
 
+print("-- Blizzard's player cast bar follows ours (spec Q7)")
+local heldCB = PlayerCastingBarFrame
+local g = UF:GetGlobalDB()
+g.hideBlizzardCastbar = nil
+eq(BH:ShouldHideCastBar(), true, "unset, our player cast bar on (the default): Blizzard's hidden")
+UF:GetUnitDB("player").castbarEnabled = false
+eq(BH:ShouldHideCastBar(), false, "our player cast bar off: Blizzard's shown (never none)")
+UF:GetUnitDB("player").castbarEnabled = nil
+UF:GetUnitDB("player").source = "Blizzard"
+eq(BH:ShouldHideCastBar(), false, "Blizzard draws the player: its cast bar too")
+UF:GetUnitDB("player").source = nil
+g.hideBlizzardCastbar = false
+eq(BH:ShouldHideCastBar(), false, "the user's own 'no' wins")
+g.hideBlizzardCastbar = true
+UF:GetUnitDB("player").castbarEnabled = false
+eq(BH:ShouldHideCastBar(), true, "...and their own 'yes'")
+UF:GetUnitDB("player").castbarEnabled = nil
+g.hideBlizzardCastbar = nil
+freshWorld()
+PlayerCastingBarFrame = BlizzFrame("PlayerCastingBarFrame", "player")
+BH:ApplyAll()
+eq(reparented[PlayerCastingBarFrame], 1, "ApplyAll: hidden by default with the player frame")
+PlayerCastingBarFrame = heldCB
+
 -- By NAME, not pairs(G): a global that was nil before is skipped by pairs and
 -- would leak this file's stub into every later suite.
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

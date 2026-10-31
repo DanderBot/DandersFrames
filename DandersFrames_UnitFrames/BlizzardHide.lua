@@ -54,9 +54,12 @@ BH.FRAMES = {
 
 BH.ALT_POWER_BARS = { "AlternatePowerBar", "MonkStaggerBar", "EvokerEbonMightBar", "DemonHunterSoulFragmentsBar" }
 
--- Blizzard's player cast bar: hidden only when the module-wide setting asks
--- (global.hideBlizzardCastbar, off by default until unit frames draw a cast bar of
--- their own). Like the frames above, showing it again needs a reload.
+-- Blizzard's player cast bar (spec §1.6, Q7). global.hideBlizzardCastbar:
+--   true / false   the user's own choice
+--   nil (default)  FOLLOWS our player cast bar: hidden while unit frames draw the
+--                  player and its cast bar is on, shown otherwise -- one cast bar,
+--                  never two (DandersUF's double-cast-bar bug) and never none.
+-- Like the frames above, showing it again needs a reload.
 BH.CASTBAR = "PlayerCastingBarFrame"
 
 -- Child bars that keep their own event registrations after the frame's are gone.
@@ -157,9 +160,18 @@ function BH:HideUnit(unit)
     if unit == "player" then BH:DisableAltPowerBars() end
 end
 
+-- Our own player cast bar is drawn (the default the setting follows).
+function BH:OwnPlayerCastBar()
+    local db = UF:GetUnitDB("player")
+    local src = db.source
+    return (src == nil or src == "DF") and db.castbarEnabled and true or false
+end
+
 function BH:ShouldHideCastBar()
     local g = UF:GetGlobalDB()
-    return g ~= nil and g.hideBlizzardCastbar == true
+    local v = g and g.hideBlizzardCastbar
+    if v == true or v == false then return v end
+    return BH:OwnPlayerCastBar()
 end
 
 function BH:ApplyAll()
