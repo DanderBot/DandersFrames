@@ -350,6 +350,216 @@ function UFO.ResetPage(kind, unit)
 end
 
 -- ============================================================
+-- COPY FROM PARTY / RAID
+-- A unit page's keys that also exist in the group frames' settings
+-- (DF:GetDB("party") / DF:GetDB("raid")) come across, so a health colour and its
+-- gradient set up for party frames need not be set up again. Only how a piece
+-- LOOKS moves: a group frame is a different size, in a different place, for a
+-- different job. Skipped, in order (UFO.GroupCopySkip says which rule):
+--   never     who draws the frame and where it is (NEVER_COPIED), and the group
+--             mover (permanentMover*), which a unit frame does not have
+--   layout    anchors, sides, growth, offsets: the Links engine's own layout /
+--             look split (Links.Aspect), so a copy and a link agree on the line
+--   size      how big a piece is, how many and how far apart (UFO.IsSizeKey).
+--             The Links engine counts sizes as look -- a link SHARES them between
+--             two units of one kind -- but a party frame's 18px buff is not a
+--             220px target frame's; border, shadow, font and texture-tile sizes and
+--             the in-icon text scales stay look (UFO.SIZE_LOOK)
+--   hidden    a control or a whole card the unit's page does not show (the page
+--             data's `hide` and `cardKeys`): nothing may change that the page
+--             cannot change back
+--   meaning   a key the unit frame keeps with another meaning (UFO.GROUP_MEANING):
+--             aggro on a frame that usually shows an enemy (whose threat is not
+--             yours), and the aura FILTERS on an enemy frame (a party filter picks
+--             what to dispel off a friend; an enemy frame shows your debuffs)
+-- A value equal to the unit's own default is dropped rather than stored, like
+-- UFO.CopyPage.
+-- ============================================================
+UFO.GROUP_SOURCES = { party = true, raid = true }
+
+-- Suffixes that make a key a SIZE (how big, how many, how far apart).
+UFO.SIZE_SUFFIXES = { "Width", "Height", "Size", "Scale", "Spacing", "Padding",
+                      "PaddingX", "PaddingY", "Gap", "Max", "Wrap", "MatchWidth" }
+-- ...unless it ends in one of these: a size that is part of how a piece looks.
+UFO.SIZE_LOOK = { "BorderSize", "ShadowSize", "TileSize", "FontSize", "BadgeSize", "GradientSize",
+                  "CasterScale", "DurationScale", "StackScale", "SymbolScale", "ImportantScale",
+                  "AnimationScale" }
+UFO.GROUP_NEVER_PREFIXES = { "permanentMover" }
+
+local HOSTILE = { target = true, targettarget = true, focus = true, focustarget = true, boss = true }
+local ENEMY_AURAS = { target = true, focus = true, boss = true }
+local AURA_FILTERS = { "debuffFilter", "debuffHide", "directDebuff", "directBuff",
+                       "buffFilterSelection", "defensiveFilterSelection" }
+-- key or key prefix -> the units it means something else on.
+UFO.GROUP_MEANING = { aggroHighlightMode = HOSTILE }
+for _, p in ipairs(AURA_FILTERS) do UFO.GROUP_MEANING[p] = ENEMY_AURAS end
+
+local function EndsWithAny(key, list)
+    for _, s in ipairs(list) do
+        if #key >= #s and key:sub(-#s) == s then return true end
+    end
+    return false
+end
+
+local function StartsWith(key, p) return key:sub(1, #p) == p end
+
+function UFO.IsSizeKey(key)
+    if type(key) ~= "string" then return false end
+    if EndsWithAny(key, UFO.SIZE_LOOK) then return false end
+    return EndsWithAny(key, UFO.SIZE_SUFFIXES)
+end
+
+-- The keys of the cards on this page that `unit` does not see.
+local function HiddenCardKeys(rec, unit)
+    local out = {}
+    for card, keys in pairs(rec.cardKeys or {}) do
+        if not UFO.CardShown(rec, unit, card) then
+            for _, k in ipairs(keys) do out[k] = true end
+        end
+    end
+    return out
+end
+
+-- Why `key` is not copied from the group frames onto `unit`'s page, or nil.
+function UFO.GroupCopySkip(rec, unit, key, hiddenCards)
+    if type(key) ~= "string" or NEVER_COPIED[key] then return "never" end
+    for _, p in ipairs(UFO.GROUP_NEVER_PREFIXES) do
+        if StartsWith(key, p) then return "never" end
+    end
+    local Lk = UFO.Links()
+    if Lk and Lk.Aspect and Lk.Aspect(key) == "layout" then return "layout" end
+    if UFO.IsSizeKey(key) then return "size" end
+    local h = rec and rec.hide and rec.hide[key]
+    if h and h[unit] then return "hidden" end
+    hiddenCards = hiddenCards or (rec and HiddenCardKeys(rec, unit)) or {}
+    if hiddenCards[key] then return "hidden" end
+    for p, units in pairs(UFO.GROUP_MEANING) do
+        if units[unit] and StartsWith(key, p) then return "meaning" end
+    end
+    return nil
+end
+
+-- Group frames can be a copy source for a page drawn from a party page.
+function UFO.CanCopyFromGroup(kind)
+    local rec = UFO.pageByKind[kind]
+    return (rec and rec.source) and true or false
+end
+
+-- The keys a copy from `mode`'s frames moves onto `unit`'s page, sorted.
+function UFO.GroupCopyKeys(kind, unit, mode)
+    local UF = DF.UnitFrames
+    local rec = UFO.pageByKind[kind]
+    if not (UF and rec and rec.source and UFO.GROUP_SOURCES[mode]) then return {} end
+    local src = DF.GetDB and DF:GetDB(mode)
+    if type(src) ~= "table" then return {} end
+    local hiddenCards = HiddenCardKeys(rec, unit)
+    local out = {}
+    for _, key in ipairs(KeysFor(UF, UFO.Prefixes(kind), unit, unit)) do
+        if src[key] ~= nil and not UFO.GroupCopySkip(rec, unit, key, hiddenCards) then
+            out[#out + 1] = key
+        end
+    end
+    tsort(out)
+    return out
+end
+
+-- Copy one page's look from the party or raid frames onto `unit`. Returns how
+-- many keys the unit now differs from its own defaults in, or nil. A linked unit
+-- passes what it took on to its partner.
+function UFO.CopyFromGroup(kind, mode, unit)
+    local UF = DF.UnitFrames
+    local stored = UF and UF:GetStoredUnit(unit)
+    if not stored or not UFO.GROUP_SOURCES[mode] then return nil end
+    local src = DF:GetDB(mode)
+    local keys = UFO.GroupCopyKeys(kind, unit, mode)
+    if #keys == 0 then return nil end
+    local n = 0
+    for _, key in ipairs(keys) do
+        local v = src[key]
+        if DeepEqual(v, UF:GetUnitDefault(unit, key)) then
+            stored[key] = nil
+        else
+            stored[key] = Copy(v)
+            n = n + 1
+        end
+    end
+    UFO.PushLinks(unit)
+    return n
+end
+
+-- ---- the undo step ----------------------------------------------------------
+-- A copy is ONE step on the settings window's undo stack (DF.SettingsUndo): the
+-- page's keys on the unit and on its linked partner, before and after. Restoring
+-- them is the whole of it -- the values live in the stored tables, nothing else.
+local function UnionKeys(UF, prefixes, units)
+    local seen, out = {}, {}
+    for _, u in ipairs(units) do
+        for _, k in ipairs(KeysFor(UF, prefixes, u, u)) do
+            if not seen[k] then seen[k] = true; out[#out + 1] = k end
+        end
+    end
+    return out
+end
+
+local function Snapshot(stored, keys)
+    local s = {}
+    for _, k in ipairs(keys) do s[k] = Copy(stored[k]) end
+    return s
+end
+
+local function Restore(stored, keys, snap)
+    for _, k in ipairs(keys) do stored[k] = Copy(snap[k]) end
+end
+
+function UFO.UndoStack()
+    local SU = DF.SettingsUndo
+    return SU and SU.GetStack and SU:GetStack() or nil
+end
+
+function UFO.SourceLabel(from)
+    if from == "party" then return L["Party Frames"] end
+    if from == "raid" then return L["Raid Frames"] end
+    return UFO.UnitLabel(from)
+end
+
+-- Copy page `kind` onto `unit` from `from` ("party", "raid" or another unit),
+-- as one undo step. Returns the count the copy returned, or nil.
+function UFO.CopyFrom(kind, from, unit)
+    local UF = DF.UnitFrames
+    local stored = UF and UF:GetStoredUnit(unit)
+    if not stored or from == unit then return nil end
+    local group = UFO.GROUP_SOURCES[from] and true or false
+    if not group and not UFO.IsUnit(from) then return nil end
+    local partner = UFO.Partner(unit)
+    local pStored = partner and UF:GetStoredUnit(partner) or nil
+    local keys = UnionKeys(UF, UFO.Prefixes(kind), { unit, partner or unit, group and unit or from })
+    local before = Snapshot(stored, keys)
+    local pBefore = pStored and Snapshot(pStored, keys)
+
+    local n
+    if group then n = UFO.CopyFromGroup(kind, from, unit) else n = UFO.CopyPage(kind, from, unit) end
+    if n == nil then return nil end
+
+    local after = Snapshot(stored, keys)
+    local pAfter = pStored and Snapshot(pStored, keys)
+    local stack = UFO.UndoStack()
+    if stack then
+        local function apply(s, ps)
+            Restore(stored, keys, s)
+            if pStored then Restore(pStored, keys, ps) end
+            if partner then UFO.InvalidateUnitPages(partner) end
+            UFO.AfterChange(unit)
+        end
+        stack:Push({
+            label = format(L["Copied settings from %s to %s."], UFO.SourceLabel(from), UFO.UnitLabel(unit)),
+            undo = function() apply(before, pBefore) end,
+            redo = function() apply(after, pAfter) end,
+        })
+    end
+    return n
+end
+
+-- ============================================================
 -- LINKED FRAMES -- the settings side of the companion's Links.lua
 -- (DandersFrames_UnitFrames). The data lives in the module table
 -- (global.unitLinks); everything here reads and writes it through Links.
@@ -544,6 +754,21 @@ function UFO.CreatePageRow(pg, rec, unit)
     copy.rightAlign = true
     if copy.SetDisplayOverride then copy:SetDisplayOverride(L["Copy to..."]) end
 
+    -- Copy from...: the party / raid frames (a page drawn from a party page) and
+    -- the other units. One undo step; without an undo stack, a confirmation first.
+    -- Parented to the Copy to picker, like Reset, so the row shows and hides as one.
+    local from
+    local fromOpts = UFO.CopyFromOptions(rec, unit)
+    if #fromOpts._order > 0 then
+        from = GUI:CreateDropdown(copy, L["Copy from..."], fromOpts, nil, nil, nil,
+            function() return nil end,
+            function(src) UFO.RunCopyFrom(rec, unit, src, section) end,
+            { inline = true })
+        from:SetSize(120, 26)
+        if from.SetDisplayOverride then from:SetDisplayOverride(L["Copy from..."]) end
+        from:SetPoint("RIGHT", copy, "LEFT", GUI.SnapLen and GUI.SnapLen(from, -4) or -4, 0)
+    end
+
     local reset = CreateFrame("Button", nil, copy, "BackdropTemplate")
     GUI:StyleButton(reset, {
         tone = "danger",
@@ -554,7 +779,7 @@ function UFO.CreatePageRow(pg, rec, unit)
     if reset.Text and GUI.SnapLenUp then
         reset:SetWidth(GUI.SnapLenUp(reset, math.ceil(reset.Text:GetStringWidth()) + 36))
     end
-    reset:SetPoint("RIGHT", copy, "LEFT", GUI.SnapLen and GUI.SnapLen(reset, -4) or -4, 0)
+    reset:SetPoint("RIGHT", from or copy, "LEFT", GUI.SnapLen and GUI.SnapLen(reset, -4) or -4, 0)
     reset:HookScript("OnEnter", function(self)
         GUI:ShowTooltip(self, {
             title = format(L["Reset: %s"], section),
@@ -576,8 +801,50 @@ function UFO.CreatePageRow(pg, rec, unit)
         })
     end)
 
-    copy.dfUnitRow = { copy = copy, reset = reset }
+    copy.dfUnitRow = { copy = copy, from = from, reset = reset }
     return copy
+end
+
+-- The Copy from... picker's sources: Party Frames and Raid Frames on a page drawn
+-- from a party page, then every other unit that has this page.
+function UFO.CopyFromOptions(rec, unit)
+    local opts = { _order = {} }
+    if UFO.CanCopyFromGroup(rec.kind) then
+        for _, m in ipairs({ "party", "raid" }) do
+            opts[m] = UFO.SourceLabel(m)
+            opts._order[#opts._order + 1] = m
+        end
+    end
+    local others = OtherUnitOptions(rec, unit)
+    for _, u in ipairs(others._order) do
+        opts[u] = others[u]
+        opts._order[#opts._order + 1] = u
+    end
+    return opts
+end
+
+-- A pick in Copy from...: the copy, what it did in chat, the page catches up.
+-- With the settings window's undo stack it runs at once (Ctrl-Z takes it back);
+-- without one, a confirmation first, worded like Copy to's.
+function UFO.RunCopyFrom(rec, unit, src, section)
+    if not (UFO.GROUP_SOURCES[src] or UFO.IsUnit(src)) or src == unit then return end
+    local function run()
+        local n = UFO.CopyFrom(rec.kind, src, unit) or 0
+        if DF.Say then
+            DF:Say(format(L["Copied %d settings from %s to %s."], n, UFO.SourceLabel(src), UFO.UnitLabel(unit)))
+            if UFO.GROUP_SOURCES[src] then DF:Say(L["Sizes and positions are not copied from group frames."]) end
+        end
+        AfterChange(unit)
+    end
+    if UFO.UndoStack() then return run() end
+    DF:ShowPopupAlert({
+        title = format(L["Copy %s Settings"], section),
+        message = format(L["Copy %s settings from %s to %s?"], section, UFO.SourceLabel(src), UFO.UnitLabel(unit)),
+        buttons = {
+            { label = L["Copy"], onClick = run },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 -- The reset confirmation. On a linked page it says the partner's linked

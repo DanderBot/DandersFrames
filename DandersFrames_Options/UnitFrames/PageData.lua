@@ -10,6 +10,7 @@ if not DF then return end
 -- cards: DF section key -> units that see that card; a DF card not listed never shows.
 -- hide: db key -> units the control is hidden for. later: new page, runtime not built yet.
 -- laterCards: cards new to unit frames on a DF page, waiting for their runtime.
+-- cardKeys: section key -> db keys of a card some of the page's units do not see.
 -- ============================================================
 DF.UnitFramePageData = {
     units = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" },
@@ -42,6 +43,9 @@ DF.UnitFramePageData = {
                 frameSpacing = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             },
             laterCards = { "Style Source", "Position" },
+            cardKeys = {
+                frame_bordershadow = { "frameBorderShadowColor", "frameBorderShadowEnabled", "frameBorderShadowOffsetX", "frameBorderShadowOffsetY", "frameBorderShadowSize" },
+            },
         },
         {
             kind = "bosslayout", category = "general", title = "Boss Layout",
@@ -85,6 +89,14 @@ DF.UnitFramePageData = {
             },
             hide = {
             },
+            cardKeys = {
+                tooltips_auradesigner = { "tooltipADBarsEnabled", "tooltipADGroupsEnabled", "tooltipADIndicatorsEnabled" },
+                tooltips_binding = { "tooltipBindingAnchor", "tooltipBindingAnchorPos", "tooltipBindingCombat", "tooltipBindingEnabled", "tooltipBindingOutOfCombat", "tooltipBindingX", "tooltipBindingY" },
+                tooltips_buff = { "tooltipBuffAnchor", "tooltipBuffAnchorPos", "tooltipBuffDisableInCombat", "tooltipBuffEnabled", "tooltipBuffX", "tooltipBuffY" },
+                tooltips_debuff = { "tooltipDebuffAnchor", "tooltipDebuffAnchorPos", "tooltipDebuffDisableInCombat", "tooltipDebuffEnabled", "tooltipDebuffX", "tooltipDebuffY" },
+                tooltips_defensive = { "tooltipDefensiveAnchor", "tooltipDefensiveAnchorPos", "tooltipDefensiveDisableInCombat", "tooltipDefensiveEnabled", "tooltipDefensiveX", "tooltipDefensiveY" },
+                tooltips_resurrection = { "tooltipResurrectionEnabled" },
+            },
         },
         {
             kind = "fading", category = "display", title = "Fading",
@@ -102,6 +114,13 @@ DF.UnitFramePageData = {
                 oorDefensiveIconAlpha = { target = true, focus = true, pet = true, boss = true },
                 oorDispelOverlayAlpha = { target = true, focus = true, pet = true, boss = true },
                 oorMissingBuffAlpha = { target = true, focus = true, pet = true, boss = true },
+            },
+            cardKeys = {
+                fading_dead = { "fadeDeadAuras", "fadeDeadBackground", "fadeDeadBackgroundColor", "fadeDeadFrames", "fadeDeadHealthBar", "fadeDeadIcons", "fadeDeadName", "fadeDeadPowerBar", "fadeDeadStatusText", "fadeDeadUseCustomColor" },
+                fading_elements = { "oorAuraDesignerAlpha", "oorAurasAlpha", "oorBackgroundAlpha", "oorBorderAlpha", "oorDefensiveIconAlpha", "oorDispelOverlayAlpha", "oorEnabled", "oorHealthBarAlpha", "oorIconsAlpha", "oorMissingBuffAlpha", "oorMissingHealthAlpha", "oorPowerBarAlpha", "oorTextAlpha" },
+                fading_health = { "healthFadeAlpha", "healthFadeEnabled", "healthFadeThreshold", "hfCancelOnDispel" },
+                fading_range = { "rangeCheckSpellID", "rangeFadeAlpha", "rangeUpdateInterval" },
+                fading_unhealable = { "fadeUnhealableAlpha", "fadeUnhealableColor", "fadeUnhealableEnabled" },
             },
         },
         {
@@ -136,6 +155,11 @@ DF.UnitFramePageData = {
             },
             hide = {
             },
+            cardKeys = {
+                health_missing = { "backgroundMode", "missingHealthClassAlpha", "missingHealthColor", "missingHealthColorMode", "missingHealthGradientAlpha", "missingHealthTexture" },
+                health_missinggradient = { "missingHealthColorStops" },
+                health_reduced = { "reducedMaxHealthBlendMode", "reducedMaxHealthClipHealthBar", "reducedMaxHealthColor", "reducedMaxHealthEnabled", "reducedMaxHealthLayer2BlendMode", "reducedMaxHealthLayer2Color", "reducedMaxHealthLayer2Enabled", "reducedMaxHealthLayer2Texture", "reducedMaxHealthLayer2TileMirror", "reducedMaxHealthLayer2TileMode", "reducedMaxHealthLayer2TileSize", "reducedMaxHealthLayer3BlendMode", "reducedMaxHealthLayer3Color", "reducedMaxHealthLayer3Enabled", "reducedMaxHealthLayer3Texture", "reducedMaxHealthLayer3TileMirror", "reducedMaxHealthLayer3TileMode", "reducedMaxHealthLayer3TileSize", "reducedMaxHealthTexture", "reducedMaxHealthTextureLayersEnabled", "reducedMaxHealthTextureLook", "reducedMaxHealthTileMirror", "reducedMaxHealthTileMode", "reducedMaxHealthTileSize" },
+            },
         },
         {
             kind = "resource", category = "bars", title = "Resource Bar",
@@ -158,6 +182,9 @@ DF.UnitFramePageData = {
                 resourceBarShowTank = { player = true, target = true, focus = true, pet = true, boss = true },
             },
             laterCards = { "Cost Prediction" },
+            cardKeys = {
+                resource_classfilter = { "resourceBarClassFilter" },
+            },
         },
         {
             kind = "absorbs", category = "bars", title = "Absorbs",
@@ -168,6 +195,9 @@ DF.UnitFramePageData = {
                 absorbs_healabsorb = { player = true, target = true, focus = true },
             },
             hide = {
+            },
+            cardKeys = {
+                absorbs_healabsorb = { "healAbsorbBarAnchor", "healAbsorbBarBackgroundColor", "healAbsorbBarBlendMode", "healAbsorbBarColor", "healAbsorbBarHeight", "healAbsorbBarLayer2BlendMode", "healAbsorbBarLayer2Color", "healAbsorbBarLayer2Enabled", "healAbsorbBarLayer2Texture", "healAbsorbBarLayer2TileMirror", "healAbsorbBarLayer2TileMode", "healAbsorbBarLayer2TileSize", "healAbsorbBarLayer3BlendMode", "healAbsorbBarLayer3Color", "healAbsorbBarLayer3Enabled", "healAbsorbBarLayer3Texture", "healAbsorbBarLayer3TileMirror", "healAbsorbBarLayer3TileMode", "healAbsorbBarLayer3TileSize", "healAbsorbBarMode", "healAbsorbBarOrientation", "healAbsorbBarOverlayReverse", "healAbsorbBarReverse", "healAbsorbBarTexture", "healAbsorbBarTextureLayersEnabled", "healAbsorbBarTextureLook", "healAbsorbBarTileMirror", "healAbsorbBarTileMode", "healAbsorbBarTileSize", "healAbsorbBarWidth", "healAbsorbBarX", "healAbsorbBarY" },
             },
         },
         {
@@ -252,6 +282,10 @@ DF.UnitFramePageData = {
             hide = {
             },
             laterCards = { "Purgeable" },
+            cardKeys = {
+                buffs_caster = { "buffCasterAnchor", "buffCasterClassColor", "buffCasterColor", "buffCasterFont", "buffCasterName", "buffCasterOutline", "buffCasterRealm", "buffCasterScale", "buffCasterX", "buffCasterY" },
+                buffs_pandemic = { "buffPandemicBorderAnimationBlendMode", "buffPandemicBorderAnimationColor", "buffPandemicBorderAnimationFrequency", "buffPandemicBorderAnimationInset", "buffPandemicBorderAnimationLength", "buffPandemicBorderAnimationOffsetX", "buffPandemicBorderAnimationOffsetY", "buffPandemicBorderAnimationParticles", "buffPandemicBorderAnimationProcStart", "buffPandemicBorderAnimationScale", "buffPandemicBorderAnimationThickness", "buffPandemicBorderAnimationType", "buffPandemicBorderBlendMode", "buffPandemicBorderColor", "buffPandemicBorderGradientDirection", "buffPandemicBorderGradientEndColor", "buffPandemicBorderGradientStartColor", "buffPandemicBorderInset", "buffPandemicBorderOffsetX", "buffPandemicBorderOffsetY", "buffPandemicBorderShadowColor", "buffPandemicBorderShadowEnabled", "buffPandemicBorderShadowOffsetX", "buffPandemicBorderShadowOffsetY", "buffPandemicBorderShadowSize", "buffPandemicBorderSize", "buffPandemicBorderStyle", "buffPandemicBorderTexture", "buffPandemicEnabled", "buffPandemicFlash", "buffPandemicFlashSpeed", "buffPandemicMode", "buffPandemicTintAlpha", "buffPandemicTintColor", "buffPandemicTintInset" },
+            },
         },
         {
             kind = "debuffs", category = "auras", title = "Debuff Bar",
@@ -283,6 +317,12 @@ DF.UnitFramePageData = {
                 directDebuffDispellableMode = { target = true, focus = true, boss = true },
             },
             laterCards = { "Pandemic" },
+            cardKeys = {
+                debuffs_blacklist = { "debuffBlacklist" },
+                debuffs_caster = { "debuffCasterAnchor", "debuffCasterClassColor", "debuffCasterColor", "debuffCasterFont", "debuffCasterName", "debuffCasterOutline", "debuffCasterRealm", "debuffCasterScale", "debuffCasterX", "debuffCasterY" },
+                debuffs_dispeltext = { "debuffDispelSymbolAnchor", "debuffDispelSymbolColor", "debuffDispelSymbolEnabled", "debuffDispelSymbolFont", "debuffDispelSymbolOutline", "debuffDispelSymbolScale", "debuffDispelSymbolX", "debuffDispelSymbolY" },
+                debuffs_important = { "debuffImportantBadge", "debuffImportantBadgeColor", "debuffImportantBadgePoint", "debuffImportantBadgeSize", "debuffImportantBadgeX", "debuffImportantBadgeY", "debuffImportantHighlight", "debuffImportantMarkColor", "debuffImportantScale" },
+            },
         },
         {
             kind = "defensive", category = "auras", title = "Defensive Icon",
@@ -341,6 +381,21 @@ DF.UnitFramePageData = {
             },
             hide = {
             },
+            cardKeys = {
+                icons_afkIcon = { "afkIconAlpha", "afkIconAnchor", "afkIconEnabled", "afkIconFrameLevel", "afkIconHideInCombat", "afkIconScale", "afkIconShowText", "afkIconShowTimer", "afkIconText", "afkIconTextColor", "afkIconTimerColor", "afkIconTimerFont", "afkIconTimerFontSize", "afkIconTimerOutline", "afkIconTimerX", "afkIconTimerY", "afkIconX", "afkIconY" },
+                icons_bgCarrierIcon = { "bgCarrierIconAlpha", "bgCarrierIconAnchor", "bgCarrierIconEnabled", "bgCarrierIconFrameLevel", "bgCarrierIconScale", "bgCarrierIconShowText", "bgCarrierIconText", "bgCarrierIconTextColor", "bgCarrierIconX", "bgCarrierIconY" },
+                icons_combatIcon = { "combatIconAlpha", "combatIconAnchor", "combatIconEnabled", "combatIconFrameLevel", "combatIconScale", "combatIconX", "combatIconY" },
+                icons_leaderIcon = { "leaderIconAlpha", "leaderIconAnchor", "leaderIconEnabled", "leaderIconFrameLevel", "leaderIconHideInCombat", "leaderIconScale", "leaderIconX", "leaderIconY" },
+                icons_phasedIcon = { "phasedIconAlpha", "phasedIconAnchor", "phasedIconEnabled", "phasedIconFrameLevel", "phasedIconHideInCombat", "phasedIconScale", "phasedIconShowLFGEye", "phasedIconShowText", "phasedIconText", "phasedIconTextColor", "phasedIconX", "phasedIconY" },
+                icons_pingIcon = { "pingIconAlpha", "pingIconAnchor", "pingIconEnabled", "pingIconFrameLevel", "pingIconHideInCombat", "pingIconScale", "pingIconX", "pingIconY" },
+                icons_raidRoleIcon = { "raidRoleIconAlpha", "raidRoleIconAnchor", "raidRoleIconEnabled", "raidRoleIconFrameLevel", "raidRoleIconHideInCombat", "raidRoleIconScale", "raidRoleIconShowAssist", "raidRoleIconShowTank", "raidRoleIconShowText", "raidRoleIconTextAssist", "raidRoleIconTextColor", "raidRoleIconTextTank", "raidRoleIconX", "raidRoleIconY" },
+                icons_readyCheckIcon = { "readyCheckIconAlpha", "readyCheckIconAnchor", "readyCheckIconEnabled", "readyCheckIconFrameLevel", "readyCheckIconHideInCombat", "readyCheckIconPersist", "readyCheckIconScale", "readyCheckIconX", "readyCheckIconY" },
+                icons_resurrectionIcon = { "resurrectionIconAlpha", "resurrectionIconAnchor", "resurrectionIconEnabled", "resurrectionIconFrameLevel", "resurrectionIconScale", "resurrectionIconShowText", "resurrectionIconTextCasting", "resurrectionIconTextColor", "resurrectionIconX", "resurrectionIconY" },
+                icons_roleIcon = { "roleIconAlpha", "roleIconAnchor", "roleIconExternalDPS", "roleIconExternalHealer", "roleIconExternalTank", "roleIconFrameLevel", "roleIconHideInCombat", "roleIconScale", "roleIconShowDPS", "roleIconShowHealer", "roleIconShowTank", "roleIconStyle", "roleIconX", "roleIconY" },
+                icons_summonIcon = { "summonIconAlpha", "summonIconAnchor", "summonIconEnabled", "summonIconFrameLevel", "summonIconHideInCombat", "summonIconScale", "summonIconShowText", "summonIconTextAccepted", "summonIconTextColor", "summonIconTextDeclined", "summonIconTextPending", "summonIconX", "summonIconY" },
+                icons_text = { "statusIconFont", "statusIconFontOutline", "statusIconFontSize" },
+                icons_vehicleIcon = { "vehicleIconAlpha", "vehicleIconAnchor", "vehicleIconEnabled", "vehicleIconFrameLevel", "vehicleIconHideInCombat", "vehicleIconScale", "vehicleIconShowText", "vehicleIconText", "vehicleIconTextColor", "vehicleIconX", "vehicleIconY" },
+            },
         },
         {
             kind = "unitIcons", category = "indicators", title = "Unit Icons",
@@ -371,6 +426,11 @@ DF.UnitFramePageData = {
             hide = {
                 aggroHideOnTanks = { target = true, focus = true, pet = true, boss = true },
                 aggroOnlyTanking = { target = true, focus = true, boss = true },
+            },
+            cardKeys = {
+                highlights_aggro = { "aggroHideOnTanks", "aggroHighlightAlpha", "aggroHighlightFrameLevel", "aggroHighlightInset", "aggroHighlightMode", "aggroHighlightThickness", "aggroInstanceOnly", "aggroOnlyTanking" },
+                highlights_selection = { "selectionHighlightAlpha", "selectionHighlightColor", "selectionHighlightFrameLevel", "selectionHighlightInset", "selectionHighlightMode", "selectionHighlightThickness" },
+                highlights_threat = { "aggroColorHighThreat", "aggroColorHighestThreat", "aggroColorTanking", "aggroUseCustomColors" },
             },
         },
     },

@@ -14,6 +14,8 @@ What the Lua table says, per unit-frames page:
   units     which units get the page
   cards     section key -> the units that see that card (a DF card not listed is never shown)
   hide      db key -> the units a control is hidden for (dropped from, or not relevant to, that unit)
+  cardKeys  DF section key -> the db keys that card's controls write, for a card some of the
+            page's units do not see (so a copy into that unit can leave them alone)
   later     the page is new to unit frames and waits for its runtime (not built yet)
 Cards new to unit frames on a DF page (no DF section key) are listed under `laterCards` and skipped,
 unless a page of their own draws them (SPLIT_CARDS: the Icons page's Unit group becomes the
@@ -125,6 +127,7 @@ def main():
         if p["origin"] == "df":
             rec["source"] = pid
         cards, hide, later_cards = [], {}, []
+        card_keys = {}                     # section key -> db keys, for partly hidden cards
         split = []                         # (title, units, controls) of SPLIT_CARDS cards
         for g in p["groups"]:
             for c in g["cards"]:
@@ -144,6 +147,13 @@ def main():
                         continue
                     key = hits[0]
                     cards.append((key, cu))
+                    if len(cu) < len(units):
+                        ks = set()
+                        for k in [c.get("tick")] + [ct.get("key") for ct in c["controls"]]:
+                            if k:
+                                ks.add(re.split(r"[\[.]", k)[0])
+                        if ks:
+                            card_keys[key] = sorted(ks)
                     for ct in c["controls"]:
                         k = ct.get("key")
                         if not k or "." in k or ct.get("new"):
@@ -164,6 +174,7 @@ def main():
         for k, us in EXTRA_HIDE.get(pid, {}).items():
             hide.setdefault(k, set()).update(u for u in us if u in units)
         rec["cards"], rec["hide"], rec["laterCards"] = cards, hide, later_cards
+        rec["cardKeys"] = card_keys
         if pid in BUILT_NEW:
             rec["built"] = True
             rec["units"] = [u for u in units if any(u in cu for _, cu in cards)]
@@ -232,6 +243,7 @@ def main():
     L.append("-- cards: DF section key -> units that see that card; a DF card not listed never shows.")
     L.append("-- hide: db key -> units the control is hidden for. later: new page, runtime not built yet.")
     L.append("-- laterCards: cards new to unit frames on a DF page, waiting for their runtime.")
+    L.append("-- cardKeys: section key -> db keys of a card some of the page's units do not see.")
     L.append("-- ============================================================")
     L.append("DF.UnitFramePageData = {")
     L.append("    units = { " + ", ".join(lua_str(u) for u in UNITS) + " },")
@@ -259,6 +271,11 @@ def main():
             L.append("            },")
             if rec["laterCards"]:
                 L.append("            laterCards = { " + ", ".join(lua_str(t) for t in rec["laterCards"]) + " },")
+            if rec.get("cardKeys"):
+                L.append("            cardKeys = {")
+                for key in sorted(rec["cardKeys"]):
+                    L.append(f"                {key} = {{ " + ", ".join(lua_str(k) for k in rec["cardKeys"][key]) + " },")
+                L.append("            },")
         elif rec.get("built"):
             L.append("            cards = {")
             for key, cu in rec["cards"]:

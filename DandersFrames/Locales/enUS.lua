@@ -98,6 +98,7 @@ L["Classification Border"] = true
 L["Classification Colors"] = true
 L["Color the frame's border by the unit's classification, using the Classification Colors."] = true
 L["Copy All"] = true
+L["Copy from..."] = true
 L["Copy to..."] = true
 L["Corner and offsets of each icon."] = true
 L["Corner and offsets of the PvP and elite/rare icons."] = true
@@ -298,6 +299,7 @@ L["Side"] = true
 L["Single Bar"] = true
 L["Size & Position"] = true
 L["Size & Style"] = true
+L["Sizes and positions are not copied from group frames."] = true
 L["Size (0 = bar height)"] = true
 L["Size (0 = frame height)"] = true
 L["size and style shared"] = true
@@ -1006,6 +1008,7 @@ L["Copied %d settings from %s to %s."] = true
 L["Copied settings from %s to %s."] = true
 L["Copies these settings from %s to %s."] = true
 L["Copy %s Settings"] = true
+L["Copy %s settings from %s to %s?"] = true
 L["Copy %s settings to %s?"] = true
 L["Copy all settings between Party and Raid modes."] = true
 L["Copy Layout"] = true

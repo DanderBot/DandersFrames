@@ -537,11 +537,18 @@ do
 
     -- The row's one picker: keeping units in step is a link now, not a per-page sync.
     local copyDD = dropdowns[1]
-    eq(#dropdowns, 1, "the row has Copy to... only (no Sync with...)")
+    eq(#dropdowns, 2, "the row has Copy to... and Copy from... (no Sync with...)")
     eq(copyDD.caption, "Copy to...", "Copy: a fixed caption")
     check(added[2].w.dfUnitRow.sync == nil, "...and no sync picker behind it")
     local order = table.concat(copyDD.options._order, ",")
     eq(order, "player,target,focus,focustarget,pet,boss", "Copy: every OTHER unit that has the page")
+    local fromDD = dropdowns[2]
+    eq(fromDD.caption, "Copy from...", "Copy from: a fixed caption")
+    eq(added[2].w.dfUnitRow.from, fromDD, "...kept on the row")
+    eq(table.concat(fromDD.options._order, ","), "party,raid,player,target,focus,focustarget,pet,boss",
+       "Copy from: Party Frames and Raid Frames first (a party-drawn page), then the other units")
+    eq(fromDD.options.party, "Party Frames", "...labelled Party Frames")
+    eq(fromDD.options.raid, "Raid Frames", "...and Raid Frames")
 
     -- The module Settings page, built for real over the same stubs.
     local checks, labels, rows = {}, {}, {}
@@ -1008,6 +1015,174 @@ do
     ply.healthTexture, tgt.healthTexture, foc.healthTexture = nil, nil, nil
     tgt.frameWidth = nil
     G.ModuleView = nil
+end
+
+-- ============================================================
+-- 5b. COPY FROM PARTY / RAID (and from another unit), one undo step
+-- ============================================================
+print("-- Copy from the party and raid frames")
+do
+    local heldPD, heldSP = DF.PartyDefaults, DF.SECTION_PREFIXES
+    local heldGetDB, heldSU, heldRefresh = DF.GetDB, DF.SettingsUndo, UF.RequestRefresh
+    local pd = {}
+    for k, v in pairs(heldPD) do pd[k] = v end
+    -- Keys of the Frame / Health / Highlights / Debuff pages the group frames have.
+    pd.healthColorStops = { { r = 1, g = 0, b = 0 }, { r = 0, g = 1, b = 0 } }
+    pd.healthOrientation = "HORIZONTAL"
+    pd.frameBorderColor = { r = 0, g = 0, b = 0, a = 1 }
+    pd.frameBorderSize = 1
+    pd.frameBorderShadowEnabled = false
+    pd.frameFadeSplitCombat = false
+    pd.permanentMoverColor = { r = 1, g = 1, b = 1 }
+    pd.aggroHighlightMode = "GLOW"
+    pd.debuffFilterMine = false
+    pd.debuffStackScale = 1
+    pd.debuffSize = 18
+    DF.PartyDefaults = pd
+    DF.SECTION_PREFIXES = {
+        bars_health = heldSP.bars_health, general_frame = heldSP.general_frame,
+        indicators_highlights = { "selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro" },
+        auras_debuffs = { "debuff", "showDebuffs", "directDebuff", "debuffBlacklist" },
+    }
+    for k in pairs(UFO.prefixes) do UFO.prefixes[k] = nil end
+    UF.Links.ResetCaches()
+    local refreshes = 0
+    UF.RequestRefresh = function() refreshes = refreshes + 1 end
+
+    local party, raid = {}, {}
+    for k, v in pairs(pd) do party[k] = deepcopy(v) end
+    for k, v in pairs(pd) do raid[k] = deepcopy(v) end
+    party.healthColorMode = "GRADIENT"
+    party.healthColorStops = { { r = 0.9, g = 0.1, b = 0.1 }, { r = 0.1, g = 0.9, b = 0.1 } }
+    party.healthTexture = "Party Tex"
+    party.healthOrientation = "VERTICAL"
+    party.frameWidth, party.frameHeight = 99, 33
+    party.frameBorderColor = { r = 0.2, g = 0.3, b = 0.4, a = 1 }
+    party.frameBorderShadowEnabled = true
+    party.frameFadeSplitCombat = true
+    party.permanentMoverColor = { r = 0, g = 0, b = 1 }
+    party.aggroHighlightMode = "BORDER"
+    party.debuffFilterMine = true
+    raid.healthTexture = "Raid Tex"
+    function DF:GetDB(mode) return (mode == "raid") and raid or party end
+
+    -- Which rule keeps a key back.
+    local function skip(kind, unit, key) return UFO.GroupCopySkip(UFO.pageByKind[kind], unit, key) end
+    eq(skip("frame", "target", "position"), "never", "skip: where the frame is")
+    eq(skip("frame", "target", "permanentMoverColor"), "never", "skip: the group mover's keys")
+    eq(skip("health", "target", "healthOrientation"), "layout", "skip: layout (the Links engine's split)")
+    eq(skip("frame", "target", "frameWidth"), "size", "skip: the frame's size")
+    eq(skip("debuffs", "player", "debuffSize"), "size", "skip: an aura icon's size")
+    eq(skip("debuffs", "player", "debuffPaddingX"), "size", "skip: the gap between icons")
+    eq(skip("debuffs", "player", "debuffMax"), "size", "skip: how many")
+    eq(skip("frame", "target", "frameBorderSize"), nil, "copied: a border's thickness is look")
+    eq(skip("debuffs", "player", "debuffStackScale"), nil, "copied: the text scale inside an icon is look")
+    eq(skip("health", "target", "healthColorStops"), nil, "copied: the health gradient")
+    eq(skip("frame", "targettarget", "frameFadeSplitCombat"), "hidden", "skip: a control the unit's page hides")
+    eq(skip("frame", "targettarget", "frameBorderShadowEnabled"), "hidden", "skip: a card the unit's page hides")
+    eq(skip("frame", "player", "frameBorderShadowEnabled"), nil, "...copied where the card shows")
+    eq(skip("highlights", "target", "aggroHighlightMode"), "meaning", "skip: aggro on an enemy frame")
+    eq(skip("highlights", "player", "aggroHighlightMode"), nil, "...copied on the player")
+    eq(skip("debuffs", "boss", "debuffFilterMine"), "meaning", "skip: an aura filter on an enemy frame")
+    eq(skip("debuffs", "pet", "debuffFilterMine"), nil, "...copied on a friendly one")
+    check(UFO.IsSizeKey("castbarIconSize") and not UFO.IsSizeKey("statusIconFontSize")
+          and not UFO.IsSizeKey("buffBorderShadowSize"), "IsSizeKey: sizes, not font / shadow sizes")
+
+    -- The copy.
+    local tgt, ply, foc = UF:GetStoredUnit("target"), UF:GetStoredUnit("player"), UF:GetStoredUnit("focus")
+    for k in pairs(tgt) do tgt[k] = nil end
+    tgt.healthTexture = "Old"
+    eq(UFO.CopyFromGroup("castbar", "party", "target"), nil, "a page not drawn from a party page: nothing to copy")
+    local n = UFO.CopyFromGroup("health", "party", "target")
+    eq(tgt.healthTexture, "Party Tex", "copy from party: the texture")
+    eq(tgt.healthColorMode, "GRADIENT", "...the colour mode")
+    check(type(tgt.healthColorStops) == "table" and tgt.healthColorStops ~= party.healthColorStops
+          and tgt.healthColorStops[1] ~= party.healthColorStops[1] and tgt.healthColorStops[1].r == 0.9,
+          "...the gradient, deep-copied")
+    eq(tgt.healthOrientation, nil, "...not the orientation (layout)")
+    check(type(n) == "number" and n >= 3, "copy from party: counts what it moved")
+    party.healthColorMode = "CLASS_REACTION"          -- target's own default
+    UFO.CopyFromGroup("health", "party", "target")
+    eq(tgt.healthColorMode, nil, "a value equal to the unit's default is dropped, not stored")
+    party.healthColorMode = "GRADIENT"
+    UFO.CopyFromGroup("health", "raid", "target")
+    eq(tgt.healthTexture, "Raid Tex", "copy from raid: the raid frames' value")
+
+    UFO.CopyFromGroup("frame", "party", "targettarget")
+    local tot = UF:GetStoredUnit("targettarget")
+    eq(tot.frameWidth, nil, "Frame from party: never the size")
+    eq(tot.frameHeight, nil, "...either way")
+    eq(tot.permanentMoverColor, nil, "...nor the group mover")
+    eq(tot.frameBorderShadowEnabled, nil, "...nor a card ToT does not have")
+    eq(tot.frameFadeSplitCombat, nil, "...nor a control ToT does not have")
+    check(tot.frameBorderColor and tot.frameBorderColor.r == 0.2 and tot.frameBorderColor ~= party.frameBorderColor,
+          "...but the border colour, copied")
+    for k in pairs(tot) do tot[k] = nil end
+    UFO.CopyFromGroup("highlights", "party", "target")
+    eq(tgt.aggroHighlightMode, nil, "Highlights on Target: aggro stays off")
+    UFO.CopyFromGroup("highlights", "party", "player")
+    eq(ply.aggroHighlightMode, "BORDER", "...the player takes it")
+
+    -- One undo step, and the linked partner with it.
+    local Undo = LibStub("DandersUndo-1.0")
+    local stack = Undo:New({})
+    DF.SettingsUndo = { GetStack = function() return stack end }
+    local Lk, root = UF.Links, DF.db.unitframes
+    root.global.unitLinks = {}
+    Lk:SetLink(root, "focus", "target", { health = { layout = "same", look = "same" } })
+    tgt.healthTexture = "Before"
+    UFO.PushLinks("target")
+    eq(foc.healthTexture, "Before", "(linked and in step)")
+    UFO.CopyFrom("health", "party", "target")
+    eq(tgt.healthTexture, "Party Tex", "CopyFrom: the copy lands")
+    eq(foc.healthTexture, "Party Tex", "...and reaches the linked partner")
+    check(stack:CanUndo(), "...as an undo step")
+    check(stack:Peek():find("Party Frames", 1, true) and stack:Peek():find("Target", 1, true),
+          "...named for where it came from and where it went")
+    stack:Undo()
+    eq(tgt.healthTexture, "Before", "undo: the unit's settings come back")
+    eq(foc.healthTexture, "Before", "undo: ...and the partner's")
+    eq(tgt.healthColorStops, nil, "undo: a key the copy added goes again")
+    check(not stack:CanUndo(), "undo: it was one step")
+    stack:Redo()
+    eq(tgt.healthTexture, "Party Tex", "redo: the copy again")
+    eq(foc.healthTexture, "Party Tex", "redo: ...on the partner too")
+    Lk:Unlink(root, "focus")
+
+    -- From another unit: Copy to's copy, the other way round, undoable.
+    ply.healthTexture = "Player Tex"
+    UFO.CopyFrom("health", "player", "target")
+    eq(tgt.healthTexture, "Player Tex", "copy from a unit: its value")
+    stack:Undo()
+    eq(tgt.healthTexture, "Party Tex", "...undone in one step")
+    eq(UFO.CopyFrom("health", "target", "target"), nil, "copy from itself: nothing")
+
+    -- The row's pick: at once with an undo stack, a confirmation without one.
+    popups, says = {}, {}
+    local rec = UFO.pageByKind.health
+    UFO.RunCopyFrom(rec, "target", "raid", "Health Bar")
+    eq(#popups, 0, "with undo: no confirmation")
+    eq(tgt.healthTexture, "Raid Tex", "...the copy ran")
+    check(says[1] and says[1]:find("Raid Frames", 1, true), "...and says what it copied")
+    check(says[2] and says[2]:find("not copied", 1, true), "...and that sizes and positions stay")
+    DF.SettingsUndo = nil
+    UFO.RunCopyFrom(rec, "target", "party", "Health Bar")
+    eq(#popups, 1, "without undo: a confirmation first")
+    eq(tgt.healthTexture, "Raid Tex", "...nothing copied yet")
+    popups[1].buttons[1].onClick()
+    eq(tgt.healthTexture, "Party Tex", "...Copy runs it")
+    local castOpts = UFO.CopyFromOptions(UFO.pageByKind.castbar, "target")
+    eq(castOpts.party, nil, "Copy from on a page of our own: no group frames...")
+    check(#castOpts._order > 0 and castOpts._order[1] ~= "party", "...the other units only")
+
+    for _, u in ipairs({ "target", "player", "focus" }) do
+        local t = UF:GetStoredUnit(u)
+        for k in pairs(t) do t[k] = nil end
+    end
+    DF.PartyDefaults, DF.SECTION_PREFIXES = heldPD, heldSP
+    DF.GetDB, DF.SettingsUndo, UF.RequestRefresh = heldGetDB, heldSU, heldRefresh
+    for k in pairs(UFO.prefixes) do UFO.prefixes[k] = nil end
+    UF.Links.ResetCaches()
 end
 
 -- ============================================================
