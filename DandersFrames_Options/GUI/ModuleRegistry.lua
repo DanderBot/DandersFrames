@@ -620,6 +620,8 @@ GUI:RegisterModule({
     slot = "bottom",
     sidebar = true,
     accent = function() return GUI.GlobalAccent end,
+    -- Settings, not a module: no Home tile and not counted in "N of M on".
+    noTile = true,
     isEnabled = function() return true end,
     status = function() return L["Fonts, colors and integrations"] end,
     ownsPage = function(name) return GUI.IsGlobalPage(name) end,

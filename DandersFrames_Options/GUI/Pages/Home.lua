@@ -45,7 +45,13 @@ function Home.TileModel()
             if GUI:IsModuleOn(def) then on[#on + 1] = def else more[#more + 1] = def end
         end
     end
-    return on, more, #on + #more
+    -- "N of M on" counts the modules you can switch: a coming-soon one
+    -- (Unit Frames) still gets the "more" tile but is not a module yet.
+    local total = #on
+    for _, def in ipairs(more) do
+        if not def.comingSoon then total = total + 1 end
+    end
+    return on, more, total
 end
 
 -- ============================================================
@@ -400,7 +406,13 @@ local function PaintMoreTile(t, more)
     local cc = C.textCaption or C.textDim
     t.TileIcon:SetVertexColor(cc.r, cc.g, cc.b)
     t.Chevron:Hide()
-    t.TileName:SetText(format(L["%d more"], #more))
+    -- Only coming-soon modules in it (today: Unit Frames) -> say so, rather
+    -- than "1 more" beside an "N of N on" that does not count it.
+    local allSoon = true
+    for _, def in ipairs(more) do
+        if not def.comingSoon then allSoon = false break end
+    end
+    t.TileName:SetText(allSoon and L["Coming soon"] or format(L["%d more"], #more))
     t.TileStatus:SetText(concat(names, " \194\183 "))
     PaintTileRest(t)
 end
@@ -758,19 +770,21 @@ function GUI:RefreshHomeView()
     local y = 0
     local on, more, total = Home.TileModel()
     W.secTitle:ClearAllPoints()
-    W.secTitle:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -(y + 2))
+    -- Centred on the 24-tall Manage modules button beside it.
+    W.secTitle:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -(y + 6))
     -- Uppercase, as the mockup's section caption. string.upper only touches
     -- ASCII letters, so a translated title keeps its other characters.
     W.secTitle:SetText(string.upper(L["Your modules"]))
     W.secCount:SetText(format(L["%d of %d on"], #on, total))
     -- A real button, not a text link: turning modules on and off is easy to
-    -- miss otherwise (author, 2026-10-31). Tinted so it reads as the way in.
+    -- miss otherwise (author, 2026-10-31). Tinted in the window's own accent
+    -- so it reads as the way in.
     local mb = W.manageBtn
     if not mb then
         mb = CreateFrame("Button", nil, body, "BackdropTemplate")
         GUI:StyleButton(mb, {
             text = L["Manage modules"], height = 24, tinted = true, rounded = true,
-            accent = GUI.Colors.text,
+            accent = GUI.GetThemeColorFor(false),
             icon = { texture = ICONS .. "extension.png", size = 16 },
         })
         mb:SetScript("OnClick", function()
@@ -779,7 +793,9 @@ function GUI:RefreshHomeView()
         W.manageBtn = mb
     end
     mb:ClearAllPoints()
-    mb:SetPoint("RIGHT", body, "TOPRIGHT", -(w - x0 - cw), -(y + 8))
+    -- TOPRIGHT, not RIGHT: centred on the row's top edge, half the button
+    -- sat above the body and was clipped.
+    mb:SetPoint("TOPRIGHT", body, "TOPRIGHT", -(w - x0 - cw), -y)
     mb:Show()
     y = y + 24 + 8
 

@@ -203,8 +203,8 @@ check(GUI:GetModule("home").view and GUI:GetModule("modules").view
 check(GUI:GetModule("units").placeholder and not GUI:GetModule("profiles").placeholder,
       "placeholder: Unit Frames still is; Profiles is a sidebar module now")
 check(GUI:GetModule("home").noTile and GUI:GetModule("modules").noTile and GUI:GetModule("profiles").noTile
-      and not GUI:GetModule("group").noTile and not GUI:GetModule("global").noTile,
-      "tiles: Home, Modules and Profiles are never Home tiles; the rest are")
+      and GUI:GetModule("global").noTile and not GUI:GetModule("group").noTile and not GUI:GetModule("clicks").noTile,
+      "tiles: Home, Modules, Profiles and Global are never Home tiles; the modules are")
 check(GUI:GetModule("units").comingSoon and not GUI:IsModuleOn("units"), "units: coming soon, so never on")
 do
     local hidden = 0

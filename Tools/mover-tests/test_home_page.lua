@@ -44,24 +44,24 @@ print("-- Home: Your modules")
 DF.db = { partyEnabled = true, raidEnabled = true }
 DF.ClickCast = { db = { enabled = true, bindings = { {}, {} } } }
 local on, more, total = Home.TileModel()
-eq(ids(on), "group,clicks,global", "tiles: one per module that is on, in rail order")
+eq(ids(on), "group,clicks", "tiles: one per module that is on, in rail order (Global is settings, not a tile)")
 eq(ids(more), "units", "tiles: Unit Frames (coming soon) folds into the N more tile")
-eq(total, 4, "tiles: Home, Modules and Profiles are never counted")
+eq(total, 2, "tiles: only switchable modules count -- not Home/Modules/Profiles/Global, not coming-soon Units")
 eq(GUI:ModuleStatus(on[1]), "Party \194\183 Raid", "status: Group Frames says which modes run")
 eq(GUI:ModuleStatus(on[2]), "2 bindings", "status: Click-Casting counts its bindings")
-eq(GUI:ModuleStatus(on[3]), "Fonts, colors and integrations", "status: Global says what it holds")
+eq(GUI:ModuleStatus(GUI:GetModule("global")), "Fonts, colors and integrations", "status: Global says what it holds")
 eq(GUI:ModuleStatus(more[1]), "Coming in a later update.", "status: Unit Frames is coming")
 
 DF.db = { partyEnabled = false, raidEnabled = false }
 DF.ClickCast = { db = { enabled = false } }
 on, more, total = Home.TileModel()
-eq(ids(on), "global", "tiles: with both turned off only Global is a tile")
+eq(ids(on), "", "tiles: with both turned off no module is a tile")
 eq(ids(more), "group,units,clicks", "tiles: ...and the N more tile holds the three")
 eq(#more, 3, "tiles: N = 3")
 DF.db = { raidEnabled = false }
 DF.ClickCast = { db = {} }
 on, more = Home.TileModel()
-eq(ids(on), "group,global", "tiles: Party alone keeps Group Frames on; an unset click-cast flag is off")
+eq(ids(on), "group", "tiles: Party alone keeps Group Frames on; an unset click-cast flag is off")
 eq(GUI:ModuleStatus(on[1]), "Party only", "status: ...and says Party only")
 
 -- ---- What's new ----------------------------------------------------------
