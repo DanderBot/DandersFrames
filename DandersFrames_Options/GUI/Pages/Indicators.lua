@@ -49,8 +49,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ Per-MODE enable now, not the shared template's field (see
             -- DF:IsAuraDesignerEnabledForMode). Reading the preset made this banner
             -- follow whichever mode last toggled it.
-            local adEnabled = DF.IsAuraDesignerEnabledForMode
-                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party"))
+            local adEnabled = DF.IsAuraDesignerEnabledForDB
+                and DF:IsAuraDesignerEnabledForDB(d)
             if adEnabled and d.showBuffs then
                 b:SetHTML(L["Aura Designer is active alongside Buffs."] .. " " ..
                     adLink("openAD", L["Open Aura Designer"]), adOnLink)
@@ -68,8 +68,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         adBanner.hideOn = function(d)
-            return not (DF.IsAuraDesignerEnabledForMode
-                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party")))
+            return not (DF.IsAuraDesignerEnabledForDB
+                and DF:IsAuraDesignerEnabledForDB(d))
         end
 
         Add(adBanner, 32, "both")
@@ -93,8 +93,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
         adPromoBanner.hideOn = function(d)
             -- hide when AD IS active
-            return (DF.IsAuraDesignerEnabledForMode
-                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party"))) and true or false
+            return (DF.IsAuraDesignerEnabledForDB
+                and DF:IsAuraDesignerEnabledForDB(d)) and true or false
         end
         Add(adPromoBanner, 32, "both")
 

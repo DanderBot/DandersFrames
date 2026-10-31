@@ -219,6 +219,18 @@ function DF:IsAuraDesignerEnabledForMode(mode)
     return modeDB.auraDesignerEnabled and true or false
 end
 
+-- The enable for whichever settings table a settings page is editing: the party and
+-- raid tables answer through their mode (above); any other table -- a standalone
+-- frame's own (DF:InitStandaloneFrame), see DF:IsAuraDesignerEnabled -- answers from
+-- its own key. Absent means off.
+function DF:IsAuraDesignerEnabledForDB(d)
+    local db = DF.db
+    if type(d) == "table" and db and d ~= db.party and d ~= db.raid and d ~= DF._realRaidDB then
+        return d.auraDesignerEnabled == true
+    end
+    return DF:IsAuraDesignerEnabledForMode((db and d == db.raid) and "raid" or "party")
+end
+
 -- ⚠ Writes the MODE only. The preset's own `enabled` is left where it is rather than
 -- cleaned up: an older build still reads it, and a profile carried between builds should
 -- not come back with the designer silently off. It is inert for mode resolution from here.

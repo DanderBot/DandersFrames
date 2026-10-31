@@ -342,6 +342,13 @@ end
 -- would be a deliberate change with its own storage.
 function DF:IsAuraDesignerEnabled(frame)
     if not frame then return false end
+    -- ★ A STANDALONE FRAME (DF:InitStandaloneFrame) is neither party nor raid: it
+    -- has no mode tab to own a switch, and its own settings table answers, under
+    -- the mode's key name. Absent means off. Asked before the preset override,
+    -- which such a frame may also carry for the template it draws.
+    if frame.dfStandalone and type(frame.dfDB) == "table" then
+        return frame.dfDB.auraDesignerEnabled == true
+    end
     if frame.dfAuraPresetOverride then
         local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
         return (adDB and adDB.enabled) and true or false
