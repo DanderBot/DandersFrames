@@ -116,6 +116,12 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- instead. Folding it into "overridden" would show a button that cannot work.
     getOverrideState = function(db, key)
         if not key or type(key) ~= "string" then return "none" end
+        -- A table that answers for itself (DF.Defaults:RegisterAdapter) is no
+        -- layout's: its own values show as "differs from default" (the amber dot,
+        -- isModifiedDefault below), never as an auto-layout override -- whatever
+        -- mode sits under the page and whatever layout is being edited.
+        local D = DF.Defaults
+        if db and D and D.GetAdapter and D:GetAdapter(db) then return "none" end
         if GUI.SelectedMode ~= "raid" then return "none" end
         local AP = DF.AutoProfilesUI
         if not AP then return "none" end
@@ -168,6 +174,11 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- Drops the layout override AND writes the true global back into the live
     -- table, so the widget can redraw from db[key] straight after.
     resetOverride = function(db, key)
+        -- A table that answers for itself drops its own value, back to its chain.
+        local D = DF.Defaults
+        if db and key and D and D.ResetOverride and D:ResetOverride(db, key) then
+            return db[key]
+        end
         local AP = DF.AutoProfilesUI
         if not AP or not key then return nil end
         AP:ResetProfileSetting(key)
