@@ -5177,6 +5177,9 @@ function GUI:CreatePopoutPageTools(page)
             BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
                            kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })
         section.hideOn = hideFn
+        -- Marked, so a caller can tell "filtered off this page" from a card that
+        -- hides on a condition (a bare header over only filtered cards goes too).
+        if filtered then section.dfFilteredOut = true end
         -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
         -- page and GUI.ColumnWidth). Without it the header bar would stay
         -- half-width over a full-width band on the one-column fold. The header
@@ -5189,6 +5192,7 @@ function GUI:CreatePopoutPageTools(page)
         local band = GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })
         band.layoutColFill = true
         band.hideOn = hideFn
+        if filtered then band.dfFilteredOut = true end
         band.dfSectionCol = col
         section:RegisterChild(band)
         if extra and extra.twoTrack then WireTwoTrack(band) end

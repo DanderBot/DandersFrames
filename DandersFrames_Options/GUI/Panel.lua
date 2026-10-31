@@ -4086,6 +4086,7 @@ function DF:CreateGUI()
                 spacer:SetSize(1, h)
                 spacer.layoutHeight = h
                 spacer.layoutCol = col or "both"
+                spacer.isSpacer = true
                 table.insert(self.children, spacer)
                 return spacer
             end
