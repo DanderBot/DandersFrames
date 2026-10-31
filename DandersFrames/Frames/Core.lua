@@ -102,13 +102,8 @@ local function SetHealthBarValue(bar, unit, frame)
     -- Set bar range and value
     bar:SetMinMaxValues(0, 100)
 
-    -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    -- The frame's own settings (GetFrameDB: party, raid, or the frame's own table).
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     SetBarValueSmoothed(bar, pct, db and db.smoothBars)
 
     -- Health threshold fading (curve-based, no Lua-side secret comparison)

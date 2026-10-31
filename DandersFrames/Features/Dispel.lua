@@ -887,13 +887,8 @@ function DF:UpdateDispelGradientHealth(frame)
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return end
 
-    -- Get the appropriate db for this frame to check smoothBars setting
-    local db
-    if frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    -- The frame's own settings, for its smoothBars setting
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     local smoothEnabled = db and db.smoothBars
 
     -- StatusBar API handles secret values internally via SetMinMaxValues/SetValue
@@ -1690,8 +1685,7 @@ local function EnsureSlotWidget(btn, frame)
         -- ★ Resolver, not hbLvl + 13: the widget band is user-settable now
         -- (dispelOverlayFrameLevel, default 16) and both paths must honour it or the
         -- slider works on one render path and silently not the other.
-        local dispelDB = (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB())
-            or (DF.GetDB and DF:GetDB())
+        local dispelDB = DF:GetFrameDB(frame)
         w:SetFrameLevel(DF:ResolveDispelOverlayLevel(base, dispelDB))
         -- ★ The GRADIENT's level is not fixed: it follows "Show On Current Health Only"
         -- (see DF:ResolveDispelGradientLevel). Full frame lands at frame+17 and covers the
@@ -1904,8 +1898,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     -- prediction) — the overlay band alone ties with a user's bar levels one lower. Same
     -- ruling as the legacy widget's pulse box; ResolveDispelGradientLevel reads the
     -- FULL+onCurrentHealth low-pin from db itself, which cannot apply in EDGE mode.
-    local edgeLvl = DF:ResolveDispelGradientLevel(frame:GetFrameLevel(),
-        (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB()) or (DF.GetDB and DF:GetDB()))
+    local edgeLvl = DF:ResolveDispelGradientLevel(frame:GetFrameLevel(), DF:GetFrameDB(frame))
     local w = EnsureSlotWidget(btn, frame)
     local carriers = {}
 

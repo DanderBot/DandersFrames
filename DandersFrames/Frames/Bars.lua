@@ -1840,12 +1840,7 @@ function DF:RefreshAbsorbBarVisibility(frame)
     if not frame.dfAbsorbBar:IsShown() then return end
     if DF.testMode or DF.raidTestMode then return end
 
-    local db
-    if frame.isRaidFrame and DF.GetRaidDB then
-        db = DF:GetRaidDB()
-    elseif DF.GetDB then
-        db = DF:GetDB()
-    end
+    local db = DF:GetFrameDB(frame)
     if not db then return end
     if (db.absorbBarMode or "OVERLAY") ~= "ATTACHED_OVERFLOW" then return end
 

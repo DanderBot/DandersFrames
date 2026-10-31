@@ -84,13 +84,8 @@ end
 local function SetBarValue(bar, value, frame, smoothOverride)
     if not bar or not bar.SetValue then return end
 
-    -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    -- The frame's own settings (GetFrameDB: party, raid, or the frame's own table).
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     -- smoothOverride lets a specific bar gate on its own key (e.g. resourceBarSmooth)
     -- instead of the global health-bar smoothBars toggle.
     local smoothEnabled
