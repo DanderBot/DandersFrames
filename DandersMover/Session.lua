@@ -494,6 +494,19 @@ function Sess:CancelLink()
     Proxy:EndLinkVisual()
 end
 
+-- Set a whole anchor spec at once (Lib:SetAnchor). `anchor` is a fresh copy the
+-- caller owns; the cycle check has already passed. One undo step.
+function Sess:SetAnchor(el, anchor)
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    pos.anchor = anchor
+    pos.point = "CENTER"
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+    return true
+end
+
 function Sess:Detach(el)
     local pos = Registry:GetPos(el)
     if not pos.anchor then return end

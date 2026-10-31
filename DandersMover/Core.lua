@@ -10,7 +10,9 @@ local addonName, NS = ...
 -- MINOR 4 adds the optional target def.partOf (Registry:WouldCreateCycle).
 -- MINOR 5 adds Lib:Lock(onDone): onDone(true) once the session has ended, onDone(false)
 -- if the unsaved-changes prompt was cancelled.
-local MAJOR, MINOR = "DandersMover-1.0", 5
+-- MINOR 6 adds Lib:SetAnchor(addon, key, anchorSpec | nil) and Lib:Detach(addon, key)
+-- (see SCRIPTED ANCHORS below).
+local MAJOR, MINOR = "DandersMover-1.0", 6
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -566,6 +568,85 @@ function Lib:Lock(onDone) if NS.Session then NS.Session:Lock(onDone) end end
 function Lib:Toggle() if NS.Session then NS.Session:Toggle() end end
 function Lib:IsUnlocked() return NS.Session and NS.Session:IsActive() or false end
 function Lib:IsEnabled(addon, key) return Registry:IsEnabled(addon, key) end
+
+-- ============================================================
+-- SCRIPTED ANCHORS
+-- Set or clear an element's anchor from outside the editor -- a settings checkbox
+-- that attaches one element to another, a "reset to attached" button.
+--
+--   Lib:SetAnchor(addon, key, spec)   spec = { target = "Addon:key", edge, align,
+--                                       mode, point, relPoint, offsetX, offsetY,
+--                                       fallback = { ... } } -- the record's own
+--                                       anchor shape; nil spec = Lib:Detach
+--   Lib:Detach(addon, key)            free the element where it sits
+--
+-- Both return false when the element is not registered; SetAnchor also returns
+-- false for a spec with no target and for one that would make a loop (the
+-- editor's own cycle check, primary and backup both). The spec is copied, never
+-- kept.
+--
+-- Inside a live session the change goes through Session, so it is one undo step
+-- and Discard still puts it back. Outside one (or suspended for combat) the record
+-- is written and the consumer told through onChanged(pos, "anchor" / "detach"),
+-- which defers for secure elements in combat like every other write, and the
+-- element's dependants re-solve.
+-- ============================================================
+local function liveSessionFor(el)
+    local sess = NS.Session
+    if sess and sess:IsActive() and not sess:IsSuspended()
+        and Registry:IsInSession(sess.filter, el) then
+        return sess
+    end
+    return nil
+end
+
+local function applyScripted(el, reason)
+    NS:Notify(el, reason)
+    NS:ReapplyDescendants(el.id, "parent")
+    if NS.Proxy then NS.Proxy:Refresh(el.id) end
+end
+
+function Lib:Detach(addon, key)
+    local el = Registry:Get(Registry.Id(addon, key))
+    if not el then return false end
+    local sess = liveSessionFor(el)
+    if sess then
+        sess:Detach(el)
+        return true
+    end
+    local pos = Registry:GetPos(el)
+    if not pos.anchor then return true end
+    -- The solved x/y is where the element sits now, so freeing it moves nothing.
+    pos.anchor = nil
+    applyScripted(el, "detach")
+    return true
+end
+
+function Lib:SetAnchor(addon, key, spec)
+    if spec == nil then return Lib:Detach(addon, key) end
+    local el = Registry:Get(Registry.Id(addon, key))
+    if not el then return false end
+    if type(spec) ~= "table" or type(spec.target) ~= "string" then return false end
+    if Registry:WouldCreateCycle(el.id, spec.target) then return false end
+    local fb = spec.fallback
+    if fb and (type(fb.target) ~= "string" or Registry:WouldCreateCycle(el.id, fb.target)) then
+        return false
+    end
+    local anchor = NS.CopyPos({ anchor = spec }).anchor
+    anchor.offsetX, anchor.offsetY = anchor.offsetX or 0, anchor.offsetY or 0
+    if anchor.fallback then
+        anchor.fallback.offsetX = anchor.fallback.offsetX or 0
+        anchor.fallback.offsetY = anchor.fallback.offsetY or 0
+    end
+    local sess = liveSessionFor(el)
+    if sess then return sess:SetAnchor(el, anchor) end
+    local pos = Registry:GetPos(el)
+    pos.anchor = anchor
+    pos.point = "CENTER"
+    NS:ResolveElement(el)
+    applyScripted(el, "anchor")
+    return true
+end
 
 -- SetPoint + scale maths for consumers that want it. Safe to call without the
 -- anchor block: only point/x/y are read.
