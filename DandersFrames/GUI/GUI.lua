@@ -601,6 +601,13 @@ end
 -- it updates GUI.CurrentPageName), else the page showing.
 function GUI.CurrentAccent(page)
     if GUI.ProfilesView then return GUI.ProfilesAccentFor(page or GUI.CurrentPageName) end
+    -- A sidebar module of its own wears its module's accent.
+    if GUI.ModuleView and GUI.GetModule then
+        local def = GUI:GetModule(GUI.ModuleView)
+        local acc = def and def.accent
+        if type(acc) == "function" then acc = acc() end
+        if acc then return acc end
+    end
     if GUI.GlobalView then return GUI.GlobalAccent end
     return GetThemeColorFor(GUI.SelectedMode == "raid")
 end
@@ -625,6 +632,26 @@ GUI.NewSections = {
 -- Live-tracked badges pending a "seen" mark, keyed by tabName → { key = badge }.
 -- Populated by AddSectionNewBadge, drained by SelectTab on tab leave.
 GUI.pendingSectionBadges = {}
+
+-- ============================================================
+-- PAGE PROVIDERS AND MODULE-OWNED PAGES
+-- ------------------------------------------------------------
+-- DF.GUIPageProviders: functions another addon or module appends to, run in order
+-- when the settings window builds -- after the built-in pages, before the rail is
+-- first painted -- as provider(GUI, CreateCategory, CreateSubTab, BuildPage, L).
+-- A provider can add categories and pages, and register (or replace) a module in
+-- the settings module registry (GUI:RegisterModule / GUI:SidebarModule, companion
+-- GUI/ModuleRegistry.lua). Empty: nothing runs.
+--
+-- GUI.ModulePageOwner: page name -> the id of the module whose sidebar lists it
+-- (GUI:SetPageModule). Such a page is on no other module's sidebar.
+-- GUI.ModuleView: the id of the sidebar module showing (GUI:EnterModuleView), nil
+-- for the built-in views. Like GLOBAL and Profiles, GUI.SelectedMode stays "party"
+-- or "raid" underneath it.
+-- ============================================================
+DF.GUIPageProviders = DF.GUIPageProviders or {}
+GUI.ModulePageOwner = GUI.ModulePageOwner or {}
+GUI.ModuleView = nil
 
 
 -- Pages that remain fully accessible regardless of whether party or raid

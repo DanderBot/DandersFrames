@@ -38,6 +38,10 @@ local SLOT_RANK = { top = 1, bottom = 2 }
 -- so the rail can read it: it loads before the panel (companion TOC order).
 GUI.ClicksAccent = GUI.ClicksAccent or { r = 0.2, g = 0.8, b = 0.4 }
 
+-- Page name -> owning module id (declared resident in DandersFrames/GUI/GUI.lua;
+-- here too so this file never indexes nil). See GUI:SetPageModule below.
+GUI.ModulePageOwner = GUI.ModulePageOwner or {}
+
 local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
 local function Resort()
@@ -71,7 +75,18 @@ function GUI:RegisterModule(def)
             if ordered[i] == old then table.remove(ordered, i) end
         end
         def._buttons = def._buttons or old._buttons
+        -- A REPLACED module's deck-2 tabs go with it: the rail builds the new
+        -- def's own (GUI/Rail.lua builds tabs for any module that has none yet).
+        if old._deckTabs and old._deckTabs ~= def._deckTabs then
+            for tabId, b in pairs(old._deckTabs) do
+                if b.Hide then b:Hide() end
+                if def._buttons[tabId] == b then def._buttons[tabId] = nil end
+            end
+        end
     end
+    -- Bumped on every registration so the rail re-reads its items even when the
+    -- set of ids it shows is the same (a module replaced in place).
+    GUI._moduleGen = (GUI._moduleGen or 0) + 1
     def.order = def.order or 100
     def.slot = def.slot or "top"
     def._buttons = def._buttons or {}
@@ -96,6 +111,9 @@ local function CurrentModuleId()
     -- A placeholder rail item (Home, Modules, Profiles) sits over whatever
     -- state the window was in, so it wins over all of it.
     if GUI.PlaceholderView then return GUI.PlaceholderView end
+    -- A sidebar module of its own (GUI:EnterModuleView) sits over the mode the
+    -- same way Profiles does.
+    if GUI.ModuleView then return GUI.ModuleView end
     -- Profiles sits over the frame mode (and GLOBAL, if it was up) the same way.
     if GUI.ProfilesView then return "profiles" end
     if GUI.SelectedMode == "clicks" then return "clicks" end
@@ -162,8 +180,11 @@ function GUI:ModuleText(def, field)
     return v
 end
 
--- Which module a sidebar page belongs to (nil: none claims it).
+-- Which module a sidebar page belongs to (nil: none claims it). A page given to
+-- a module (GUI:SetPageModule) is that module's, whatever the catch-alls say.
 function GUI:ModuleForPage(name)
+    local owner = name and GUI.ModulePageOwner and GUI.ModulePageOwner[name]
+    if owner and modules[owner] then return owner end
     for i = 1, #ordered do
         local def = ordered[i]
         if def.ownsPage and def.ownsPage(name) then return def.id end
@@ -519,10 +540,12 @@ GUI:RegisterModule({
         return L["Off"]
     end,
     description = function() return L["Party and raid frames: layout, bars, auras and indicators."] end,
-    -- Every page that is not GLOBAL's or Profiles' is Party's/Raid's.
+    -- Every page that is not GLOBAL's, Profiles' or given to another module
+    -- (GUI:SetPageModule) is Party's/Raid's.
     ownsPage = function(name)
         return not GUI.IsGlobalPage(name)
             and not (GUI.IsProfilesPage and GUI.IsProfilesPage(name))
+            and not (GUI.ModulePageOwner and GUI.ModulePageOwner[name])
     end,
     -- No tab asked for: the frame mode showing, else the one Binds/GLOBAL left.
     defaultTab = function()
@@ -790,6 +813,128 @@ function GUI:SetUnderlyingFrameMode(mode)
         GUI.UpdateThemeColors()
     end
     return GUI.SelectedMode == mode
+end
+
+-- ============================================================
+-- SIDEBAR MODULES OF THEIR OWN, AND PAGE PROVIDERS
+-- ------------------------------------------------------------
+-- A module that owns pages of its own -- a sidebar like Profiles', optional
+-- deck-2 tabs like Group Frames' -- registered by a page provider
+-- (DF.GUIPageProviders, DandersFrames/GUI/GUI.lua) rather than written in here.
+--
+--   GUI:SetPageModule(pageName, moduleId)   -- the page is on that module's
+--                                           -- sidebar and nobody else's
+--   GUI:SidebarModule(def)                  -- register (or replace) the module
+--
+-- def, beyond RegisterModule's fields:
+--   onTab(tabId)        -- the module's own tab state changes (tabs only);
+--                          activeTab() must then report it
+--   buildKey(pageName)  -- which retained build of a page this is: one build is
+--                          kept per key (BuildPage, GUI/Panel.lua). Typically the
+--                          current tab, so each tab keeps its own build the way
+--                          Party and Raid do. nil: one build for the module.
+--   buildDb(pageName)   -- the settings table the page builds against (the
+--                          `db` handed to the builder). nil: DF.db[mode].
+-- A page may carry page.buildKey / page.buildDb itself; those win.
+-- ⚠ def.accent must not call GUI.CurrentAccent: CurrentAccent asks it.
+-- ============================================================
+
+function GUI:SetPageModule(pageName, moduleId)
+    if type(pageName) ~= "string" then return end
+    GUI.ModulePageOwner[pageName] = moduleId
+end
+
+-- Show a sidebar module's view: its sidebar, its accent, the mode left as it is
+-- underneath. Selects no page (the caller does), so the redirect off a page this
+-- view does not list is held off -- as GUI:EnterView does.
+function GUI:EnterModuleView(id)
+    if GUI.SelectedMode == "clicks" then
+        GUI.SelectedMode = GUI._lastFrameMode or "party"
+        if DF.Search and DF.Search.InvalidateRegistry then DF.Search:InvalidateRegistry() end
+    end
+    GUI.ModuleView = id
+    GUI:SyncSelectedModule()
+    if GUI.CurrentAccent then GUI:SetAccent(GUI.CurrentAccent()) end
+    local held = GUI._redirectingTab
+    GUI._redirectingTab = true
+    GUI:ShowNormalContent()
+    GUI._redirectingTab = held
+end
+
+function GUI:SidebarModule(def)
+    if type(def) ~= "table" or type(def.id) ~= "string" then
+        DF:DebugError("GUI", "SidebarModule: a module needs a string id")
+        return nil
+    end
+    local id = def.id
+    def.sidebar = true
+    def.sidebarModule = true   -- GUI:RestoreModuleOnOpen (GUI/Rail.lua) reopens it
+    def.placeholder, def.comingSoon, def.view = nil, nil, nil
+    def.ownsPage = def.ownsPage or function(name) return GUI.ModulePageOwner[name] == id end
+    def.onEnter = function(tabId)
+        local entering = GUI.ModuleView ~= id
+        if entering then GUI:EnterModuleView(id) end
+        if tabId ~= nil and def.onTab then def.onTab(tabId) end
+        if entering then
+            local page = GUI:LastTabInView()
+            if page then GUI.SelectTab(page) end
+        else
+            -- A tab switch inside the module: the page swaps to that tab's build
+            -- (its buildKey moved), cached rather than rebuilt.
+            GUI:RefreshCurrentPageForModeSwitch()
+            GUI.UpdateThemeColors()
+        end
+    end
+    def.onEnterForPage = function(tabId)
+        if GUI.ModuleView ~= id then GUI:EnterModuleView(id) end
+        if tabId ~= nil and def.onTab then def.onTab(tabId) end
+    end
+    def.onLeave = function()
+        GUI.ModuleView = nil
+        -- The view under it comes back on the next onEnter -- the flag Profiles
+        -- sets for the same reason (LeaveGlobalTo, GLOBAL's onEnter).
+        GUI._leavingProfiles = true
+    end
+    return GUI:RegisterModule(def)
+end
+
+-- The retained-build key and the settings table for a page (BuildPage). nil
+-- from either: the ordinary answer (the frame mode, DF.db[mode]).
+local function PageBuildFn(page, field)
+    local fn = page[field]
+    if fn == nil then
+        local owner = page.tabName and GUI.ModulePageOwner[page.tabName]
+        local def = owner and modules[owner]
+        fn = def and def[field]
+    end
+    return fn
+end
+
+function GUI.PageBuildKey(page)
+    local fn = page and PageBuildFn(page, "buildKey")
+    if fn then return fn(page.tabName, page) end
+end
+
+function GUI.PageBuildDb(page)
+    local fn = page and PageBuildFn(page, "buildDb")
+    if fn then return fn(page.tabName, page) end
+end
+
+-- Run every page provider, in the order they were added. Called by DF:CreateGUI
+-- (GUI/Panel.lua) after the built-in pages exist and before the rail is first
+-- painted. One that throws is reported and skipped; the rest still run.
+function GUI:RunPageProviders(CreateCategory, CreateSubTab, BuildPage)
+    local list = DF.GUIPageProviders
+    if type(list) ~= "table" then return end
+    for i = 1, #list do
+        local provider = list[i]
+        if type(provider) == "function" then
+            local ok, err = pcall(provider, GUI, CreateCategory, CreateSubTab, BuildPage, L)
+            if not ok then
+                DF:DebugError("GUI", "page provider %d failed: %s", i, tostring(err))
+            end
+        end
+    end
 end
 
 GUI:SyncSelectedModule()

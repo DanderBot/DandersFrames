@@ -157,6 +157,8 @@ function GUI:IsTabDisabledForCurrentMode(tabName)
     if GUI.AlwaysAccessiblePages[tabName] then return false end
     -- A GLOBAL page belongs to neither mode, so neither mode being off greys it.
     if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return false end
+    -- Nor does a page given to a module of its own (GUI:SetPageModule).
+    if GUI.ModulePageOwner and GUI.ModulePageOwner[tabName] then return false end
     -- A Profiles page is mode-neutral (GUI/Pages/Profiles.lua): the mode under
     -- it says nothing. Auto Layouts is the one that is Raid's whatever sits
     -- underneath, so it greys with Raid alone.

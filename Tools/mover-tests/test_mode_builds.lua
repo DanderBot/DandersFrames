@@ -325,7 +325,12 @@ end
 -- pages invalidated (it copies into the existing tables -- section 3).
 -- The mode tabs' switch bodies live in the module registry (group.onEnter).
 local registry = options_file_source("GUI/ModuleRegistry.lua"):gsub("\r\n", "\n")
-eq(count(registry, "    GUI:RefreshCurrentPageForModeSwitch()"), 2,
+-- The built-in modules only: a sidebar module's tab switch (GUI:SidebarModule,
+-- further down the file) takes the same cached path; test_page_providers.lua pins it.
+local builtinsEnd = registry:find("-- SIDEBAR MODULES OF THEIR OWN", 1, true)
+check(builtinsEnd ~= nil, "modebuilds: found the end of the built-in modules")
+local builtins = registry:sub(1, (builtinsEnd or (#registry + 1)) - 1)
+eq(count(builtins, "    GUI:RefreshCurrentPageForModeSwitch()"), 2,
    "modebuilds: both mode tabs refresh through the cached path")
 eq(count(panel, "        GUI:UpdateTabAvailability()\n        GUI:RefreshCurrentPage()")
    + count(registry, "    GUI:UpdateTabAvailability()\n    GUI:RefreshCurrentPage()"), 0,

@@ -35,6 +35,7 @@ local C_PANEL, C_BORDER = GUI.Colors.panel, GUI.Colors.border
 local railKey            -- the ids the rail was last given, joined
 local deckCrumb          -- deck 2's module title (modules without tabs)
 local underline          -- the one underline under the current module's tabs
+local deckFrame          -- deck 2, for tabs built after the shell
 
 local function Resolve(v)
     if type(v) == "function" then return v() end
@@ -70,7 +71,10 @@ local function SyncRailItems(rail)
             }
         end
     end
-    local key = concat(ids, ",")
+    -- The registry's generation too: a module REPLACED in place (same id, new
+    -- def -- a page provider upgrading one) must hand the rail its new label,
+    -- icon and accent even though the set of ids did not change.
+    local key = concat(ids, ",") .. "#" .. tostring(GUI._moduleGen or 0)
     if key ~= railKey then
         railKey = key
         rail:SetItems(items)
@@ -101,6 +105,40 @@ function GUI:RefreshRailBadges()
         else
             rail:SetBadge(id, new[id] and L["New"] or nil)
         end
+    end
+end
+
+-- ============================================================
+-- DECK-2 TABS for one module (a module with `tabs` and none built yet).
+-- Shared underline-tab style, no stripe of their own: ONE underline glides
+-- between them (UI:CreateSelectionMarker), as the old mode tabs did.
+-- ★ ALSO RUN FROM THE REFRESH, for a module registered or replaced after the
+-- shell was built (a page provider runs after it -- GUI:RunPageProviders).
+-- ============================================================
+local function BuildDeckTabs(def)
+    if not def.tabs or def._deckTabs or not deckFrame then return end
+    def._deckTabs = {}
+    local prev
+    for _, tab in ipairs(def.tabs) do
+        local b = CreateFrame("Button", nil, deckFrame, "BackdropTemplate")
+        -- The +1 lifts the 24px button off deck 2's centre onto the row
+        -- the header has always used.
+        if prev then
+            b:SetPoint("LEFT", prev, "RIGHT", GUI.SnapLen(b, 4), 0)
+        else
+            b:SetPoint("LEFT", deckFrame, "LEFT", GUI.SnapLen(b, 12), 1)
+        end
+        GUI:StyleButton(b, {
+            tab = true, tabStripe = false,
+            text = Resolve(tab.deckLabel or tab.label),
+            accent = Resolve(tab.accent),
+            width = 70, height = 24, font = "DFFontHighlight",
+        })
+        local moduleId, tabId = def.id, tab.id
+        b:SetScript("OnClick", function() GUI:SelectModule(moduleId, tabId) end)
+        GUI:AttachModuleButton(moduleId, tabId, b)
+        def._deckTabs[tabId] = b
+        prev = b
     end
 end
 
@@ -147,36 +185,9 @@ function GUI:BuildModuleShell(frame, deck2, saveWindowPos)
     -- A whole-module lock (Auto Layout editing) greys the rail item.
     GUI.OnModuleLockChanged = function(id, locked) rail:SetDisabled(id, locked) end
 
-    -- ---- deck 2: each module's own tabs ---------------------------------
-    -- Shared underline-tab style, no stripe of their own: ONE underline glides
-    -- between them (UI:CreateSelectionMarker), as the old mode tabs did.
-    for _, def in ipairs(GUI:GetModules()) do
-        if def.tabs then
-            def._deckTabs = {}
-            local prev
-            for _, tab in ipairs(def.tabs) do
-                local b = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-                -- The +1 lifts the 24px button off deck 2's centre onto the row
-                -- the header has always used.
-                if prev then
-                    b:SetPoint("LEFT", prev, "RIGHT", GUI.SnapLen(b, 4), 0)
-                else
-                    b:SetPoint("LEFT", deck2, "LEFT", GUI.SnapLen(b, 12), 1)
-                end
-                GUI:StyleButton(b, {
-                    tab = true, tabStripe = false,
-                    text = Resolve(tab.deckLabel or tab.label),
-                    accent = Resolve(tab.accent),
-                    width = 70, height = 24, font = "DFFontHighlight",
-                })
-                local moduleId, tabId = def.id, tab.id
-                b:SetScript("OnClick", function() GUI:SelectModule(moduleId, tabId) end)
-                GUI:AttachModuleButton(moduleId, tabId, b)
-                def._deckTabs[tabId] = b
-                prev = b
-            end
-        end
-    end
+    -- ---- deck 2: each module's own tabs (BuildDeckTabs, above) ----------
+    deckFrame = deck2
+    for _, def in ipairs(GUI:GetModules()) do BuildDeckTabs(def) end
     local group = GUI:GetModule("group")
     if group and group._deckTabs then
         GUI.PartyButton = group._deckTabs.party
@@ -214,6 +225,7 @@ function GUI:RefreshModuleShell(instant)
     local curDef = GUI:GetModule(cur)
     local activeBtn, activeAccent
     for _, def in ipairs(GUI:GetModules()) do
+        BuildDeckTabs(def)
         local tabs = def._deckTabs
         if tabs then
             local on = (def == curDef)
@@ -291,6 +303,12 @@ function GUI:RestoreModuleOnOpen(id)
         end
     elseif def and (def.placeholder or def.view) then
         GUI:SelectModule(id)
+    elseif def and def.sidebarModule then
+        -- A sidebar module of its own (GUI:SidebarModule), over the mode ToggleGUI
+        -- picked, as Profiles is.
+        if GUI.ModuleView ~= id and not GUI:IsModulePickLocked(id) then
+            GUI:SelectModule(id)
+        end
     elseif id == "clicks" then
         -- Binds hides frames and drops test mode on the way in. A user who
         -- reopens with a preview up or a mover session running is looking at

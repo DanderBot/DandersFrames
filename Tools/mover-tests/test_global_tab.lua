@@ -176,7 +176,10 @@ check(sel:find("GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name 
       and REGISTRY:find("onEnterForPage = function() GUI:EnterView(true) end", 1, true) ~= nil
       and REGISTRY:find("onEnterForPage = function() GUI:EnterView(false) end", 1, true) ~= nil,
       "select: asking for a page switches to the tab it lives on (search, cross-links)")
-check(PANEL:find("if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name\n            elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name\n            else GUI._lastModePage = name end", 1, true) ~= nil,
+-- (A page given to a module of its own -- GUI:SetPageModule -- is remembered per
+-- module between the Profiles and GLOBAL arms; test_page_providers.lua pins it.)
+check(PANEL:find("if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name\n", 1, true) ~= nil
+      and PANEL:find("            elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name\n            else GUI._lastModePage = name end", 1, true) ~= nil,
       "select: each tab remembers its last page")
 for _, h in ipairs({ "EnterParty", "EnterRaid", "EnterClicks" }) do
     local body = between(REGISTRY, "local function " .. h .. "()", "DF:SyncLinkedSections()")

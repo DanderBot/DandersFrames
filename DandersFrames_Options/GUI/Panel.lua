@@ -2903,6 +2903,11 @@ function DF:CreateGUI()
         local isProfiles = GUI.IsProfilesPage and GUI.IsProfilesPage(btn.tabName) or false
         if GUI.ProfilesView then return isProfiles end
         if isProfiles then return false end
+        -- A page given to a module (GUI:SetPageModule) is on that module's sidebar
+        -- only, and that sidebar shows nothing else.
+        local owner = GUI.ModulePageOwner and GUI.ModulePageOwner[btn.tabName]
+        if GUI.ModuleView then return owner == GUI.ModuleView end
+        if owner then return false end
         if btn.partyOnly and GUI.SelectedMode == "raid" then return false end
         return GUI.IsGlobalPage(btn.tabName) == (GUI.GlobalView == true)
     end
@@ -2936,6 +2941,7 @@ function DF:CreateGUI()
     -- The page this tab showed last, else its first.
     function GUI:LastTabInView()
         local last = (GUI.ProfilesView and GUI._lastProfilesPage)
+            or (GUI.ModuleView and GUI._lastModuleViewPage and GUI._lastModuleViewPage[GUI.ModuleView])
             or (not GUI.ProfilesView and GUI.GlobalView and GUI._lastGlobalPage)
             or (not GUI.ProfilesView and not GUI.GlobalView and GUI._lastModePage)
             or nil
@@ -3207,6 +3213,9 @@ function DF:CreateGUI()
         -- What each tab comes back to.
         if GUI.Tabs[name] then
             if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name
+            elseif GUI.ModulePageOwner and GUI.ModulePageOwner[name] then
+                GUI._lastModuleViewPage = GUI._lastModuleViewPage or {}
+                GUI._lastModuleViewPage[GUI.ModulePageOwner[name]] = name
             elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name
             else GUI._lastModePage = name end
         end
@@ -3870,12 +3879,20 @@ function DF:CreateGUI()
         -- so a profile switch (which replaces it) still reads as stale. A page that
         -- needs a mode reads its own in-page choice.
         if page and GUI.IsProfilesPage and GUI.IsProfilesPage(page.tabName) then page.modeNeutral = true end
+        -- ★ A MODULE-OWNED PAGE MAY KEY ITS OWN BUILDS (GUI.PageBuildKey / PageBuildDb,
+        -- GUI/ModuleRegistry.lua: a page's or its module's buildKey / buildDb). One
+        -- build is retained per key exactly as per mode -- a module with tabs keys by
+        -- tab and every tab keeps its own build. nil from either: the frame mode.
         local function PageMode(self)
             if self.modeNeutral then return "_neutral" end
+            local key = GUI.PageBuildKey and GUI.PageBuildKey(self)
+            if key ~= nil then return key end
             return GUI.SelectedMode
         end
         local function PageDb(self)
             if self.modeNeutral then return DF.db and DF.db.party end
+            local db = GUI.PageBuildDb and GUI.PageBuildDb(self)
+            if db ~= nil then return db end
             return DF.db[GUI.SelectedMode]
         end
         -- Move the build on screen into its mode's slot, hidden. Anchors and
@@ -4255,6 +4272,11 @@ function DF:CreateGUI()
     if DF.SetupGUIPages then
         DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     end
+    -- ...then anyone else's (DF.GUIPageProviders, DandersFrames/GUI/GUI.lua):
+    -- after the built-in pages exist, before the first paint of the rail and
+    -- nav below. ☠ No new locals in this function (Lua's 200-local limit) -- the
+    -- loop lives in GUI/ModuleRegistry.lua.
+    if GUI.RunPageProviders then GUI:RunPageProviders(CreateCategory, CreateSubTab, BuildPage) end
     
     -- Setup Auto Profiles editing banner
     if DF.AutoProfilesUI and DF.AutoProfilesUI.SetupEditingBanner then
