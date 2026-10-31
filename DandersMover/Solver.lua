@@ -39,9 +39,16 @@ end
 -- rounded half up. ONE producer for both: the visible rect's centre is a different
 -- quantity whenever the record's point is not CENTER or the consumer's rect is offset
 -- from its record (DF's raid frames sit inside a larger reserved container).
+--
+-- A MIRRORED axis shows its Mirror Position instead of its offset: on that axis the
+-- offset is derived (see MIRROR below) and the box edits the centre line.
 function S.Readout(pos)
     local a = pos.anchor
-    if a then return floor((a.offsetX or 0) + 0.5), floor((a.offsetY or 0) + 0.5) end
+    if a then
+        local x = a.mirrorX and (a.mirrorPosX or 0) or (a.offsetX or 0)
+        local y = a.mirrorY and (a.mirrorPosY or 0) or (a.offsetY or 0)
+        return floor(x + 0.5), floor(y + 0.5)
+    end
     return floor((pos.x or 0) + 0.5), floor((pos.y or 0) + 0.5)
 end
 
@@ -188,15 +195,15 @@ end
 -- ============================================================
 -- ANCHOR RESOLUTION
 -- ============================================================
-function S.Resolve(anchor, childW, childH, parent, spacing)
-    if not parent or not parent.w or not parent.h or parent.w <= 0 or parent.h <= 0 then return nil end
-    -- Point mode: child:SetPoint(point, target, relPoint, offsetX, offsetY).
+-- The seat with NO offsets: where the anchor's edge/align (or point/relPoint)
+-- alone puts the child's centre. Resolve adds the offsets; OffsetsFor inverts it.
+local function seat(anchor, childW, childH, parent, spacing)
+    -- Point mode: child:SetPoint(point, target, relPoint, 0, 0).
     if anchor.mode == "point" then
         local pt, rel = anchor.point or "CENTER", anchor.relPoint or "CENTER"
         local tx = parent.x + (H[rel] or 0) * parent.w / 2
         local ty = parent.y + (V[rel] or 0) * parent.h / 2
-        return tx - (H[pt] or 0) * childW / 2 + (anchor.offsetX or 0),
-               ty - (V[pt] or 0) * childH / 2 + (anchor.offsetY or 0)
+        return tx - (H[pt] or 0) * childW / 2, ty - (V[pt] or 0) * childH / 2
     end
     spacing = spacing or S.SPACING
     local hpw, hph = parent.w / 2, parent.h / 2
@@ -214,7 +221,70 @@ function S.Resolve(anchor, childW, childH, parent, spacing)
         if align == "start" then x = parent.x - hpw + hcw
         elseif align == "end" then x = parent.x + hpw - hcw end
     end
-    return x + (anchor.offsetX or 0), y + (anchor.offsetY or 0)
+    return x, y
+end
+
+local function validParent(parent)
+    return parent and parent.w and parent.h and parent.w > 0 and parent.h > 0
+end
+
+-- The child's centre for an anchor block against its parent's rect. A mirrored axis
+-- ignores the seat and the offset on that axis and reflects the parent's centre
+-- across the anchor's centre line instead (see MIRROR below).
+function S.Resolve(anchor, childW, childH, parent, spacing)
+    if not validParent(parent) then return nil end
+    local x, y = seat(anchor, childW, childH, parent, spacing)
+    x, y = x + (anchor.offsetX or 0), y + (anchor.offsetY or 0)
+    if anchor.mirrorX then x = S.Reflect(parent.x, anchor.mirrorPosX or 0) end
+    if anchor.mirrorY then y = S.Reflect(parent.y, anchor.mirrorPosY or 0) end
+    return x, y
+end
+
+-- The plain offsets that put the child's centre at (cx, cy) on this anchor's seat:
+-- the inverse of Resolve with the mirror ignored. What a mirrored axis keeps in its
+-- offset field, and what that axis becomes when the mirror is turned off.
+function S.OffsetsFor(anchor, childW, childH, parent, spacing, cx, cy)
+    if not validParent(parent) then return nil end
+    local x, y = seat(anchor, childW, childH, parent, spacing)
+    return cx - x, cy - y
+end
+
+-- ============================================================
+-- MIRROR
+-- An anchored child can mirror its parent on either axis. On a mirrored axis the
+-- child's CENTRE is the reflection of the parent's CENTRE across a centre line --
+-- centres, not edges or points, so frames of different sizes still look symmetric.
+-- The line sits at the anchor's mirrorPosX / mirrorPosY, measured like every other
+-- coordinate here from UIParent CENTER: 0 is the screen centre. Coordinates are
+-- UIParent units (Registry measures rects through effective scale), so the
+-- reflection is in screen space whatever either frame's scale is.
+--
+-- Record fields, PRIMARY anchor block only (a backup never mirrors):
+--   mirrorX / mirrorY        true or nil
+--   mirrorPosX / mirrorPosY  the centre line; nil reads as 0
+-- offsetX / offsetY stay numbers on a mirrored axis: every solve rewrites them to
+-- the plain offset that reproduces where the child is (OffsetsFor), so a reader
+-- that knows nothing of mirroring still places the child where it last was.
+-- ============================================================
+function S.Reflect(c, line) return 2 * line - c end
+
+-- The centre line two centres mirror around: their midpoint. Always exists, so
+-- turning a mirror on can always keep the child exactly where it is.
+function S.MirrorLine(c1, c2) return (c1 + c2) / 2 end
+
+-- One axis of the PAIR clamp. c is a centre, half its half-size; the partner is the
+-- reflection of c across line with half-size partnerHalf. Returns c pulled into the
+-- range where BOTH rects are fully inside [-screenHalf, screenHalf], so a clamp can
+-- never silently break the symmetry. When no such range exists (the line is so far
+-- off centre that one of the two must leave the screen) c comes back untouched and
+-- the caller's own single-element clamp is the one that applies.
+function S.MirrorClampAxis(c, half, partnerHalf, line, screenHalf)
+    local lo = max(-screenHalf + half, 2 * line - screenHalf + partnerHalf)
+    local hi = min(screenHalf - half, 2 * line + screenHalf - partnerHalf)
+    if lo > hi then return c end
+    if c < lo then return lo end
+    if c > hi then return hi end
+    return c
 end
 
 -- ============================================================

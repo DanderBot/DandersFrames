@@ -77,6 +77,38 @@ primary is the fallback's own target, which would make the two the same link.
 same cycle test the primary gets, so a copy can land the primary and drop the
 fallback on its own.
 
+### Mirror
+
+```lua
+anchor = { target = "OtherAddon:key", edge = "right", align = "center", offsetX = 0, offsetY = 0,
+           mirrorX = true, mirrorPosX = 0 }        -- and/or mirrorY = true, mirrorPosY = 0
+```
+On a mirrored axis the element's **centre** is its target's centre reflected
+across a centre line — centres, so frames of different sizes still look
+symmetric. The line sits at `mirrorPosX` (a vertical line) / `mirrorPosY` (a
+horizontal one), in the usual UIParent units from UIParent CENTER: `0` is the
+middle of the screen, and `nil` reads as `0`. Move the target left and the
+element moves right by the same distance. The edge/align (or point/relPoint) and
+the offset still drive the axis that is not mirrored.
+
+`offsetX` / `offsetY` stay numbers on a mirrored axis: every solve rewrites them
+to the plain offset that puts the element where the mirror did, so a reader that
+knows nothing about mirroring (an older lib, or your own native SetPoint glue)
+still places it where it last was. Mirroring lives on the **primary** block only —
+a backup never mirrors, and an element standing on its backup sits there unmirrored.
+
+In the editor: the panel's **Mirror** row toggles X and Y, and on a mirrored axis
+the X/Y box becomes **Mirror Position**. Turning a mirror on puts the line half way
+between the two centres, so nothing moves; turning it off converts back to the
+offset that keeps the element where it is. Dragging or nudging *either* half moves
+the other the opposite way on every mirrored axis (one undo step for both); the line
+only moves through Mirror Position. The parent follows only when it is a free
+element in the session — an anchored parent, or a plain anchor target, holds the
+mirrored axis just as an unmirrored one is held. A long pull along an *unmirrored*
+axis still breaks the tether as usual (the parent goes back where it started); a pull
+along a mirrored axis never does. Clamping keeps **both** halves on screen when the
+line allows it.
+
 ### `getRect`
 
 `getRect = function() return { x = cx, y = cy, w = w, h = h } end` reports the
@@ -112,7 +144,7 @@ visible rect.
 | `Mover:RefreshAnchorTargets(addon, keys)` | The batched form: one union descendant set, one resolution order, one pass, so an element hanging off two of the listed targets is solved once instead of once per target. Use it when several targets move together (a header re-layout that shifts every sub-target) rather than looping `RefreshAnchorTarget` |
 | `Mover:RenameKey(addon, old, new)` | Move an element's key in place. The user's enable toggle, the registry entry (with its paired anchor target) and every registered or queued record's anchor target *and* fallback target follow it; `twin` strings are re-pointed too. The element keeps its own table and its position — nothing is re-registered, nothing is re-solved. Returns `false` and changes nothing while a session is unlocked, or when `new` is already taken. Consumers that register later in the same login are caught by a replay at the lib's queue flush, so the order addons load in does not matter |
 | `Mover:Apply(addon, key)` | Re-solve and re-fire `onChanged` (e.g. after you change the frame's scale) |
-| `Mover:SetAnchor(addon, key, spec)` | Anchor an element from your own UI (a "attach to …" checkbox). `spec` is the record's anchor shape — `target` (`"addon:key"`, required), `edge`/`align` or `mode = "point"` with `point`/`relPoint`, `offsetX`/`offsetY`, optional `fallback` — and is copied. `nil` spec = `Detach`. Returns `false` (and changes nothing) for an unregistered element, a spec with no target, or one that would make a loop. In a live session it is one undo step and Discard puts it back; otherwise the record is written, `onChanged(pos, "anchor")` fires (deferred for secure elements in combat) and its dependants re-solve. MINOR 6 |
+| `Mover:SetAnchor(addon, key, spec)` | Anchor an element from your own UI (a "attach to …" checkbox). `spec` is the record's anchor shape — `target` (`"addon:key"`, required), `edge`/`align` or `mode = "point"` with `point`/`relPoint`, `offsetX`/`offsetY`, optional `fallback`, optional `mirrorX`/`mirrorY`/`mirrorPosX`/`mirrorPosY` (MINOR 7, see Mirror) — and is copied. `nil` spec = `Detach`. Returns `false` (and changes nothing) for an unregistered element, a spec with no target, or one that would make a loop. In a live session it is one undo step and Discard puts it back; otherwise the record is written, `onChanged(pos, "anchor")` fires (deferred for secure elements in combat) and its dependants re-solve. MINOR 6 |
 | `Mover:Detach(addon, key)` | Free an element where it sits, the same two ways (`onChanged(pos, "detach")` outside a session). `false` only for an unregistered element. MINOR 6 |
 | `Mover:Unregister(addon, key)`, `Mover:UnregisterAddon(addon)` | Cleanup |
 | `Mover:Unlock([filter])`, `Lock()`, `Toggle()`, `IsUnlocked()` | Drive the editor from your own UI. `filter` = nil, `"Addon"`, or `{ addon = "Addon", keys = { "k", ... } }`. Your addon is the initiator: only its listed keys get proxies (forced relevant for the session). Other addons' enabled+relevant elements stay anchor targets (snap zones, resolution) and get proxies only when the user turns on "Show other addons' movers" (Settings › Editor, or the legend) |
@@ -205,7 +237,7 @@ selection (the following panel goes with it), then the session.
 - `snappable = false` on `Register` / `RegisterAnchorTarget` (default true) takes a target out of the snap-zone pass only: a drag builds no zones for it and can never snap to it. It stays a first-class anchor target everywhere else — the panel's anchor and backup pickers both list it, link-drag can land on it, and anything already anchored to it keeps resolving. It is for dense sub-targets, like the per-unit frames inside a container, where twelve zones each would bury the screen.
 - A drag snaps to the **nearest** free zone whose landing position is within the **Snap distance** setting (Settings › Snapping, default 25, 0–400) of where the element is now — measured centre to centre, i.e. how far it would jump on drop. The distance is independent of the element's size, so a wide raid container and a single icon snap from the same distance. The zone highlight uses the same radius, so a zone that lights up is a zone that will take the drop.
 - Drags, nudges and X/Y edits are clamped so the visible rect stays on screen — except a drag held on a snap zone, which previews the seat exactly as the drop will solve it (so a seat overhanging an edge shows its overhang). An anchored solve is only clamped when it would leave **no part** of the element visible (a deliberate overhang keeps its seat). The slab follows the same rule, so it always sits exactly on its element while any of the element is on screen; only an element with nothing visible gets its slab pulled back to the nearest on-screen spot, as a handle — dragging it re-places the element where the slab goes.
-- The coords on a slab are the same numbers the panel's X/Y boxes show: the record's x/y for a free element, the anchor offsets for an anchored one, rounded.
+- The coords on a slab are the same numbers the panel's X/Y boxes show: the record's x/y for a free element, the anchor offsets for an anchored one (the Mirror Position on a mirrored axis), rounded.
 - A drop onto a snap zone whose target has stopped being available since the drag began (hidden, unregistered) commits as a plain move to where the preview showed, never a solve against the stale rect.
 - The per-drag **distance measures** (lines to the nearest screen edge with a px readout) and the **grid snap lines** (the crosshair on the line a drag snapped to) are **off by default** — they are precision aids, and on every drag frame they are louder than the frame being dragged. Turn either on in Settings › Snapping.
 - Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. On slabs too narrow for both, the addon icon wins and the dot drops (the left edge still carries the role, and a root's green ring moves onto the icon). Selection is a white outline; a faded slab means the real frame is hidden. **Settings › Editor › Mover Opacity** (default 0.5) thins the slab's fill so the frames underneath stay readable; the outline, role colours and text stay at full strength.

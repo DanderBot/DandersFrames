@@ -289,13 +289,164 @@ local function visualCenter(el, pos)
     return Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
 end
 
+-- ============================================================
+-- MIRROR
+-- The session half of anchor mirroring (the maths and the record shape are in
+-- Solver.lua, MIRROR). A mirrored pair is one child and the parent it is anchored
+-- to; on every mirrored axis, moving either one moves the other the opposite way
+-- and the centre line between them stays put. Only the Mirror Position setting
+-- moves the line.
+-- ============================================================
+local function screenHalves() return UIParent:GetWidth() / 2, UIParent:GetHeight() / 2 end
+
+-- The element's PRIMARY anchor block when that block is the one driving it and it
+-- mirrors at least one axis; nil otherwise. A backup block never mirrors, so a child
+-- standing on its backup behaves exactly like an unmirrored one.
+local function activeMirror(el)
+    local a = Registry:GetPos(el).anchor
+    if not a or not (a.mirrorX or a.mirrorY) then return nil end
+    if Registry:ActiveAnchor(el) ~= a then return nil end
+    return a
+end
+
+-- Seen from the PARENT: every child mirrored onto it right now, as the numbers the
+-- pair clamp needs. nil when there are none.
+local function mirroredKids(el)
+    local out
+    for _, kid in ipairs(Registry:Children(el.id)) do
+        local a = activeMirror(kid)
+        if a and Registry:CanonicalId(a.target) == el.id then
+            local w, h = Registry:GetSize(kid)
+            if w then
+                out = out or {}
+                out[#out + 1] = { x = a.mirrorX, y = a.mirrorY, lineX = a.mirrorPosX or 0,
+                                  lineY = a.mirrorPosY or 0, hw = w / 2, hh = h / 2 }
+            end
+        end
+    end
+    return out
+end
+
+-- A parent centre pulled into the range where it AND every mirrored child's
+-- reflection of it are fully on screen (Solver.MirrorClampAxis). Clamping the pair,
+-- not just the element being moved, is what keeps a clamp from quietly breaking the
+-- symmetry: the child's own solve only rescues a rect with nothing left on screen.
+local function clampForKids(kids, cx, cy, w, h)
+    if not kids then return cx, cy end
+    local sx, sy = screenHalves()
+    for _, k in ipairs(kids) do
+        if k.x then cx = Solver.MirrorClampAxis(cx, w / 2, k.hw, k.lineX, sx) end
+        if k.y then cy = Solver.MirrorClampAxis(cy, h / 2, k.hh, k.lineY, sy) end
+    end
+    return cx, cy
+end
+
+-- Seen from the CHILD: the parent a drag or nudge of the child moves the opposite
+-- way, or nil when there is nothing to move. freeX / freeY are the mirrored axes the
+-- parent can actually follow on. The parent must be a registered element in this
+-- session (so Discard restores it) and FREE: an anchored parent's place belongs to
+-- its own anchor, and moving it would fight that. On a mirrored axis the parent
+-- cannot follow, the child is HELD, exactly as it is on an unmirrored axis.
+--
+-- The parent is moved by its TARGET rect (startTx/Ty, the rect the child's solve
+-- reflects), as a delta on its record, so a record that is not centred on its
+-- visible rect keeps that offset.
+function Sess:MirrorPartner(el)
+    local a = activeMirror(el)
+    if not a then return nil end
+    local target = Registry:GetTarget(a.target)
+    local rect = target and Registry:GetRect(target)
+    if not rect then return nil end
+    local partner = Registry:Get(Registry:CanonicalId(a.target))
+    if not partner or partner == el then return nil end
+    local ppos = Registry:GetPos(partner)
+    if ppos.anchor or not Registry:IsInSession(self.filter, partner) then return nil end
+    return {
+        partner = partner, freeX = a.mirrorX and true or false, freeY = a.mirrorY and true or false,
+        lineX = a.mirrorPosX or 0, lineY = a.mirrorPosY or 0,
+        before = NS.CopyPos(ppos), startTx = rect.x, startTy = rect.y, tw = rect.w, th = rect.h,
+    }
+end
+
+-- The child's centre (cx, cy) with the pair clamp applied on the free axes, and the
+-- target centre (tx, ty) the parent must move to for the reflection to hold.
+local function mirrorPlace(m, cx, cy, w, h)
+    local sx, sy = screenHalves()
+    local tx, ty = m.startTx, m.startTy
+    if m.freeX then
+        cx = Solver.MirrorClampAxis(cx, w / 2, m.tw / 2, m.lineX, sx)
+        tx = Solver.Reflect(cx, m.lineX)
+    end
+    if m.freeY then
+        cy = Solver.MirrorClampAxis(cy, h / 2, m.th / 2, m.lineY, sy)
+        ty = Solver.Reflect(cy, m.lineY)
+    end
+    return cx, cy, tx, ty
+end
+
+-- Move the parent so its target rect's centre sits at (tx, ty). Quiet when that is
+-- where it already is: a drag calls this every frame.
+local function placePartner(m, tx, ty, reason)
+    local ppos = Registry:GetPos(m.partner)
+    local nx, ny = (m.before.x or 0) + (tx - m.startTx), (m.before.y or 0) + (ty - m.startTy)
+    if ppos.x == nx and ppos.y == ny then return end
+    ppos.x, ppos.y = nx, ny
+    NS:Notify(m.partner, reason)
+    NS:ReapplyDescendants(m.partner.id, "parent")
+end
+
+local function partnerMoved(m)
+    local ppos = Registry:GetPos(m.partner)
+    return ppos.x ~= m.before.x or ppos.y ~= m.before.y
+end
+
 -- Free elements: after a record change, pull the visible rect back on screen.
 -- The consumer must have applied the record first (Notify), so the rect is current.
+-- A parent with mirrored children is clamped as a pair (clampForKids).
 local function clampFree(el, pos)
     local rect = Registry:GetRect(el)
     if not rect then return end
     local cx, cy = Solver.ClampToScreen(rect.x, rect.y, rect.w, rect.h, UIParent:GetWidth(), UIParent:GetHeight())
+    cx, cy = clampForKids(mirroredKids(el), cx, cy, rect.w, rect.h)
     pos.x, pos.y = (pos.x or 0) + (cx - rect.x), (pos.y or 0) + (cy - rect.y)
+end
+
+-- One undo step for a change that moved a mirrored child AND its parent. The parent
+-- is restored first so the child re-solves against where it belongs.
+local function commitPair(el, before, m, label)
+    local after = NS.CopyPos(Registry:GetPos(el))
+    local partner, pBefore = m.partner, m.before
+    local pAfter = NS.CopyPos(Registry:GetPos(partner))
+    Sess.dirty = true
+    Sess.undo:Push({
+        label = format(label, el.title),
+        undo = function() restore(partner, pBefore, "undo"); restore(el, before, "undo") end,
+        redo = function() restore(partner, pAfter, "redo"); restore(el, after, "redo") end,
+    })
+end
+
+-- Nudge a mirrored child: an unmirrored axis takes the step on its offset as always;
+-- a mirrored axis moves the child by the step and the parent by minus the step
+-- (clamped as a pair), or does nothing when the parent cannot follow.
+local function nudgeMirrored(el, pos, before, dx, dy)
+    local a = pos.anchor
+    local changed = false
+    if not a.mirrorX and dx ~= 0 then a.offsetX = (a.offsetX or 0) + dx; changed = true end
+    if not a.mirrorY and dy ~= 0 then a.offsetY = (a.offsetY or 0) + dy; changed = true end
+    local m = Sess:MirrorPartner(el)
+    if m and ((m.freeX and dx ~= 0) or (m.freeY and dy ~= 0)) then
+        local w, h = sizeOf(el)
+        local cx = Solver.Reflect(m.startTx, m.lineX) + (m.freeX and dx or 0)
+        local cy = Solver.Reflect(m.startTy, m.lineY) + (m.freeY and dy or 0)
+        local _, _, tx, ty = mirrorPlace(m, cx, cy, w, h)
+        placePartner(m, tx, ty, "nudge")
+    end
+    local pair = m and partnerMoved(m)
+    if not (changed or pair) then return end
+    NS:ResolveElement(el)
+    if pair then apply(m.partner, "nudge") end
+    apply(el, "nudge")
+    if pair then commitPair(el, before, m, L["Nudge %s"]) else commit(el, before, L["Nudge %s"]) end
 end
 
 function Sess:Nudge(el, dx, dy)
@@ -303,6 +454,7 @@ function Sess:Nudge(el, dx, dy)
     -- is a better answer to "the panel chases my nudges" than a timed hold.
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
+    if activeMirror(el) then return nudgeMirrored(el, pos, before, dx, dy) end
     if pos.anchor then
         pos.anchor.offsetX = (pos.anchor.offsetX or 0) + dx
         pos.anchor.offsetY = (pos.anchor.offsetY or 0) + dy
@@ -315,12 +467,26 @@ function Sess:Nudge(el, dx, dy)
     commit(el, before, L["Nudge %s"])
 end
 
--- Panel edit boxes: free element -> absolute x/y; anchored -> offsets.
+-- Panel edit boxes: free element -> absolute x/y; anchored -> offsets, except that
+-- a MIRRORED axis's box is its Mirror Position. Both boxes commit together, so a
+-- mirrored axis whose box still shows its rounded readout is left alone: rewriting
+-- the line with the rounded number would move the child up to a pixel.
 function Sess:SetXY(el, x, y)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     if pos.anchor then
-        pos.anchor.offsetX, pos.anchor.offsetY = x, y
+        local a = pos.anchor
+        local rx, ry = Solver.Readout(pos)
+        if a.mirrorX then
+            if x ~= rx then a.mirrorPosX = x end
+        else
+            a.offsetX = x
+        end
+        if a.mirrorY then
+            if y ~= ry then a.mirrorPosY = y end
+        else
+            a.offsetY = y
+        end
         NS:ResolveElement(el)
     else
         pos.x, pos.y = x, y
@@ -450,6 +616,45 @@ function Sess:SetAnchorSpec(el, changes)
     NS:ResolveElement(el)
     apply(el, "anchor")
     commit(el, before, L["Anchor %s"])
+end
+
+-- Turn mirroring on or off for one axis ("X" or "Y") of the element's PRIMARY anchor.
+--
+-- On: the centre line becomes the midpoint of the child's and the parent's centres,
+-- so the child stays exactly where it is -- reflecting centres means there is always
+-- such a line. Off: the axis's offset becomes the plain one that reproduces where the
+-- child is now, so it stays put again. Both need the primary to be the live block and
+-- its target to have a rect; without that (the child is holding, or standing on its
+-- backup) "on" takes the screen centre as the line and "off" keeps the offset the last
+-- mirrored solve left, which is where the child last sat on the primary.
+function Sess:SetMirror(el, axis, on)
+    local pos = Registry:GetPos(el)
+    local a = pos.anchor
+    if not a or (axis ~= "X" and axis ~= "Y") then return end
+    local flag, lineKey, offKey = "mirror" .. axis, "mirrorPos" .. axis, "offset" .. axis
+    on = on and true or nil
+    if (a[flag] and true or nil) == on then return end
+    local before = NS.CopyPos(pos)
+    local target = Registry:GetTarget(a.target)
+    local rect = Registry:ActiveAnchor(el) == a and target and Registry:GetRect(target) or nil
+    local cx, cy = visualCenter(el, pos)
+    if on then
+        local line = 0
+        if rect then
+            line = axis == "X" and Solver.MirrorLine(cx, rect.x) or Solver.MirrorLine(cy, rect.y)
+        end
+        a[flag], a[lineKey] = true, line
+    else
+        if rect then
+            local w, h = sizeOf(el)
+            local ox, oy = Solver.OffsetsFor(a, w, h, rect, Solver.SPACING, cx, cy)
+            a[offKey] = axis == "X" and ox or oy
+        end
+        a[flag], a[lineKey] = nil, nil
+    end
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Mirror %s"])
 end
 
 -- ============================================================
@@ -621,16 +826,26 @@ function Sess:BeginDrag(el)
     -- Anchored: arm the tether. Pull is measured from the RESOLVED anchor
     -- position, which is exactly where the element sits at drag start (the
     -- record was solved). Proxy reads this table to draw the strain.
+    --
+    -- A mirrored child whose parent can follow (Sess:MirrorPartner) drags that parent
+    -- the opposite way on each free axis, and only the HELD axes count towards the
+    -- tether: movement along a free axis is the mirror working, not a pull.
+    self.mirror = pos.anchor and self:MirrorPartner(el) or nil
+    local m = self.mirror
     if pos.anchor then
         local a = pos.anchor
         self.tether = { target = a.target,
                         spec = { mode = a.mode, edge = a.edge, align = a.align,
                                  point = a.point, relPoint = a.relPoint },
                         homeX = self.dragStartCx, homeY = self.dragStartCy,
+                        freeX = m and m.freeX or false, freeY = m and m.freeY or false,
                         state = "held", strain = 0, snapped = false }
     else
         self.tether = nil
     end
+    -- Dragging a parent: its mirrored children re-solve as it moves (the usual
+    -- descendant pass); this is only what the pair clamp needs, read once.
+    self.mirrorKids = mirroredKids(el)
 end
 
 function Sess:DragTo(el, cx, cy)
@@ -669,6 +884,12 @@ function Sess:DragTo(el, cx, cy)
         cx, cy = NS.KeepOnScreen(cx, cy, w, h)
     else
         cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
+        -- Mirrored pairs clamp together, whichever half is being dragged.
+        cx, cy = clampForKids(self.mirrorKids, cx, cy, w, h)
+        local m = self.mirror
+        if m and not (self.tether and self.tether.snapped) then
+            cx, cy = mirrorPlace(m, cx, cy, w, h)
+        end
     end
     Grid:ShowMeasure(cx, cy, w, h)
     -- Tether strain-and-snap: pulling an anchored element past the thresholds
@@ -677,7 +898,9 @@ function Sess:DragTo(el, cx, cy)
     -- is free from that moment and EndDrag's spring-back no longer applies.
     local t = self.tether
     if t and not t.snapped then
-        local dist = sqrt((cx - t.homeX) ^ 2 + (cy - t.homeY) ^ 2)
+        local ddx = t.freeX and 0 or (cx - t.homeX)
+        local ddy = t.freeY and 0 or (cy - t.homeY)
+        local dist = sqrt(ddx ^ 2 + ddy ^ 2)
         local snapR = db.snapDistance or SNAP_DISTANCE
         t.state = Solver.TetherState(dist, snapR)
         t.strain = Solver.TetherStrain(dist, snapR)
@@ -689,6 +912,19 @@ function Sess:DragTo(el, cx, cy)
     local pos = Registry:GetPos(el)
     pos.anchor = nil
     pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
+    -- The mirrored parent follows on its free axes -- unless the drop is going to
+    -- re-anchor the child (a zone) or free it (a snapped tether), in which case the
+    -- mirror is over and the parent goes back to where it started, so the preview
+    -- shows exactly what the drop will do.
+    local m = self.mirror
+    if m then
+        if zone or (t and t.snapped) then
+            placePartner(m, m.startTx, m.startTy, "drag")
+        else
+            placePartner(m, m.freeX and Solver.Reflect(cx, m.lineX) or m.startTx,
+                            m.freeY and Solver.Reflect(cy, m.lineY) or m.startTy, "drag")
+        end
+    end
     NS:Notify(el, "drag")
     NS:ReapplyDescendants(el.id, "parent")
     Proxy:RefreshAll()
@@ -698,8 +934,9 @@ end
 function Sess:EndDrag(el, cx, cy, zone)
     local before = self.dragBefore or NS.CopyPos(Registry:GetPos(el))
     local tether = self.tether
+    local m = self.mirror
     self.dragBefore, self.dragStartPos, self.dragStartCx, self.dragStartCy = nil, nil, nil, nil
-    self.tether = nil
+    self.tether, self.mirror, self.mirrorKids = nil, nil, nil
     local pos = Registry:GetPos(el)
     if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
     -- ⚠ THE ZONES ARE A SNAPSHOT. Proxy:ShowZones collects them once at drag
@@ -709,6 +946,13 @@ function Sess:EndDrag(el, cx, cy, zone)
     -- somewhere the preview never showed. Refused here: the drop goes through
     -- as a plain move to the spot the preview DID show.
     if zone and not Registry:IsTargetAvailable(Registry:GetTarget(zone.target)) then zone = nil end
+    -- The mirrored parent keeps where the drag took it only when the child's anchor
+    -- (and so the mirror) survives the drop; any other drop puts it back.
+    local keepPartner = m and not zone and before.anchor and not (tether and tether.snapped)
+    if m and not keepPartner and partnerMoved(m) then
+        NS.CopyPos(m.before, Registry:GetPos(m.partner))
+        apply(m.partner, "reapply")
+    end
     if zone then
         pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
         carryFallback(pos, before, zone.target)
@@ -721,6 +965,15 @@ function Sess:EndDrag(el, cx, cy, zone)
         -- element detached mid-drag and the drop commits it as free.
         NS.CopyPos(before, pos)
         NS:ResolveElement(el)
+        -- A mirrored drag DID change something: the parent moved, and the child
+        -- re-solves onto its reflection. One undo step for the two of them.
+        if keepPartner and partnerMoved(m) then
+            apply(m.partner, "drag")
+            apply(el, "drag")
+            commitPair(el, before, m, L["Move %s"])
+            self:Select(el.id)
+            return
+        end
         apply(el, "reapply")
         self:Select(el.id)
         return

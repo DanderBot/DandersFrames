@@ -12,7 +12,9 @@ local addonName, NS = ...
 -- if the unsaved-changes prompt was cancelled.
 -- MINOR 6 adds Lib:SetAnchor(addon, key, anchorSpec | nil) and Lib:Detach(addon, key)
 -- (see SCRIPTED ANCHORS below).
-local MAJOR, MINOR = "DandersMover-1.0", 6
+-- MINOR 7 adds anchor mirroring: the anchor block's optional mirrorX / mirrorY /
+-- mirrorPosX / mirrorPosY (Solver.lua, MIRROR), also accepted by Lib:SetAnchor.
+local MAJOR, MINOR = "DandersMover-1.0", 7
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -130,7 +132,11 @@ function NS.CopyPos(src, dst)
         dst.anchor = { target = src.anchor.target, mode = src.anchor.mode,
                        edge = src.anchor.edge, align = src.anchor.align,
                        point = src.anchor.point, relPoint = src.anchor.relPoint,
-                       offsetX = src.anchor.offsetX, offsetY = src.anchor.offsetY }
+                       offsetX = src.anchor.offsetX, offsetY = src.anchor.offsetY,
+                       -- Mirror (Solver MIRROR): primary block only, so the fallback
+                       -- copy below deliberately leaves these four out.
+                       mirrorX = src.anchor.mirrorX or nil, mirrorY = src.anchor.mirrorY or nil,
+                       mirrorPosX = src.anchor.mirrorPosX, mirrorPosY = src.anchor.mirrorPosY }
         local fb = src.anchor.fallback
         if fb then
             dst.anchor.fallback = { target = fb.target, mode = fb.mode,
@@ -247,6 +253,14 @@ function NS:ResolveElement(el)
     if not rect or not w then return false end
     local cx, cy = Solver.Resolve(a, w, h, rect, Solver.SPACING)
     if not cx then return false end
+    -- A mirrored axis keeps its offset field equal to the plain offset that puts the
+    -- child where the mirror just did (Solver MIRROR), measured before the on-screen
+    -- pull so it describes the seat, not the rescue.
+    if a.mirrorX or a.mirrorY then
+        local ox, oy = Solver.OffsetsFor(a, w, h, rect, Solver.SPACING, cx, cy)
+        if a.mirrorX then a.offsetX = ox end
+        if a.mirrorY then a.offsetY = oy end
+    end
     cx, cy = NS.KeepOnScreen(cx, cy, w, h)
     -- cx/cy is where the VISIBLE centre belongs; see RECORD-TO-VISIBLE OFFSET.
     local offX, offY = NS.VisibleOffset(el, pos)
