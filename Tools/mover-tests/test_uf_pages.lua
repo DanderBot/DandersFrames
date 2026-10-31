@@ -282,6 +282,25 @@ eq(made.pages.uf_target_health.searchTabLabel, "Target \194\183 Health Bar", "se
 eq(made.pages.uf_targettarget_frame.searchTabLabel, "Target of Target \194\183 Frame", "...every unit")
 eq(made.pages.uf_settings.searchTabLabel, "Unit Frames \194\183 Settings", "...and the module page")
 
+print("-- Loaded: a party builder's in-page links go to the unit's own pages")
+do
+    eq(UFO.MapPageLink("player", "auras_auradesigner"), "uf_player_auradesigner",
+       "the Aura Designer link: the unit's own Aura Designer page")
+    eq(UFO.MapPageLink("target", "auras_auradesigner"), false, "...none for a unit without one (link left out)")
+    eq(UFO.MapPageLink("target", "bars_health"), "uf_target_health", "a sourced page: the unit's copy")
+    eq(UFO.MapPageLink("target", "auras_filterdesigner"), nil, "a page no unit has a copy of: left as it is")
+    local pb = made.pages.uf_player_buffs
+    eq(G.PageLinkFor(pb, "auras_auradesigner"), "uf_player_auradesigner", "GUI.PageLinkFor asks the page")
+    eq(G.PageLinkFor(made.pages.uf_target_buffs, "auras_auradesigner"), false, "...false: no counterpart")
+    eq(G.PageLinkFor({}, "auras_auradesigner"), "auras_auradesigner", "a page with no map: the id itself")
+    local ind = options_file_source("GUI/Pages/Indicators.lua")
+    check(ind:find('local target = GUI.PageLinkFor and GUI.PageLinkFor(self, "auras_auradesigner")', 1, true) ~= nil,
+          "Buff Bar: Open Aura Designer goes where the page says")
+    check(ind:find('return GUI.PageLinkFor ~= nil and GUI.PageLinkFor(self, "auras_auradesigner") == false', 1, true) ~= nil,
+          "Buff Bar: the Aura Designer promo hides on a page with no Aura Designer to open")
+    check(not ind:find('GUI.SelectTab("auras_auradesigner")', 1, true), "...no hard-wired party Aura Designer link left")
+end
+
 print("-- Loaded: unit pages join the search index lazily")
 do
     local n, lazy = 0, 0

@@ -566,6 +566,24 @@ local function MapLinks(links, unit)
     return out
 end
 
+-- A party builder's in-page link (GUI.PageLinkFor) on a unit page: to this unit's
+-- own counterpart, false when the unit has none, nil for a page no unit has a copy
+-- of (the link stays as it is). The Aura Designer page has no `source` (the unit
+-- page is ours), so it is named here.
+UFO.LINK_KIND = { auras_auradesigner = "auradesigner" }
+
+function UFO.MapPageLink(unit, id)
+    local kind = UFO.LINK_KIND[id]
+    if not kind then
+        for k, rec in pairs(UFO.pageByKind) do
+            if rec.source == id then kind = k break end
+        end
+    end
+    if not kind then return nil end
+    local pages = UFO.pagesByUnit[unit]
+    return (pages and pages[kind]) or false
+end
+
 -- Controls whose search entry the build marked (Search.EntryFilter) leave the page.
 function UFO.HideFilteredControls(list)
     for _, w in ipairs(list or {}) do
@@ -1536,6 +1554,7 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                         pg.buildDb = function() return UF and UF:GetUnitDB(u) end
                         pg.searchTabLabel = format("%s%s%s", UFO.UnitLabel(u), SEP, L[rec.title])
                         pg.ufUnit, pg.ufKind = u, rec.kind
+                        pg.mapPageLink = function(id) return UFO.MapPageLink(u, id) end
                         -- ~90 unit pages, each a full party page builder: they join
                         -- the search index only once a search is typed or the
                         -- Unit Frames ledger is asked for (Search DEFERRED PAGES).
