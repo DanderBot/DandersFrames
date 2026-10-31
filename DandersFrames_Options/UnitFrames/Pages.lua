@@ -776,6 +776,58 @@ function UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
     UFO.HideFilteredControls(self.children)
 end
 
+-- ============================================================
+-- GREYED CONTROLS SAY WHY (the kit's widget.disableReason)
+-- A page's feature gate is made with UFO.Gate, which remembers what turns the
+-- control back on; after a build, every widget whose disableOn is a gate gets
+-- that reason for its hover (UFO.ApplyDisableReasons, from UFO.PageBuilder).
+-- One place, so every gated control on these pages explains itself.
+-- ============================================================
+UFO.gateReasons = setmetatable({}, { __mode = "k" })
+
+-- A gate: true when `test(d)` is, or when the `parent` gate is. Its reason
+-- names the switch to flip -- the parent's first (the feature itself), then its
+-- own `label`. verb "off": the switch has to be turned OFF (Always).
+function UFO.Gate(label, test, parent, verb)
+    local function gate(d)
+        if parent and parent(d) then return true end
+        return test(d) and true or false
+    end
+    UFO.gateReasons[gate] = function(d)
+        if parent and parent(d) then
+            local r = UFO.gateReasons[parent]
+            return r and r(d) or nil
+        end
+        if not test(d) then return nil end
+        if verb == "off" then return format(L["Turn off %s to change this"], label) end
+        return format(L["Turn on %s to change this"], label)
+    end
+    return gate
+end
+
+-- A gate whose reason is not a switch: `reason(d)` says why.
+function UFO.Explain(test, reason)
+    local function gate(d) return test(d) and true or false end
+    UFO.gateReasons[gate] = function(d) return gate(d) and reason(d) or nil end
+    return gate
+end
+
+function UFO.ApplyDisableReasons(list)
+    for _, w in ipairs(list or {}) do
+        if type(w) == "table" then
+            local on = rawget(w, "disableOn")
+            local why = on and UFO.gateReasons[on]
+            if why and rawget(w, "disableReason") == nil then w.disableReason = why end
+            local kids = rawget(w, "groupChildren")
+            if type(kids) == "table" then
+                local ws = {}
+                for i, e in ipairs(kids) do ws[i] = e.widget end
+                UFO.ApplyDisableReasons(ws)
+            end
+        end
+    end
+end
+
 -- ---- small card pages of this module's own ---------------------------------
 -- Open(label, key, col, summary, kind[, toggle[, dimFn[, hideFn]]]):
 --   toggle  the card's header tick ({ db, key, label, onChanged }, see
@@ -867,15 +919,17 @@ function UFO.VisControlShown(rec, unit, key)
     return not (hide and hide[unit])
 end
 
-local function AlwaysOn(d) return d and d.visAlways ~= false end
+local function AlwaysOnTest(d) return d and d.visAlways ~= false end
 
 function UFO.BuildVisibilityPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
     local Open, Close = Tools(self, Add)
     local function changed() self:RefreshStates(); RefreshFrames() end
+    -- The conditions grey while Always is ticked; turning Always OFF frees them.
+    local AlwaysOn = UFO.Gate(L["Always"], AlwaysOnTest, nil, "off")
 
     local band = Open(L["Show When"], "uf_vis_show", 1,
-        function(d) return AlwaysOn(d) and L["Always"] or L["Custom"] end, "visibility")
+        function(d) return AlwaysOnTest(d) and L["Always"] or L["Custom"] end, "visibility")
     band:AddWidget(GUI:CreateCheckbox(self.child, L["Always"], db, "visAlways", changed), 30)
     for _, c in ipairs(UFO.VIS_SHOW) do
         if UFO.VisControlShown(rec, unit, c.key) then
@@ -956,7 +1010,7 @@ end
 -- A border card's two controls (the piece's own keys, prefix .. "Border*");
 -- the card's header tick is the third.
 local function BorderControls(self, band, db, prefix, changed, featureOff)
-    local function off(d) return featureOff(d) or (d and d[prefix .. "BorderEnabled"] == false) end
+    local off = UFO.Gate(L["Show Border"], function(d) return d and d[prefix .. "BorderEnabled"] == false end, featureOff)
     local w = band:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 8, 1, db, prefix .. "BorderSize", changed), 55)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Border Color"], db, prefix .. "BorderColor", true, changed), 30)
@@ -987,7 +1041,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
     local Open, Close = Tools(self, Add)
     local function changed() self:RefreshStates(); RefreshFrames() end
     local function shown(key) return UFO.VisControlShown(rec, unit, key) end
-    local function off(d) return not (d and d.castbarEnabled) end
+    local off = UFO.Gate(L["Cast Bar"], function(d) return not (d and d.castbarEnabled) end)
     local function detached(d) return d and d.castbarDetached end
     local function attached(d) return not detached(d) end
     local w
@@ -1075,7 +1129,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
 
     band = Open(L["Icon"], "uf_cb_icon", 2, nil, "appearance",
         { db = db, key = "castbarShowIcon", label = L["Show Icon"], onChanged = changed })
-    local function iconOff(d) return off(d) or (d and d.castbarShowIcon == false) end
+    local iconOff = UFO.Gate(L["Show Icon"], function(d) return d and d.castbarShowIcon == false end, off)
     if shown("castbarIconSide") then
         w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
             { LEFT = L["Left"], RIGHT = L["Right"], _order = { "LEFT", "RIGHT" } }, db, "castbarIconSide", changed), 55)
@@ -1091,7 +1145,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
 
     band = Open(L["Spell Name"], "uf_cb_spell", 1, nil, "text",
         { db = db, key = "castbarShowSpell", label = L["Show Spell Name"], onChanged = changed })
-    local function spellOff(d) return off(d) or (d and d.castbarShowSpell == false) end
+    local spellOff = UFO.Gate(L["Show Spell Name"], function(d) return d and d.castbarShowSpell == false end, off)
     w = band:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "castbarSpellFont", changed), 55)
     w.disableOn = spellOff
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 32, 1, db, "castbarSpellFontSize", changed), 55)
@@ -1114,7 +1168,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
 
     band = Open(L["Timer"], "uf_cb_timer", 1, nil, "timer",
         { db = db, key = "castbarShowTimer", label = L["Show Timer"], onChanged = changed })
-    local function timerOff(d) return off(d) or (d and d.castbarShowTimer == false) end
+    local timerOff = UFO.Gate(L["Show Timer"], function(d) return d and d.castbarShowTimer == false end, off)
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Format"], {
         REMAINING = L["Remaining"], REMAINING_TOTAL = L["Remaining / Total"], ELAPSED = L["Elapsed"],
         _order = { "REMAINING", "REMAINING_TOTAL", "ELAPSED" } }, db, "castbarTimerFormat", changed), 55)
@@ -1142,7 +1196,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
     local Open, Close = Tools(self, Add)
     local function changed() self:RefreshStates(); RefreshFrames() end
-    local function off(d) return not (d and d.classPowerEnabled) end
+    local off = UFO.Gate(L["Class Power"], function(d) return not (d and d.classPowerEnabled) end)
     local function detached(d) return d and d.classPowerDetached end
     local function attached(d) return not detached(d) end
     local w
@@ -1225,7 +1279,7 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
     local Open, Close = Tools(self, Add)
     local function changed() self:RefreshStates(); RefreshFrames() end
     local function shown(key) return UFO.VisControlShown(rec, unit, key) end
-    local function off(d) return not (d and d.portraitEnabled) end
+    local off = UFO.Gate(L["Portrait"], function(d) return not (d and d.portraitEnabled) end)
     local w
 
     local band = Open(L["Settings"], "uf_po_settings", 1, function(d)
@@ -1295,7 +1349,7 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     for _, c in ipairs(UFO.UNIT_ICON_CARDS) do
         if UFO.CardShown(rec, unit, c.card) then
             local pre = c.prefix
-            local function off(d) return not (d and d[pre .. "Enabled"]) end
+            local off = UFO.Gate(c.label(), function(d) return not (d and d[pre .. "Enabled"]) end)
             col = (col % 2) + 1
             local band = Open(c.label(), c.key, col, function(d) return OnOff(d, pre .. "Enabled") end, "icons",
                 { db = db, key = pre .. "Enabled", label = L["Show"], onChanged = changed })
@@ -1352,7 +1406,8 @@ function UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
     band:AddWidget(GUI:CreateSlider(self.child, L["Units Per Row"], 1, count, 1, db, "bossUnitsPerRow", changed), 55)
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Row Spacing"], -5, 50, 1, db, "bossRowSpacing", changed), 55)
     -- Only matters once a row wraps.
-    w.disableOn = function(d) return not (d and tonumber(d.bossUnitsPerRow) and d.bossUnitsPerRow < count) end
+    w.disableOn = UFO.Explain(function(d) return not (d and tonumber(d.bossUnitsPerRow) and d.bossUnitsPerRow < count) end,
+        function() return L["Only used when the frames wrap into more than one row"] end)
     band:AddWidget(GUI:CreateButtonRow(self.child, {
         { label = L["Edit in Mover"], width = 120, icon = "open_with",
           onClick = function() UFO.EditInMover("boss") end },
@@ -1447,6 +1502,8 @@ function UFO.PageBuilder(rec, unit)
         elseif rec.kind == "bosslayout" then
             UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
         end
+        -- Every gated control says why it is grey (GREYED CONTROLS SAY WHY).
+        UFO.ApplyDisableReasons(self.children)
     end
 end
 

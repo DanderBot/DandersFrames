@@ -653,7 +653,8 @@ do
         return {
             OpenSection = function(_, label, key, col, summary, dimFn, hideFn, builder, toggle)
                 local b = Frame(); b.cardKey = key; b.summary = summary
-                b.AddWidget = function(self, w) self.last = w; return w end
+                b.groupChildren = {}
+                b.AddWidget = function(self, w) self.last = w; self.groupChildren[#self.groupChildren + 1] = { widget = w }; return w end
                 if toggle then toggles[key] = toggle end
                 Add(b, 36, col)
                 return b
@@ -665,6 +666,7 @@ do
         built, toggles, added = {}, {}, {}
         local pg = made.pages["uf_" .. unit .. "_" .. kind]
         pg.children = {}
+        page.children = pg.children     -- Add appends to `page.children`: make it this page's
         pg.RefreshStates = function() end
         pg.builder(pg, UF:GetUnitDB(unit), Add, noop, noop)
         local cardKeys, keys = {}, {}
@@ -730,6 +732,40 @@ do
     for _, x in ipairs(built) do if x.kind == "buttons" then editRow = x end end
     check(editRow and editRow.args[1][1].label == "Edit in Mover", "Arrangement: Edit in Mover")
     eq(table.concat(UFO.Prefixes("bosslayout"), ","), "boss", "Boss Layout: Reset / Copy act on the boss keys")
+
+    print("-- Greyed controls say why")
+    cards, keys, byKey = BuildPage("player", "castbar")
+    local function why(k, d) local w = byKey[k]; return w and type(w.disableReason) == "function" and w.disableReason(d) or nil end
+    eq(why("castbarLatency", { castbarEnabled = false }), "Turn on Cast Bar to change this", "Cast Bar off: says to turn it on")
+    eq(why("castbarLatency", { castbarEnabled = true }), nil, "...live: no reason")
+    eq(why("castbarSpellFont", { castbarEnabled = true, castbarShowSpell = false }), "Turn on Show Spell Name to change this",
+       "a nested gate names its own switch...")
+    eq(why("castbarSpellFont", { castbarEnabled = false, castbarShowSpell = false }), "Turn on Cast Bar to change this",
+       "...unless the feature itself is off, which comes first")
+    eq(why("castbarIconSize", { castbarEnabled = true, castbarShowIcon = false }), "Turn on Show Icon to change this", "Icon card")
+    eq(why("castbarBorderSize", { castbarEnabled = true, castbarBorderEnabled = false }), "Turn on Show Border to change this",
+       "the border card's gate")
+    local gated, explained = 0, 0
+    for _, w in ipairs(built) do
+        if w.disableOn then
+            gated = gated + 1
+            if w.disableReason then explained = explained + 1 end
+        end
+    end
+    check(gated > 20, "Cast Bar: many gated controls (" .. gated .. ")")
+    eq(explained, gated, "Cast Bar: every gated control has a reason")
+    cards, keys, byKey = BuildPage("boss", "bosslayout")
+    eq(why("bossRowSpacing", { bossUnitsPerRow = 5 }), "Only used when the frames wrap into more than one row",
+       "Boss Row Spacing explains why it is grey")
+    eq(why("bossRowSpacing", { bossUnitsPerRow = 2 }), nil, "...and says nothing while live")
+    cards, keys, byKey = BuildPage("player", "portrait")
+    eq(why("portraitSize", { portraitEnabled = false }), "Turn on Portrait to change this", "Portrait")
+    cards, keys, byKey = BuildPage("target", "unitIcons")
+    eq(why("classificationSize", { classificationEnabled = false }), "Turn on Elite / Rare to change this", "Unit Icons: per card")
+    cards, keys, byKey = BuildPage("player", "visibility")
+    eq(why("visCombat", { visAlways = true }), "Turn off Always to change this", "Visibility: Always has to go OFF")
+    local d = { visAlways = true }
+    eq(byKey.visCombat and byKey.visCombat.disableOn(d), true, "(the gate itself is unchanged)")
 
     print("-- Stage F pages: Class Power")
     cards, keys, byKey = BuildPage("player", "classpower")
