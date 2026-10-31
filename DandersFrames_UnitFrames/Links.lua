@@ -732,7 +732,7 @@ end
 -- current version for a later step must not run an earlier one a second time (this
 -- one would turn a Player-follows-Target link the user made since round again).
 -- ============================================================
-Links.VERSION = 3
+Links.VERSION = 4
 function Links:RepairOrientation(root)
     local g = Global(root)
     if (tonumber(g.unitLinksVersion) or 1) >= 2 then return false end
@@ -749,39 +749,37 @@ function Links:RepairOrientation(root)
 end
 
 -- ============================================================
--- ONE-TIME TOP-UP (unitLinksVersion 3): a Player/Target link keeps apart every
--- key whose two defaults deliberately differ (DeliberateDifferences), worked out
--- when the link is made. The aura rows' defaults added two -- the buff and debuff
--- rows' vertical offsets (Target shows buffs then debuffs under the frame, Player
--- debuffs then buffs) -- and a link made before them does not know: its next
--- apply would copy one frame's rows onto the other's, swapping them. Added once,
--- for the pair either way round; nothing is copied, nothing is taken out.
--- ⚠ ONLY THESE KEYS, never the whole DeliberateDifferences set: a link the user
--- has since set to "same" would otherwise gain its anchors and growth too, and
--- stop sharing them.
+-- ONE-TIME CLEAN-UP (unitLinksVersion 4). Version 3 kept the aura rows' vertical
+-- offsets apart on a Player/Target link, for a layout that stacked the rows in a
+-- different order on each frame. The rows are now buffs above and debuffs below on
+-- both frames, with the same offsets, so the two keys are shared again: they come
+-- back out of the link's kept keys once -- only where they really are no longer a
+-- deliberate difference, so a link that keeps them for some other reason keeps
+-- them. Nothing is copied. A profile that never reached version 3 has nothing to
+-- take out. (Version 3's own step is gone; its number stays spent.)
 -- ============================================================
-Links.KEPT_V3 = { "buffOffsetY", "debuffOffsetY" }
-function Links:TopUpKept(root)
+Links.RETIRED_KEPT_V4 = { "buffOffsetY", "debuffOffsetY" }
+function Links:DropRetiredKept(root)
     local g = Global(root)
-    if (tonumber(g.unitLinksVersion) or 1) >= 3 then return 0 end
-    g.unitLinksVersion = 3
+    if (tonumber(g.unitLinksVersion) or 1) >= 4 then return 0 end
+    g.unitLinksVersion = 4
     local d = Links.DEFAULT
     local link, follower, leader = self:LinkOf(root, d.follower)
     local pair = link and ((follower == d.follower and leader == d.leader)
         or (follower == d.leader and leader == d.follower))
-    if not pair or type(link.elements) ~= "table" then return 0 end
-    local differ = Links.DeliberateDifferences(follower, leader, link.elements)
-    local added = 0
-    for _, key in ipairs(Links.KEPT_V3) do
-        if differ[key] then
-            if type(link.except) ~= "table" then link.except = {} end
-            if not link.except[key] then
-                link.except[key] = true
-                added = added + 1
-            end
+    if not pair or type(link.except) ~= "table" then return 0 end
+    local differ = type(link.elements) == "table"
+        and Links.DeliberateDifferences(follower, leader, link.elements) or {}
+    local dropped = 0
+    for _, key in ipairs(Links.RETIRED_KEPT_V4) do
+        if link.except[key] and not differ[key] then
+            link.except[key] = nil
+            dropped = dropped + 1
         end
     end
-    return added
+    -- A link keeps no `except` table when it keeps nothing (SetLink's shape).
+    if next(link.except) == nil then link.except = nil end
+    return dropped
 end
 
 -- ============================================================
@@ -795,7 +793,7 @@ function Links:Ensure(root)
     if type(g.unitLinks) ~= "table" then g.unitLinks = {} end
     self:Migrate(root)
     self:RepairOrientation(root)
-    self:TopUpKept(root)
+    self:DropRetiredKept(root)
     if first then self:CreateDefault(root) end
 end
 

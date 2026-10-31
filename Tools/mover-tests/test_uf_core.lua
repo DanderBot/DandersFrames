@@ -100,8 +100,17 @@ eq(TT.resourceBarEnabled, false, "target of target: power bar off")
 eq(UF:GetUnitDB("pet").resourceBarEnabled, false, "pet: power bar off")
 eq(P.showBuffs, false, "player: buffs off")
 eq(T.showDebuffs, true, "target: debuffs on")
-eq(T.debuffFilterMine, true, "target: debuffs you cast")
-eq(T.directDebuffShowAll, false, "...not every debuff")
+eq(T.directDebuffShowAll, true, "target: every caster's debuffs")
+eq(T.debuffFilterMine, true, "...yours only once Show All is turned off")
+for _, u in ipairs({ "focus", "boss" }) do
+    local d = UF:GetUnitDB(u)
+    eq(d.directDebuffShowAll, false, u .. ": not every debuff")
+    eq(d.debuffFilterMine, true, u .. ": ...yours only")
+end
+for _, u in ipairs({ "target", "focus", "boss" }) do
+    local d = UF:GetUnitDB(u)
+    eq(tostring(d.directBuffShowAll) .. "/" .. tostring(d.directBuffOnlyMine), "true/false", u .. ": buffs from any caster")
+end
 eq(P.debuffFilterMine ~= true, true, "player: debuff filter not narrowed to yours")
 eq(T.textDesignerPreset, UF.TEXT_PRESET, "target: the unit-frame text preset")
 eq(TT.textDesignerPreset, UF.TEXT_PRESET_SMALL, "target of target: the small one")

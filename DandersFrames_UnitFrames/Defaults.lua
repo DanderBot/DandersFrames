@@ -199,7 +199,10 @@ local function Detached(unit, edge, x, y)
                         align = "center", offsetX = 0, offsetY = 0 } }
 end
 
--- Enemy-frame aura filter: debuffs you cast, buffs shown in full.
+-- Enemy-frame aura filter: debuffs you cast, buffs shown in full (any caster).
+-- Target widens its debuffs to every caster's (PER_UNIT below); Focus and Boss keep
+-- yours only. Sated, Exhaustion and the rest of DandersFrames' default debuff
+-- blacklist reach every unit through the chain (debuffBlacklist, party defaults).
 local ENEMY_AURAS = {
     showDebuffs = true,
     directDebuffShowAll = false,
@@ -209,35 +212,33 @@ local ENEMY_AURAS = {
     debuffFilterPriority = false,
     debuffFilterCrowdControl = false,
     debuffFilterDispellable = false,
+    directBuffShowAll = true,
+    directBuffOnlyMine = false,
 }
 
 -- ============================================================
 -- AURA ROWS
--- Player, Target and Focus hang their buff and debuff rows UNDER the frame, one
--- full row each: anchored on a bottom corner, growing sideways and DOWN, each row
--- pushed down by whole rows (icon + gap). A row's offset lives in its own scaled
--- space, as its icons do, so the gap holds at any Scale; a bigger Size needs a
--- bigger offset to keep it.
--- ⚠ FIXED OFFSETS, ONE ROW EACH. The aura containers cannot anchor one row to the
--- other, so the second row sits one buff row down whether or not the first has
--- anything in it, and Max = Icons Per Row keeps each to a single row.
--- Target: buffs, then debuffs, from the LEFT edge growing right. Player is its
--- mirror for the link (Links.MirrorDefaults turns Player's anchors and growth into
--- Target's): from the RIGHT edge growing left, with the rows the other way up --
--- debuffs (shown) right under the frame, buffs (off by default) under them -- so
--- each frame's first row is the one it shows. The vertical offsets therefore
--- differ on purpose, and the default link keeps them per frame
--- (Links.DeliberateDifferences).
--- Size 20 / 2 gap: 8 buffs span 174px (inside Target's 220 and Focus' 180), and 5
--- debuffs 108px, which keeps Player's row, growing left from its right edge, clear
--- of the pet frame tucked under its left half.
+-- Player, Target and Focus put BUFFS ABOVE the frame and DEBUFFS BELOW it, one row
+-- each, flush with an outer corner: buffs on a top corner growing sideways then UP,
+-- debuffs on a bottom corner growing sideways then DOWN, so extra rows wrap away
+-- from the frame. The flow pins a row's first icon by its anchor corner to the
+-- frame's same corner, so a row outside the frame is pushed out by one icon + gap
+-- (offset Y +/- AURA_ROW). That offset lives in the row's scaled space, as its icons
+-- do, so the gap holds at any Scale; a bigger Size needs a bigger offset to keep it.
+-- Target from the LEFT edge growing right. Player is its mirror for the link
+-- (Links.MirrorDefaults turns Player's anchors and growth into Target's): from the
+-- RIGHT edge growing left. Every row key the two share is equal or mirrored, so the
+-- default link keeps nothing about the rows apart.
+-- ⚠ A debuff row under a frame whose cast bar is attached under it is pushed further
+-- down by the cast bar's band at RUN time (CastBar.lua, AURA ROW RESERVE), not here.
+-- Size 22 / spacing 1: 8 buffs span 183px (inside Target's 220), 5 debuffs 114px.
 -- ============================================================
-local AURA_SIZE, AURA_GAP = 20, 2
+local AURA_SIZE, AURA_GAP = 22, 1
 local AURA_ROW = AURA_SIZE + AURA_GAP
 
 -- Shared by Player, Target and Focus. Sizes and counts are LOOK keys, which the
 -- default link shares rather than mirrors, so Player and Target must agree on them.
-local UNDER_FRAME_AURAS = {
+local OUTSIDE_FRAME_AURAS = {
     buffSize = AURA_SIZE, buffPaddingX = AURA_GAP, buffPaddingY = AURA_GAP,
     buffMax = 8, buffWrap = 8,
     debuffSize = AURA_SIZE, debuffPaddingX = AURA_GAP, debuffPaddingY = AURA_GAP,
@@ -245,8 +246,10 @@ local UNDER_FRAME_AURAS = {
     -- Flush with the frame's edge. Set here, not mirrored: a mirror of 0 is 0, so
     -- MirrorDefaults leaves it and Target would fall back to the party default.
     buffOffsetX = 0, debuffOffsetX = 0,
+    -- One icon + gap above / below the frame. Vertical: the mirror leaves it alone.
+    buffOffsetY = AURA_ROW, debuffOffsetY = -AURA_ROW,
 }
-local UNDER_FRAME = { player = true, target = true, focus = true }
+local OUTSIDE_FRAME = { player = true, target = true, focus = true }
 
 -- Boss: debuffs (yours) in one row to the LEFT of the frame, growing left, as tall
 -- as the frame (40). Buffs are off; turned on, they sit in one row to the RIGHT.
@@ -260,10 +263,10 @@ local PER_UNIT = {
         healthColorMode = "CLASS",
         resourceBarEnabled = true, resourceBarHeight = 6,
         showBuffs = false, showDebuffs = true,
-        -- Under the frame from its right edge, growing left (AURA ROWS above):
-        -- debuffs first, buffs (off) the row below.
-        debuffAnchor = "BOTTOMRIGHT", debuffGrowth = "LEFT_DOWN", debuffOffsetY = -AURA_ROW,
-        buffAnchor = "BOTTOMRIGHT", buffGrowth = "LEFT_DOWN", buffOffsetY = -2 * AURA_ROW,
+        -- From the right edge, growing left (AURA ROWS above): debuffs below the
+        -- frame, buffs (off) above it.
+        debuffAnchor = "BOTTOMRIGHT", debuffGrowth = "LEFT_DOWN",
+        buffAnchor = "TOPRIGHT", buffGrowth = "LEFT_UP",
         oorEnabled = false,
         leaderIconEnabled = true, readyCheckIconEnabled = true, summonIconEnabled = true,
         resurrectionIconEnabled = true, phasedIconEnabled = true,
@@ -291,11 +294,11 @@ local PER_UNIT = {
         frameWidth = 220, frameHeight = 46,
         healthColorMode = "CLASS_REACTION",
         resourceBarEnabled = true, resourceBarHeight = 6,
-        showBuffs = true, directBuffShowAll = true, directBuffOnlyMine = false,
-        -- Buffs right under the frame, debuffs the row below (AURA ROWS above). The
-        -- anchors and growth (bottom-left, growing right) are Player's mirrored, set
-        -- by Links.MirrorDefaults below; only the rows' order is Target's own.
-        buffOffsetY = -AURA_ROW, debuffOffsetY = -2 * AURA_ROW,
+        showBuffs = true,
+        -- Every caster's debuffs (ENEMY_AURAS keeps the rest of the enemy filter, for
+        -- when Show All is turned off). Buffs above the frame, debuffs below, from the
+        -- left edge growing right: Player's rows mirrored, by Links.MirrorDefaults below.
+        directDebuffShowAll = true,
         oorEnabled = true,
         -- It IS the target, always: a selection outline would never turn off.
         selectionHighlightMode = "NONE",
@@ -325,10 +328,10 @@ local PER_UNIT = {
         healthColorMode = "CLASS_REACTION",
         resourceBarEnabled = true, resourceBarHeight = 4,
         showBuffs = false,
-        -- Target's rows (AURA ROWS above): buffs under the frame from its left edge,
-        -- debuffs the row below. Buffs stay off, so the debuff row sits one row down.
-        buffAnchor = "BOTTOMLEFT", buffGrowth = "RIGHT_DOWN", buffOffsetY = -AURA_ROW,
-        debuffAnchor = "BOTTOMLEFT", debuffGrowth = "RIGHT_DOWN", debuffOffsetY = -2 * AURA_ROW,
+        -- Target's rows (AURA ROWS above): debuffs (yours) below the frame from its
+        -- left edge; buffs (off) above it. 7 buffs to a row: 8 would overhang its 180px.
+        buffAnchor = "TOPLEFT", buffGrowth = "RIGHT_UP", buffWrap = 7,
+        debuffAnchor = "BOTTOMLEFT", debuffGrowth = "RIGHT_DOWN",
         oorEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = -280, y = -300 },
@@ -355,14 +358,14 @@ local PER_UNIT = {
         frameWidth = 110, frameHeight = 24,
         healthColorMode = "CLASS",
         resourceBarEnabled = false,
-        -- A few small debuffs (what you would dispel off your pet) in one row under
-        -- the frame from its left edge, growing right: 4 x 16px spans 70 of its 110px.
+        -- A few debuffs (what you would dispel off your pet) in one row under the
+        -- frame from its left edge, growing right: 4 x 22px spans 91 of its 110px.
         -- Buffs stay off.
         showBuffs = false, showDebuffs = true,
-        debuffSize = 16, debuffPaddingX = AURA_GAP, debuffPaddingY = AURA_GAP,
+        debuffSize = AURA_SIZE, debuffPaddingX = AURA_GAP, debuffPaddingY = AURA_GAP,
         debuffMax = 4, debuffWrap = 4,
         debuffAnchor = "BOTTOMLEFT", debuffGrowth = "RIGHT_DOWN",
-        debuffOffsetX = 0, debuffOffsetY = -(16 + AURA_GAP),
+        debuffOffsetX = 0, debuffOffsetY = -AURA_ROW,
         oorEnabled = false,
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
         castbarHeight = 12,
@@ -387,6 +390,8 @@ local PER_UNIT = {
         buffMax = 4, buffWrap = 4,
         buffAnchor = "TOPRIGHT", buffGrowth = "RIGHT_DOWN",
         buffOffsetX = AURA_ROW, buffOffsetY = 0,
+        -- ⚠ Both rows are anchored to a TOP corner, so the attached cast bar under
+        -- each boss never pushes them (CastBar.lua, AURA ROW RESERVE).
         oorEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = 480, y = 120 },
@@ -421,8 +426,8 @@ for _, unit in ipairs(UF.UNITS) do
         for k, v in pairs(ENEMY_AURAS) do t[k] = v end
     end
     if HOSTILE_SHOWN[unit] then t.aggroHighlightMode = "NONE" end
-    if UNDER_FRAME[unit] then
-        for k, v in pairs(UNDER_FRAME_AURAS) do t[k] = v end
+    if OUTSIDE_FRAME[unit] then
+        for k, v in pairs(OUTSIDE_FRAME_AURAS) do t[k] = v end
     end
     for k, v in pairs(PER_UNIT[unit] or {}) do t[k] = v end
     UF.UnitDefaults[unit] = t
