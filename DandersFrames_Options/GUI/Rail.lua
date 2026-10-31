@@ -354,6 +354,13 @@ function GUI:GetPlaceholderPanel()
     note:SetText(L["Coming in a later update."])
     panel.Note = note
 
+    -- The module's own action (def.placeholderAction), under the note.
+    local action = CreateFrame("Button", nil, panel, "BackdropTemplate")
+    action:SetPoint("TOP", note, "BOTTOM", 0, -14)
+    GUI:StyleButton(action, { width = 140, height = 26, text = "" })
+    action:Hide()
+    panel.Action = action
+
     panel:Hide()
     GUI.PlaceholderPanel = panel
     return panel
@@ -379,7 +386,23 @@ function GUI:PaintPlaceholderPanel(def)
     if not panel then return end
     panel.Icon:SetTexture(def.icon)
     panel.Title:SetText(GUI:ModuleLabel(def) or "")
-    panel.Note:SetText(L["Coming in a later update."])
+    -- A module may say something else than "coming soon" (def.placeholderNote) and
+    -- offer one action under it (def.placeholderAction -> { label, onClick }):
+    -- an installed module that is switched on but waiting for a reload says so,
+    -- with the reload a click away.
+    local note = def.placeholderNote and def.placeholderNote()
+    panel.Note:SetText(note or L["Coming in a later update."])
+    local act = def.placeholderAction and def.placeholderAction()
+    if panel.Action then
+        if type(act) == "table" and act.label then
+            if panel.Action.Text then panel.Action.Text:SetText(act.label) end
+            panel.Action:SetScript("OnClick", act.onClick)
+            panel.Action:Show()
+        else
+            panel.Action:SetScript("OnClick", nil)
+            panel.Action:Hide()
+        end
+    end
     panel:Show()
 end
 
