@@ -208,7 +208,20 @@ function CP:Layout(f, res)
     end
     res = res or (not f.dfUFPreview and CP:Resolve(nil, nil, nil, db)) or cp.previewRes
     cp.res = res
-    local w = db.classPowerMatchWidth ~= false and K.FrameWidth(f, db) or (tonumber(db.classPowerWidth) or 220)
+    local showBorder = db.classPowerBorderEnabled ~= false
+    local w
+    if db.classPowerMatchWidth ~= false then
+        -- K.Border draws OUTSIDE each pip, so the bar is narrowed by the border
+        -- on each side: its outer edge then lines up with the frame's.
+        w = K.FrameWidth(f, db)
+        if showBorder then
+            local bs = tonumber(db.classPowerBorderSize) or 1
+            if bs < 1 then bs = 1 end
+            w = w - 2 * bs
+        end
+    else
+        w = tonumber(db.classPowerWidth) or 220
+    end
     local h = tonumber(db.classPowerHeight) or 6
     local gap = tonumber(db.classPowerGap) or 2
     cp:SetSize(w, h)
@@ -218,7 +231,6 @@ function CP:Layout(f, res)
     local tex = db.classPowerTexture or K.BAR
     local r, g, b = CP:Color(db, res)
     local er, eg, eb, ea = K.RGBA(db.classPowerEmptyColor, 0.15, 0.15, 0.15, 0.6)
-    local showBorder = db.classPowerBorderEnabled ~= false
     local single = res and (res.kind == "stagger" or db.classPowerMode == "BAR")
     local n = (res and not single) and CP:MaxPips(res) or 0
     cp.count = n

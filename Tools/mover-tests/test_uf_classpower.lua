@@ -161,7 +161,8 @@ for i = 1, 5 do
     eq(pip._last.SetMinMaxValues[2], i, "pip " .. i .. ": max i")
     eq(pip._last.SetValue[1], secretPower, "pip " .. i .. ": the raw (secret) value")
 end
-eq(cp.pips[1]._w, (208 - 2 * 4) / 5, "pip width shares the frame width less the gaps")
+eq(cp.pips[1]._w, (208 - 2 * 1 - 2 * 4) / 5,
+    "pip width shares the frame width less the gaps, and less the 1px border drawn outside each end")
 check(cp:IsShown(), "shown")
 eq(powerArgs[2], 4, "read as Enum.PowerType.ComboPoints")
 maxPower = Secret("max")
