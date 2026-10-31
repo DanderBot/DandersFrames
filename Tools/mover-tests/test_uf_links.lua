@@ -195,7 +195,25 @@ do
                          "portraitMirror", "textDesignerPreset", "healthColorMode", "visAlways" }) do
         eq(Links.Aspect(k), "look", "look: " .. k)
     end
-    eq(#layout, 157, "the layout set is the size it was reviewed at (157 keys); a change here wants a look")
+    -- 161 = 157 + the classification dragon's side, x, y and tail x (reviewed: all
+    -- four move with the frame's end).
+    eq(#layout, 161, "the layout set is the size it was reviewed at (161 keys); a change here wants a look")
+
+    -- The classification dragon / border: the Unit Icons element, layout = where it sits.
+    for _, k in ipairs({ "classDragonEnabled", "classDragonSize", "classDragonSide", "classDragonX",
+                         "classDragonY", "classDragonTailX", "classDragonElite", "classDragonBossColor",
+                         "classBorderEnabled", "classBorderSize" }) do
+        eq(Links.OwnerOf(k), "unitIcons", "Unit Icons owns " .. k)
+    end
+    for _, k in ipairs({ "classDragonSide", "classDragonX", "classDragonY", "classDragonTailX" }) do
+        eq(Links.Aspect(k), "layout", "layout: " .. k)
+    end
+    for _, k in ipairs({ "classDragonEnabled", "classDragonSize", "classDragonRareElite",
+                         "classDragonEliteColor", "classBorderEnabled", "classBorderSize" }) do
+        eq(Links.Aspect(k), "look", "look: " .. k)
+    end
+    eq(Links.OwnerOf("combatIconBorderSize"), "icons", "the combat icon's border: the Icons element (DF's page)")
+    eq(Links.Aspect("combatIconBorderColor"), "look", "...a look key")
 end
 
 -- ============================================================
@@ -217,6 +235,13 @@ do
     eq(M("castbarSpellY", 2), 2, "a y position never changes")
     eq(tostring(M("portraitX", 0)), "0", "zero stays 0, never -0")
     eq(M("castbarDetached", true), true, "a boolean layout key copies unchanged")
+    eq(M("classDragonSide", "RIGHT"), "LEFT", "the dragon: right end -> left end")
+    eq(M("classDragonSide", "LEFT"), "RIGHT", "...left -> right")
+    eq(M("classDragonSide", "BOTH"), "BOTH", "...both stays both")
+    eq(M("classDragonX", 5), -5, "the dragon's x negates")
+    eq(M("classDragonTailX", -2), 2, "...and the tail's")
+    eq(M("classDragonY", 3), 3, "...its y never changes")
+    eq(M("classDragonEliteColor", { r = 1 }).r, 1, "...its colours are look")
     -- Exclusions.
     eq(M("buffBorderShadowOffsetX", 2), 2, "excluded: shadow offsets")
     eq(M("buffBorderGradientDirection", "LEFT"), "LEFT", "excluded: gradient directions")

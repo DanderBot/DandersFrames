@@ -320,6 +320,218 @@ check(PP.dfUFIcons.resting:IsShown(), "player preview: the resting ZZZ shows")
 check(PP.dfUFIcons.resting.glow:IsShown(), "player preview: the glow shows when on")
 check(PP.dfUFIcons.resting:GetScript("OnUpdate") ~= nil, "player preview: animated")
 PP.dfDB.restingIconGlow = false
+
+-- ============================================================
+-- CLASSIFICATION DRAGON / BORDER / COMBAT ICON BORDER
+-- ============================================================
+local function near(a, b) return type(a) == "number" and math.abs(a - b) < 1e-6 end
+local REF = 46 / 136.35
+
+print("-- Dragon: defaults per unit")
+eq(UF:GetUnitDB("target").classDragonEnabled, true, "target: dragon on")
+eq(UF:GetUnitDB("focus").classDragonEnabled, true, "focus: dragon on")
+eq(UF:GetUnitDB("boss").classDragonEnabled, false, "boss: off (every boss frame is a boss)")
+eq(UF:GetUnitDB("player").classDragonEnabled, false, "player: off (no classification)")
+eq(UF:GetUnitDB("pet").classDragonEnabled, false, "pet: off")
+eq(UF:GetUnitDB("target").classDragonSize, 100, "size 100%")
+eq(UF:GetUnitDB("target").classDragonSide, "RIGHT", "the right end")
+eq(UF:GetUnitDB("target").classBorderEnabled, false, "class border: off")
+eq(UF:GetUnitDB("player").combatIconBorderEnabled, false, "combat icon border: off")
+for _, sfx in ipairs({ "Elite", "Rare", "RareElite", "Boss" }) do
+    eq(UF:GetUnitDB("target")["classDragon" .. sfx], true, sfx .. ": on")
+    eq(type(UF:GetUnitDB("target")["classDragon" .. sfx .. "Color"]), "table", sfx .. ": a colour")
+end
+check(T.dfUFIcons.dragon and T.dfUFIcons.classBorder, "target: a dragon and a class border built")
+check(not P.dfUFIcons.dragon and not P.dfUFIcons.classBorder, "player: neither")
+
+print("-- Dragon: the pieces, size 100")
+local function byPiece(list)
+    local o = {}
+    for _, e in ipairs(list) do o[e.side .. e.piece] = e end
+    return o
+end
+local L100 = byPiece(IN.DragonLayout({ classDragonSize = 100 }))
+local top, bot = L100.RIGHTTOP, L100.RIGHTBOTTOM
+check(top and bot and not L100.LEFTTOP, "RIGHT: two pieces, right end only")
+check(near(top.w, 197 * REF) and near(top.h, 61 * REF), "top: the used art (197x61) at 46/136.35")
+eq(math.floor(top.w + 0.5) .. "x" .. math.floor(top.h + 0.5), "66x21", "...~66x21")
+check(near(bot.w, 176 * REF) and near(bot.h, 41 * REF), "bottom: 176x41 at the same scale")
+eq(math.floor(bot.w + 0.5) .. "x" .. math.floor(bot.h + 0.5), "59x14", "...~59x14")
+eq(top.point .. ">" .. top.relPoint, "BOTTOMRIGHT>TOPRIGHT", "top: its bottom-right on the frame's top-right")
+eq(top.x .. "," .. top.y, "0,0", "...flush")
+eq(bot.point .. ">" .. bot.relPoint, "TOPRIGHT>BOTTOMRIGHT", "bottom: its top-right on the frame's bottom-right")
+eq(bot.x, -2, "...2px INSIDE the frame's right edge")
+check(near(top.coords[2], 197 / 256) and near(top.coords[4], 61 / 128) and top.coords[1] == 0, "top: texcoords crop the used art")
+check(near(bot.coords[2], 176 / 256) and near(bot.coords[4], 41 / 128), "bottom: likewise")
+local fh = IN.DragonLayout({ classDragonSize = 100, frameHeight = 80 })
+check(near(fh[1].w, top.w), "the pieces never follow the frame's height")
+
+print("-- Dragon: size 150, clamps")
+local L150 = byPiece(IN.DragonLayout({ classDragonSize = 150 }))
+check(near(L150.RIGHTTOP.w, 197 * 1.5 * REF) and near(L150.RIGHTBOTTOM.h, 41 * 1.5 * REF), "150%: both pieces 1.5x")
+eq(L150.RIGHTBOTTOM.x, -2, "...the tail inset stays 2px")
+check(near(byPiece(IN.DragonLayout({ classDragonSize = 10 })).RIGHTTOP.w, 197 * 0.5 * REF), "below 50: 50")
+check(near(byPiece(IN.DragonLayout({ classDragonSize = 900 })).RIGHTTOP.w, 197 * 2 * REF), "above 200: 200")
+
+print("-- Dragon: offsets, tail")
+local LO = byPiece(IN.DragonLayout({ classDragonX = 4, classDragonY = -3, classDragonTailX = -5 }))
+eq(LO.RIGHTTOP.x .. "," .. LO.RIGHTTOP.y, "4,-3", "X / Y move the top piece")
+eq(LO.RIGHTBOTTOM.x .. "," .. LO.RIGHTBOTTOM.y, "-3,-3", "...and the bottom, plus its own tail X (4 - 5 - 2)")
+
+print("-- Dragon: LEFT mirrors")
+local LL = byPiece(IN.DragonLayout({ classDragonSide = "LEFT", classDragonX = -4, classDragonTailX = 5 }))
+check(LL.LEFTTOP and LL.LEFTBOTTOM and not LL.RIGHTTOP, "LEFT: the left end only")
+eq(LL.LEFTTOP.point .. ">" .. LL.LEFTTOP.relPoint, "BOTTOMLEFT>TOPLEFT", "top: bottom-left on the frame's top-left")
+eq(LL.LEFTBOTTOM.point .. ">" .. LL.LEFTBOTTOM.relPoint, "TOPLEFT>BOTTOMLEFT", "bottom: top-left on the frame's bottom-left")
+check(near(LL.LEFTTOP.coords[1], 197 / 256) and LL.LEFTTOP.coords[2] == 0, "top: flipped by texcoord (left > right)")
+check(near(LL.LEFTBOTTOM.coords[1], 176 / 256) and LL.LEFTBOTTOM.coords[2] == 0, "bottom: flipped too")
+-- The mirror of { RIGHT, X 4, tail -5 } (what a mirrored link stores) is its exact mirror image.
+eq(LL.LEFTTOP.x, -LO.RIGHTTOP.x, "a mirrored link's top piece: the mirror image")
+eq(LL.LEFTBOTTOM.x, -LO.RIGHTBOTTOM.x, "...and its bottom piece (inset inward on the left)")
+
+print("-- Dragon: BOTH")
+local LB = byPiece(IN.DragonLayout({ classDragonSide = "BOTH", classDragonX = 3, classDragonTailX = -1 }))
+check(LB.RIGHTTOP and LB.RIGHTBOTTOM and LB.LEFTTOP and LB.LEFTBOTTOM, "both ends: four pieces")
+eq(LB.RIGHTTOP.x .. "," .. LB.RIGHTBOTTOM.x, "3,0", "right end: X 3, tail 3 - 1 - 2")
+eq(LB.LEFTTOP.x .. "," .. LB.LEFTBOTTOM.x, "-3,0", "left end: its mirror image")
+
+print("-- Dragon: on the frame")
+class = "elite"
+local tdbD = UF:GetUnitDB("target")
+tdbD.classificationStyle = nil
+IN:Layout(T)
+local D = T.dfUFIcons.dragon
+check(D:IsShown(), "elite: shown")
+check(D.tex.RIGHT.TOP:IsShown() and D.tex.RIGHT.BOTTOM:IsShown(), "...the right end's pieces")
+check(not D.tex.LEFT.TOP:IsShown() and not D.tex.LEFT.BOTTOM:IsShown(), "...not the left end's")
+eq(D.tex.RIGHT.TOP._texture, IN.DRAGON.TOP.file, "...the top art")
+eq(D.tex.RIGHT.BOTTOM._texture, IN.DRAGON.BOTTOM.file, "...the bottom art")
+local tp = D.tex.RIGHT.TOP._points[#D.tex.RIGHT.TOP._points]
+eq(tp and tp[1], "BOTTOMRIGHT", "anchored on the frame:"); eq(tp and tp[2], T, "...the unit button")
+eq(tp and tp[3], "TOPRIGHT", "...its top-right")
+local v = D.tex.RIGHT.TOP._vertex
+check(v and v.r == 1 and near(v.g, 0.80) and near(v.b, 0.32), "elite: gold")
+eq(D:GetFrameLevel() - T:GetFrameLevel(), IN.DRAGON_LEVEL, "one level above the class border")
+eq(T.dfUFIcons.classBorder:GetFrameLevel() - T:GetFrameLevel(), IN.CLASS_BORDER_LEVEL, "the class border above DF's (+14)")
+check(IN.DRAGON_LEVEL > IN.CLASS_BORDER_LEVEL and IN.CLASS_BORDER_LEVEL > 14, "dragon > class border > DF's frame border")
+local function tint() local x = D.tex.RIGHT.TOP._vertex; return x and string.format("%.2f,%.2f,%.2f", x.r, x.g, x.b) end
+class = "rare"; IN:Update(T)
+eq(tint(), "0.88,0.90,0.94", "rare: silver")
+class = "rareelite"; IN:Update(T)
+eq(tint(), "0.45,0.70,1.00", "rare elite: blue")
+class = "worldboss"; IN:Update(T)
+check(D:IsShown(), "worldboss: shown (counts as boss)")
+eq(tint(), "0.95,0.43,0.28", "...boss red")
+tdbD.classDragonBossColor = { r = 0.1, g = 0.2, b = 0.3 }
+IN:Update(T)
+eq(tint(), "0.10,0.20,0.30", "a colour of the user's own")
+tdbD.classDragonBossColor = nil
+tdbD.classDragonBoss = false
+IN:Update(T)
+check(not D:IsShown(), "Boss ticked off: hidden")
+tdbD.classDragonBoss = nil
+class = "rare"; tdbD.classDragonRare = false; IN:Update(T)
+check(not D:IsShown(), "Rare ticked off: hidden")
+tdbD.classDragonRare = nil
+class = "normal"; IN:Update(T)
+check(not D:IsShown(), "normal: hidden")
+class = Secret("classification"); IN:Update(T)
+check(not D:IsShown(), "secret classification: hidden, never guessed")
+class = "elite"
+tdbD.classificationEnabled = false; IN:Update(T)
+check(D:IsShown(), "the Elite / Rare icon off: the dragon is its own switch")
+tdbD.classificationEnabled = nil
+tdbD.classDragonEnabled = false; IN:Update(T)
+check(not D:IsShown(), "dragon off: hidden")
+tdbD.classDragonEnabled = nil
+tdbD.classDragonSide = "BOTH"; IN:Layout(T)
+check(D.tex.LEFT.TOP:IsShown() and D.tex.RIGHT.TOP:IsShown(), "BOTH: both ends drawn")
+eq(D.tex.LEFT.TOP._texCoord and D.tex.LEFT.TOP._texCoord[2], 0, "...the left end flipped")
+tdbD.classDragonSide = "LEFT"; IN:Layout(T)
+check(D.tex.LEFT.TOP:IsShown() and not D.tex.RIGHT.TOP:IsShown(), "LEFT: the right end's pieces hidden")
+tdbD.classDragonSide = nil
+tdbD.classDragonSize = 150; IN:Layout(T)
+check(near(D.tex.RIGHT.TOP._w, 197 * 1.5 * REF), "size 150 on the frame")
+tdbD.classDragonSize = nil
+IN:Layout(T)
+
+print("-- Classification border")
+local CB = T.dfUFIcons.classBorder
+check(not CB:IsShown(), "off by default")
+tdbD.classBorderEnabled = true
+IN:Layout(T)
+check(CB:IsShown(), "on: shown")
+eq(CB.edges.top._h, 2, "default thickness 2")
+local bv = CB.edges.left._vertex
+check(bv and bv.r == 1 and near(bv.g, 0.80), "...in the elite colour (the shared Classification Colors)")
+local ep = CB.edges.top._points[1]
+eq(ep and ep[1] .. ">" .. ep[3] .. ":" .. ep[4] .. "," .. ep[5], "TOPLEFT>TOPLEFT:0,0", "inside the frame's edge, where DF draws its border")
+tdbD.classBorderSize = 4; IN:Layout(T)
+eq(CB.edges.bottom._h, 4, "thickness follows the setting")
+tdbD.frameShowBorder = false; IN:Layout(T)
+check(CB:IsShown(), "the frame's own border hidden: the class border still shows")
+tdbD.frameShowBorder = nil
+class = "normal"; IN:Update(T)
+check(not CB:IsShown(), "normal: hidden")
+class = Secret("c"); IN:Update(T)
+check(not CB:IsShown(), "secret: hidden")
+class = "elite"; tdbD.classDragonElite = false; IN:Update(T)
+check(not CB:IsShown() and not D:IsShown(), "the per-type tick hides both")
+tdbD.classDragonElite = nil
+tdbD.classDragonEnabled = false; IN:Update(T)
+check(CB:IsShown() and not D:IsShown(), "dragon off, border on: the border alone")
+tdbD.classDragonEnabled, tdbD.classBorderEnabled, tdbD.classBorderSize = nil, nil, nil
+IN:Layout(T)
+
+print("-- Combat icon border")
+local pdbC = UF:GetUnitDB("player")
+P.combatIcon = Make("Frame", P)
+IN:Layout(P)
+eq(P.combatIcon.dfUFBorder, nil, "off: no edges ever built")
+pdbC.combatIconBorderEnabled = true
+pdbC.combatIconBorderSize = 2
+pdbC.combatIconBorderColor = { r = 1, g = 0, b = 0, a = 1 }
+IN:Layout(P)
+local cbd = P.combatIcon.dfUFBorder
+check(cbd and cbd.top:IsShown() and cbd.right:IsShown(), "on: four edges shown")
+eq(cbd and cbd.top._h, 2, "...its thickness")
+local cp = cbd and cbd.top._points[1]
+eq(cp and cp[4] .. "," .. cp[5], "-2,2", "...drawn OUTSIDE the icon (K.Border)")
+eq(cbd and cbd.left._vertex.r, 1, "...its colour")
+pdbC.combatIconBorderEnabled = false
+IN:Layout(P)
+check(not cbd.top:IsShown(), "off again: hidden")
+local PETf = Owner("pet")
+PETf.combatIcon = Make("Frame", PETf)
+UF:GetUnitDB("pet").combatIconBorderEnabled = true
+IN:Layout(PETf)
+check(PETf.combatIcon.dfUFBorder and PETf.combatIcon.dfUFBorder.top:IsShown(), "pet (no unit icons of its own): bordered too")
+UF:GetUnitDB("pet").combatIconBorderEnabled = nil
+pdbC.combatIconBorderEnabled, pdbC.combatIconBorderSize, pdbC.combatIconBorderColor = nil, nil, nil
+eq(UF.LIVE_KEYS.combatIconBorderSize[1], "Indicators", "the thickness slider drags live through this module")
+
+print("-- Dragon: preview")
+local TP = Owner("target")
+TP.dfUFPreview = true
+TP.dfTestData = { classification = "rareelite" }
+IN:Attach(TP)
+IN:Preview(TP)
+check(TP.dfUFIcons.dragon:IsShown(), "target preview: the test panel's classification")
+eq(string.format("%.2f", TP.dfUFIcons.dragon.tex.RIGHT.TOP._vertex.r), "0.45", "...rare elite blue")
+TP.dfTestData = { classification = nil }
+IN:Preview(TP)
+check(not TP.dfUFIcons.dragon:IsShown(), "Classification: Normal -- no dragon")
+check(PV.dfUFIcons.dragon:IsShown(), "focus preview: the sample rare")
+local BP = Owner("boss")
+BP.dfUFPreview = true
+BP.dfTestData = { classification = "worldboss" }
+IN:Attach(BP)
+IN:Preview(BP)
+check(not BP.dfUFIcons.dragon:IsShown(), "boss preview: off by default")
+UF:GetUnitDB("boss").classDragonEnabled = true
+IN:Preview(BP)
+check(BP.dfUFIcons.dragon:IsShown(), "...on: the world boss shows it")
+UF:GetUnitDB("boss").classDragonEnabled = nil
 eq(#errs, 0, "no element errored (" .. tostring(errs[1]) .. ")")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

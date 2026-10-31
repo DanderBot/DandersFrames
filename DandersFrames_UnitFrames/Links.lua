@@ -64,7 +64,8 @@ Links.KIND_SOURCE = {
 Links.KIND_PREFIXES = {
     text = { "textDesignerPreset" }, auradesigner = { "auraDesignerEnabled" },
     visibility = { "vis" }, castbar = { "castbar" }, classpower = { "classPower" },
-    portrait = { "portrait" }, unitIcons = { "restingIcon", "pvpIcon", "classification" },
+    portrait = { "portrait" },
+    unitIcons = { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" },
     bosslayout = { "boss" },
 }
 

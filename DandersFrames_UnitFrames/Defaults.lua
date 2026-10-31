@@ -225,6 +225,32 @@ local ELEMENTS = {
     classificationAnchor = "TOPRIGHT",
     classificationX = 0,
     classificationY = 0,
+
+    -- Classification dragon + border (Indicators.lua). Target and Focus switch
+    -- the dragon on (PER_UNIT). Boss leaves it off: every boss frame IS a boss,
+    -- so it would always show. One set of per-type toggles and colours
+    -- ("Classification Colors") drives both the dragon and the border.
+    classDragonEnabled = false,
+    classDragonSize = 100,          -- percent: 100 = top piece ~66x21
+    classDragonSide = "RIGHT",      -- RIGHT | LEFT | BOTH
+    classDragonX = 0,
+    classDragonY = 0,
+    classDragonTailX = 0,           -- the bottom piece only, on top of X
+    classDragonElite = true,
+    classDragonRare = true,
+    classDragonRareElite = true,
+    classDragonBoss = true,         -- worldboss counts as boss
+    classDragonEliteColor = { r = 1, g = 0.80, b = 0.32 },
+    classDragonRareColor = { r = 0.88, g = 0.90, b = 0.94 },
+    classDragonRareEliteColor = { r = 0.45, g = 0.70, b = 1 },
+    classDragonBossColor = { r = 0.95, g = 0.43, b = 0.28 },
+    classBorderEnabled = false,
+    classBorderSize = 2,
+
+    -- A border round DandersFrames' combat icon, unit frames only.
+    combatIconBorderEnabled = false,
+    combatIconBorderSize = 1,
+    combatIconBorderColor = { r = 0, g = 0, b = 0, a = 1 },
 }
 for k, v in pairs(ELEMENTS) do COMMON[k] = v end
 
@@ -359,6 +385,7 @@ local PER_UNIT = {
         portraitEnabled = true,
         pvpIconEnabled = true,
         classificationEnabled = true,
+        classDragonEnabled = true,
     },
     targettarget = {
         frameWidth = 110, frameHeight = 24,
@@ -392,6 +419,7 @@ local PER_UNIT = {
         castbarPosition = Detached("focus", "bottom", -280, -328),
         portraitEnabled = true,
         classificationEnabled = true,
+        classDragonEnabled = true,
     },
     -- The focus's target: target of target's look, beside the focus's right edge
     -- (x/y are the mover's solve for the default focus position, as for ToT). Focus's

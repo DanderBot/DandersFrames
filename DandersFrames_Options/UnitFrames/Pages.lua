@@ -272,7 +272,7 @@ function UFO.Prefixes(kind)
     if kind == "castbar" then return { "castbar" } end
     if kind == "classpower" then return { "classPower" } end
     if kind == "portrait" then return { "portrait" } end
-    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification" } end
+    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
     if kind == "bosslayout" then return { "boss" } end
     return {}
 end
@@ -740,6 +740,8 @@ function UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
         return
     end
     self.sectionFilter = function(key) return UFO.CardAllowed(rec, unit, key) end
+    -- Unit-frame-only controls inside a DF card (Modules.lua reads it per card).
+    if rec.kind == "icons" then self.dfIconCardExtras = UFO.IconCardExtras(self) end
 
     local function PageAdd(widget, height, col)
         local row = type(widget) == "table" and rawget(widget, "dfCopyRow")
@@ -1390,6 +1392,90 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
             Close(band)
         end
     end
+    -- The dragon and the class border go wherever the Elite / Rare icon does
+    -- (the units with a classification).
+    if UFO.CardShown(rec, unit, "elite_rare") then
+        UFO.BuildClassDecorationCards(self, db, Open, Close, changed, col)
+    end
+end
+
+-- Elite Dragon / Classification Border / Classification Colors (Indicators.lua,
+-- CLASSIFICATION DRAGON and CLASSIFICATION BORDER). One set of per-type toggles
+-- and colours drives both.
+UFO.CLASS_TYPES = {
+    { suffix = "Elite", label = function() return L["Elite"] end, color = function() return L["Elite Color"] end },
+    { suffix = "Rare", label = function() return L["Rare"] end, color = function() return L["Rare Color"] end },
+    { suffix = "RareElite", label = function() return L["Rare Elite"] end, color = function() return L["Rare Elite Color"] end },
+    { suffix = "Boss", label = function() return L["Boss"] end, color = function() return L["Boss Color"] end },
+}
+
+function UFO.DragonSideOptions()
+    return { RIGHT = L["Right"], LEFT = L["Left"], BOTH = L["Both"], _order = { "RIGHT", "LEFT", "BOTH" } }
+end
+
+function UFO.BuildClassDecorationCards(self, db, Open, Close, changed, col)
+    local w
+    -- The dragon.
+    local dragonOff = UFO.Gate(L["Elite Dragon"], function(d) return not (d and d.classDragonEnabled) end)
+    col = (col % 2) + 1
+    local band = Open(L["Elite Dragon"], "uf_icon_dragon", col, function(d) return OnOff(d, "classDragonEnabled") end,
+        "icons", { db = db, key = "classDragonEnabled", label = L["Show"], onChanged = changed,
+                   tooltip = L["Draw a dragon gripping the end of the frame on elite, rare and boss units."] })
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Size"], 50, 200, 5, db, "classDragonSize", changed), 55)
+    w.disableOn = dragonOff
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Side"], UFO.DragonSideOptions(), db, "classDragonSide", changed), 55)
+    w.disableOn = dragonOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "classDragonX", changed), 55)
+    w.disableOn = dragonOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "classDragonY", changed), 55)
+    w.disableOn = dragonOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Tail Offset X"], -50, 50, 1, db, "classDragonTailX", changed), 55)
+    w.disableOn = dragonOff
+    w.tooltip = L["Moves the lower piece (the tail) left or right on its own."]
+    Close(band)
+
+    -- The border.
+    local borderOff = UFO.Gate(L["Classification Border"], function(d) return not (d and d.classBorderEnabled) end)
+    col = (col % 2) + 1
+    band = Open(L["Classification Border"], "uf_icon_classborder", col, function(d) return OnOff(d, "classBorderEnabled") end,
+        "border", { db = db, key = "classBorderEnabled", label = L["Show"], onChanged = changed,
+                    tooltip = L["Color the frame's border by the unit's classification, using the Classification Colors."] })
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 8, 1, db, "classBorderSize", changed), 55)
+    w.disableOn = borderOff
+    Close(band)
+
+    -- The colours both use, and which classifications get them.
+    local neither = UFO.Explain(function(d) return not (d and (d.classDragonEnabled or d.classBorderEnabled)) end,
+        function() return format(L["Turn on %s to change this"], L["Elite Dragon"]) end)
+    col = (col % 2) + 1
+    band = Open(L["Classification Colors"], "uf_icon_classcolors", col, nil, "colours")
+    for _, t in ipairs(UFO.CLASS_TYPES) do
+        local key = "classDragon" .. t.suffix
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, t.label(), db, key, changed), 30)
+        w.disableOn = neither
+        w.tooltip = L["Show the dragon and the border on this classification."]
+        local typeOff = UFO.Gate(t.label(), function(d) return d and d[key] == false end, neither)
+        w = band:AddWidget(GUI:CreateColorPicker(self.child, t.color(), db, key .. "Color", false, changed), 30)
+        w.disableOn = typeOff
+    end
+    Close(band)
+end
+
+-- The combat icon card on DandersFrames' Icons page gets the unit frames' border
+-- controls (Modules.lua's combatIcon `after` hook reads page.dfIconCardExtras;
+-- only unit frame pages set it, so the party / raid page is unchanged).
+function UFO.IconCardExtras(page)
+    local function changed() page:RefreshStates(); RefreshFrames() end
+    return {
+        combatIcon = function(group, parent, db)
+            local off = UFO.Gate(L["Show Border"], function(d) return not (d and d.combatIconBorderEnabled) end)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Border"], db, "combatIconBorderEnabled", changed), 30)
+            local w = group:AddWidget(GUI:CreateSlider(parent, L["Border Thickness"], 1, 8, 1, db, "combatIconBorderSize", changed), 55)
+            w.disableOn = off
+            w = group:AddWidget(GUI:CreateColorPicker(parent, L["Border Color"], db, "combatIconBorderColor", true, changed), 30)
+            w.disableOn = off
+        end,
+    }
 end
 
 -- ---- Boss Layout (a page new to unit frames; Boss only) ----------------------

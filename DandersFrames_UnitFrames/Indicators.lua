@@ -16,6 +16,9 @@ local addonName, UF = ...
 --                 ("+", Rare, Rare Elite, Boss) from the Text Designer's own
 --                 Classification resolver (the D12 token), so the text matches
 --                 a Classification text element exactly
+-- Plus three decorations (CLASSIFICATION DRAGON / CLASSIFICATION BORDER / COMBAT
+-- ICON BORDER below): a dragon gripping the frame's end on elite / rare / boss
+-- units, a border coloured by classification, and a border round DF's combat icon.
 -- Everything else on the list rides DandersFrames as-is: leader and raid
 -- target icons (Icons page cards), the combat icon (DF:UpdateCombatIcon, kicked
 -- here on the combat edges and UNIT_FLAGS, which DF's own group dispatcher never
@@ -30,7 +33,7 @@ local addonName, UF = ...
 local DF = DandersFrames
 if not DF then return end
 
-local pairs, type, pcall, tonumber = pairs, type, pcall, tonumber
+local pairs, ipairs, type, pcall, tonumber = pairs, ipairs, type, pcall, tonumber
 
 local IN = { NAME = "Indicators" }
 UF.Indicators = IN
@@ -100,6 +103,10 @@ function IN:Attach(f)
             end
         end
     end
+    if IN.ICONS.classification[unit] then
+        icons.dragon = IN.NewDragon(f)
+        icons.classBorder = IN.NewClassBorder(f)
+    end
     f.dfUFIcons = icons
     return icons
 end
@@ -162,11 +169,15 @@ function IN.GlowRects(f, db)
 end
 
 function IN:Layout(f)
-    local icons = f and f.dfUFIcons
-    if not icons then return end
+    if not f then return end
     local db = K.DB(f)
     if not db then return end
+    IN.PaintCombatBorder(f, db)
+    local icons = f.dfUFIcons
+    if not icons then return end
     icons.host:SetFrameLevel(f:GetFrameLevel() + 30)
+    if icons.dragon then IN.LayoutDragon(f, icons.dragon, db) end
+    if icons.classBorder then IN.LayoutClassBorder(f, icons.classBorder, db) end
     for key in pairs(IN.ICONS) do
         local icon = icons[key]
         if icon then
@@ -307,6 +318,10 @@ function IN:Update(f)
         local c = (IN:Enabled(db, "classification") and exists) and IN:Classification(unit) or nil
         IN:PaintClassification(icons.classification, c, db and db.classificationStyle)
     end
+    if icons.dragon or icons.classBorder then
+        local c = exists and IN:Classification(unit) or nil
+        IN.PaintDecorations(icons, db, c)
+    end
 end
 
 function IN:Refresh(f)
@@ -333,10 +348,11 @@ end
 -- PREVIEW: each icon that is switched on, with sample answers.
 -- ============================================================
 function IN:Preview(f)
-    local icons = f and f.dfUFIcons
+    if not f then return end
+    IN:Layout(f)
+    local icons = f.dfUFIcons
     if not icons then return end
     local db = K.DB(f)
-    IN:Layout(f)
     if icons.resting then IN:PaintResting(icons.resting, IN:Enabled(db, "resting"), db and db.restingIconGlow) end
     if icons.pvp then
         local faction = UnitFactionGroup and UnitFactionGroup("player")
@@ -349,6 +365,249 @@ function IN:Preview(f)
         IN:PaintClassification(icons.classification, IN:Enabled(db, "classification") and c or nil,
             db and db.classificationStyle)
     end
+    if icons.dragon or icons.classBorder then
+        -- The sample unit's own answer: the test panel's "normal" is nil here and
+        -- draws no dragon (no sample data at all: the elite sample).
+        local data = f.dfTestData
+        local c = "elite"
+        if data then c = data.classification end
+        IN.PaintDecorations(icons, db, c)
+    end
+end
+
+-- ============================================================
+-- CLASSIFICATION DRAGON
+-- Two pieces of art (Media/EliteDragonTop / Bottom: 256x128 canvases, the art
+-- in their TOP-LEFT corner, grey silver with alpha, tinted per classification
+-- with SetVertexColor) gripping one END of the frame:
+--   top     its bottom edge on the frame's TOP edge, its right edge (the wing
+--           tip) on the frame's RIGHT edge; the head faces left, the claws
+--           grip the top edge
+--   bottom  its top edge on the frame's BOTTOM edge, its right edge
+--           DRAGON.TAIL_INSET px INSIDE the frame's right edge (a tail hanging
+--           past the frame's edge was rejected); the tail tip points left
+-- The pieces never scale with the frame's height: the frame itself hides the
+-- gap between them, so the dragon works on any frame height. Size 100% = the
+-- art at 46/136.35 (the source's placeholder bar was 136.35 art-px tall for a
+-- 46 px frame): the top piece ~66x21, the bottom ~59x14.
+-- LEFT end: both pieces flipped by texcoord (the head then faces right, in
+-- over the frame) and their anchors mirrored. BOTH draws the two ends.
+-- Offsets are SCREEN x/y (positive = right / up), so a mirrored link (which
+-- negates every ...X and swaps LEFT/RIGHT, Links.Mirror) lands the follower on
+-- the exact mirror image. With BOTH the left end is the right end's mirror
+-- image, so its x offsets are negated.
+-- LAYERING: the pieces sit outside the frame's rect except the claws, which
+-- overlap its top edge by ~1px. Their frame is one level above DandersFrames'
+-- frame border (frame + 14, Frames/Create.lua) and the class border below, so
+-- the claws are never cut by either; it stays below the power bar (+20), the
+-- text / icon overlay (+25) and these unit icons (+30).
+-- ============================================================
+local MEDIA = "Interface\\AddOns\\DandersFrames_UnitFrames\\Media\\"
+IN.DRAGON = {
+    TOP = { file = MEDIA .. "EliteDragonTop", w = 197, h = 61 },
+    BOTTOM = { file = MEDIA .. "EliteDragonBottom", w = 176, h = 41 },
+    CANVAS_W = 256, CANVAS_H = 128,
+    REF_SCALE = 46 / 136.35,
+    TAIL_INSET = 2,
+    MIN_SIZE = 50, MAX_SIZE = 200,
+}
+-- Frame levels over the unit button (DF's frame border is +14).
+IN.CLASS_BORDER_LEVEL = 15
+IN.DRAGON_LEVEL = 16
+
+-- classification -> the suffix of its toggle / colour keys. A world boss is a boss.
+IN.CLASS_SUFFIX = { elite = "Elite", rare = "Rare", rareelite = "RareElite", worldboss = "Boss", boss = "Boss" }
+-- Fallback tints (= the defaults, Defaults.lua): gold, silver, blue, red.
+IN.CLASS_COLORS = {
+    Elite = { r = 1, g = 0.80, b = 0.32 },
+    Rare = { r = 0.88, g = 0.90, b = 0.94 },
+    RareElite = { r = 0.45, g = 0.70, b = 1 },
+    Boss = { r = 0.95, g = 0.43, b = 0.28 },
+}
+
+-- Does classification `c` get the dragon / border, and its tint. false for an
+-- ordinary (nil) or unknown classification, or one whose toggle is off.
+function IN.ClassStyle(db, c)
+    local suffix = (type(c) == "string") and IN.CLASS_SUFFIX[c]
+    if not (suffix and db) then return false end
+    if db["classDragon" .. suffix] == false then return false end
+    local d = IN.CLASS_COLORS[suffix]
+    local r, g, b = K.RGBA(db["classDragon" .. suffix .. "Color"], d.r, d.g, d.b)
+    return true, r, g, b
+end
+
+function IN.DragonScale(db)
+    local D = IN.DRAGON
+    local pct = tonumber(db and db.classDragonSize) or 100
+    if pct < D.MIN_SIZE then pct = D.MIN_SIZE elseif pct > D.MAX_SIZE then pct = D.MAX_SIZE end
+    return pct / 100 * D.REF_SCALE
+end
+
+-- The ends the dragon is drawn on.
+function IN.DragonSides(db)
+    local side = db and db.classDragonSide
+    if side == "LEFT" then return { "LEFT" } end
+    if side == "BOTH" then return { "RIGHT", "LEFT" } end
+    return { "RIGHT" }
+end
+
+-- Where each piece goes, pure (no frames): a list of
+--   { side, piece = "TOP"|"BOTTOM", w, h, point, relPoint, x, y, coords = {l,r,t,b} }
+-- the piece's `point` on the frame's `relPoint`.
+function IN.DragonLayout(db)
+    local D = IN.DRAGON
+    local s = IN.DragonScale(db)
+    local ox, oy = tonumber(db and db.classDragonX) or 0, tonumber(db and db.classDragonY) or 0
+    local tx = tonumber(db and db.classDragonTailX) or 0
+    local sides = IN.DragonSides(db)
+    local out = {}
+    for _, side in ipairs(sides) do
+        -- BOTH: the left end is the right end's mirror image.
+        local x, t = ox, tx
+        if side == "LEFT" and #sides == 2 then x, t = -ox, -tx end
+        for _, piece in ipairs({ "TOP", "BOTTOM" }) do
+            local a = D[piece]
+            local u, v = a.w / D.CANVAS_W, a.h / D.CANVAS_H
+            local e = { side = side, piece = piece, w = a.w * s, h = a.h * s, y = oy }
+            local vert = (piece == "TOP") and "BOTTOM" or "TOP"
+            local rel = (piece == "TOP") and "TOP" or "BOTTOM"
+            if side == "RIGHT" then
+                e.point, e.relPoint = vert .. "RIGHT", rel .. "RIGHT"
+                e.coords = { 0, u, 0, v }
+                e.x = (piece == "TOP") and x or (x + t - D.TAIL_INSET)
+            else
+                e.point, e.relPoint = vert .. "LEFT", rel .. "LEFT"
+                e.coords = { u, 0, 0, v }     -- left > right: flipped
+                e.x = (piece == "TOP") and x or (x + t + D.TAIL_INSET)
+            end
+            out[#out + 1] = e
+        end
+    end
+    return out
+end
+
+function IN.NewDragon(f)
+    local d = CreateFrame("Frame", nil, f)
+    d:SetAllPoints(f)
+    d.tex = {}
+    for _, side in ipairs({ "RIGHT", "LEFT" }) do
+        d.tex[side] = {}
+        for _, piece in ipairs({ "TOP", "BOTTOM" }) do
+            local t = d:CreateTexture(nil, "ARTWORK")
+            t:SetTexture(IN.DRAGON[piece].file)
+            t:Hide()
+            d.tex[side][piece] = t
+        end
+    end
+    d:Hide()
+    return d
+end
+
+function IN.LayoutDragon(f, d, db)
+    d:SetFrameLevel(f:GetFrameLevel() + IN.DRAGON_LEVEL)
+    local used = {}
+    for _, e in ipairs(IN.DragonLayout(db)) do
+        local t = d.tex[e.side][e.piece]
+        t:SetSize(e.w, e.h)
+        t:ClearAllPoints()
+        t:SetPoint(e.point, f, e.relPoint, e.x, e.y)
+        t:SetTexCoord(e.coords[1], e.coords[2], e.coords[3], e.coords[4])
+        t:Show()
+        used[t] = true
+    end
+    for _, pieces in pairs(d.tex) do
+        for _, t in pairs(pieces) do
+            if not used[t] then t:Hide() end
+        end
+    end
+end
+
+-- ============================================================
+-- CLASSIFICATION BORDER
+-- An OVERLAY on the frame's own border band, not a recolour of it: DandersFrames
+-- repaints frame.border from several independent paths (ApplyFrameBorder, the
+-- unit-colour pass on roster and unit changes, the out-of-range alpha, the
+-- settings' lightweight colour pass, the test painter), so a recolour would be
+-- painted over the next time any of them ran, and could not show while the
+-- frame's normal border is hidden. Four solid edges INSIDE the frame's rect
+-- (where DF draws its border), one level above it (frame + 14).
+-- ============================================================
+function IN.NewClassBorder(f)
+    local b = CreateFrame("Frame", nil, f)
+    b:SetAllPoints(f)
+    b.edges = {}
+    for _, side in ipairs({ "top", "bottom", "left", "right" }) do
+        local t = b:CreateTexture(nil, "OVERLAY", nil, 7)
+        t:SetTexture(K.WHITE)
+        b.edges[side] = t
+    end
+    b:Hide()
+    return b
+end
+
+function IN.LayoutClassBorder(f, b, db)
+    b:SetFrameLevel(f:GetFrameLevel() + IN.CLASS_BORDER_LEVEL)
+    local size = tonumber(db.classBorderSize) or 1
+    if size < 1 then size = 1 end
+    local e = b.edges
+    e.top:ClearAllPoints()
+    e.top:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+    e.top:SetPoint("TOPRIGHT", b, "TOPRIGHT", 0, 0)
+    e.top:SetHeight(size)
+    e.bottom:ClearAllPoints()
+    e.bottom:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 0, 0)
+    e.bottom:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, 0)
+    e.bottom:SetHeight(size)
+    e.left:ClearAllPoints()
+    e.left:SetPoint("TOPLEFT", b, "TOPLEFT", 0, -size)
+    e.left:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 0, size)
+    e.left:SetWidth(size)
+    e.right:ClearAllPoints()
+    e.right:SetPoint("TOPRIGHT", b, "TOPRIGHT", 0, -size)
+    e.right:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, size)
+    e.right:SetWidth(size)
+end
+
+-- Show and tint the dragon and the class border for classification `c` (nil:
+-- ordinary, secret or no unit -- both hidden).
+function IN.PaintDecorations(icons, db, c)
+    local on, r, g, b = IN.ClassStyle(db, c)
+    local d = icons.dragon
+    if d then
+        if on and db.classDragonEnabled then
+            for _, pieces in pairs(d.tex) do
+                for _, t in pairs(pieces) do t:SetVertexColor(r, g, b, 1) end
+            end
+            d:Show()
+        else
+            d:Hide()
+        end
+    end
+    local cb = icons.classBorder
+    if cb then
+        if on and db.classBorderEnabled then
+            for _, t in pairs(cb.edges) do t:SetVertexColor(r, g, b, 1) end
+            cb:Show()
+        else
+            cb:Hide()
+        end
+    end
+end
+
+-- ============================================================
+-- COMBAT ICON BORDER
+-- DandersFrames' own combat icon (frame.combatIcon, Frames/StatusIcons.lua) on a
+-- unit frame gets an optional solid border, drawn OUTSIDE the icon by the kit's
+-- K.Border. Only unit frames call this, so party / raid icons are untouched.
+-- The edges are the icon's own textures: they show, hide and scale with it.
+-- ============================================================
+function IN.PaintCombatBorder(f, db)
+    local icon = f and f.combatIcon
+    if not (icon and icon.CreateTexture) then return end
+    local on = db and db.combatIconBorderEnabled and true or false
+    -- Never build edges for an icon that has never had a border.
+    if not on and not icon.dfUFBorder then return end
+    K.Border(icon, on, db and db.combatIconBorderSize, db and db.combatIconBorderColor)
 end
 
 -- Resting has no unit event: one shared listener for the player frame.

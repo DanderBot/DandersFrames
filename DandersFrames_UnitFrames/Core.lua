@@ -366,6 +366,9 @@ UF.LIVE_ELEMENTS = {
     classpower = { "ClassPower", "Indicators" },
     portrait = { "Portrait", "Indicators" }, unitIcons = { "Indicators" },
 }
+-- Single keys an element of ours draws although DandersFrames' page owns them: the
+-- combat icon is DF's (the Icons element), its border is Indicators.lua's.
+UF.LIVE_KEYS = { combatIconBorderSize = { "Indicators" } }
 UF.LIVE_AURAS = { buffs = true, debuffs = true, defensive = true, dispel = true }
 
 local function InCombat()
@@ -406,7 +409,7 @@ function UF:LiveApply(unit, key, kind)
         return
     end
 
-    local mods = elem and UF.LIVE_ELEMENTS[elem]
+    local mods = (key and UF.LIVE_KEYS[key]) or (elem and UF.LIVE_ELEMENTS[elem])
     if mods then
         UF:EachFrameOf(unit, function(f, preview)
             for _, name in ipairs(mods) do

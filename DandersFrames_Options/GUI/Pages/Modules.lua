@@ -641,6 +641,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             onEnable = OnIconEnabled,
             note = L["Shows crossed swords on a party/raid member who is in combat."],
             noteHeight = 44,
+            -- Unit frame pages add their icon border here (UnitFrames/Pages.lua,
+            -- UFO.IconCardExtras); the party / raid page never sets the table.
+            after = function(group, parent)
+                local extra = rawget(self, "dfIconCardExtras")
+                extra = type(extra) == "table" and extra.combatIcon
+                if extra then extra(group, parent, db) end
+            end,
             -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
             -- greys the section header when the icon is disabled.
             preview = { enableKey = "combatIconEnabled", icons = { { texture = "Interface\\CharacterFrame\\UI-StateIcon", coords = {0.5, 1.0, 0, 0.49} } } },

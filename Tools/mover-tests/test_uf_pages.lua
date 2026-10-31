@@ -829,11 +829,49 @@ do
     end
     check(not has(keys, "pvpIconAnimate") and not has(keys, "pvpIconGlow"), "...and only on the Resting card")
     eq(toggles.uf_icon_resting and toggles.uf_icon_resting.key, "restingIconEnabled", "...each icon's tick in its header")
-    cards, keys = BuildPage("target", "unitIcons")
-    eq(cards, "uf_icon_pvp,uf_icon_classification", "target Unit Icons: PvP, Elite / Rare")
+    cards, keys, byKey = BuildPage("target", "unitIcons")
+    eq(cards, "uf_icon_pvp,uf_icon_classification,uf_icon_dragon,uf_icon_classborder,uf_icon_classcolors",
+       "target Unit Icons: PvP, Elite / Rare, Elite Dragon, Classification Border, Classification Colors")
     check(has(keys, "classificationStyle"), "...Elite / Rare: icon or text")
-    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification",
-       "Unit Icons: Reset / Copy act on the three icons' keys")
+    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification,classDragon,classBorder",
+       "Unit Icons: Reset / Copy act on the three icons' keys and the dragon / border")
+    eq(toggles.uf_icon_dragon and toggles.uf_icon_dragon.key, "classDragonEnabled", "Elite Dragon: its tick in the header")
+    eq(toggles.uf_icon_classborder and toggles.uf_icon_classborder.key, "classBorderEnabled", "Classification Border: likewise")
+    for _, k in ipairs({ "classDragonSize", "classDragonSide", "classDragonX", "classDragonY", "classDragonTailX" }) do
+        local dw = byKey[k]
+        check(dw ~= nil, "Elite Dragon: a control for " .. k)
+        check(dw and dw.disableOn and dw.disableOn({ classDragonEnabled = false })
+              and not dw.disableOn({ classDragonEnabled = true }), "..." .. k .. " greys while the dragon is off")
+    end
+    check(byKey.classDragonTailX and type(byKey.classDragonTailX.tooltip) == "string", "Tail Offset X explains itself")
+    check(byKey.classBorderSize and byKey.classBorderSize.disableOn({ classBorderEnabled = false })
+          and not byKey.classBorderSize.disableOn({ classBorderEnabled = true }), "Border Thickness greys while the border is off")
+    for _, sfx in ipairs({ "Elite", "Rare", "RareElite", "Boss" }) do
+        local tw, cw = byKey["classDragon" .. sfx], byKey["classDragon" .. sfx .. "Color"]
+        check(tw and cw, "Classification Colors: a tick and a colour for " .. sfx)
+        check(tw and tw.disableOn({}) and not tw.disableOn({ classBorderEnabled = true })
+              and not tw.disableOn({ classDragonEnabled = true }), "..." .. sfx .. " greys while neither dragon nor border is on")
+        check(cw and cw.disableOn({ classDragonEnabled = true, ["classDragon" .. sfx] = false })
+              and not cw.disableOn({ classDragonEnabled = true }), "..." .. sfx .. "'s colour greys while its tick is off")
+    end
+    cards = BuildPage("player", "unitIcons")
+    check(not cards:find("uf_icon_dragon", 1, true), "player: no dragon (no classification)")
+    do
+        -- The combat icon card on DF's Icons page: the unit frame border controls,
+        -- handed in through the page (Modules.lua's combatIcon `after` hook).
+        built = {}
+        local grp = { AddWidget = function(_, w) return w end }
+        local pg = { RefreshStates = function() end }
+        local extras = UFO.IconCardExtras(pg)
+        extras.combatIcon(grp, {}, UF:GetUnitDB("player"))
+        local ck = {}
+        for _, x in ipairs(built) do ck[x.key] = x end
+        check(ck.combatIconBorderEnabled and ck.combatIconBorderSize and ck.combatIconBorderColor,
+              "Combat Icon card: Show Border, Border Thickness, Border Color")
+        check(ck.combatIconBorderSize and ck.combatIconBorderSize.disableOn({ combatIconBorderEnabled = false })
+              and not ck.combatIconBorderSize.disableOn({ combatIconBorderEnabled = true }),
+              "...thickness greys while the border is off")
+    end
 
     print("-- Stage F: Hide Blizzard Player Cast Bar follows ours until set")
     built = {}
