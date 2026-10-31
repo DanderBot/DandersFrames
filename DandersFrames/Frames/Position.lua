@@ -1014,6 +1014,8 @@ local function copyAnchor(a)
         target = a.target, mode = a.mode, edge = a.edge, align = a.align,
         point = a.point, relPoint = a.relPoint,
         offsetX = a.offsetX, offsetY = a.offsetY,
+        -- DandersMover's mirror (primary block only; the backup never carries it).
+        mirrorX = a.mirrorX, mirrorY = a.mirrorY, mirrorPosX = a.mirrorPosX, mirrorPosY = a.mirrorPosY,
     }
     if type(a.fallback) == "table" then
         local fb = a.fallback
