@@ -197,6 +197,52 @@ eq(DF.db.extra.theirs, true, "selective import with its category: replaced")
 ImportProfileRootTables({}, nil)
 eq(DF.db.extra.theirs, true, "absent from the payload: untouched")
 
+-- ---- a string of registered tables only ----------------------------------
+print("-- A category export of registered tables only")
+local heldCats, heldExtract = DF.ExportCategories, DF.ExtractCategorySettings
+DF.ExportCategories = { other = { "frameWidth" } }
+function DF:ExtractCategorySettings(t, cats)
+    local out = {}
+    for _, c in ipairs(cats) do
+        for _, k in ipairs(self.ExportCategories[c] or {}) do out[k] = t[k] end
+    end
+    return out
+end
+DF.db = { party = { frameWidth = 1 }, raid = { frameWidth = 2 }, extra = { mine = true } }
+captured = nil
+DF:ExportProfile({ "extraCat" }, { party = true, raid = true })
+check(captured and captured.extra and captured.extra.mine == true, "a registered table's category alone: carried")
+check(captured and captured.party == nil and captured.raid == nil,
+      "...with no empty mode tables riding along (they would read as Party / Raid settings)")
+captured = nil
+DF:ExportProfile({ "extraCat", "other" }, { party = true, raid = true })
+check(captured and captured.party and captured.party.frameWidth == 1, "with a mode category too: the mode tables stay")
+DF.db.extra = {}
+captured = nil
+DF:ExportProfile({ "colors" }, { party = true, raid = false })
+check(captured and type(captured.party) == "table",
+      "no registered table aboard: the empty mode table still carries the string")
+DF.ExportCategories, DF.ExtractCategorySettings = heldCats, heldExtract
+
+print("-- Import info names a registered table's category")
+local infoChunk = loadstring(lift("GetImportInfo"), "=info")
+setfenv(infoChunk, env)
+infoChunk()
+function DF:GetImportVersion(d) return d.version or "?" end
+DF.ExportCategories = { other = { "frameWidth" }, layout = { "x" } }
+DF.ExportCategoryInfo = { other = { order = 1 }, layout = { order = 2 }, extraCat = { order = 3 } }
+local info = DF:GetImportInfo({ party = {}, extra = { a = 1 } })
+eq(table.concat(info.detectedCategories, ","), "other,layout,extraCat",
+   "a full string: the mode categories plus the registered table's, in order")
+info = DF:GetImportInfo({ party = {} })
+eq(table.concat(info.detectedCategories, ","), "other,layout", "...and not when the string lacks the table")
+info = DF:GetImportInfo({ localOnly = { x = 1 }, party = {} })
+eq(table.concat(info.detectedCategories, ","), "other,layout", "...nor for a table that never travels")
+info = DF:GetImportInfo({ extra = { a = 1 }, categories = { "extraCat" } })
+check(info.hasParty == false and info.hasRaid == false and info.detectedCategories[1] == "extraCat",
+      "a category string of the table alone: no Party, no Raid, its one category")
+DF.ExportCategories, DF.ExportCategoryInfo = heldCats, nil
+
 local apply = lift("ApplyImportedProfile")
 local _, imports = apply:gsub("ImportProfileRootTables%(importData, ", "")
 eq(imports, 2, "ApplyImportedProfile: both the full and the selective branch import registered tables")

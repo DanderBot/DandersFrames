@@ -549,8 +549,14 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
 
     -- Derived from the category registry (single source of truth) so this list
     -- can never drift from DF.ExportCategories when categories change.
+    -- A category carried by an addon's own profile table is offered only while
+    -- that addon is loaded (DF:IsExportCategoryAvailable).
     local categoryOrder = {}
-    for cat in pairs(DF.ExportCategoryInfo) do tinsert(categoryOrder, cat) end
+    for cat in pairs(DF.ExportCategoryInfo) do
+        if not DF.IsExportCategoryAvailable or DF:IsExportCategoryAvailable(cat) then
+            tinsert(categoryOrder, cat)
+        end
+    end
     tsort(categoryOrder, function(a, b)
         return (DF.ExportCategoryInfo[a].order or 99) < (DF.ExportCategoryInfo[b].order or 99)
     end)
@@ -613,10 +619,22 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         else
             local info = parsed.info or DF:GetImportInfo(parsed.data)
             parsed.info = info
-            SetStatus(format("%s v%s %s%s", ToneText("success", L["OK"]),
+            -- A string with no mode settings (only profile-root ones) names what
+            -- it carries instead, so the line never reads as an empty profile.
+            local carries = ""
+            if not info.hasParty and not info.hasRaid then
+                local names = {}
+                for _, cat in ipairs(info.detectedCategories or {}) do
+                    local ci = DF.ExportCategoryInfo[cat]
+                    if ci and ci.modeless then names[#names + 1] = L[ci.name] end
+                end
+                if #names > 0 then carries = "[" .. table.concat(names, ", ") .. "]" end
+            end
+            SetStatus(format("%s v%s %s%s%s", ToneText("success", L["OK"]),
                 (tostring(info.version):gsub("^[vV]", "")),
                 info.hasParty and L["[Party]"] or "",
-                info.hasRaid and L["[Raid]"] or ""))
+                info.hasRaid and L["[Raid]"] or "",
+                carries))
             if self.importNameEdit and info.profileName then
                 self.importNameEdit:SetText(info.profileName)
             end
@@ -707,7 +725,10 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
             party = self.importPartyCheck:GetChecked(),
             raid = self.importRaidCheck:GetChecked(),
         }
-        if not selectedFrameTypes.party and not selectedFrameTypes.raid then
+        -- Categories that are not per mode (profile-root data) need no mode: a
+        -- string carrying only those has no Party or Raid to tick.
+        if not selectedFrameTypes.party and not selectedFrameTypes.raid
+            and not (DF.ExportCategoriesAreModeless and DF:ExportCategoriesAreModeless(selectedCats)) then
             DF:Err("Select Party or Raid.")
             return
         end
@@ -912,10 +933,12 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         exportSettingsGroup:AddWidget(catRow, 20)
     end
     -- Grey the category list while no mode is selected (nothing would export).
+    -- A modeless category (profile-root data) exports with no mode ticked.
     self.UpdateExportCategoryState = function()
         local enabled = self.exportFrameTypes.party or self.exportFrameTypes.raid
-        for _, cb in pairs(self.exportCheckboxes) do
-            if enabled then cb:Enable() else cb:Disable() end
+        for cat, cb in pairs(self.exportCheckboxes) do
+            local info = DF.ExportCategoryInfo[cat]
+            if enabled or (info and info.modeless) then cb:Enable() else cb:Disable() end
         end
     end
     K.Close(exportSettingsGroup)

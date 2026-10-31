@@ -1172,6 +1172,13 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     else
         -- Selective category export
         exportData.categories = categories
+        -- A list naming no mode category (only profile-root ones) carries no mode
+        -- setting at all, so it ships no mode table: an empty party = {} would read
+        -- on import as "this string has Party settings" and ask for a mode to apply.
+        local namesModeKeys = false
+        for _, cat in ipairs(categories) do
+            if DF.ExportCategories and DF.ExportCategories[cat] then namesModeKeys = true break end
+        end
         if frameTypes.party and DF.db.party then
             exportData.party = self:ExtractCategorySettings(DF.db.party, categories)
         end
@@ -1231,6 +1238,12 @@ function DF:ExportProfile(categories, frameTypes, profileName)
             if DF.db.powerColors  and next(DF.db.powerColors)  then exportData.powerColors  = DF:DeepCopy(DF.db.powerColors)  end
             if DF.db.roleColors   and next(DF.db.roleColors)   then exportData.roleColors   = DF:DeepCopy(DF.db.roleColors)   end
             if DF.db.dispelColors and next(DF.db.dispelColors) then exportData.dispelColors = DF:DeepCopy(DF.db.dispelColors) end
+        end
+        -- ⚠ Only once a registered table is aboard: a colours-only string with no
+        -- registered table still needs its (empty) mode table to count as an export.
+        if not namesModeKeys and HasProfileRootTable(exportData) then
+            if exportData.party and next(exportData.party) == nil then exportData.party = nil end
+            if exportData.raid and next(exportData.raid) == nil then exportData.raid = nil end
         end
     end
 
@@ -1502,8 +1515,21 @@ function DF:GetImportInfo(importData)
         -- category registry (single source of truth) rather than keeping a
         -- hand-maintained copy here that drifts when categories change.
         info.detectedCategories = {}
+        local seen = {}
         for cat in pairs(DF.ExportCategories) do
             table.insert(info.detectedCategories, cat)
+            seen[cat] = true
+        end
+        -- ...plus the category of every registered profile-root table the string
+        -- carries: those categories have no mode keys, so the list above never
+        -- names them, and an import that picks categories would leave them behind.
+        for _, key in ipairs(DF.ProfileRootTableOrder) do
+            local spec = DF.ProfileRootTables[key]
+            local cat = spec and spec.exportable and spec.exportCategory
+            if cat and not seen[cat] and type(importData[key]) == "table" then
+                table.insert(info.detectedCategories, cat)
+                seen[cat] = true
+            end
         end
         table.sort(info.detectedCategories, function(a, b)
             local ia = DF.ExportCategoryInfo[a] and DF.ExportCategoryInfo[a].order or 99

@@ -1385,8 +1385,39 @@ DF.ExportCategoryInfo = {
         name = "Colors",
         description = "Class, power, role and dispel colours",
         order = 19,
+        modeless = true,
     },
 }
+
+-- ☠ Two optional fields on an entry above, both for a category carried by
+-- profile-ROOT data rather than by the party/raid mode tables:
+--   modeless   the category exports and imports whether or not Party or Raid is
+--              ticked (its data is not per mode), so the page neither greys it
+--              with no mode ticked nor demands a mode for an import of it alone.
+--   rootTable  the registered profile-root table (DF:RegisterProfileRootTable)
+--              that carries it: the category is offered only while that table is
+--              registered, i.e. while the addon that owns it is loaded.
+
+-- Is this category offered on the export / import page right now?
+function DF:IsExportCategoryAvailable(cat)
+    local info = self.ExportCategoryInfo and self.ExportCategoryInfo[cat]
+    if not info then return false end
+    if info.rootTable then
+        return self.ProfileRootTables ~= nil and self.ProfileRootTables[info.rootTable] ~= nil
+    end
+    return true
+end
+
+-- True when every category in the list is modeless (an empty list is not).
+function DF:ExportCategoriesAreModeless(categories)
+    local any = false
+    for _, cat in ipairs(categories or {}) do
+        local info = self.ExportCategoryInfo and self.ExportCategoryInfo[cat]
+        if not (info and info.modeless) then return false end
+        any = true
+    end
+    return any
+end
 
 -- Export-page quick-picks are declared inline in GUI/Pages/Modules.lua, not here.
 
