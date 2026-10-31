@@ -221,7 +221,7 @@ eq(def.tabs[3].label(), "Target of Target", "ToT's tab: full name")
 eq(def.tabs[3].deckLabel(), "TOT", "...short on deck 2")
 eq(G:ModuleLabel(def), "Unit Frames", "label")
 eq(def.railLabel(), "Units", "rail label")
-eq(def.status(), "Player \194\183 Target \194\183 ToT", "status: the units it draws")
+eq(def.status(), "Player \194\183 Target \194\183 ToT \194\183 Focus \194\183 Pet", "status: the units it draws")
 load_options_file_into("GUI/Pages/ModulesPage.lua", NS)
 do
     local on = G:ModulesPageModel()
@@ -235,11 +235,11 @@ eq(made.catOrder[1], "uf_module", "the module-wide category comes first")
 check(made.pages.uf_settings ~= nil, "the module Settings page exists")
 eq(G:ModuleForPage("uf_settings"), "units", "...on the module's sidebar")
 local WANT = {
-    player = "frame,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,defensive,dispel,auradesigner,icons,highlights",
-    target = "frame,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,icons,highlights",
+    player = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,defensive,dispel,auradesigner,icons,highlights",
+    target = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,icons,highlights",
     targettarget = "frame,tooltips,health,text,highlights",
-    focus = "frame,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,icons,highlights",
-    pet = "frame,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,auradesigner,icons,highlights",
+    focus = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,icons,highlights",
+    pet = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,auradesigner,icons,highlights",
     boss = "frame,tooltips,fading,health,resource,absorbs,text,buffs,debuffs,icons,highlights",
 }
 for _, unit in ipairs(UFO.UNITS) do
@@ -257,8 +257,10 @@ for _, unit in ipairs(UFO.UNITS) do
     eq(table.concat(kinds, ","), WANT[unit], unit .. ": its pages, in sidebar order")
 end
 check(made.pages.uf_boss_bosslayout == nil and made.pages.uf_player_castbar == nil
-      and made.pages.uf_player_classpower == nil and made.pages.uf_player_portrait == nil
-      and made.pages.uf_player_visibility == nil, "new pages waiting for their runtime are left out")
+      and made.pages.uf_player_classpower == nil and made.pages.uf_player_portrait == nil,
+      "new pages waiting for their runtime are left out")
+check(made.pages.uf_player_visibility ~= nil, "Visibility: built now its runtime exists")
+eq(made.pages.uf_targettarget_visibility, nil, "...but not for target of target (no card reaches it)")
 eq(made.pages.uf_target_health.cat, "uf_bars", "a page sits in its own category")
 eq(made.cats.uf_bars, "Bars", "...labelled as DF's")
 
@@ -424,8 +426,8 @@ do
     sp.builder(sp, UF:GetGlobalDB(), Add, noop, noop)
     local cards = {}
     for _, a in ipairs(added) do if a.w.cardKey then cards[#cards + 1] = a.w.cardKey end end
-    eq(table.concat(cards, ","), "uf_module,uf_movers,uf_source,uf_blizzard",
-       "Settings: Unit Frames, Position, Frame Source, Blizzard Frames")
+    eq(table.concat(cards, ","), "uf_module,uf_preview,uf_movers,uf_source,uf_blizzard",
+       "Settings: Unit Frames, Preview, Position, Frame Source, Blizzard Frames")
     eq(#dropdowns, #UF.SPAWNED_UNITS, "Settings: one source dropdown per frame this build draws")
     eq(dropdowns[1].label, "Player", "...labelled by unit")
     eq(dropdowns[1].get(), "DF", "...reading the unit's source")
@@ -446,6 +448,46 @@ do
     eq(unlocked and unlocked.addon, "DandersFrames_UnitFrames", "Edit in Mover: the mover, filtered to the addon")
     eq(unlocked and unlocked.keys and unlocked.keys[1], "player", "...and to that unit")
     UF.Mover = nil
+
+    -- The Settings page's Preview card: the switch and the test-mode option.
+    local prevSwitch, inTest
+    for _, c in ipairs(checks) do
+        if c.label == "Preview" then prevSwitch = c end
+        if c.label == "Include Unit Frames in Test Mode" then inTest = c end
+    end
+    check(prevSwitch and prevSwitch.get and prevSwitch.set, "Settings: a Preview switch (get/set, not a db key)")
+    check(inTest and inTest.get, "Settings: Include Unit Frames in Test Mode")
+    if inTest then
+        eq(inTest.get(), true, "...on by default")
+        inTest.set(false)
+        eq(DF.db.unitframes.global.includeInTestMode, false, "...saved module-wide")
+        inTest.set(true)
+    end
+
+    -- The Visibility page, built for real.
+    for _, unit in ipairs({ "player", "target" }) do
+        checks, added = {}, {}
+        local vp = made.pages["uf_" .. unit .. "_visibility"]
+        vp.children = {}
+        vp.RefreshStates = function() end
+        vp.builder(vp, UF:GetUnitDB(unit), Add, noop, noop)
+        local cardKeys, keys = {}, {}
+        for _, x in ipairs(added) do if x.w.cardKey then cardKeys[#cardKeys + 1] = x.w.cardKey end end
+        for _, c in ipairs(checks) do keys[#keys + 1] = c.key end
+        eq(table.concat(cardKeys, ","), "uf_vis_show,uf_vis_hide", unit .. " Visibility: Show When, Hide When")
+        check(added[1].w.dfUnitRow ~= nil, unit .. " Visibility: the unit row (Reset / Sync / Copy)")
+        local want = (unit == "player")
+            and "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHasTarget,visHasEnemyTarget,visHidePetBattle,visHideVehicle,visHideMounted,visHideSkyriding"
+            or "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHidePetBattle,visHideMounted,visHideSkyriding"
+        eq(table.concat(keys, ","), want, unit .. " Visibility: its controls")
+        local combat = checks[2]
+        check(combat and combat.disableOn, unit .. ": conditions grey while Always is on")
+        if combat and combat.disableOn then
+            eq(combat.disableOn(UF:GetUnitDB(unit)), true, "...Always on: greyed")
+            eq(combat.disableOn({ visAlways = false }), false, "...Always off: live")
+        end
+    end
+    eq(UFO.Prefixes("visibility")[1], "vis", "Visibility: Reset / Sync / Copy act on the vis keys")
     UF:GetStoredUnit("player").position = { point = "TOP", x = 1, y = 2 }
     rows[1].buttons[2].onClick()
     eq(UF:GetStoredUnit("player").position, nil, "Reset Position: back to the unit's default")

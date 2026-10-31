@@ -3418,4 +3418,20 @@ L["That doesn't look like a DandersFrames string."] = true
 L["That filter can't be exported."] = true
 L["The Default profile can't be renamed."] = true
 L["This character uses the profile: %s"] = true
+-- Unit frames: Visibility page, preview
+L["Have a Hostile Target"] = true
+L["Have a Target"] = true
+L["Hide When"] = true
+L["In a Group"] = true
+L["In a Pet Battle"] = true
+L["In a Vehicle"] = true
+L["In an Instance"] = true
+L["In Combat"] = true
+L["Include Unit Frames in Test Mode"] = true
+L["Mounted"] = true
+L["Out of Combat"] = true
+L["Show When"] = true
+L["Skyriding"] = true
+L["Solo"] = true
+L["Untick Always to choose conditions. Any ticked condition shows the frame."] = true
 --@end-do-not-package@

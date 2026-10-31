@@ -37,6 +37,9 @@ KIND = {
     "uf_bosslayout": "bosslayout", "uf_visibility": "visibility", "uf_portrait": "portrait",
     "uf_castbar": "castbar", "uf_classpower": "classpower",
 }
+# New pages whose runtime is built: emitted without `later`, with the units their
+# cards reach and the per-unit `hide` list; Pages.lua draws their controls.
+BUILT_NEW = {"uf_visibility"}
 # Section-key prefix of each DF page's cards (tools.OpenSection's collapseKey).
 PREFIX = {
     "general_frame": "frame_", "display_tooltips": "tooltips_", "display_fading": "fading_",
@@ -80,7 +83,7 @@ def main():
         kind = KIND[pid]
         units = [u for u in UNITS if u in p["units"]]
         rec = {"kind": kind, "category": p["category"], "title": p["title"], "units": units}
-        if p["origin"] == "new":
+        if p["origin"] == "new" and pid not in BUILT_NEW:
             rec["later"] = True
         if p["origin"] == "df":
             rec["source"] = pid
@@ -110,7 +113,17 @@ def main():
                                 hide.setdefault(k, set()).update(hidden)
                 else:
                     cards.append((None, cu))
+                    if pid in BUILT_NEW:
+                        for ct in c["controls"]:
+                            k = ct.get("key")
+                            if k and ct.get("units"):
+                                hidden = [u for u in cu if u not in ct["units"]]
+                                if hidden:
+                                    hide.setdefault(k, set()).update(hidden)
         rec["cards"], rec["hide"], rec["laterCards"] = cards, hide, later_cards
+        if pid in BUILT_NEW:
+            rec["built"] = True
+            rec["units"] = [u for u in units if any(u in cu for _, cu in cards)]
         if p["origin"] == "df":
             # A unit with no card on a DF page does not get the page (Fading on
             # Target of Target: every card there is filtered off for it).
@@ -188,6 +201,11 @@ def main():
             L.append("            },")
             if rec["laterCards"]:
                 L.append("            laterCards = { " + ", ".join(lua_str(t) for t in rec["laterCards"]) + " },")
+        elif rec.get("built"):
+            L.append("            hide = {")
+            for key in sorted(rec["hide"]):
+                L.append(f"                {key} = {lua_set(rec['hide'][key])},")
+            L.append("            },")
         L.append("        },")
     L.append("    },")
     L.append("}")

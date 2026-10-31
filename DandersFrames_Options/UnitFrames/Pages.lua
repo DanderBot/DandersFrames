@@ -231,6 +231,7 @@ function UFO.Prefixes(kind)
     end
     if kind == "text" then return { "textDesignerPreset" } end
     if kind == "auradesigner" then return { "auraDesignerEnabled" } end
+    if kind == "visibility" then return { "vis" } end
     return {}
 end
 
@@ -667,6 +668,62 @@ function UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
     Close(band)
 end
 
+-- ---- Visibility (a page new to unit frames) ---------------------------------
+-- When the frame shows, as a secure state driver (DandersFrames_UnitFrames/Units.lua
+-- Units:VisibilityMacro). Two inventory controls are not drawn: Health Below Full
+-- (health is secret in combat, so no secure condition can test it) and In Player
+-- Housing (no macro condition answers it).
+UFO.VIS_SHOW = {
+    { key = "visCombat",         label = function() return L["In Combat"] end },
+    { key = "visNoCombat",       label = function() return L["Out of Combat"] end },
+    { key = "visGroup",          label = function() return L["In a Group"] end },
+    { key = "visSolo",           label = function() return L["Solo"] end },
+    { key = "visInstance",       label = function() return L["In an Instance"] end },
+    { key = "visHasTarget",      label = function() return L["Have a Target"] end },
+    { key = "visHasEnemyTarget", label = function() return L["Have a Hostile Target"] end },
+}
+UFO.VIS_HIDE = {
+    { key = "visHidePetBattle", label = function() return L["In a Pet Battle"] end },
+    { key = "visHideVehicle",   label = function() return L["In a Vehicle"] end },
+    { key = "visHideMounted",   label = function() return L["Mounted"] end },
+    { key = "visHideSkyriding", label = function() return L["Skyriding"] end },
+}
+
+function UFO.VisControlShown(rec, unit, key)
+    local hide = rec and rec.hide and rec.hide[key]
+    return not (hide and hide[unit])
+end
+
+local function AlwaysOn(d) return d and d.visAlways ~= false end
+
+function UFO.BuildVisibilityPage(self, db, Add, rec, unit)
+    Add(UFO.CreatePageRow(self, rec, unit), 25, 2)
+    local Open, Close = Tools(self, Add)
+    local function changed() self:RefreshStates(); RefreshFrames() end
+
+    local band = Open(L["Show When"], "uf_vis_show", 1,
+        function(d) return AlwaysOn(d) and L["Always"] or L["Custom"] end, "visibility")
+    band:AddWidget(GUI:CreateCheckbox(self.child, L["Always"], db, "visAlways", changed), 30)
+    for _, c in ipairs(UFO.VIS_SHOW) do
+        if UFO.VisControlShown(rec, unit, c.key) then
+            local w = GUI:CreateCheckbox(self.child, c.label(), db, c.key, changed)
+            w.disableOn = AlwaysOn
+            band:AddWidget(w, 30)
+        end
+    end
+    band:AddWidget(GUI:CreateLabel(self.child,
+        L["Untick Always to choose conditions. Any ticked condition shows the frame."], 250), 30)
+    Close(band)
+
+    band = Open(L["Hide When"], "uf_vis_hide", 1, nil, "visibility")
+    for _, c in ipairs(UFO.VIS_HIDE) do
+        if UFO.VisControlShown(rec, unit, c.key) then
+            band:AddWidget(GUI:CreateCheckbox(self.child, c.label(), db, c.key, changed), 30)
+        end
+    end
+    Close(band)
+end
+
 -- ---- moving a frame ----------------------------------------------------------
 function UFO.EditInMover(unit)
     local UF = DF.UnitFrames
@@ -691,6 +748,32 @@ function UFO.ResetPosition(unit)
     if UF.Mover and UF.Mover.ApplyAll then UF.Mover:ApplyAll() end
 end
 
+-- ---- preview ------------------------------------------------------------------
+function UFO.IsPreviewOn()
+    local UF = DF.UnitFrames
+    local P = UF and UF.Preview
+    return P and P:IsOwnedBy("settings") or false
+end
+
+function UFO.SetPreview(on)
+    local UF = DF.UnitFrames
+    local P = UF and UF.Preview
+    if P then P:SetOwner("settings", on) end
+end
+
+function UFO.IncludeInTestMode()
+    local UF = DF.UnitFrames
+    return not (UF and UF.IncludeInTestMode) or UF:IncludeInTestMode()
+end
+
+function UFO.SetIncludeInTestMode(on)
+    local UF = DF.UnitFrames
+    local g = UF and UF:GetGlobalDB()
+    if not g then return end
+    g.includeInTestMode = on and true or false
+    if UF.Preview and UF.Preview.SyncTestMode then UF.Preview:SyncTestMode() end
+end
+
 -- ⚠ NO CARD OF OUR OWN IS ADDED TO A PAGE A PARTY BUILDER DRAWS: a second
 -- GUI:CreatePopoutPageTools in the same build retires the first one's popout
 -- holders, taking the party cards' pins with it. Moving frames lives on the
@@ -703,6 +786,8 @@ function UFO.PageBuilder(rec, unit)
             UFO.BuildTextPage(self, db, Add, rec, unit)
         elseif rec.kind == "auradesigner" then
             UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
+        elseif rec.kind == "visibility" then
+            UFO.BuildVisibilityPage(self, db, Add, rec, unit)
         end
     end
 end
@@ -761,6 +846,18 @@ function UFO.BuildSettingsPage(self, db, Add)
     band:AddWidget(GUI:CreateCheckbox(self.child, L["Enabled"], nil, nil, nil,
         function() return UFO.IsEnabled() end,
         function(v) UFO.SetEnabled(v) end), 30)
+    Close(band)
+
+    -- Preview: sample frames for every unit this build draws (UF.Preview). The
+    -- switch is for this session only; the test-mode option is saved.
+    band = Open(L["Preview"], "uf_preview", 1,
+        function() return UFO.IsPreviewOn() and L["On"] or L["Off"] end, "rendering")
+    band:AddWidget(GUI:CreateCheckbox(self.child, L["Preview"], nil, nil, nil,
+        function() return UFO.IsPreviewOn() end,
+        function(v) UFO.SetPreview(v); self:RefreshStates() end), 30)
+    band:AddWidget(GUI:CreateCheckbox(self.child, L["Include Unit Frames in Test Mode"], nil, nil, nil,
+        function() return UFO.IncludeInTestMode() end,
+        function(v) UFO.SetIncludeInTestMode(v) end), 30)
     Close(band)
 
     -- One row per frame this build draws: its name, Edit in Mover, Reset Position.

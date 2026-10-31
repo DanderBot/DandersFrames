@@ -50,8 +50,14 @@ DF.UnitFramePageData = {
         },
         {
             kind = "visibility", category = "display", title = "Visibility",
-            later = true,
-            units = { player = true, target = true, targettarget = true, focus = true, pet = true },
+            units = { player = true, target = true, focus = true, pet = true },
+            hide = {
+                visHasEnemyTarget = { target = true, focus = true, pet = true },
+                visHasTarget = { target = true, focus = true, pet = true },
+                visHealthMissing = { target = true, focus = true, pet = true },
+                visHideHousing = { player = true, pet = true },
+                visHideVehicle = { target = true, focus = true, pet = true },
+            },
         },
         {
             kind = "tooltips", category = "display", title = "Tooltips",
