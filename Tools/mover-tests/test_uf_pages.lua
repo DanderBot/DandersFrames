@@ -127,6 +127,7 @@ end
 local function LoadPages()
     load_options_file_into("UnitFrames/PageData.lua", NS)
     load_options_file_into("UnitFrames/Pages.lua", NS)
+    load_options_file_into("UnitFrames/LinksPage.lua", NS)
     return DF.GUI.UnitFrameOptions
 end
 
@@ -211,10 +212,11 @@ eq(#DF.GUIPageProviders, 1, "loaded: one page provider")
 eq(type(G.PlayerFrameOwnerNote), "function", "loaded: the player-frame note hook is set")
 check(#postDrains >= 1, "loaded: the sync rides DF's apply drain")
 
-local made = { cats = {}, catOrder = {}, pages = {} }
+local made = { cats = {}, catOrder = {}, pages = {}, pageOrder = {} }
 local function CreateCategory(name, label) made.cats[name] = label; made.catOrder[#made.catOrder + 1] = name end
 local function CreateSubTab(cat, name, label)
     local p = { tabName = name, tabLabel = label, cat = cat, child = Frame(), children = {} }
+    made.pageOrder[#made.pageOrder + 1] = name
     made.pages[name] = p
     G.Pages[name] = p
     return p
@@ -323,7 +325,8 @@ print("-- Loaded: unit pages join the search index lazily")
 do
     local n, lazy = 0, 0
     for name, p in pairs(made.pages) do
-        if name ~= "uf_settings" then
+        -- The module's own pages (Settings, Linked Frames) are two: indexed as usual.
+        if name ~= "uf_settings" and name ~= "uf_links" then
             n = n + 1
             if p.deferIndex == true then lazy = lazy + 1 end
             check(not p.skipSearchIndex, name .. ": indexed (once a search is typed), not skipped")
@@ -556,8 +559,8 @@ do
     sp.builder(sp, UF:GetGlobalDB(), Add, noop, noop)
     local cards = {}
     for _, a in ipairs(added) do if a.w.cardKey then cards[#cards + 1] = a.w.cardKey end end
-    eq(table.concat(cards, ","), "uf_module,uf_preview,uf_movers,uf_source,uf_blizzard,uf_links",
-       "Settings: Unit Frames, Preview, Position, Frame Source, Blizzard Frames, Linked Frames")
+    eq(table.concat(cards, ","), "uf_module,uf_preview,uf_movers,uf_source,uf_blizzard",
+       "Settings: Unit Frames, Preview, Position, Frame Source, Blizzard Frames (Linked Frames is a page of its own)")
     local sources = {}
     for _, d in ipairs(dropdowns) do if d.opts and d.opts.optionsFunc and d.options and d.options.DF then sources[#sources + 1] = d end end
     eq(#sources, #UF.SPAWNED_UNITS, "Settings: one source dropdown per frame this build draws")
@@ -885,7 +888,7 @@ do
     check(UFO.PageLinked("health", "target"), "the Health Bar page is linked on Target")
     check(not UFO.PageLinked("frame", "target"), "...the Frame page is not")
     local text = UFO.LinkBannerText("health", "target")
-    check(text and text:find("Focus", 1, true) and text:find("layout and look shared", 1, true),
+    check(text and text:find("Focus", 1, true) and text:find("position, size and style shared", 1, true),
           "banner: names the partner and how the page is linked")
     eq(UFO.LinkBannerText("frame", "target"), nil, "banner: nothing on a page that is not linked")
     eq(UFO.PageMark("uf_target_health"), UFO.ROW_MARK, "sidebar: a linked page's row carries the link mark")
@@ -1032,137 +1035,231 @@ do
 end
 
 -- ============================================================
--- 7b. THE LINKED FRAMES CARD (module Settings page), built for real
+-- 7b. THE LINKED FRAMES PAGE (uf_links), built for real over stub widgets
 -- ============================================================
-print("-- The Linked Frames card")
+print("-- The Linked Frames page")
 do
     local Lk, root = UF.Links, DF.db.unitframes
     root.global.unitLinks = nil
     Lk:Ensure(root)                         -- the default link: Target follows Player
-    local bands, dds, buttonRows = {}, {}, {}
-    local saved2 = { G.CreateDropdown, G.CreateCheckbox, G.CreateLabel, G.CreateButtonRow,
-                     G.CreatePopoutPageTools, G.CreateLabelNative }
-    function G:CreateDropdown(parent, label, options, db, key, cb, get, set, opts)
-        local d = Frame(); d.label, d.options, d.get, d.set, d.opts, d.parent = label, options, get, set, opts, parent
+
+    -- Registered under the module category, right below Settings.
+    local pg = made.pages.uf_links
+    check(pg ~= nil, "the page exists")
+    eq(pg and pg.cat, "uf_module", "...in the Unit Frames category")
+    eq(made.pageOrder[1] .. "," .. made.pageOrder[2], "uf_settings,uf_links", "...right below Settings")
+    eq(pg and pg.tabLabel, "Linked Frames", "...called Linked Frames")
+    eq(G:ModuleForPage("uf_links"), "units", "...on the module's sidebar")
+    eq(UFO.PageMark("uf_links"), UFO.ROW_MARK, "...with the link mark while a link exists")
+    check(type(G.PageMinWidths.uf_links) == "function", "...and a measured minimum window width")
+    calls = {}
+    UFO.OpenLinkCard("target")
+    eq(calls[#calls], "tab:uf_links", "a unit page's Edit link opens this page")
+
+    -- ---- the words ---------------------------------------------------------------
+    local E = Lk.BY_ID
+    eq(UFO.LinkResult(E.health, "mirror", "same", "target", "player"), "Target is a mirror image of Player.", "result: mirror + same")
+    eq(UFO.LinkResult(E.health, "mirror", "own", "target", "player"), "Positions mirror. Target keeps its own size and style.", "result: mirror + own")
+    eq(UFO.LinkResult(E.health, "same", "same", "target", "player"), "Identical on both frames.", "result: same + same")
+    eq(UFO.LinkResult(E.health, "same", "own", "target", "player"), "Same positions. Target keeps its own size and style.", "result: same + own")
+    eq(UFO.LinkResult(E.health, "own", "same", "target", "player"), "Same size and style. Each frame places it on its own.", "result: own + same")
+    eq(UFO.LinkResult(E.health, "own", "own", "target", "player"), "Not linked. Each frame has its own.", "result: own + own")
+    eq(UFO.LinkResult(E.border, "own", "same", "target", "player"), "Same on both frames.", "result: no position, shared")
+    eq(UFO.LinkResult(E.border, "own", "own", "target", "player"), "Not linked. Each frame has its own.", "result: no position, separate")
+    eq(UFO.LinkResult(E.health, "mirror", "same", "focus", "target"), "Focus is a mirror image of Target.", "result: names the pair")
+    local link = root.global.unitLinks.target
+    check(UFO.LinkExceptText(link, "health"):find("reaction", 1, true), "always separate: health colour mode")
+    check(UFO.LinkExceptText(link, "castbar"):find("latency", 1, true), "always separate: cast bar detach and latency")
+    eq(UFO.LinkExceptText(link, "portrait"), nil, "...nothing for a part with no kept key")
+    eq(UFO.LinkExceptText({ elements = {} }, "health"), nil, "...nothing for a link that keeps nothing apart")
+    for _, e in ipairs(Lk.ELEMENTS) do
+        local pos, size = UFO.LinkPartText(e.id)
+        check(size ~= nil, e.id .. ": says what its size & style covers")
+        check((pos ~= nil) == (e.layout and true or false), e.id .. ": a position text exactly when it has a position")
+    end
+
+    -- ---- the groups --------------------------------------------------------------
+    local linked, separate = UFO.LinkPageGroups("target", "player")
+    local function ids(list) local t = {} for i, e in ipairs(list) do t[i] = e.id end return table.concat(t, ",") end
+    eq(ids(linked), "health,resource,portrait,castbar,text,buffs,debuffs,border", "Linked by default: the default link's parts, in page order")
+    eq(ids(separate), "absorbs,healpred,icons,unitIcons,tooltips,visibility,fading,frame,highlights",
+       "Separate by default: everything else both frames have")
+    local n, total = UFO.LinkedPartCount("target", "player")
+    eq(n .. "/" .. total, "8/17", "8 of 17 parts linked")
+    linked, separate = UFO.LinkPageGroups("targettarget", "focustarget")
+    eq(ids(linked) .. "|" .. ids(separate), "health,text,border|tooltips,frame,highlights", "a pair with fewer parts lists only those")
+
+    -- ---- the layout decision -----------------------------------------------------
+    local m = UFO.LinkDefaultMeasures()
+    local wideNeed, stackedNeed = UFO.LinkCardNeeds(m)
+    check(stackedNeed < wideNeed, "stacked needs less width than wide")
+    eq(UFO.LinkCardLayout(wideNeed, m).mode, "wide", "wide at exactly what it needs")
+    eq(UFO.LinkCardLayout(wideNeed - 1, m).mode, "stacked", "...stacked a pixel under it")
+    local w = UFO.LinkCardLayout(wideNeed, m)
+    check(w.pos > w.name + m.nameW - 1 and w.look >= w.pos + m.posW and w.result >= w.look + m.lookW,
+          "wide: columns in order, never overlapping")
+    eq(w.resultW, m.resultMin, "wide at its minimum: the result column gets exactly its minimum")
+    local s = UFO.LinkCardLayout(stackedNeed, m)
+    check(s.look + m.lookW <= stackedNeed - m.pad, "stacked at its minimum: the second segment ends inside the card")
+    check(s.resultW >= m.resultMinStacked, "stacked at its minimum: the result keeps its minimum beside the name")
+    eq(UFO.LinkHeaderLines(5000, m), 1, "header: one line when everything fits")
+    eq(UFO.LinkHeaderLines(2 * m.pad + m.pickersW + m.gap + m.summaryW, m), 2, "...buttons below when they do not")
+    eq(UFO.LinkHeaderLines(stackedNeed, m) >= 2, true, "...never one line at the stacked minimum")
+    check(stackedNeed >= 2 * m.pad + m.buttonsW and stackedNeed >= 2 * m.pad + m.pickersW,
+          "the stacked minimum holds the buttons and the pickers on their own lines")
+    eq(UFO.LinksMinWindowWidth(m, 281), 281 + UFO.LinksMinUsableWidth(m), "min window = chrome + the narrow layout's need")
+    check(UFO.LinksMinWindowWidth(m, 281) < 281 + wideNeed, "...which is less than the wide layout's")
+
+    -- ---- built ----------------------------------------------------------------------
+    local savedCF = CreateFrame
+    CreateFrame = function(kind, _, parent)
+        local f = FakeUIFrame()
+        f._kind, f._parent = kind, parent
+        return f
+    end
+    local segs, dds = {}, {}
+    local saved3 = { G.CreateLabelNative, G.CreateElementBackdrop, G.StyleButton, G.CreateSegmentToggle,
+                     G.CreateDropdown, G.SetSettingsFont, G.ShowTooltip, G.HideTooltip, G.GetAccent }
+    function G:CreateLabelNative(_, o) local l = FakeUIFrame(); l:SetText(o and o.text or ""); return l end
+    function G:CreateElementBackdrop(f) return f end
+    function G:StyleButton(b, o) b.Text = FakeUIFrame(); b.Text:SetText(o.text or ""); b._opts = o; b:SetWidth(o.width or 60); b:SetHeight(o.height or 24) end
+    function G:CreateSegmentToggle(parent, segments, _, _, _, o)
+        local f = FakeUIFrame()
+        f.segments, f.opts, f.parent = segments, o, parent
+        f:SetSize(#segments * o.segmentWidth + 2, o.height + 2)
+        f.Refresh = function() end
+        segs[#segs + 1] = f
+        return f
+    end
+    function G:CreateDropdown(parent, label, options, _, _, _, get, set, o)
+        local d = FakeUIFrame(); d.label, d.get, d.set, d.opts = label, get, set, o
         dds[#dds + 1] = d
         return d
     end
-    function G:CreateCheckbox() return Frame() end
-    function G:CreateLabel() return Frame() end
-    function G:CreateLabelNative(_, o) local l = Frame(); l.text = o and o.text; return l end
-    function G:CreateButtonRow(_, buttons) local f = Frame(); f.buttons = buttons; buttonRows[#buttonRows + 1] = f; return f end
-    function G:CreatePopoutPageTools()
-        return {
-            OpenSection = function(_, label, key, col, summary)
-                local b = Frame(); b.cardKey, b.summary, b.col, b.kids = key, summary, col, {}
-                b.AddWidget = function(self, w) self.kids[#self.kids + 1] = w; return w end
-                bands[key] = b
-                return b
-            end,
-            CloseSection = function() end,
-        }
-    end
-    local sp = made.pages.uf_settings
-    sp.children = {}
-    local refreshed = 0
-    sp.RefreshStates = function() refreshed = refreshed + 1 end
-    sp.builder(sp, UF:GetGlobalDB(), function(w) return w end, noop, noop)
-    local card = bands.uf_links
-    check(card ~= nil, "Settings: the Linked Frames card")
-    eq(card and card.col, 2, "...in column 2")
-    eq(card and card.summary(), "Target + Player", "...its summary lists the links")
+    function G:SetSettingsFont() end
+    function G:ShowTooltip() end
+    function G:HideTooltip() end
+    function G:GetAccent() return { r = 0.6, g = 0.4, b = 1 } end
+    G.PageChildWidth = function(cw) return cw - 22 end
+    G.PageUsableWidth = function(cw) return cw - 10 end
+    G.contentFrame = FakeUIFrame(1000, 600)
 
-    local frameDD, linkDD
-    for _, d in ipairs(dds) do
-        if d.label == "Frame" then frameDD = d end
-        if d.label == "Linked To" then linkDD = d end
+    local page = made.pages.uf_links
+    page.child = FakeUIFrame()
+    local blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg, h = h, col = col }; return wg end)
+    eq(#blocks, 3, "head, the three explainers, one card per link")
+    for _, b in ipairs(blocks) do eq(b.col, "both", "every block spans the page") end
+    local card = blocks[3].w
+    check(card.dfLinkCard, "the third block is the link's card")
+    eq(#card.rows, 17, "a row per part both frames have")
+    local byId = {}
+    for _, r in ipairs(card.rows) do byId[r.elem.id] = r end
+    local function values(seg) local t = {} for i, x in ipairs(seg.segments) do t[i] = x.value end return table.concat(t, ",") end
+    eq(values(byId.health.pos), "same,mirror,own", "Health: Same / Mirrored / Separate")
+    eq(byId.health.pos.segments[3].label, "Separate", "...the off choice reads Separate")
+    check(byId.health.pos.segments[3].accent ~= nil and byId.health.pos.segments[1].accent == nil,
+          "...and only it wears the neutral accent when chosen")
+    for _, id in ipairs({ "absorbs", "healpred", "tooltips" }) do
+        eq(values(byId[id].pos), "same,own", id .. ": Same / Separate only (no Mirrored)")
     end
-    check(frameDD and linkDD, "the card: a Frame picker and a Linked To picker")
-    UFO.linkUnit = nil
-    UFO.unit = "target"
-    eq(frameDD.get(), "target", "Frame: the tab's unit until one is picked")
-    eq(linkDD.get(), "player", "Linked To: Target's partner")
-    eq(table.concat(linkDD.opts.optionsFunc()._order, ","), "_none,player,targettarget,focus,focustarget,pet,boss",
-       "Linked To: None, then every other unit")
+    eq(rawget(byId.border, "pos"), nil, "Border: no position segment...")
+    check(rawget(byId.border, "noPos") ~= nil, "...it says No position settings")
+    eq(values(byId.border.look), "same,own", "Size & Style: Same / Separate")
+    eq(byId.health.result:GetText(), "Target is a mirror image of Player.", "Health's result line")
+    eq(byId.absorbs.result:GetText(), "Not linked. Each frame has its own.", "Absorbs' result line")
+    eq(byId.health.badge:GetText(), "+1", "Health: one thing kept apart")
+    eq(byId.portrait.badge:GetText(), "", "Portrait: nothing kept apart")
+    eq(card.summary:GetText(), "8 of 17 parts linked", "the card's summary")
 
-    -- One row per element; shown only where both units have it.
-    local rows = {}
-    for _, w in ipairs(card.kids) do
-        local id = rawget(w, "dfLinkElement")
-        if id then rows[id] = w end
-    end
-    eq(#Lk.ELEMENTS, (function() local n = 0 for _ in pairs(rows) do n = n + 1 end return n end)(),
-       "a row per element")
-    eq(rows.health.hideOn(), false, "Target + Player: Health Bar shows")
-    eq(rows.classpower.hideOn(), true, "...Class Power does not (Target has none)")
-    eq(rows.bosslayout.hideOn(), true, "...Boss Layout does not")
-    check(rows.health.dfLinkLayout and rows.health.dfLinkLook, "Health Bar: a Layout and a Look picker")
-    eq(rows.border.dfLinkLayout, nil, "Border: Look only (no layout aspect)")
-    eq(rows.health.dfLinkLayout.get(), "mirror", "Health Bar layout: Mirrored (the default link)")
-    eq(rows.health.dfLinkLook.get(), "same", "Health Bar look: Same")
-    eq(table.concat(rows.health.dfLinkLayout.options._order, ","), "same,mirror,own", "Layout: Same / Mirrored / Own")
-    eq(table.concat(rows.health.dfLinkLook.options._order, ","), "same,own", "Look: Same / Own")
+    -- Widths: wide when it fits, stacked when it does not, nothing past the edge.
+    local wideW = UFO.LinkCardNeeds(UFO.linkMeasured)
+    card:Layout(wideW + 40)
+    eq(card.mode, "wide", "wide when it fits")
+    card:Layout(wideW - 1)
+    eq(card.mode, "stacked", "stacked when it does not")
+    local minUsable = UFO.LinksMinUsableWidth(UFO.linkMeasured)
+    card:Layout(minUsable)
+    eq(card.mode, "stacked", "stacked at the page's minimum")
+    local lookSeg = byId.health.look
+    local _, _, _, lx = lookSeg:GetPoint(1)
+    check(lx + lookSeg:GetWidth() <= minUsable - UFO.LINK_METRICS.pad,
+          "at the minimum: the last segment ends inside the card")
+    eq(UFO.LinksMinWindowWidth(nil, 281), 281 + minUsable, "the page's minimum window width is the narrow layout's")
 
-    -- Making an aspect own copies nothing: no question asked.
-    popups = {}
-    rows.tooltips.dfLinkLook.set("own")
-    eq(#popups, 0, "Own: applied without a confirmation")
-    -- Sharing one asks first, and only Link applies it.
-    rows.tooltips.dfLinkLook.set("same")
-    eq(#popups, 1, "Same: asks first")
-    eq(Lk:ElementLinked(root, "target", "tooltips"), false, "...nothing changes before the answer")
+    -- ---- the actions ---------------------------------------------------------------
     local function click(cfg, label)
         for _, b in ipairs(cfg.buttons) do if b.label == label then if b.onClick then b.onClick() end return true end end
     end
+    popups = {}
+    byId.absorbs.look.opts.customSet("same")
+    eq(#popups, 1, "sharing a part asks first")
     click(popups[1], "Link")
-    eq(select(2, Lk:Aspects(root, "target", "tooltips")), "same", "Link: the look is shared")
-    rows.tooltips.dfLinkLook.set("own")
-
-    -- Re-linking to another unit asks, says it replaces, and moves the link.
+    eq(select(2, Lk:Aspects(root, "target", "absorbs")), "same", "...and Link shares it")
     popups = {}
-    linkDD.set("focus")
-    eq(#popups, 1, "Linked To another unit: asks first")
-    check(popups[1].message:find("replaces", 1, true), "...and says it replaces the current link")
-    click(popups[1], "Cancel")
-    eq(UFO.Partner("target"), "player", "Cancel: nothing changes")
-    popups = {}
-    linkDD.set("focus")
+    byId.absorbs.look.opts.customSet("own")
+    eq(#popups, 0, "Separate copies nothing: no question")
+    eq(select(2, Lk:Aspects(root, "target", "absorbs")), "own", "...applied at once")
+    byId.absorbs.pos.opts.customSet("same")
     click(popups[1], "Link")
-    eq(UFO.Partner("target"), "focus", "Link: Target now follows Focus")
-    eq(UFO.Partner("player"), nil, "...and Player is free")
-    local link = root.global.unitLinks.target
-    check(link.elements.health and link.elements.health.layout == "same" and link.elements.health.look == "same",
-          "a new link (not the Player pair) starts with everything shared")
-    eq(link.except, nil, "...and keeps nothing apart")
+    eq((Lk:Aspects(root, "target", "absorbs")), "same", "Absorbs position: Same")
 
-    -- Unlink: asks, then frees both.
-    local unlink
-    for _, r in ipairs(buttonRows) do if r.buttons[1].label == "Unlink" then unlink = r end end
-    check(unlink ~= nil, "an Unlink button")
-    eq(unlink.hideOn(), false, "...shown while linked")
+    -- Mirror All: every part, absorbs' position stays same (it cannot mirror).
+    local function btn(label) for _, b in ipairs(card.buttons) do if b.Text:GetText() == label then return b end end end
     popups = {}
-    unlink.buttons[1].onClick()
+    btn("Mirror All"):GetScript("OnClick")()
+    click(popups[1], "Mirror All")
+    eq((Lk:Aspects(root, "target", "health")), "mirror", "Mirror All: health mirrored")
+    eq((Lk:Aspects(root, "target", "absorbs")), "same", "Mirror All: absorbs same (never mirrored)")
+    eq(select(2, Lk:Aspects(root, "target", "visibility")), "same", "Mirror All: visibility's look shared")
+    popups = {}
+    btn("Separate All"):GetScript("OnClick")()
+    eq(#popups, 0, "Separate All copies nothing: no question")
+    eq(Lk:ElementLinked(root, "target", "health"), false, "Separate All: nothing linked")
+    check(Lk:LinkOf(root, "target") ~= nil, "...the link stays")
+    popups = {}
+    btn("Copy All"):GetScript("OnClick")()
+    click(popups[1], "Copy All")
+    eq((Lk:Aspects(root, "target", "health")), "same", "Copy All: shared, nothing flipped")
+
+    -- Unlink: asks, the tooltip says nothing is reset, the link goes.
+    popups = {}
+    btn("Unlink"):GetScript("OnClick")()
+    check(popups[1] and popups[1].message:find("keep their settings", 1, true), "Unlink asks, and says both keep their settings")
     click(popups[1], "Unlink")
-    eq(UFO.Partner("target"), nil, "Unlink: Target is free")
-    eq(unlink.hideOn(), true, "...and the button hides")
-    eq(rows.health.hideOn(), true, "...as do the element rows")
-    eq(card.summary(), "Off", "the summary: no links")
-    eq(type(root.global.unitLinks), "table", "the link table stays: the default is never made again")
+    eq(UFO.Partner("target"), nil, "Unlink: gone")
+    eq(UFO.PageMark("uf_links"), nil, "...and the page's mark with it")
 
-    -- Player + Target again, from Player's side: the default pair keeps its shape.
-    UFO.linkUnit = "player"
+    -- + Link Two Frames: a draft card with the first free pair, then Link.
+    UFO.StartLinkDraft()
+    eq(UFO.linkDraft and (UFO.linkDraft.leader .. ">" .. UFO.linkDraft.follower), "player>target", "the draft starts on the first two free frames")
+    blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
+    local draft = blocks[3].w
+    eq(#draft.rows, 0, "the draft card has no rows yet")
     popups = {}
-    linkDD.set("target")
+    draft.buttons[1]:GetScript("OnClick")()
     click(popups[1], "Link")
-    link = root.global.unitLinks.player
-    check(link and link.to == "target", "Player follows Target (it was picked from Player's side)")
-    eq(link and link.elements.health.layout, "mirror", "...as the mirrored pair")
-    check(link and link.except and link.except.healthColorMode, "...each keeping its deliberate own defaults")
-    Lk:Unlink(root, "player")
-    UFO.linkUnit = nil
+    eq(UFO.Partner("target"), "player", "Link: Target follows Player again")
+    eq(root.global.unitLinks.target.elements.health.layout, "mirror", "...as the default pair")
+    eq(UFO.linkDraft, nil, "...and the draft is done")
 
-    G.CreateDropdown, G.CreateCheckbox, G.CreateLabel, G.CreateButtonRow, G.CreatePopoutPageTools, G.CreateLabelNative =
-        saved2[1], saved2[2], saved2[3], saved2[4], saved2[5], saved2[6]
+    -- Moving one end of a link keeps its parts.
+    Lk:SetElement(root, "target", "absorbs", "same", "same")
+    popups = {}
+    UFO.ConfirmLinkPair("focus", "player", root.global.unitLinks.target.elements)
+    check(popups[1].message:find("replaces", 1, true), "moving an end says it replaces the current link")
+    click(popups[1], "Link")
+    eq(UFO.Partner("focus"), "player", "Focus now follows Player")
+    eq(UFO.Partner("target"), nil, "...Target is free")
+    eq(select(2, Lk:Aspects(root, "focus", "absorbs")), "same", "...and the parts came along")
+    Lk:Unlink(root, "focus")
+
+    CreateFrame = savedCF
+    G.CreateLabelNative, G.CreateElementBackdrop, G.StyleButton, G.CreateSegmentToggle, G.CreateDropdown,
+        G.SetSettingsFont, G.ShowTooltip, G.HideTooltip, G.GetAccent =
+        saved3[1], saved3[2], saved3[3], saved3[4], saved3[5], saved3[6], saved3[7], saved3[8], saved3[9]
+    G.contentFrame = nil
 end
 
 -- ============================================================

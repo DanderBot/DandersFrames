@@ -105,6 +105,7 @@ GUI\Pages\ModulesPage.lua
 # provider runs at CreateGUI, and its pages run the party pages' builders.
 UnitFrames\PageData.lua
 UnitFrames\Pages.lua
+UnitFrames\LinksPage.lua
 
 # Aura Designer editor (migrations stay resident in the main addon)
 AuraDesigner\UI\Options.lua

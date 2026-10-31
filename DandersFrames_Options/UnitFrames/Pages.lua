@@ -417,6 +417,17 @@ end
 
 function UFO.PageMark(name)
     local m = UFO.pageMeta[name]
+    -- The Linked Frames page carries the mark while any link exists.
+    if m and m.kind == "links" then
+        local root = UFO.Root()
+        local t = root and root.global and root.global.unitLinks
+        if type(t) == "table" then
+            for u, link in pairs(t) do
+                if type(link) == "table" and UFO.IsUnit(u) and UFO.IsUnit(link.to) then return UFO.ROW_MARK end
+            end
+        end
+        return nil
+    end
     if not (m and m.unit) then return nil end
     return UFO.PageLinked(m.kind, m.unit) and UFO.ROW_MARK or nil
 end
@@ -426,13 +437,13 @@ function UFO.RefreshLinkMarks()
     if GUI.RefreshModuleShell then GUI:RefreshModuleShell(true) end
 end
 
--- How an element is linked, as words: "layout mirrored, look shared".
+-- How an element is linked, as words: "position mirrored, size and style shared".
 function UFO.AspectPhrase(layout, look)
-    if layout == "mirror" and look == "same" then return L["layout mirrored, look shared"] end
-    if layout == "same" and look == "same" then return L["layout and look shared"] end
-    if layout == "mirror" then return L["layout mirrored"] end
-    if layout == "same" then return L["layout shared"] end
-    if look == "same" then return L["look shared"] end
+    if layout == "mirror" and look == "same" then return L["position mirrored, size and style shared"] end
+    if layout == "same" and look == "same" then return L["position, size and style shared"] end
+    if layout == "mirror" then return L["position mirrored"] end
+    if layout == "same" then return L["position shared"] end
+    if look == "same" then return L["size and style shared"] end
     return nil
 end
 
@@ -590,14 +601,9 @@ local function EditLinkMarkup()
     return "|cffffffff|HufEditLink|h" .. L["Edit link"] .. "|h|r"
 end
 
+-- "Edit link" on a unit page: the Linked Frames page.
 function UFO.OpenLinkCard(unit)
-    UFO.linkUnit = unit
-    if GUI.LinkToSetting then
-        GUI:LinkToSetting({ page = "uf_settings", section = L["Linked Frames"],
-                            flash = { fill = false, border = true } })
-    elseif GUI.SelectTab then
-        GUI.SelectTab("uf_settings")
-    end
+    if GUI.SelectTab then GUI.SelectTab(UFO.LINKS_PAGE or "uf_links") end
 end
 
 function UFO.CreateLinkBanner(pg, rec, unit)
@@ -1642,26 +1648,12 @@ function UFO.BuildSettingsPage(self, db, Add)
         function() return UFO.HidesBlizzardCastBar() end,
         function(v) if db then db.hideBlizzardCastbar = v and true or false end end), 30)
     Close(band)
-
-    UFO.BuildLinksCard(self, Open, Close)
 end
 
 -- ============================================================
--- THE LINKED FRAMES CARD (module Settings page)
--- One frame at a time (the Frame picker: the tab's unit until one is picked, and
--- a linked page's "Edit link" opens it on that page's unit): what it is linked
--- to, then a row per element both frames have, Layout (Same / Mirrored / Own)
--- and Look (Same / Own). A change that copies settings asks first, then applies
--- the link leader -> follower once (Links:SetLink / SetElement).
+-- WHICH PARTS TWO UNITS SHARE (the Linked Frames page lists these;
+-- DandersFrames_Options/UnitFrames/LinksPage.lua)
 -- ============================================================
-UFO.LINK_LAYOUT_W, UFO.LINK_LOOK_W, UFO.LINK_GAP = 92, 76, 4
-
-function UFO.LinkUnit()
-    local u = UFO.linkUnit
-    if u and UFO.IsUnit(u) then return u end
-    return UFO.IsUnit(UFO.unit) and UFO.unit or "player"
-end
-
 -- Does `unit` have this element's page?
 function UFO.UnitHasElement(unit, elem)
     local rec = elem and UFO.pageByKind[elem.kind]
@@ -1677,244 +1669,6 @@ function UFO.SharedElements(a, b)
         if UFO.UnitHasElement(a, e) and UFO.UnitHasElement(b, e) then out[#out + 1] = e end
     end
     return out
-end
-
--- A new link's starting point: Player and Target (either way round) start as
--- the default link does -- mirrored, with each keeping its deliberate own
--- defaults; any other pair starts with everything both have shared.
-function UFO.NewLinkElements(follower, leader)
-    local Lk = UFO.Links()
-    local d = Lk.DEFAULT
-    if (follower == d.follower and leader == d.leader) or (follower == d.leader and leader == d.follower) then
-        return d.elements, Lk.DeliberateDifferences(follower, leader, d.elements)
-    end
-    local els = {}
-    for _, e in ipairs(UFO.SharedElements(follower, leader)) do
-        els[e.id] = { layout = e.layout and "same" or "own", look = "same" }
-    end
-    return els, nil
-end
-
--- Link `unit` (follower) to `other` (leader), or unlink it ("_none"), asking
--- first. `done` runs either way, so a picker can show what actually happened.
-function UFO.ConfirmLink(unit, other, done)
-    local Lk, root = UFO.Links(), UFO.Root()
-    if not (Lk and root) then return end
-    done = done or function() end
-    local partner = Lk:Partner(root, unit)
-    local U = UFO.UnitLabel
-    if other == "_none" then
-        if not partner then return done() end
-        DF:ShowPopupAlert({
-            title = L["Unlink"],
-            message = format(L["Unlink %s and %s?\n\nBoth keep their settings as they are now. They just stop changing together."],
-                U(unit), U(partner)),
-            buttons = {
-                { label = L["Unlink"], onClick = function()
-                    Lk:Unlink(root, unit)
-                    UFO.InvalidateUnitPages(unit)
-                    AfterChange(partner)
-                    done()
-                end },
-                { label = L["Cancel"], onClick = done },
-            },
-        })
-        return
-    end
-    if not UFO.IsUnit(other) or other == unit or other == partner then return done() end
-    local message = format(L["Link %s to %s?\n\n%s's linked settings are copied to %s now, and from then on a change on either one changes the other."],
-        U(unit), U(other), U(other), U(unit))
-    if partner or Lk:Partner(root, other) then
-        message = message .. "\n\n" .. L["A frame links to one other frame, so this replaces their current links."]
-    end
-    DF:ShowPopupAlert({
-        title = L["Linked Frames"],
-        message = message,
-        buttons = {
-            { label = L["Link"], onClick = function()
-                local old = Lk:Partner(root, other)
-                local els, except = UFO.NewLinkElements(unit, other)
-                Lk:SetLink(root, unit, other, els, except)
-                for _, u in ipairs({ partner, old, other }) do
-                    if u then UFO.InvalidateUnitPages(u) end
-                end
-                AfterChange(unit)
-                done()
-            end },
-            { label = L["Cancel"], onClick = done },
-        },
-    })
-end
-
--- Set one element's aspect. Anything that copies settings asks first; making an
--- aspect the unit's own copies nothing, so it just happens.
-function UFO.ConfirmAspect(unit, elem, aspect, value, done)
-    local Lk, root = UFO.Links(), UFO.Root()
-    if not (Lk and root) then return end
-    done = done or function() end
-    local link, follower, leader = Lk:LinkOf(root, unit)
-    if not link then return done() end
-    local layout, look = Lk:Aspects(root, unit, elem.id)
-    if aspect == "layout" then layout = value else look = value end
-    local function apply()
-        Lk:SetElement(root, unit, elem.id, layout, look)
-        UFO.InvalidateUnitPages(follower)
-        AfterChange(leader)
-        done()
-    end
-    if value == "own" then return apply() end
-    local U = UFO.UnitLabel
-    DF:ShowPopupAlert({
-        title = L["Linked Frames"],
-        message = format(L["Link %s?\n\n%s's %s settings are copied to %s now."],
-            L[elem.title], U(leader), L[elem.title], U(follower)),
-        buttons = {
-            { label = L["Link"], onClick = apply },
-            { label = L["Cancel"], onClick = done },
-        },
-    })
-end
-
-function UFO.LinkSummary()
-    local Lk, root = UFO.Links(), UFO.Root()
-    local t = root and root.global and root.global.unitLinks
-    local parts = {}
-    for _, u in ipairs(UFO.UNITS) do
-        local link = type(t) == "table" and t[u]
-        if type(link) == "table" and UFO.IsUnit(link.to) then
-            parts[#parts + 1] = format("%s + %s", UFO.UnitShortLabel(u), UFO.UnitShortLabel(link.to))
-        end
-    end
-    if #parts == 0 or not Lk then return L["Off"] end
-    return concat(parts, SEP)
-end
-
-local function LinkedUnitOptions(unit)
-    local opts = { _none = L["None"], _order = { "_none" } }
-    for _, u in ipairs(UFO.UNITS) do
-        if u ~= unit then
-            opts[u] = UFO.UnitLabel(u)
-            opts._order[#opts._order + 1] = u
-        end
-    end
-    return opts
-end
-
--- One element's row: its name, then Layout (if it has one) and Look, inline.
--- ⚠ BESPOKE ROW, built from the shared pieces: no helper lays two inline
--- dropdowns beside a name (the page row above does the same by hand).
-local function ElementRow(self, e)
-    local row = CreateFrame("Frame", nil, self.child)
-    row:SetSize(250, 26)
-    local function unit() return UFO.LinkUnit() end
-    local function refresh() self:RefreshStates() end
-    local look = GUI:CreateDropdown(row, L["Look"],
-        { same = L["Same"], own = L["Own"], _order = { "same", "own" } }, nil, nil, nil,
-        function() return select(2, UFO.Links():Aspects(UFO.Root(), unit(), e.id)) end,
-        function(v) UFO.ConfirmAspect(unit(), e, "look", v, refresh) end,
-        { inline = true })
-    look:SetSize(UFO.LINK_LOOK_W, 22)
-    look:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    local layout
-    if e.layout then
-        layout = GUI:CreateDropdown(row, L["Layout"],
-            { same = L["Same"], mirror = L["Mirrored"], own = L["Own"], _order = { "same", "mirror", "own" } },
-            nil, nil, nil,
-            function() return (UFO.Links():Aspects(UFO.Root(), unit(), e.id)) end,
-            function(v) UFO.ConfirmAspect(unit(), e, "layout", v, refresh) end,
-            { inline = true })
-        layout:SetSize(UFO.LINK_LAYOUT_W, 22)
-        layout:SetPoint("RIGHT", look, "LEFT", -UFO.LINK_GAP, 0)
-    end
-    local name = GUI:CreateLabelNative(row, { text = L[e.title] })
-    name:SetPoint("LEFT", row, "LEFT", 0, 0)
-    name:SetPoint("RIGHT", row, "RIGHT", -(UFO.LINK_LOOK_W + UFO.LINK_LAYOUT_W + 2 * UFO.LINK_GAP), 0)
-    if name.SetWordWrap then name:SetWordWrap(false) end
-    row.refreshContent = function()
-        if layout and layout.UpdateText then layout:UpdateText() end
-        if look.UpdateText then look:UpdateText() end
-    end
-    row.hideOn = function()
-        local u = unit()
-        local p = UFO.Partner(u)
-        return not (p and UFO.UnitHasElement(u, e) and UFO.UnitHasElement(p, e))
-    end
-    row.dfLinkElement = e.id
-    row.dfLinkLayout, row.dfLinkLook = layout, look
-    return row
-end
-
--- The two column captions over the element rows.
-local function ElementHeader(self)
-    local row = CreateFrame("Frame", nil, self.child)
-    row:SetSize(250, 16)
-    local look = GUI:CreateLabelNative(row, { text = L["Look"], color = GUI.Colors and GUI.Colors.textDim })
-    look:SetPoint("LEFT", row, "RIGHT", -UFO.LINK_LOOK_W, 0)
-    local layout = GUI:CreateLabelNative(row, { text = L["Layout"], color = GUI.Colors and GUI.Colors.textDim })
-    layout:SetPoint("LEFT", row, "RIGHT", -(UFO.LINK_LOOK_W + UFO.LINK_GAP + UFO.LINK_LAYOUT_W), 0)
-    row.hideOn = function() return UFO.Partner(UFO.LinkUnit()) == nil end
-    return row
-end
-
--- "N settings ... stay separate": the link's kept-per-unit keys, counted.
-local function ExceptNote(self)
-    local row = CreateFrame("Frame", nil, self.child)
-    row:SetSize(250, 30)
-    local text = GUI:CreateLabelNative(row, { text = "", color = GUI.Colors and GUI.Colors.textDim, width = 250 })
-    text:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -4)
-    local function count()
-        local Lk, root = UFO.Links(), UFO.Root()
-        local link = Lk and root and Lk:LinkOf(root, UFO.LinkUnit())
-        local n = 0
-        for _ in pairs(link and type(link.except) == "table" and link.except or {}) do n = n + 1 end
-        return n
-    end
-    row.refreshContent = function()
-        text:SetText(format(L["%d settings that start out different on each frame stay separate."], count()))
-    end
-    row.hideOn = function() return count() == 0 end
-    return row
-end
-
-function UFO.BuildLinksCard(self, Open, Close)
-    local band = Open(L["Linked Frames"], "uf_links", 2, function() return UFO.LinkSummary() end, "settings")
-    local function refresh() self:RefreshStates() end
-    local UF = DF.UnitFrames
-    local frameOpts = { _order = {} }
-    for _, u in ipairs(UF and UF.SPAWNED_UNITS or UFO.UNITS) do
-        frameOpts[u] = UFO.UnitLabel(u)
-        frameOpts._order[#frameOpts._order + 1] = u
-    end
-    local frameDD = band:AddWidget(GUI:CreateDropdown(self.child, L["Frame"], frameOpts, nil, nil, nil,
-        function() return UFO.LinkUnit() end,
-        function(v) if UFO.IsUnit(v) then UFO.linkUnit = v end; refresh() end), 55)
-    frameDD.refreshContent = function(w) if w.UpdateText then w:UpdateText() end end
-
-    local linkDD
-    linkDD = band:AddWidget(GUI:CreateDropdown(self.child, L["Linked To"], LinkedUnitOptions(UFO.LinkUnit()),
-        nil, nil, nil,
-        function() return UFO.Partner(UFO.LinkUnit()) or "_none" end,
-        function(v)
-            UFO.ConfirmLink(UFO.LinkUnit(), v, function()
-                if linkDD and linkDD.UpdateText then linkDD:UpdateText() end
-                refresh()
-            end)
-        end,
-        { optionsFunc = function() return LinkedUnitOptions(UFO.LinkUnit()) end }), 55)
-    linkDD.refreshContent = function(w) if w.UpdateText then w:UpdateText() end end
-
-    band:AddWidget(ElementHeader(self), 18)
-    local Lk = UFO.Links()
-    for _, e in ipairs(Lk and Lk.ELEMENTS or {}) do
-        band:AddWidget(ElementRow(self, e), 28)
-    end
-    band:AddWidget(ExceptNote(self), 34)
-    local unlink = band:AddWidget(GUI:CreateButtonRow(self.child, {
-        { label = L["Unlink"], width = 100,
-          onClick = function() UFO.ConfirmLink(UFO.LinkUnit(), "_none", refresh) end },
-    }, { width = 250 }), 30)
-    unlink.hideOn = function() return UFO.Partner(UFO.LinkUnit()) == nil end
-    Close(band)
 end
 
 -- ============================================================
@@ -1985,6 +1739,8 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
         UFO.pageMeta.uf_settings = { kind = "settings" }
         BuildPage(settings, function(self, db, Add) UFO.BuildSettingsPage(self, db, Add) end)
     end
+    -- Linked Frames, right below it (LinksPage.lua).
+    if UFO.RegisterLinksPage then UFO.RegisterLinksPage(CreateSubTab, BuildPage) end
 
     for _, cat in ipairs(data.categories) do
         CreateCategory("uf_" .. cat.id, L[cat.label])
