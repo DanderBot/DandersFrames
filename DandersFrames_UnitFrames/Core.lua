@@ -294,6 +294,8 @@ function UF:RefreshAll()
     if not UF.Units then return end
     for _, f in pairs(UF.frames) do
         f.dfTextPresetOverride = f.dfDB and f.dfDB.textDesignerPreset or nil
+        -- The follower of a mirrored Text link draws the shared template mirrored.
+        f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(f.dfUFUnit) or false
         UF:RunOutOfCombat("layout:" .. tostring(f.dfUFKey or f.dfUFUnit), function() UF.Units:ApplyLayout(f) end)
         -- The unit-frame-only pieces are plain frames: their layout follows at once,
         -- in combat too (ApplyLayout repeats it with the frame's own, later).
@@ -322,6 +324,7 @@ end
 
 -- A profile switch, reset or import: new tables underneath every frame.
 function UF:OnProfileChanged()
+    if UF.Links then UF.Links:Ensure(Root()) end
     UF:RebuildUnitDBs()
     UF:EnsureTextPresets()
     for _, f in pairs(UF.frames) do
@@ -343,6 +346,9 @@ function UF:Init()
     if UF.initialised then return true end
     if not DF.db then return false end
     UF.initialised = true
+    -- A profile made after login (none of the registry's migrate passes saw it)
+    -- gets its links here: the default one, or the old sync migrated.
+    if UF.Links then UF.Links:Ensure(Root()) end
     UF:EnsureTextPresets()
     UF:RunOutOfCombat("init", function()
         if UF.Units then UF.Units:SpawnAll() end

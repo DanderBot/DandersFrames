@@ -248,6 +248,7 @@ function P:Paint(f)
     local db = UF:GetUnitDB(f.dfUFUnit)
     f.dfDB = db
     f.dfTextPresetOverride = db.textDesignerPreset
+    f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(f.dfUFUnit) or false
     f.dfTestData = P:TestData(f.dfUFUnit, f.dfUFSlot)
     if DF.ApplyFrameLayout then DF:ApplyFrameLayout(f) end
     if f.dfUFSlot then

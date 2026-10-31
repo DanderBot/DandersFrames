@@ -501,6 +501,7 @@ function Units:Build(key, unit, token, name, parent, slot)
     f.dfUFKey = key
     f.dfUFSlot = slot
     f.dfTextPresetOverride = db.textDesignerPreset
+    f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(unit) or false
     if VEHICLE[unit] then f:SetAttribute("toggleForVehicle", true) end
     f:SetAttribute("unit", token)
     f.unit = f.unit or token

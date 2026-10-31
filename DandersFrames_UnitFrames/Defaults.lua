@@ -353,6 +353,16 @@ for _, unit in ipairs(UF.UNITS) do
     UF.UnitDefaults[unit] = t
 end
 
+-- Target's layout defaults are the MIRROR of Player's for the pieces the default
+-- link mirrors (Links.lua, THE DEFAULT LINK): portrait on the right, buffs and
+-- debuffs growing the other way, the cast bar's icon and texts swapped. So a
+-- fresh profile's default link has nothing to store, and a Reset on either side
+-- lands the other on its own default. Keys Target sets above on purpose stay.
+if UF.Links and UF.Links.MirrorDefaults then
+    UF.Links.MirrorDefaults(UF.UnitDefaults.player, UF.UnitDefaults.target, PER_UNIT.target,
+        UF.Links.DEFAULT.elements)
+end
+
 -- The profile-root table. Unit tables start empty (sparse; see the header).
 UF.ProfileDefaults = { version = UF.DB_VERSION, global = {}, units = {} }
 for _, unit in ipairs(UF.UNITS) do UF.ProfileDefaults.units[unit] = {} end
@@ -369,6 +379,9 @@ function UF.MigrateProfileTable(tbl)
     if type(tbl.version) ~= "number" or tbl.version < UF.DB_VERSION then
         tbl.version = UF.DB_VERSION
     end
+    -- Linked frames: the old per-page sync becomes unit links, and a profile that
+    -- never had links gets the default one (Links.lua ENSURE). Idempotent.
+    if UF.Links and UF.Links.Ensure then UF.Links:Ensure(tbl) end
 end
 
 if DF.RegisterProfileRootTable then

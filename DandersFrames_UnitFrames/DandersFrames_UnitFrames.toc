@@ -17,12 +17,14 @@
 # and export carry it with everything else.
 # No DandersUI embed: this addon draws no settings widgets. Its pages live in
 # DandersFrames_Options.
-# Load order: Core (namespace, db accessors) -> Defaults (registers the profile
+# Load order: Core (namespace, db accessors) -> Links (linked frames: before
+# Defaults, whose migrate hook and mirrored target defaults use it) -> Defaults (registers the profile
 # table) -> Units (spawning, events) -> Elements (the registry + kit the next four
 # register into) -> Portrait / CastBar / ClassPower / Indicators -> Preview
 # (sample frames) -> Boss (the boss container) -> BlizzardHide -> Mover.
 
 Core.lua
+Links.lua
 Defaults.lua
 Units.lua
 Elements.lua
