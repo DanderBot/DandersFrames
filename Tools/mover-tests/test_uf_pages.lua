@@ -1126,7 +1126,11 @@ do
     function G:CreateSegmentToggle(parent, segments, _, _, _, o)
         local f = FakeUIFrame()
         f.segments, f.opts, f.parent = segments, o, parent
-        f:SetSize(#segments * o.segmentWidth + 2, o.height + 2)
+        -- The real helper's geometry (pinned in test_segment_toggle_page_min.lua):
+        -- a rounded track has a 2px lip and 2px between pills.
+        local n = #segments
+        if o.rounded then f:SetSize(n * o.segmentWidth + (n - 1) * 2 + 4, o.height + 4)
+        else f:SetSize(n * o.segmentWidth + 2, o.height + 2) end
         f.Refresh = function() end
         segs[#segs + 1] = f
         return f
@@ -1171,6 +1175,17 @@ do
     eq(byId.health.badge:GetText(), "+1", "Health: one thing kept apart")
     eq(byId.portrait.badge:GetText(), "", "Portrait: nothing kept apart")
     eq(card.summary:GetText(), "8 of 17 parts linked", "the card's summary")
+    -- The leader reads first: "Player linked with Target", results from Target's side.
+    eq(card.leaderDD.get(), "player", "the first picker shows the leader (Player)")
+    eq(card.followerDD.get(), "target", "...the second the follower (Target)")
+    eq(table.concat(card.leaderDD.opts.optionsFunc()._order, ","), "player,target,targettarget,focus,focustarget,pet,boss",
+       "both pickers offer every frame (picking the other one swaps them)")
+    -- Rounded, the settings cards' recipe.
+    check(byId.health.pos.opts.rounded == true and byId.health.look.opts.rounded == true,
+          "both segments are the rounded track")
+    eq(byId.health.pos:GetWidth(), UFO.SegTrackWidth(3, UFO.linkMeasured.segW), "a 3-choice track's width")
+    eq(byId.absorbs.pos:GetWidth(), UFO.SegTrackWidth(2, UFO.linkMeasured.segW), "a 2-choice track's width")
+    for _, b in ipairs(card.buttons) do check(b._opts.rounded == true, "rounded button: " .. tostring(b.Text:GetText())) end
 
     -- Widths: wide when it fits, stacked when it does not, nothing past the edge.
     local wideW = UFO.LinkCardNeeds(UFO.linkMeasured)
@@ -1229,6 +1244,31 @@ do
     click(popups[1], "Unlink")
     eq(UFO.Partner("target"), nil, "Unlink: gone")
     eq(UFO.PageMark("uf_links"), nil, "...and the page's mark with it")
+
+    -- Swapping from the pickers: the first picker set to the follower turns the
+    -- link round, and asks first.
+    root.global.unitLinks = nil
+    Lk:Ensure(root)
+    blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
+    local sw = blocks[3].w
+    popups = {}
+    sw.leaderDD.set("target")
+    eq(#popups, 1, "swapping asks first")
+    check(not popups[1].message:find("replaces", 1, true), "...and does not call it replacing a link")
+    click(popups[1], "Link")
+    eq(root.global.unitLinks.player and root.global.unitLinks.player.to, "target", "swapped: Player follows Target")
+    eq(root.global.unitLinks.target, nil, "...and Target no longer follows Player")
+    eq((Lk:Aspects(root, "player", "health")), "mirror", "...keeping the parts")
+    Lk:Unlink(root, "player")
+    -- In a draft the swap just happens.
+    UFO.StartLinkDraft()
+    blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
+    local dr = blocks[3].w
+    dr.leaderDD.set("target")
+    eq(UFO.linkDraft.leader .. ">" .. UFO.linkDraft.follower, "target>player", "draft: picking the other frame swaps them")
+    UFO.linkDraft = nil
 
     -- + Link Two Frames: a draft card with the first free pair, then Link.
     UFO.StartLinkDraft()

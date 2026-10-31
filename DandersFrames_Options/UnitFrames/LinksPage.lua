@@ -42,12 +42,16 @@ UFO.LINKS_PAGE = "uf_links"
 local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
 local M = {               -- the card's fixed metrics
-    pad = 14,             -- card edge -> content
-    gap = 12,             -- between columns / controls
+    pad = 16,             -- card edge -> content
+    gap = 16,             -- between columns / controls: ONE gap, so the columns read apart
+    radius = 8,           -- the card's and the tiles' corners
     ddW = 120, ddH = 24,  -- the two frame pickers
-    segH = 22,            -- a segment toggle's height
+    segH = 22,            -- a segment pill's height (the track adds its 2px lip)
+    segLip = 2, segGap = 2,  -- GUI:CreateSegmentToggle's rounded track geometry
     segMin = 56,          -- a segment's minimum width
-    rowMin = 30,          -- a wide row's minimum height
+    rowMin = 34,          -- a wide row's minimum height
+    capBand = 24,         -- the column-caption band's height
+    headingGap = 14,      -- space above a group heading
     resultMin = 130,      -- a wide row's result column, at least
     resultMinStacked = 110,
     nameMin = 100, nameMax = 170,
@@ -57,7 +61,27 @@ local M = {               -- the card's fixed metrics
 }
 UFO.LINK_METRICS = M
 
+-- A rounded segment track's width for n segments (CreateSegmentToggle, rounded).
+function UFO.SegTrackWidth(n, segW)
+    return n * segW + (n - 1) * M.segGap + 2 * M.segLip
+end
+
 local function C(name) return (GUI.Colors and GUI.Colors[name]) or { r = 1, g = 1, b = 1 } end
+-- The section cards' own recipe (GUI.SectionCard, GUI:CreateCardChrome): the card
+-- fill is GUI.Colors.panel, its ring GUI.Colors.border at the card's borderAlpha,
+-- hairlines at its lineAlpha and a header strip GUI.Colors.hover at headerAlpha.
+local function Card() return GUI.SectionCard or { borderAlpha = 0.6, lineAlpha = 0.4, headerAlpha = 0.35 } end
+
+-- A card surface: rounded, the settings pages' card ground and ring.
+local function CardSurface(frame)
+    local panel, border, card = C("panel"), C("border"), Card()
+    if not GUI.CreateRoundedSurface then return nil end
+    return GUI:CreateRoundedSurface(frame, {
+        radius = M.radius, borderWidth = 1,
+        fill = { panel.r, panel.g, panel.b, 1 },
+        border = { border.r, border.g, border.b, card.borderAlpha },
+    })
+end
 local function Accent() return (GUI.GetAccent and GUI:GetAccent()) or GUI.UnitsAccent or C("text") end
 local function Paint(fs, c) if fs and c then fs:SetTextColor(c.r, c.g, c.b) end end
 
@@ -114,15 +138,24 @@ local function Button(parent, text, opts)
     local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
     opts = opts or {}
     GUI:StyleButton(b, { text = text, height = M.btnH, width = opts.width or 60, tone = opts.tone,
-                         primary = opts.primary, icon = opts.icon })
+                         primary = opts.primary, icon = opts.icon, rounded = true })
     return b
 end
 
-local function Line(parent)
+-- A hairline: the card's header/body line, or (soft) the line between two rows.
+local function Line(parent, soft)
     local t = parent:CreateTexture(nil, "BORDER")
     local c = C("border")
-    t:SetColorTexture(c.r, c.g, c.b, 0.6)
+    t:SetColorTexture(c.r, c.g, c.b, Card().lineAlpha * (soft and 0.6 or 1))
     t:SetHeight(1)
+    return t
+end
+
+-- The column captions' band: the header-strip shade, a step off the card.
+local function Band(parent)
+    local t = parent:CreateTexture(nil, "BACKGROUND", nil, 1)
+    local c = C("hover")
+    t:SetColorTexture(c.r, c.g, c.b, Card().headerAlpha)
     return t
 end
 
@@ -287,7 +320,7 @@ function UFO.LinkDefaultMeasures()
     local segW = 60
     return {
         pad = M.pad, gap = M.gap, nameW = 130, segW = segW,
-        posW = 3 * segW + 2, lookW = 2 * segW + 2,
+        posW = UFO.SegTrackWidth(3, segW), lookW = UFO.SegTrackWidth(2, segW),
         resultMin = M.resultMin, resultMinStacked = M.resultMinStacked,
         pickersW = M.ddW * 2 + 2 * 8 + 80, summaryW = 130, buttonsW = 4 * 76 + 3 * M.btnGap,
         headW = 280, tileMin = M.tileMin,
@@ -512,11 +545,11 @@ local function PartRow(card, e, ctx)
             end
         end
         row.pos = GUI:CreateSegmentToggle(row, segs, nil, nil, nil, {
-            segmentWidth = ctx.m.segW, height = M.segH, fontSize = SEG_FONT,
+            segmentWidth = ctx.m.segW, height = M.segH, fontSize = SEG_FONT, rounded = true,
             customGet = function() return (Lk():Aspects(Root(), ctx.follower, e.id)) end,
             customSet = function(v) UFO.SetLinkAspect(ctx.follower, e, "layout", v) end,
         })
-        row.posW = #segs * ctx.m.segW + 2
+        row.posW = UFO.SegTrackWidth(#segs, ctx.m.segW)
     else
         row.noPos = Label(row, L["No position settings"], 11, C("textDim"))
         row.noPosTip = HoverTip(row, row.noPos, {
@@ -534,7 +567,7 @@ local function PartRow(card, e, ctx)
         end
     end
     row.look = GUI:CreateSegmentToggle(row, looks, nil, nil, nil, {
-        segmentWidth = ctx.m.segW, height = M.segH, fontSize = SEG_FONT,
+        segmentWidth = ctx.m.segW, height = M.segH, fontSize = SEG_FONT, rounded = true,
         customGet = function() return select(2, Lk():Aspects(Root(), ctx.follower, e.id)) end,
         customSet = function(v) UFO.SetLinkAspect(ctx.follower, e, "look", v) end,
     })
@@ -554,9 +587,17 @@ local function PartRow(card, e, ctx)
         Paint(self.result, (layout ~= "own" or look ~= "own") and C("text") or C("textDim"))
     end
 
-    -- Lay out for the card's columns; returns the row's height.
-    function row:Layout(cols, width)
+    -- The thin line above the row (shown for every row but a group's first).
+    row.sep = Line(row, true)
+
+    -- Lay out for the card's columns; returns the row's height. `first`: the
+    -- first row under a group heading, which carries no separator.
+    function row:Layout(cols, width, first)
         self:SetWidth(width)
+        self.sep:ClearAllPoints()
+        self.sep:SetPoint("TOPLEFT", self, "TOPLEFT", ctx.m.pad, 0)
+        self.sep:SetPoint("TOPRIGHT", self, "TOPRIGHT", -ctx.m.pad, 0)
+        self.sep:SetShown(not first)
         self.name:ClearAllPoints()
         self.badge:ClearAllPoints()
         self.result:ClearAllPoints()
@@ -579,13 +620,14 @@ local function PartRow(card, e, ctx)
             self.result:SetPoint("TOPLEFT", self, "TOPLEFT", cols.result, -(h - resultH) / 2)
         else
             local line1 = max(16, resultH)
-            self.name:SetPoint("TOPLEFT", self, "TOPLEFT", cols.name, -6)
+            self.name:SetPoint("TOPLEFT", self, "TOPLEFT", cols.name, -8)
             self.badge:SetPoint("LEFT", self.name, "RIGHT", 4, 0)
-            self.result:SetPoint("TOPLEFT", self, "TOPLEFT", cols.result, -6)
-            local y2 = 6 + line1 + 6
-            posFrame:SetPoint("TOPLEFT", self, "TOPLEFT", cols.pos, -(y2 + (noPos and 4 or 0)))
+            self.result:SetPoint("TOPLEFT", self, "TOPLEFT", cols.result, -8)
+            local y2 = 8 + line1 + 6
+            local trackH = M.segH + 2 * M.segLip
+            posFrame:SetPoint("TOPLEFT", self, "TOPLEFT", cols.pos, -(y2 + (noPos and 6 or 0)))
             self.look:SetPoint("TOPLEFT", self, "TOPLEFT", cols.look, -y2)
-            h = y2 + M.segH + 2 + 6
+            h = y2 + trackH + 8
         end
         self:SetHeight(h)
         return h
@@ -619,22 +661,53 @@ local function Picker(card, label, get, set, optionsFn)
 end
 
 function UFO.CreateLinkCard(parent, follower, leader, m, draft)
-    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    GUI:CreateElementBackdrop(card)
+    local card = CreateFrame("Frame", nil, parent)
+    CardSurface(card)
     local ctx = { follower = follower, leader = leader, m = m, draft = draft }
     card.ctx = ctx
 
     -- ---- header: [leader] linked with [follower]   N of M   buttons ----------
+    -- ★ THE FIRST PICKER IS THE LEADER: the card reads "<leader> linked with
+    -- <follower>", and the results are phrased from the follower's side ("Target
+    -- is a mirror image of Player"). Both pickers offer every frame: picking the
+    -- frame the OTHER picker shows swaps the two round (the leader becomes the
+    -- follower), anything else moves that end of the link. A real link asks first.
+    local function Elements()
+        local lk, root = Lk(), Root()
+        local lnk = lk and root and lk:LinkOf(root, ctx.follower)
+        return lnk and lnk.elements
+    end
+    local function Pick(isLeader, v)
+        if draft then
+            if isLeader then
+                if v == ctx.follower then ctx.follower = ctx.leader end
+                ctx.leader = v
+            else
+                if v == ctx.leader then ctx.leader = ctx.follower end
+                ctx.follower = v
+            end
+            UFO.linkDraft.leader, UFO.linkDraft.follower = ctx.leader, ctx.follower
+            if card.leaderDD.UpdateText then card.leaderDD:UpdateText() end
+            if card.followerDD.UpdateText then card.followerDD:UpdateText() end
+            return
+        end
+        local mine = isLeader and ctx.leader or ctx.follower
+        local other = isLeader and ctx.follower or ctx.leader
+        if v == mine then return end
+        if v == other then
+            -- Swap: the follower leads, the leader follows.
+            return UFO.ConfirmLinkPair(ctx.leader, ctx.follower, Elements())
+        end
+        if isLeader then
+            UFO.ConfirmLinkPair(ctx.follower, v, Elements())
+        else
+            UFO.ConfirmLinkPair(v, ctx.leader, Elements())
+        end
+    end
     card.leaderDD = Picker(card, L["First frame"],
         function() return ctx.leader end,
-        function(v)
-            if draft then UFO.linkDraft.leader = v; ctx.leader = v; return end
-            if v == ctx.leader then return end
-            local lk, root = Lk(), Root()
-            local lnk = lk and root and lk:LinkOf(root, ctx.follower)
-            UFO.ConfirmLinkPair(ctx.follower, v, lnk and lnk.elements)
-        end,
-        function() return UnitOptions(ctx.follower) end)
+        function(v) Pick(true, v) end,
+        function() return UnitOptions(nil) end)
     card.linkIcon = card:CreateTexture(nil, "OVERLAY")
     card.linkIcon:SetTexture(UFO.LINK_ICON)
     card.linkIcon:SetSize(14, 14)
@@ -643,14 +716,8 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
     card.linkedWith = Label(card, L["linked with"], 11, acc)
     card.followerDD = Picker(card, L["Second frame"],
         function() return ctx.follower end,
-        function(v)
-            if draft then UFO.linkDraft.follower = v; ctx.follower = v; return end
-            if v == ctx.follower then return end
-            local lk, root = Lk(), Root()
-            local lnk = lk and root and lk:LinkOf(root, ctx.follower)
-            UFO.ConfirmLinkPair(v, ctx.leader, lnk and lnk.elements)
-        end,
-        function() return UnitOptions(ctx.leader) end)
+        function(v) Pick(false, v) end,
+        function() return UnitOptions(nil) end)
     card.summary = Label(card, "", 11, C("textDim"))
 
     card.buttons = {}
@@ -709,6 +776,8 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
             lines = { L["Everything else: sizes, colours, textures, fonts, borders, counts and timers."] } },
             card.capLookInfo)
         card.headLine = Line(card)
+        card.capBand = Band(card)
+        card.bandLine = Line(card)
 
         local linked, separate = UFO.LinkPageGroups(ctx.follower, ctx.leader)
         card.groupLinked = Label(card, L["Linked by default"], 12, C("text"))
@@ -789,34 +858,44 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
                 prev = b
             end
         end
-        y = buttonsY + M.btnH + 10
+        y = buttonsY + M.btnH + pad
         if ctx.draft then
             self:SetHeight(y)
             return y
         end
 
-        -- column captions, then the rows
+        -- The caption band: right under the header, edge to edge inside the ring
+        -- (it never reaches the card's corners, so it is square), the header-strip
+        -- shade. The captions sit centred in it at their columns' x.
         local cols = UFO.LinkCardLayout(width, m)
         self.mode = cols.mode
+        self.headLine:ClearAllPoints()
+        self.headLine:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -y)
+        self.headLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -y)
+        self.capBand:ClearAllPoints()
+        self.capBand:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -(y + 1))
+        self.capBand:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -(y + 1))
+        self.capBand:SetHeight(M.capBand)
+        local capY = y + 1 + M.capBand / 2
         for _, fs in ipairs({ self.capPart, self.capPos, self.capLook, self.capResult }) do fs:ClearAllPoints() end
-        self.capPos:SetPoint("TOPLEFT", self, "TOPLEFT", cols.pos, -y)
-        self.capLook:SetPoint("TOPLEFT", self, "TOPLEFT", cols.look, -y)
+        self.capPos:SetPoint("LEFT", self, "TOPLEFT", cols.pos, -capY)
+        self.capLook:SetPoint("LEFT", self, "TOPLEFT", cols.look, -capY)
         if cols.mode == "wide" then
-            self.capPart:SetPoint("TOPLEFT", self, "TOPLEFT", cols.name, -y)
-            self.capResult:SetPoint("TOPLEFT", self, "TOPLEFT", cols.result, -y)
+            self.capPart:SetPoint("LEFT", self, "TOPLEFT", cols.name, -capY)
+            self.capResult:SetPoint("LEFT", self, "TOPLEFT", cols.result, -capY)
             self.capPart:Show(); self.capResult:Show()
         else
             -- Stacked: one caption line, aligned to the segments on each row's
             -- second line; "Part" and "Result" need no caption there.
             self.capPart:Hide(); self.capResult:Hide()
         end
-        y = y + 14 + 6
-        self.headLine:ClearAllPoints()
-        self.headLine:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
-        self.headLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -pad, -y)
-        y = y + 6
+        y = y + 1 + M.capBand
+        self.bandLine:ClearAllPoints()
+        self.bandLine:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -y)
+        self.bandLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -y)
 
         local function Group(fs, sub)
+            y = y + M.headingGap
             fs:ClearAllPoints()
             fs:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
             y = y + 18
@@ -831,17 +910,18 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
         self.groupSeparate:SetShown(self.hasSeparateGroup)
         self.groupSeparateSub:SetShown(self.hasSeparateGroup)
         for i, r in ipairs(self.rows) do
-            if i == 1 and self.hasLinkedGroup then Group(self.groupLinked) end
-            if i == self.firstSeparate then y = y + 6; Group(self.groupSeparate, self.groupSeparateSub) end
+            local first = false
+            if i == 1 and self.hasLinkedGroup then Group(self.groupLinked); first = true end
+            if i == self.firstSeparate then Group(self.groupSeparate, self.groupSeparateSub); first = true end
             r:ClearAllPoints()
             r:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -y)
-            y = y + r:Layout(cols, width)
+            y = y + r:Layout(cols, width, first)
         end
-        y = y + 6
+        y = y + 8
         self.footLine:ClearAllPoints()
-        self.footLine:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
-        self.footLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -pad, -y)
-        y = y + 10
+        self.footLine:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -y)
+        self.footLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -y)
+        y = y + 12
         self.footIcon:ClearAllPoints()
         self.footIcon:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -(y + 1))
         self.foot:ClearAllPoints()
@@ -891,8 +971,8 @@ local function HeadBlock(parent)
 end
 
 local function Tile(parent, iconPath, rotate, tint, title, body, tip)
-    local t = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    GUI:CreateElementBackdrop(t)
+    local t = CreateFrame("Frame", nil, parent)
+    CardSurface(t)
     t.icon = t:CreateTexture(nil, "OVERLAY")
     t.icon:SetTexture(iconPath)
     t.icon:SetSize(22, 22)
@@ -972,7 +1052,7 @@ local function Measure(probeParent)
     local segText = 0
     for _, s in ipairs({ L["Same"], L["Mirrored"], L["Separate"] }) do segText = max(segText, W(s, SEG_FONT)) end
     if segText > 0 then m.segW = max(M.segMin, ceil(segText) + 16) end
-    m.posW, m.lookW = 3 * m.segW + 2, 2 * m.segW + 2
+    m.posW, m.lookW = UFO.SegTrackWidth(3, m.segW), UFO.SegTrackWidth(2, m.segW)
     local nameText = 0
     local lk = Lk()
     for _, e in ipairs(lk and lk.ELEMENTS or {}) do nameText = max(nameText, W(L[e.title], 12)) end
