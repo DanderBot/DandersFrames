@@ -542,6 +542,27 @@ do
     local firstMount = PAGE:find("MountIcon({", 1, true)
     check(wipeAt and firstMount and wipeAt < firstMount,
           "preview: ...which is what moving the block above the sections had to preserve")
+
+    -- Leader and Combat preview the modern atlases the frames draw at runtime,
+    -- with the legacy art as the fallback (Frames/Core.lua).
+    local MOD = options_file_source("GUI/Pages/Modules.lua"):gsub("\r\n", "\n")
+    check(MOD:find('StatusPreviewIcon("UI-HUD-UnitFrame-Player-Group-LeaderIcon", "Interface\\\\GroupFrame\\\\UI-Group-LeaderIcon")', 1, true) ~= nil,
+          "preview: Leader shows the modern leader atlas, legacy texture as fallback")
+    check(MOD:find('StatusPreviewIcon("UI-HUD-UnitFrame-Player-CombatIcon", "Interface\\\\CharacterFrame\\\\UI-StateIcon", {0.5, 1.0, 0, 0.49})', 1, true) ~= nil,
+          "preview: Combat shows the modern combat atlas, the sheet slice as fallback")
+    local helper = MOD:match("local function StatusPreviewIcon%(atlas, legacy, coords%).-\nend\n")
+    check(helper ~= nil, "preview: the atlas-or-legacy helper is on the file")
+    if helper then
+        local fn = assert(loadstring(helper .. "\nreturn StatusPreviewIcon"))()
+        local savedCT = C_Texture
+        C_Texture = { GetAtlasInfo = function(a) return a == "known" and {} or nil end }
+        local hit, miss = fn("known", "legacy.tga"), fn("missing", "legacy.tga", { 1, 2, 3, 4 })
+        C_Texture = savedCT
+        eq(hit.texture, "known", "preview helper: the atlas when the client has it")
+        check(hit.coords == nil, "preview helper: ...uncropped")
+        eq(miss.texture, "legacy.tga", "preview helper: the legacy texture when it does not")
+        eq(miss.coords and miss.coords[3], 3, "preview helper: ...with its slice")
+    end
 end
 
 -- ============================================================

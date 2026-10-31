@@ -8,6 +8,17 @@
 -- name; deleting Core.lua:9 as "redundant" would nil DF in every file here.
 local DF = DandersFrames
 local format = string.format
+
+-- The status-icon previews show the art the frames actually draw: the modern
+-- atlas (DandersFrames/Frames/Core.lua: the leader entry of
+-- LEGACY_STATUS_ICON_ATLAS, and DF:SetCombatStatusIcon), or the legacy
+-- texture when the client lacks it, exactly as the runtime falls back.
+local function StatusPreviewIcon(atlas, legacy, coords)
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+        return { texture = atlas }
+    end
+    return { texture = legacy, coords = coords }
+end
 function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
     BuildPage(pageIcons, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
@@ -536,7 +547,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             enableKey = "leaderIconEnabled", enableLabel = L["Enable Leader Icon"],
             onEnable = OnIconEnabled,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
-            preview = { enableKey = "leaderIconEnabled", icons = { "Interface\\GroupFrame\\UI-Group-LeaderIcon" } },
+            preview = { enableKey = "leaderIconEnabled", icons = { StatusPreviewIcon("UI-HUD-UnitFrame-Player-Group-LeaderIcon", "Interface\\GroupFrame\\UI-Group-LeaderIcon") } },
         })
 
         -- ============================================
@@ -641,9 +652,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             onEnable = OnIconEnabled,
             note = L["Shows crossed swords on a party/raid member who is in combat."],
             noteHeight = 44,
-            -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
-            -- greys the section header when the icon is disabled.
-            preview = { enableKey = "combatIconEnabled", icons = { { texture = "Interface\\CharacterFrame\\UI-StateIcon", coords = {0.5, 1.0, 0, 0.49} } } },
+            -- Preview the modern combat atlas (the swords quadrant of the UI-StateIcon
+            -- sheet when it is missing); also greys the section header when disabled.
+            preview = { enableKey = "combatIconEnabled", icons = { StatusPreviewIcon("UI-HUD-UnitFrame-Player-CombatIcon", "Interface\\CharacterFrame\\UI-StateIcon", {0.5, 1.0, 0, 0.49}) } },
         })
 
         -- ============================================
