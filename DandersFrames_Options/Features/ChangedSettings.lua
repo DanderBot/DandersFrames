@@ -84,6 +84,51 @@ ChangedSettings.PAGE_ID = "profiles_changed"
 -- Session-only, like the window's other navigation state.
 ChangedSettings.scope = nil
 
+-- ============================================================
+-- MODULE SCOPES
+-- A module whose pages edit tables of its own (GUI:SetPageModule) is in neither
+-- the mode nor the Global ledger (ScopeRegistry). It can add a scope of its own
+-- to the picker:
+--
+--   ChangedSettings:RegisterScope(id, {
+--       label     = function() return "..." end,     -- the picker's text
+--       owns      = function(tab) return bool end,   -- the pages it covers
+--       dbFor     = function(tab) return tbl end,    -- the table a page edits; it
+--                                                    -- must answer DF.Defaults (an
+--                                                    -- adapter: Defaults:RegisterAdapter)
+--       pageOrder = function() return { tab, ... } end, -- optional: the row order
+--       rowKey    = function(entry) return str end,  -- optional: one row per this
+--                                                    -- (default: page + key)
+--       prepare   = function() end,                  -- optional: before the index
+--                                                    -- is read (e.g. include pages
+--                                                    -- the index defers)
+--       available = function() return bool end,     -- optional: offered right now
+--   })
+--
+-- Each page is diffed against ITS OWN table, so one key can be a row on several
+-- pages (the same setting on two tables of the module).
+-- ============================================================
+ChangedSettings.scopes = {}
+ChangedSettings.scopeOrder = {}
+
+function ChangedSettings:RegisterScope(id, spec)
+    if type(id) ~= "string" or id == "global" or id == "party" or id == "raid" then return false end
+    if type(spec) ~= "table" or type(spec.owns) ~= "function" or type(spec.dbFor) ~= "function" then
+        return false
+    end
+    if not self.scopes[id] then self.scopeOrder[#self.scopeOrder + 1] = id end
+    self.scopes[id] = spec
+    return true
+end
+
+-- The registered scope `scope` names, when it is offered right now.
+function ChangedSettings:ModuleScope(scope)
+    local spec = scope and self.scopes[scope]
+    if not spec then return nil end
+    if spec.available and not spec.available() then return nil end
+    return spec
+end
+
 -- The profile ROOT's shipped values (the panel font, the frame-mode switches):
 -- the scalars a new profile is created with. Built once -- the constructor deep
 -- copies both modes' defaults -- and they cannot change within a session.
@@ -326,7 +371,12 @@ end
 -- report "9 settings differ" over 7 settings and list two of them twice. The
 -- first registration in NAV order wins, which is also the page a user would
 -- most naturally look on.
-function ChangedSettings.Collect(registry, pageOrder, diffMap)
+-- `opts` (optional, a module scope's): diffFor(entry) -> { current, default } in
+-- place of diffMap[entry.dbKey], and rowKey(entry) -> the identity one row is
+-- kept per, in place of the bare key.
+function ChangedSettings.Collect(registry, pageOrder, diffMap, opts)
+    local diffFor = opts and opts.diffFor
+    local rowKey = opts and opts.rowKey
     local rank = {}
     for i = 1, #(pageOrder or {}) do
         local tab = pageOrder[i]
@@ -341,13 +391,18 @@ function ChangedSettings.Collect(registry, pageOrder, diffMap)
     for i = 1, #(registry or {}) do
         local e = registry[i]
         local key = e and e.dbKey
-        local diff = (type(key) == "string" and diffMap) and diffMap[key] or nil
+        local diff
+        if type(key) == "string" then
+            if diffFor then diff = diffFor(e)
+            elseif diffMap then diff = diffMap[key] end
+        end
         if diff then
             local tab = e.tab or "?"
             local r = rank[tab] or (1e6 + i)
-            local prev = hits[key]
+            local id = rowKey and rowKey(e) or key
+            local prev = hits[id]
             if not prev or r < prev.rank then
-                hits[key] = {
+                hits[id] = {
                     key     = key,
                     rank    = r,
                     seq     = i,
@@ -494,10 +549,38 @@ end
 --   "building" a budgeted build is under way; the page refreshes itself when it
 --              lands (see the waiter below)
 --   "unbuilt"  the panel cannot produce a registry at all yet
+-- A module scope's report (MODULE SCOPES): the registry entries on its pages,
+-- each page's keys diffed against the table that page edits.
+function ChangedSettings:BuildModuleReport(GUI, spec, registry)
+    local entries, byTab = {}, {}
+    for i = 1, #registry do
+        local e = registry[i]
+        if e.tab and spec.owns(e.tab) then
+            entries[#entries + 1] = e
+            local list = byTab[e.tab]
+            if not list then list = {}; byTab[e.tab] = list end
+            list[#list + 1] = e
+        end
+    end
+    local diffs = {}
+    for tab, list in pairs(byTab) do
+        local db = spec.dbFor(tab)
+        diffs[tab] = db and DF.Defaults:DiffKeys(db, ChangedSettings.BoundKeys(list)) or {}
+    end
+    local order = (spec.pageOrder and spec.pageOrder()) or self:PageOrder(GUI)
+    return ChangedSettings.Collect(entries, order, nil, {
+        diffFor = function(e) local d = diffs[e.tab]; return d and d[e.dbKey] end,
+        rowKey = spec.rowKey or function(e) return tostring(e.tab) .. "|" .. e.dbKey end,
+    })
+end
+
 function ChangedSettings:BuildReport(GUI, scope)
     local Search = DF.Search
     local pageId = ChangedSettings.PAGE_ID
     if not Search then return nil, "unbuilt" end
+    -- A module scope may need pages the index defers (Search:IncludeDeferredPages).
+    local module = self:ModuleScope(scope)
+    if module and module.prepare then module.prepare() end
 
     -- An index that can be put together from the pages' retained builds is,
     -- here and now: no builder runs, so no build, no waiter and no second
@@ -548,6 +631,11 @@ function ChangedSettings:BuildReport(GUI, scope)
 
     local registry = Search.Registry
     if not registry or #registry == 0 then return nil, "unbuilt" end
+
+    -- A module's own scope: its pages, each against its own table.
+    local module = self:ModuleScope(scope)
+    if module then return self:BuildModuleReport(GUI, module, registry) end
+
     registry = ScopeRegistry(registry, GUI, scope == "global")
 
     local db

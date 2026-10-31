@@ -1077,9 +1077,18 @@ local function CreateScopePicker(page)
         party = L["Party"], raid = L["Raid"], global = L["Global"],
         _order = { "party", "raid", "global" },
     }
+    -- ...and any module's own scope (ChangedSettings:RegisterScope) offered now.
+    for _, id in ipairs(CS.scopeOrder or {}) do
+        local spec = CS:ModuleScope(id)
+        if spec then
+            options[id] = spec.label and spec.label() or id
+            options._order[#options._order + 1] = id
+        end
+    end
     return GUI:CreateDropdown(page.child, L["Show"], options, nil, nil, nil,
         function()
             if CS.scope == "global" then return "global" end
+            if CS.ModuleScope and CS:ModuleScope(CS.scope) then return CS.scope end
             return GUI.SelectedMode
         end,
         function(v)
@@ -1087,8 +1096,8 @@ local function CreateScopePicker(page)
             -- and both a mode switch (which refreshes the page on screen) and the
             -- rebuild a new scope causes retire this very dropdown.
             C_Timer.After(0, function()
-                if v == "global" then
-                    CS.scope = "global"
+                if v == "global" or (CS.ModuleScope and CS:ModuleScope(v)) then
+                    CS.scope = v
                 else
                     CS.scope = nil
                     if v ~= GUI.SelectedMode and GUI.SetUnderlyingFrameMode then
@@ -1122,7 +1131,9 @@ local function BuildChangedSettings(self, Add, AddSpace)
     -- move this below the first Add() and it re-lays a half-built page.
     local report, reason = CS:BuildReport(GUI, scope)
     local isGlobal = (scope == "global")
+    local moduleScope = CS.ModuleScope and CS:ModuleScope(scope)
     local modeLabel = isGlobal and L["Global"]
+        or (moduleScope and (moduleScope.label and moduleScope.label() or scope))
         or (GUI.SelectedMode == "raid") and L["Raid"] or L["Party"]
 
     -- Dim hex for the "-> default" half of a value cell. Built from the

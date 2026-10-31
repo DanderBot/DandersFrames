@@ -656,6 +656,74 @@ do
 end
 
 -- ============================================================
+-- A MODULE'S OWN SCOPE (ChangedSettings:RegisterScope)
+-- A module whose pages edit tables of their own: each page diffed against its
+-- own table (an adapter answers DF.Defaults), one key a row on several tables,
+-- ordered by the module's page order, and kept out of the mode ledger.
+-- ============================================================
+print("-- Changed Settings: a module's own scope")
+do
+    local D = DF.Defaults
+    local function Unit(own, chain)
+        local t = setmetatable({}, { __index = function(_, k)
+            local v = own[k]; if v == nil then v = chain[k] end; return v end })
+        D:RegisterAdapter(t, { getDefault = function(k) return chain[k] end,
+                               getStored = function(k) return own[k] end })
+        return t
+    end
+    local aOwn, bOwn = { width = 300, height = 40 }, { width = 150 }
+    local tables = {
+        a = Unit(aOwn, { width = 200, height = 40 }),
+        b = Unit(bOwn, { width = 110, height = 24 }),
+    }
+    local prepared = 0
+    check(not CS:RegisterScope("global", { owns = function() end, dbFor = function() end }),
+          "scope: a built-in scope name is refused")
+    check(not CS:RegisterScope("mod", { owns = function() end }), "scope: needs owns and dbFor")
+    check(CS:RegisterScope("mod", {
+        label = function() return "Module" end,
+        owns = function(tab) return tab:sub(1, 4) == "mod_" end,
+        dbFor = function(tab) return tables[tab:sub(5, 5)] end,
+        pageOrder = function() return { "mod_a_frame", "mod_a_text", "mod_b_frame" } end,
+        rowKey = function(e) return e.tab:sub(5, 5) .. ":" .. e.dbKey end,
+        prepare = function() prepared = prepared + 1 end,
+    }), "scope: a module scope registers")
+    DF.Search = {
+        Registry = {
+            { dbKey = "width", label = "Width", tab = "mod_b_frame", tabLabel = "B / Frame" },
+            { dbKey = "width", label = "Width", tab = "mod_a_frame", tabLabel = "A / Frame" },
+            { dbKey = "height", label = "Height", tab = "mod_a_frame", tabLabel = "A / Frame" },
+            { dbKey = "width", label = "Width again", tab = "mod_a_text", tabLabel = "A / Text" },
+            { dbKey = "absorbBarHeight", label = "Height", tab = "bars_absorb", tabLabel = "Absorbs" },
+        },
+    }
+    function DF.Search:RegistryIsStale() return false end
+    DF.db.party.absorbBarHeight = DF.PartyDefaults.absorbBarHeight + 2
+    local GUI = { SelectedMode = "party", CategoryOrder = {}, Categories = {},
+                  ModulePageOwner = { mod_a_frame = "mod", mod_a_text = "mod", mod_b_frame = "mod" },
+                  IsGlobalPage = function() return false end }
+    local report = CS:BuildReport(GUI, "mod")
+    eq(prepared, 1, "scope: prepare runs before the index is read")
+    eq(report and report.count, 2, "scope: one row per table and key (A's width, B's width), not per page")
+    eq(report and #report.groups, 2, "scope: grouped by page")
+    eq(report and report.groups[1].tab, "mod_a_frame", "scope: the module's own page order (A first)")
+    eq(report and report.groups[1].rows[1].current, 300, "scope: A's row reads A's table")
+    eq(report and report.groups[2].rows[1].current, 150, "scope: B's row reads B's table")
+    eq(report and report.groups[2].rows[1].default, 110, "scope: ...against B's own default")
+    local mode = CS:BuildReport(GUI)
+    eq(mode and mode.count, 1, "scope: the mode ledger leaves the module's pages out")
+    aOwn.width, bOwn.width = nil, nil
+    eq(CS:BuildReport(GUI, "mod").count, 0, "scope: back at the defaults, nothing is listed")
+    check(CS:CacheKey(GUI, "mod") ~= CS:CacheKey(GUI), "scope: its page cache key is its own")
+    CS.scopes.mod.available = function() return false end
+    check(CS:ModuleScope("mod") == nil, "scope: not offered while unavailable")
+    CS.scopes.mod, CS.scopeOrder = nil, {}
+    D:RegisterAdapter(tables.a, nil)
+    D:RegisterAdapter(tables.b, nil)
+    DF.Search = nil
+end
+
+-- ============================================================
 -- NO BARE GLYPHS ON THE SURFACES THIS PAGE DRAWS
 -- ------------------------------------------------------------
 -- ☠ WOW FONTS DO NOT HAVE ARROWS. The settings panel renders in the user's
