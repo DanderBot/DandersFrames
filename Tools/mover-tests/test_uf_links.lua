@@ -312,6 +312,76 @@ do
 end
 
 -- ============================================================
+-- 4b. PARTS THAT CANNOT MIRROR, AND SETTING EVERY PART AT ONCE
+-- ============================================================
+print("-- Links: no mirror for Absorbs, Heal Prediction and Tooltips; Mirror / Copy / Separate All")
+do
+    for _, id in ipairs({ "absorbs", "healpred", "tooltips" }) do
+        eq(Links.BY_ID[id].mirror, false, id .. ": flagged mirror = false")
+        eq(Links.CanMirror(id), false, id .. ": cannot mirror")
+        eq((Links.Normalise(id, { layout = "mirror", look = "own" })), "same", id .. ": a mirror asked for reads as same")
+    end
+    eq(Links.CanMirror("health"), true, "health can mirror")
+    eq(Links.CanMirror("text"), true, "text can mirror (drawn mirrored)")
+    eq(Links.CanMirror("border"), false, "border has no layout to mirror")
+    local cannot = {}
+    for _, e in ipairs(Links.ELEMENTS) do
+        if e.layout and not Links.CanMirror(e.id) then cannot[#cannot + 1] = e.id end
+    end
+    table.sort(cannot)
+    eq(table.concat(cannot, ","), "absorbs,healpred,tooltips", "exactly those three have a layout that cannot mirror")
+
+    local root = newProfile()
+    root.global.unitLinks = {}
+    local U = root.units
+    Links:SetLink(root, "focus", "target", { absorbs = { layout = "mirror", look = "own" } })
+    eq(root.global.unitLinks.focus.elements.absorbs.layout, "same", "SetLink stores a mirror asked for as same")
+    U.target.absorbBarAnchor = "TOPLEFT"
+    U.target.absorbBarX = 7
+    Links:ApplyFrom(root, "target")
+    eq(U.focus.absorbBarAnchor, "TOPLEFT", "...and copies its anchor unflipped")
+    eq(U.focus.absorbBarX, 7, "...and its x unnegated")
+    -- A "mirror" already stored (an older build, an import) acts as same.
+    root.global.unitLinks.focus.elements.tooltips = { layout = "mirror", look = "own" }
+    U.target.tooltipFrameAnchorPos = "TOPLEFT"
+    Links:ApplyFrom(root, "target")
+    eq(U.focus.tooltipFrameAnchorPos, "TOPLEFT", "a stored mirror on Tooltips copies as same")
+    Links:SetElement(root, "focus", "healpred", "mirror", "same")
+    eq(root.global.unitLinks.focus.elements.healpred.layout, "same", "SetElement: mirror becomes same too")
+
+    -- Mirror All / Copy All / Separate All.
+    local ids = { "health", "absorbs", "border", "tooltips", "text" }
+    Links:SetAll(root, "focus", ids, "mirror", "same")
+    local el = root.global.unitLinks.focus.elements
+    eq(el.health.layout .. "/" .. el.health.look, "mirror/same", "Mirror All: health mirrored, shared")
+    eq(el.absorbs.layout, "same", "Mirror All: absorbs' position is same, never mirrored")
+    eq(el.tooltips.layout, "same", "Mirror All: tooltips' position is same")
+    eq(el.border.layout .. "/" .. el.border.look, "own/same", "Mirror All: border shares its look (no layout)")
+    eq(Links:IsTextMirrored(root, "focus"), true, "Mirror All: the follower's text draws mirrored")
+    Links:SetAll(root, "focus", ids, "same", "same")
+    eq(root.global.unitLinks.focus.elements.health.layout, "same", "Copy All: nothing flipped")
+    eq(Links:IsTextMirrored(root, "focus"), false, "Copy All: text drawn as written")
+    Links:SetAll(root, "focus", ids, "own", "own")
+    eq(keys(root.global.unitLinks.focus.elements), "healpred", "Separate All: the listed parts leave the link")
+    check(Links:LinkOf(root, "focus") ~= nil, "...and the link itself stays")
+    eq(Links:SetAll(root, "player", ids, "same", "same"), nil, "SetAll on an unlinked unit: nothing")
+
+    -- A new link's starting point.
+    local els, except = Links.StartingElements("target", "player")
+    eq(els, Links.DEFAULT.elements, "Player + Target: the default link's shape")
+    check(except and except.healthColorMode, "...keeping Target's deliberate own defaults")
+    els, except = Links.StartingElements("player", "target")
+    eq(els, Links.DEFAULT.elements, "...either way round")
+    els, except = Links.StartingElements("focus", "target")
+    eq(keys(els), keys(Links.DEFAULT.elements), "any other pair: the same pieces linked by default")
+    eq(els.health.layout .. "/" .. els.health.look, "same/same", "...shared, not mirrored")
+    eq(els.border.layout .. "/" .. els.border.look, "own/same", "...the border's look only")
+    eq(except, nil, "...and nothing kept apart")
+    eq(Links.IsDefaultElement("health"), true, "health is linked by default")
+    eq(Links.IsDefaultElement("absorbs"), false, "absorbs is separate by default")
+end
+
+-- ============================================================
 -- 5. THE DEFAULT LINK
 -- ============================================================
 print("-- Links: the default link (Target follows Player)")

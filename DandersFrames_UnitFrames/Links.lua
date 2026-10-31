@@ -82,7 +82,11 @@ end
 -- One per settings page, except the Frame page, which is two: its border and
 -- everything else. `layout = false`: the element has no layout aspect a link
 -- moves (its position keys are the party group's anchor and mover, which mean
--- nothing to a unit frame). `title` is an L key.
+-- nothing to a unit frame). `mirror = false`: its layout can be shared but never
+-- mirrored -- Absorbs and Heal Prediction sit where the health bar's fill ends,
+-- which a mirror does not turn round, and a tooltip's anchor is relative to the
+-- screen edge it opens towards. A stored "mirror" for one reads as "same"
+-- (Links.Normalise). `title` is an L key.
 -- Order = the settings sidebar's.
 -- ============================================================
 local BORDER_PREFIXES = { "frameBorder", "frameShowBorder" }
@@ -91,13 +95,13 @@ Links.ELEMENTS = {
     { id = "frame",        kind = "frame",        title = "Frame",           layout = false, without = BORDER_PREFIXES },
     { id = "border",       kind = "frame",        title = "Border",          layout = false, only = BORDER_PREFIXES },
     { id = "visibility",   kind = "visibility",   title = "Visibility",      layout = false },
-    { id = "tooltips",     kind = "tooltips",     title = "Tooltips",        layout = true },
+    { id = "tooltips",     kind = "tooltips",     title = "Tooltips",        layout = true, mirror = false },
     { id = "fading",       kind = "fading",       title = "Fading",          layout = false },
     { id = "portrait",     kind = "portrait",     title = "Portrait",        layout = true },
     { id = "health",       kind = "health",       title = "Health Bar",      layout = true },
     { id = "resource",     kind = "resource",     title = "Resource Bar",    layout = true },
-    { id = "absorbs",      kind = "absorbs",      title = "Absorbs",         layout = true },
-    { id = "healpred",     kind = "healpred",     title = "Heal Prediction", layout = true },
+    { id = "absorbs",      kind = "absorbs",      title = "Absorbs",         layout = true, mirror = false },
+    { id = "healpred",     kind = "healpred",     title = "Heal Prediction", layout = true, mirror = false },
     { id = "castbar",      kind = "castbar",      title = "Cast Bar",        layout = true },
     { id = "classpower",   kind = "classpower",   title = "Class Power",     layout = true },
     -- Text's layout is the shared Text Designer template's: a mirrored Text link
@@ -386,15 +390,28 @@ function Links:Partner(root, unit)
 end
 
 -- An element's two aspects in a link, normalised: absent / unknown = "own";
--- an element with no layout aspect is "own" on layout; look is never "mirror".
+-- an element with no layout aspect is "own" on layout; one that cannot mirror
+-- (mirror = false) is "same" where "mirror" was asked; look is never "mirror".
 function Links.Normalise(elemId, aspects)
     local e = Links.BY_ID[elemId]
     local layout, look = "own", "own"
     if e and type(aspects) == "table" then
         if e.layout and (aspects.layout == "same" or aspects.layout == "mirror") then layout = aspects.layout end
+        if layout == "mirror" and e.mirror == false then layout = "same" end
         if aspects.look == "same" then look = "same" end
     end
     return layout, look
+end
+
+-- Can this element's layout be mirrored at all?
+function Links.CanMirror(elemId)
+    local e = Links.BY_ID[elemId]
+    return (e and e.layout and e.mirror ~= false) and true or false
+end
+
+-- Is this element in the default link's set (the "linked by default" group)?
+function Links.IsDefaultElement(elemId)
+    return Links.DEFAULT.elements[elemId] ~= nil
 end
 
 function Links:Aspects(root, unit, elemId)
@@ -509,6 +526,22 @@ function Links:SetLink(root, follower, leader, elements, except)
     return (self:ApplyFrom(root, leader))
 end
 
+-- Set every listed element's aspects at once (Mirror All / Copy All / Separate
+-- All), each normalised (an element with no layout keeps "own"; one that cannot
+-- mirror gets "same"), then one full apply leader -> follower.
+function Links:SetAll(root, unit, ids, layout, look)
+    local link, _, leader = self:LinkOf(root, unit)
+    if not link then return nil end
+    if type(link.elements) ~= "table" then link.elements = {} end
+    for _, id in ipairs(ids or {}) do
+        if Links.BY_ID[id] then
+            local l, k = Links.Normalise(id, { layout = layout, look = look })
+            link.elements[id] = (l ~= "own" or k ~= "own") and { layout = l, look = k } or nil
+        end
+    end
+    return (self:ApplyFrom(root, leader))
+end
+
 -- Set one element's aspects in the link `unit` is in, then one full apply
 -- leader -> follower.
 function Links:SetElement(root, unit, elemId, layout, look)
@@ -580,6 +613,25 @@ function Links.DeliberateDifferences(follower, leader, elements)
         end
     end
     return out
+end
+
+-- A new link's starting point, for any pair: the default link's pieces linked
+-- and the rest separate. Player and Target (either way round) start exactly as
+-- the default link does -- mirrored, each keeping its deliberate own defaults
+-- (except); any other pair shares the same pieces unmirrored and keeps nothing
+-- apart. Returns elements, except.
+function Links.StartingElements(follower, leader)
+    local d = Links.DEFAULT
+    local pair = (follower == d.follower and leader == d.leader) or (follower == d.leader and leader == d.follower)
+    if pair then
+        return d.elements, Links.DeliberateDifferences(follower, leader, d.elements)
+    end
+    local els = {}
+    for id, aspects in pairs(d.elements) do
+        local e = Links.BY_ID[id]
+        els[id] = { layout = (e and e.layout and aspects.layout ~= "own") and "same" or "own", look = aspects.look }
+    end
+    return els, nil
 end
 
 function Links:CreateDefault(root)
