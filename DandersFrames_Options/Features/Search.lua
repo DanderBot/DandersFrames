@@ -313,6 +313,35 @@ end
 function Search:RegistryIsStale()
     local currentMode = DF.GUI and DF.GUI.SelectedMode or "party"
     return (not self.RegistryBuilt) or #self.Registry == 0 or self.BuiltForMode ~= currentMode
+        or (self.BuiltWithDeferred or false) ~= (self.deferredIndexOn or false)
+end
+
+-- ============================================================
+-- DEFERRED PAGES
+-- ------------------------------------------------------------
+-- A page may set `page.deferIndex = true`: it stays OUT of the index until
+-- something asks for it -- a search being typed (ShowResults / Find) or a caller
+-- that reports on those pages (Search:IncludeDeferredPages). For a large set of
+-- pages that most sessions never search, it keeps every OTHER index build (the
+-- Changed Settings ledger's, a Party/Raid switch's) from building them all.
+-- Once included they stay included for the session: dropping them again would
+-- only rebuild the index for nothing.
+-- ⚠ STALENESS, NOT AN ABORT. Including them marks the index stale (see
+-- RegistryIsStale) rather than invalidating it, so a budgeted build already in
+-- flight finishes and fires its waiters; their re-check then finds the index
+-- stale and starts the build that adds the deferred pages -- reusing every page
+-- that already holds a valid build, so only the deferred ones are built.
+-- ============================================================
+function Search:IsPageIndexed(page)
+    if not page or page.skipSearchIndex then return false end
+    if page.deferIndex and not self.deferredIndexOn then return false end
+    return true
+end
+
+function Search:IncludeDeferredPages()
+    if self.deferredIndexOn then return false end
+    self.deferredIndexOn = true
+    return true
 end
 
 function Search:EnsureRegistry()
@@ -339,7 +368,7 @@ function Search:TryReuseRegistry()
 
     local lists = {}
     for _, page in pairs(GUI.Pages) do
-        if not page.skipSearchIndex then
+        if self:IsPageIndexed(page) then
             local entries = page.GetIndexEntries and page:GetIndexEntries()
             if not entries then return false end
             lists[#lists + 1] = entries
@@ -349,6 +378,7 @@ function Search:TryReuseRegistry()
     self.Registry = {}
     registrationId = 0
     self.BuiltForMode = GUI.SelectedMode
+    self.BuiltWithDeferred = self.deferredIndexOn or false
     self._buildToken = (self._buildToken or 0) + 1
     for _, entries in ipairs(lists) do AppendIndexEntries(self, entries) end
     self.RegistryBuilt = true
@@ -403,6 +433,10 @@ local REGISTRY_BUILD_BUDGET_MS = 8
 function Search:_BeginRegistryBuild()
     self.Registry = {}
     registrationId = 0
+    -- ⚠ NOT BUILT WHILE IT IS BEING BUILT. Register drops every entry while
+    -- RegistryBuilt is true, so a rebuild that was not preceded by an
+    -- InvalidateRegistry (a stale index -- DEFERRED PAGES) would come back empty.
+    self.RegistryBuilt = false
 
     if not DF.GUI or not DF.GUI.Pages then
         return nil
@@ -410,6 +444,8 @@ function Search:_BeginRegistryBuild()
 
     -- Store the mode we're building for
     self.BuiltForMode = DF.GUI.SelectedMode
+    -- ...and whether the deferred pages are in it (DEFERRED PAGES, above).
+    self.BuiltWithDeferred = self.deferredIndexOn or false
 
     -- Bumped on every build AND by InvalidateRegistry, so a budgeted drain can
     -- tell "still mine" from "superseded" between slices.
@@ -427,7 +463,8 @@ function Search:_BeginRegistryBuild()
       -- keeps its rows out of the index, which is correct on its own terms -- a
       -- report of settings is not itself a setting.
       -- Deliberately page-agnostic: any page may set `skipSearchIndex`.
-      if not page.skipSearchIndex then
+      -- A deferred page (page.deferIndex) waits until something asks for it.
+      if self:IsPageIndexed(page) then
         ctx.steps[#ctx.steps + 1] = function()
             -- ★ A VALID BUILD FOR THIS MODE IS INDEXED AS IT STANDS -- no builder,
             -- nothing retired. Asked at STEP time, not when the list was made: a
@@ -747,6 +784,8 @@ end
 function Search:Find(query)
     if not query or query == "" then return {} end
     
+    -- A search covers every page, deferred ones included (DEFERRED PAGES).
+    self:IncludeDeferredPages()
     self:EnsureRegistry()
     
     query = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
@@ -1699,6 +1738,8 @@ function Search:ShowResults(query)
     -- would put stale results under a box that says something else.
     -- (An index that can be assembled from the pages' retained builds comes first: no builder
     -- runs and nothing waits -- see TryReuseRegistry.)
+    -- A search covers every page, deferred ones included (DEFERRED PAGES).
+    if query and query ~= "" then self:IncludeDeferredPages() end
     self:TryReuseRegistry()
     if self:RegistryIsStale() or self.RegistryBuilding then
         self:ShowBuildingMessage()

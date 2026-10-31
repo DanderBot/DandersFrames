@@ -379,5 +379,73 @@ do
     end
 end
 
+-- ============================================================
+-- 10. DEFERRED PAGES (page.deferIndex)
+-- ------------------------------------------------------------
+-- A page set a large module adds (one per unit and page kind) stays out of the
+-- index until a search is typed or a caller asks for it, so every OTHER index
+-- build (the Changed Settings ledger's, a Party/Raid switch's) costs what it did
+-- before the module existed. Including them marks the index stale; it never
+-- aborts a build in flight, so that build's waiters still fire.
+-- ============================================================
+print("-- Search: deferred pages")
+do
+    for _, mode in ipairs({ "sync", "budgeted" }) do
+        local DF, GUI, rec = NewHost()
+        local Search = DF.Search
+        rec.page("general_frame", true)
+        rec.page("auras_buffs", false)
+        local d1 = rec.page("uf_target_health", false)
+        local d2 = rec.page("uf_pet_frame", false)
+        d1.deferIndex, d2.deferIndex = true, true
+        local function Build()
+            if mode == "sync" then Search:BuildFullRegistry()
+            else Search:BuildFullRegistryBudgeted(); RunAllFrames() end
+        end
+        Build()
+        eq(d1.builds + d2.builds, 0, "deferred: left out of an ordinary build (" .. mode .. ")")
+        eq(#rec.built, 2, "deferred: ...the other pages are built (" .. mode .. ")")
+        check(not Search:RegistryIsStale(), "deferred: the index is complete without them (" .. mode .. ")")
+        check(Search:IncludeDeferredPages(), "deferred: included on request")
+        check(not Search:IncludeDeferredPages(), "deferred: ...once per session")
+        check(Search:RegistryIsStale(), "deferred: including them marks the index stale (" .. mode .. ")")
+        Build()
+        eq(d1.builds + d2.builds, 2, "deferred: the next build adds them (" .. mode .. ")")
+        local parked = {}
+        for _, n in ipairs(rec.parked) do parked[n] = true end
+        check(parked.uf_target_health and parked.uf_pet_frame, "deferred: ...and parks them like any page (" .. mode .. ")")
+        check(not Search:RegistryIsStale(), "deferred: the index is complete again (" .. mode .. ")")
+    end
+
+    -- A build in flight when they are included: it completes and its waiter fires;
+    -- the index then reads stale, so the waiter's re-check starts the build that adds them.
+    local DF, GUI, rec = NewHost()
+    local Search = DF.Search
+    rec.page("general_frame", true)
+    local d = rec.page("uf_focus_health", false)
+    d.deferIndex = true
+    local fired = 0
+    Search:EnsureRegistryAsync(function(ok) if ok then fired = fired + 1 end end)
+    Search:IncludeDeferredPages()
+    RunAllFrames()
+    eq(fired, 1, "deferred: a build in flight still completes and fires its waiter")
+    check(Search:RegistryIsStale(), "deferred: ...and the index reads stale afterwards")
+    check(Search:EnsureRegistryAsync() == "building", "deferred: the next request builds again")
+    RunAllFrames()
+    eq(d.builds, 1, "deferred: ...adding the deferred page")
+
+    -- Typing a search includes them (ShowResults / Find).
+    DF, GUI, rec = NewHost()
+    Search = DF.Search
+    rec.page("general_frame", true)
+    d = rec.page("uf_player_castbar", false)
+    d.deferIndex = true
+    Search:Find("fakeKey")
+    eq(d.builds, 1, "deferred: a search covers them")
+    local src = options_file_source("Features/Search.lua"):gsub("\r\n", "\n")
+    check(src:find("if query and query ~= \"\" then self:IncludeDeferredPages() end\n    self:TryReuseRegistry()", 1, true) ~= nil,
+          "deferred: the search box includes them before it reads the index")
+end
+
 -- Everything this file swapped, put back -- one runtime serves every suite.
 DandersFrames, C_Timer, debugprofilestop = savedDF, savedTimer, savedProfile
