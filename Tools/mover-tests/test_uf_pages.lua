@@ -787,8 +787,16 @@ do
     check(not has(keys, "portraitNpcMode") and not has(keys, "portraitDesatDead"), "pet: no NPC style, no desaturate")
 
     print("-- Stage F pages: Unit Icons")
-    cards = BuildPage("player", "unitIcons")
+    cards, keys, byKey = BuildPage("player", "unitIcons")
     eq(cards, "uf_icon_resting,uf_icon_pvp", "player Unit Icons: Resting, PvP")
+    for _, k in ipairs({ "restingIconAnimate", "restingIconGlow" }) do
+        local rw = byKey[k]
+        check(rw ~= nil, "Resting: a tick for " .. k)
+        check(rw and type(rw.tooltip) == "string" and rw.tooltip ~= "", "..." .. k .. " has a tooltip")
+        check(rw and rw.disableOn and rw.disableOn({ restingIconEnabled = false })
+              and not rw.disableOn({ restingIconEnabled = true }), "..." .. k .. " greys while Resting is off")
+    end
+    check(not has(keys, "pvpIconAnimate") and not has(keys, "pvpIconGlow"), "...and only on the Resting card")
     eq(toggles.uf_icon_resting and toggles.uf_icon_resting.key, "restingIconEnabled", "...each icon's tick in its header")
     cards, keys = BuildPage("target", "unitIcons")
     eq(cards, "uf_icon_pvp,uf_icon_classification", "target Unit Icons: PvP, Elite / Rare")

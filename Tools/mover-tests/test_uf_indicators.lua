@@ -35,6 +35,7 @@ local function Make(kind, parent)
     function f:CreateFontString() return Make("FontString", self) end
     function f:SetAtlas(a) self._atlas = a end
     function f:SetTextColor() end
+    function f:SetBlendMode(m) self._blend = m end
     return f
 end
 CreateFrame = function(kind, _, parent) return Make(kind, parent) end
@@ -55,7 +56,7 @@ local errs = {}
 function DF:DebugError(_, fmt, ...) errs[#errs + 1] = string.format(fmt, ...) end
 function DF:DeepCopy(t) return deepcopy(t) end
 function DF:RegisterProfileRootTable(key, spec) self.registered[key] = spec; return true end
-function DF:SafeSetFont() end
+function DF:SafeSetFont(fs, _, size) fs._fontSize = size end
 local combatKicks = 0
 function DF:UpdateCombatIcon() combatKicks = combatKicks + 1 end
 -- The Text Designer's Classification resolver (D12), as DataSource / Resolver expose it.
@@ -66,6 +67,16 @@ DF.TextDesigner = { Resolver = { _RESOLVERS = { classification = function(_, sou
     return ""
 end } } }
 DandersFrames = DF
+
+-- The REAL resting builder, lifted out of DandersFrames/Frames/Create.lua by its
+-- section header (the file builds tooltips at file scope, so not loaded whole).
+do
+    local src = df_file_source("Frames/Create.lua")
+    local a = src:find("-- RESTED INDICATOR BUILDER", 1, true)
+    local b = src:find("-- SAFE UNIT WATCH REGISTRATION", 1, true)
+    assert(a and b, "rested builder section in Create.lua")
+    assert(loadstring("local DF, CreateFrame, ipairs = ... " .. src:sub(a, b - 1), "@rested_builder"))(DF, CreateFrame, ipairs)
+end
 
 local UF = {}
 load_uf_file_into("Core.lua", UF)
@@ -104,6 +115,39 @@ check(not P.dfUFIcons.resting:IsShown(), "not resting: hidden")
 resting = Secret("resting")
 IN:Update(P)
 check(not P.dfUFIcons.resting:IsShown(), "a secret answer: hidden, never guessed")
+
+print("-- Resting: the shared ZZZ, animation, glow, size")
+local pdb = UF:GetUnitDB("player")
+eq(pdb.restingIconAnimate, true, "default: animated")
+eq(pdb.restingIconGlow, false, "default: no glow (loud in every city)")
+local R = P.dfUFIcons.resting
+eq(#R.zTexts, 3, "the shared builder's three Zs")
+check(R.glow ~= nil, "a glow built round the frame")
+eq(R.glow._parent, P, "...on the unit button itself (the frame's main rect)")
+resting = true
+IN:Layout(P)
+check(R:IsShown(), "resting again: shown")
+check(not R.glow:IsShown(), "glow off by default")
+check(R:GetScript("OnUpdate") ~= nil, "animated: the loop runs")
+eq(R.zTexts[3]._fontSize, 14, "size 16 = the party ZZZ (largest Z 14)")
+pdb.restingIconGlow = true
+IN:Update(P)
+check(R.glow:IsShown(), "glow on: shown")
+pdb.restingIconAnimate = false
+IN:Layout(P)
+eq(R:GetScript("OnUpdate"), nil, "still: no OnUpdate")
+eq(R.zTexts[1]:GetAlpha(), 1, "still: Zs at full alpha")
+eq(R.glow:GetAlpha(), 0.3, "still: glow at a fixed alpha")
+pdb.restingIconSize = 32
+IN:Layout(P)
+eq(R.zTexts[3]._fontSize, 28, "size 32: the Zs scale with it")
+local rp = R._points[#R._points]
+eq(rp and rp[1], "TOPLEFT", "anchored at the unit's anchor")
+eq(rp and rp[2], P, "...on the frame")
+resting = false
+IN:Update(P)
+check(not R:IsShown() and not R.glow:IsShown(), "not resting: ZZZ and glow both hidden")
+pdb.restingIconSize, pdb.restingIconAnimate, pdb.restingIconGlow = 16, true, false
 
 print("-- PvP")
 pvp = true
@@ -171,6 +215,16 @@ IN:Attach(PV)
 IN:Preview(PV)
 eq(PV.dfUFIcons.classification.tex._atlas, IN.ART.rare, "the sample unit's classification")
 check(not PV.dfUFIcons.pvp:IsShown(), "focus PvP off: hidden in the preview too")
+local PP = Owner("player")
+PP.dfUFPreview = true
+PP.dfDB = UF:GetUnitDB("player")
+PP.dfDB.restingIconGlow = true
+IN:Attach(PP)
+IN:Preview(PP)
+check(PP.dfUFIcons.resting:IsShown(), "player preview: the resting ZZZ shows")
+check(PP.dfUFIcons.resting.glow:IsShown(), "player preview: the glow shows when on")
+check(PP.dfUFIcons.resting:GetScript("OnUpdate") ~= nil, "player preview: animated")
+PP.dfDB.restingIconGlow = false
 eq(#errs, 0, "no element errored (" .. tostring(errs[1]) .. ")")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

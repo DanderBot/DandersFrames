@@ -209,6 +209,9 @@ local ELEMENTS = {
     restingIconAnchor = "TOPLEFT",
     restingIconX = 0,
     restingIconY = 0,
+    restingIconAnimate = true,
+    -- Off by default: a glow round the whole frame every time you rest is loud.
+    restingIconGlow = false,
     pvpIconEnabled = false,
     pvpIconSize = 16,
     pvpIconAnchor = "TOPRIGHT",

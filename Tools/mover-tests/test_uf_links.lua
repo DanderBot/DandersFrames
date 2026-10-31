@@ -119,6 +119,12 @@ do
     eq(Links.OwnerOf("frameShowBorder"), "border", "...the show-border switch too")
     eq(Links.OwnerOf("frameWidth"), "frame", "...and its size is the Frame element")
     eq(Links.OwnerOf("castbarSpellX"), "castbar", "a page new to unit frames owns its own prefix")
+    eq(Links.OwnerOf("restingIconAnimate"), "unitIcons", "the resting ZZZ's Animate rides the Unit Icons link")
+    eq(Links.OwnerOf("restingIconGlow"), "unitIcons", "...and its Glow")
+    eq(Links.Aspect("restingIconAnimate"), "look", "...both look, not layout")
+    eq(Links.Aspect("restingIconGlow"), "look", "...")
+    eq(Links.Mirror("restingIconGlow", true), true, "a mirror never touches a boolean")
+    eq(Links.Mirror("restingIconAnimate", false), false, "...either way")
     eq(Links.OwnerOf("debuffFilterMine"), "debuffs", "the longest-prefix rule decides between pages")
 
     -- The layout flag says whether the element HAS a layout aspect.

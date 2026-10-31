@@ -1373,6 +1373,14 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
             w.disableOn = off
             w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, pre .. "Y", changed), 55)
             w.disableOn = off
+            if pre == "restingIcon" then
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Animate"], db, "restingIconAnimate", changed), 30)
+                w.disableOn = off
+                w.tooltip = L["Fade the Zs in and out. Off shows them still."]
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Glow"], db, "restingIconGlow", changed), 30)
+                w.disableOn = off
+                w.tooltip = L["Show a pulsing yellow glow around the frame."]
+            end
             Close(band)
         end
     end

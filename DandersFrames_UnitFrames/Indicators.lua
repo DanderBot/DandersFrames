@@ -4,7 +4,10 @@ local addonName, UF = ...
 -- UNIT ICONS (spec §3.3 "Icons: a new Unit group", §4 "Level / classification /
 -- PvP / resting")
 -- What DandersFrames' own status icons do not cover, as three small icons:
---   Resting       the player, while resting
+--   Resting       the player, while resting: DandersFrames' own animated
+--                 ZZZ (DF:CreateRestedIndicator), optionally still, with an
+--                 optional glow round the frame body (the unit button itself;
+--                 a portrait beside the frame sits outside it)
 --   PvP           the player / target / focus while PvP flagged (faction crest,
 --                 or the free-for-all flag)
 --   Elite / Rare  target / focus / boss: an elite or rare dragon, or the word
@@ -43,9 +46,10 @@ IN.ICONS = {
 }
 -- db key prefix per icon.
 IN.PREFIX = { resting = "restingIcon", pvp = "pvpIcon", classification = "classification" }
+-- restingIconSize that draws the ZZZ at the party player frame's scale.
+IN.RESTING_BASE_SIZE = 16
 
 IN.ART = {
-    resting = { file = "Interface\\CharacterFrame\\UI-StateIcon", coords = { 0, 0.5, 0, 0.421875 } },
     pvp = {
         Horde = { file = "Interface\\TargetingFrame\\UI-PVP-Horde", coords = { 0.08, 0.58, 0.045, 0.545 } },
         Alliance = { file = "Interface\\TargetingFrame\\UI-PVP-Alliance", coords = { 0.07, 0.58, 0.06, 0.57 } },
@@ -76,7 +80,13 @@ function IN:Attach(f)
     host:SetAllPoints(f)
     local icons = { host = host }
     for key, units in pairs(IN.ICONS) do
-        if units[unit] then icons[key] = NewIcon(host) end
+        if units[unit] then
+            if key == "resting" then
+                icons[key] = DF:CreateRestedIndicator(host, f)
+            else
+                icons[key] = NewIcon(host)
+            end
+        end
     end
     f.dfUFIcons = icons
     return icons
@@ -97,7 +107,14 @@ function IN:Layout(f)
         if icon then
             local pre = IN.PREFIX[key]
             local size = tonumber(db[pre .. "Size"]) or 16
-            icon:SetSize(size, size)
+            if key == "resting" then
+                -- The ZZZ group at size 16 = the party player frame's (8/11/14).
+                icon:SetZScale(size / IN.RESTING_BASE_SIZE)
+                icon:SetFrameLevel(icons.host:GetFrameLevel() + 5)
+                icon:SetAnimated(db[pre .. "Animate"] ~= false)
+            else
+                icon:SetSize(size, size)
+            end
             icon:ClearAllPoints()
             local point = K.Point(db[pre .. "Anchor"], "TOPRIGHT")
             icon:SetPoint(point, f, point, tonumber(db[pre .. "X"]) or 0, tonumber(db[pre .. "Y"]) or 0)
@@ -159,14 +176,18 @@ end
 
 -- ---- painting --------------------------------------------------------------
 
-function IN:PaintResting(icon, on)
-    if not on then icon:Hide(); return end
-    local a = IN.ART.resting
-    icon.text:Hide()
-    icon.tex:Show()
-    icon.tex:SetTexture(a.file)
-    icon.tex:SetTexCoord(a.coords[1], a.coords[2], a.coords[3], a.coords[4])
+-- `icon` is the DF:CreateRestedIndicator frame; its glow rides with it.
+function IN:PaintResting(icon, on, glow)
+    local g = icon.glow
+    if not on then
+        icon:Hide()
+        if g then g:Hide() end
+        return
+    end
     icon:Show()
+    if g then
+        if glow then g:Show() else g:Hide() end
+    end
 end
 
 function IN:PaintPvP(icon, state)
@@ -203,7 +224,8 @@ function IN:Update(f)
     local exists = unit and UnitExists and UnitExists(unit)
     if IsSecret(exists) then exists = true end
     if icons.resting then
-        IN:PaintResting(icons.resting, IN:Enabled(db, "resting") and IN:IsResting())
+        IN:PaintResting(icons.resting, IN:Enabled(db, "resting") and IN:IsResting(),
+            db and db.restingIconGlow)
     end
     if icons.pvp then
         IN:PaintPvP(icons.pvp, (IN:Enabled(db, "pvp") and exists) and IN:PvPState(unit) or nil)
@@ -242,7 +264,7 @@ function IN:Preview(f)
     if not icons then return end
     local db = K.DB(f)
     IN:Layout(f)
-    if icons.resting then IN:PaintResting(icons.resting, IN:Enabled(db, "resting")) end
+    if icons.resting then IN:PaintResting(icons.resting, IN:Enabled(db, "resting"), db and db.restingIconGlow) end
     if icons.pvp then
         local faction = UnitFactionGroup and UnitFactionGroup("player")
         if IsSecret(faction) or (faction ~= "Horde" and faction ~= "Alliance") then faction = "Alliance" end
