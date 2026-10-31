@@ -206,6 +206,127 @@ local function RefreshAll()
     if CC and CC.headerEnableCb and CC.headerEnableCb.Refresh then CC.headerEnableCb:Refresh() end
 end
 
+-- ============================================================
+-- RESET A MODULE TO ITS DEFAULTS (def.reset -- MODULE RESET in
+-- GUI/ModuleRegistry.lua)
+-- The row's Reset button -> a danger warning that lists exactly what goes and
+-- whose settings they are -> def.reset.run(). The module's own run does the
+-- data and refreshes its frames; this page then repaints itself, the rail and
+-- Home. Nothing here turns a module on or off.
+-- ============================================================
+
+local BULLET = "\226\128\162 "
+
+-- A reset's line list (covers / keeps), or {} -- a broken one must not take the
+-- warning down with it.
+local function ResetLines(reset, field)
+    local fn = reset and reset[field]
+    if type(fn) ~= "function" then return {} end
+    local ok, lines = pcall(fn)
+    return (ok and type(lines) == "table") and lines or {}
+end
+GUI.ModuleResetLines = ResetLines
+
+-- Why a reset cannot run now, or nil. Combat: the resets re-apply secure frames.
+-- An auto layout being edited: its values sit in the real raid table until the
+-- editor puts them back, and the editor locks Global, Binds and Profiles anyway.
+function GUI:ModuleResetBlocked()
+    if InCombatLockdown() then return L["Cannot use this action in combat."] end
+    local APU = DF.AutoProfilesUI
+    if APU and APU.IsEditing and APU:IsEditing() then return L["Finish editing the auto layout first."] end
+    return nil
+end
+
+-- The warning's body: what goes back to its defaults, what stays, whose settings
+-- these are (the current profile, named, unless the module says otherwise), that
+-- the module stays on or off, where to export a copy, and that it is final.
+function GUI:ModuleResetMessage(def)
+    local reset = GUI:GetModuleReset(def)
+    if not reset then return nil end
+    local out = { L["These go back to their defaults:"] }
+    for _, line in ipairs(ResetLines(reset, "covers")) do out[#out + 1] = BULLET .. tostring(line) end
+    local keeps = ResetLines(reset, "keeps")
+    if #keeps > 0 then
+        out[#out + 1] = ""
+        out[#out + 1] = L["Not reset:"]
+        for _, line in ipairs(keeps) do out[#out + 1] = BULLET .. tostring(line) end
+    end
+    out[#out + 1] = ""
+    local scope
+    if type(reset.scope) == "function" then
+        local ok, s = pcall(reset.scope)
+        if ok and type(s) == "string" and s ~= "" then scope = s end
+    end
+    out[#out + 1] = scope or format(L["Only the current profile, %s, is reset. Your other profiles are untouched."],
+        tostring(DF.GetCurrentProfile and DF:GetCurrentProfile() or ""))
+    out[#out + 1] = L["The module stays on or off, as it is now."]
+    out[#out + 1] = format(L["To keep a copy, export it first: %s > %s."], L["Profiles"], L["Import/Export"])
+    out[#out + 1] = ""
+    local last = L["This cannot be undone."]
+    if GUI.ToneHex then last = format("|c%s%s|r", GUI:ToneHex("danger"), last) end
+    out[#out + 1] = last
+    return table.concat(out, "\n")
+end
+
+-- Run a module's reset (no warning: ConfirmModuleReset is the way in). A mover
+-- session is ended first -- its unsaved moves would land over the reset
+-- positions -- and with unsaved moves that is a Save / Discard prompt the reset
+-- waits for (Cancel drops it).
+function GUI:RunModuleReset(def)
+    if type(def) == "string" then def = GUI:GetModule(def) end
+    local reset = GUI:GetModuleReset(def)
+    if not reset then return false end
+    local blocked = GUI:ModuleResetBlocked()
+    if blocked then
+        DF:Err(blocked)
+        return false
+    end
+    local function go()
+        -- The session's prompt can outlast the start of a pull.
+        local again = GUI:ModuleResetBlocked()
+        if again then
+            DF:Err(again)
+            return
+        end
+        reset.run()
+        RefreshAll()
+        if GUI.RefreshHomeView then GUI:RefreshHomeView() end
+    end
+    local B = DF.MoverBridge
+    if B and B.IsSessionActive and B:IsSessionActive() and B.EndSessionThen then
+        B:EndSessionThen(go)
+    else
+        go()
+    end
+    return true
+end
+
+-- The warning. Reset is the danger button; Cancel (and Escape) leave everything.
+function GUI:ConfirmModuleReset(def)
+    if type(def) == "string" then def = GUI:GetModule(def) end
+    if not GUI:GetModuleReset(def) then return false end
+    local blocked = GUI:ModuleResetBlocked()
+    if blocked then
+        DF:Err(blocked)
+        return false
+    end
+    DF:ShowPopupAlert({
+        title = format(L["Reset %s?"], GUI:ModuleLabel(def) or ""),
+        tone = "danger",
+        message = GUI:ModuleResetMessage(def),
+        buttons = {
+            { label = L["Reset"], tone = "danger", onClick = function()
+                -- ☠ Deferred: the popup hides AFTER this returns, and the reset can
+                -- raise a popup of its own (a mover session's Save / Discard, a
+                -- reload prompt) on the same singleton frame.
+                C_Timer.After(0, function() GUI:RunModuleReset(def) end)
+            end },
+            { label = L["Cancel"] },
+        },
+    })
+    return true
+end
+
 -- A list row. Bespoke on purpose (an icon box, two lines and two controls in
 -- a pooled list row); its pieces are the shared ones: the kit's rounded
 -- surface, GUI:CreateCheckRow for the switch (the kit has no pill switch, so
@@ -246,6 +367,28 @@ local function MakeRow(sub)
     })
     switch:SetPoint("RIGHT", open, "LEFT", -12, 0)
     row.Switch = switch
+
+    -- Reset to defaults, on a module row whose module has one (def.reset): left
+    -- of the switch, a full gap clear of it, so the destructive button is never
+    -- the one beside Open. The danger tone is the kit's (red label and hover);
+    -- it asks first (GUI:ConfirmModuleReset). Shown on and off rows alike -- a
+    -- module's settings are kept while it is off, so they can be reset then too.
+    if not sub then
+        local reset = CreateFrame("Button", nil, row, "BackdropTemplate")
+        GUI:StyleButton(reset, { text = L["Reset"], width = 56, height = 24, rounded = true, tone = "danger" })
+        reset:SetPoint("RIGHT", switch, "LEFT", -12, 0)
+        reset:SetScript("OnClick", function(self)
+            if self.def then GUI:ConfirmModuleReset(self.def) end
+        end)
+        -- StyleButton owns OnEnter / OnLeave (its hover); the tooltip rides on top.
+        reset:HookScript("OnEnter", function(self)
+            local r = self.def and GUI:GetModuleReset(self.def)
+            if r then GUI:ShowTooltip(self, { title = L["Reset to Defaults"], lines = ResetLines(r, "covers") }) end
+        end)
+        reset:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        reset:Hide()
+        row.Reset = reset
+    end
 
     -- Coming soon: a gold tag where the switch would be.
     local soon = Label(row, 10, Gold())
@@ -341,6 +484,16 @@ local function PaintModuleRow(row, def, on, soon)
     row.Open.target, row.Open.targetTab = def.id, nil
     row.Open:SetShown(on and not soon)
     row.Open:SetEnabled(on and not GUI:IsModulePickLocked(def.id))
+    -- Reset, where the module has one. The status then sits left of it.
+    local hasReset = (not soon) and GUI:GetModuleReset(def) ~= nil
+    row.Reset.def = hasReset and def or nil
+    row.Reset:SetShown(hasReset)
+    -- Greyed while an auto layout is edited (SetModuleLocked repaints this page);
+    -- combat is refused on the click instead, with the reason in chat.
+    local APU = DF.AutoProfilesUI
+    row.Reset:SetEnabled(not (APU and APU.IsEditing and APU:IsEditing()))
+    row.Status:ClearAllPoints()
+    row.Status:SetPoint("RIGHT", hasReset and row.Reset or row.Switch, "LEFT", -12, 0)
 end
 
 -- Party Frames / Raid Frames under the master, each in its own accent.

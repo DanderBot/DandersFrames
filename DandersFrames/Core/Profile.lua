@@ -244,6 +244,103 @@ function DF:ResetFullProfile()
     end
 end
 
+-- ============================================================
+-- RESET GROUP FRAMES (the Modules page's Reset on Group Frames)
+-- ------------------------------------------------------------
+-- The current profile's Party and Raid frames go back to what a NEW profile has,
+-- and nothing else does. ResetFullProfile's way round: the parts come from the
+-- constructor a new profile uses (NewProfileTable), so nothing it seeds is missed,
+-- and ActivateProfile then runs the refresh a profile switch runs.
+--
+-- RESET: the party and raid tables (every frame setting, positions, pinned frames,
+-- the designer refs), auto layouts, the Party/Raid section syncs, and the "Party"
+-- and "Raid" Aura / Text Designer presets (rebuilt from the fresh modes by the
+-- designer migration, which is armed again for that).
+-- KEPT:
+--   * partyEnabled / raidEnabled and the master switch's stash: a reset never turns
+--     the module on or off.
+--   * every other profile-root key: the Global tab's (colours, aura filters, the
+--     settings font), another module's (a registered root table such as unit
+--     frames'), migration flags. A NEW root key is kept unless added here -- the
+--     safe default for a reset scoped to one module.
+--   * GLOBAL-TAB SETTINGS STORED PER MODE (GROUP_FRAMES_KEEP_MODE_KEYS): the Global
+--     pages write these to party AND raid, but they are not group-frame settings.
+--   * designer presets under any other name: the libraries are shared (unit frames
+--     pick from them), so only the two group frames own by name are rebuilt.
+--
+-- ⚠ NOT SAVED FIRST, for ResetFullProfile's reason. ⚠ Out of combat only: the
+-- refresh re-applies secure headers, and a mid-fight reset would land half of it.
+-- ============================================================
+local GROUP_FRAMES_ROOT_KEYS = { "party", "raid", "raidAutoProfiles", "linkedSections" }
+local GROUP_FRAMES_KEEP_MODE_KEYS = {
+    -- Global > Settings (written to both modes by its makeBlizSet).
+    "hideBlizzardPartyFrames", "hideBlizzardRaidFrames", "hideDefaultPlayerFrame",
+    "hideDefaultPlayerFrameRaidOnly", "showBlizzardSideMenu", "pixelPerfect", "showMinimapButton",
+    -- Global > Fonts: one text shadow for both modes.
+    "fontShadowOffsetX", "fontShadowOffsetY", "fontShadowColor",
+    -- Machine state and an internal escape hatch (ExportLocalOnly).
+    "minimapIcon", "useSecureHeaders",
+}
+DF.GroupFramesResetKeepKeys = GROUP_FRAMES_KEEP_MODE_KEYS
+
+function DF:ResetGroupFrames()
+    local L = DF.L
+    if InCombatLockdown() then
+        DF:Err(L["Cannot use this action in combat."])
+        return false
+    end
+    -- Editing an auto layout parks the layout's values in the real raid table;
+    -- resetting under the editor would hand its restore a table that is gone.
+    local APU = DF.AutoProfilesUI
+    if APU and APU.IsEditing and APU:IsEditing() then
+        DF:Err(L["Finish editing the auto layout first."])
+        return false
+    end
+    if not (DandersFramesDB_v2 and DandersFramesDB_v2.profiles) then return false end
+    local name = DF:GetCurrentProfile()
+    -- The STORED table, never DF.db: that is a proxy while an auto layout runs.
+    local p = DandersFramesDB_v2.profiles[name]
+    if type(p) ~= "table" then return false end
+    local fresh = DF:NewProfileTable()
+
+    for _, mode in ipairs({ "party", "raid" }) do
+        local old, new = p[mode], fresh[mode]
+        if type(old) == "table" and type(new) == "table" then
+            for _, key in ipairs(GROUP_FRAMES_KEEP_MODE_KEYS) do
+                local v = rawget(old, key)
+                if v ~= nil then new[key] = DF:DeepCopy(v) end
+            end
+        end
+    end
+    for _, key in ipairs(GROUP_FRAMES_ROOT_KEYS) do
+        p[key] = fresh[key]
+    end
+
+    -- The Party and Raid presets go; with the flag down, the designer migration in
+    -- ActivateProfile rebuilds them from the fresh mode tables exactly as it does for
+    -- a new profile, and points the modes at them.
+    local partyName = DF.DefaultPresetNameForMode and DF.DefaultPresetNameForMode("party") or "Party"
+    local raidName = DF.DefaultPresetNameForMode and DF.DefaultPresetNameForMode("raid") or "Raid"
+    for _, libKey in ipairs({ "auraDesignerPresets", "textDesignerPresets" }) do
+        local lib = p[libKey]
+        if type(lib) == "table" then
+            lib[partyName], lib[raidName] = nil, nil
+        end
+    end
+    p._designerPresetsMigratedV1 = nil
+
+    -- The fresh tables are born migrated; make sure no root flag a one-time
+    -- migration of mode data reads is missing, or it would run over the defaults.
+    DF:StampFreshProfileMigrations(p)
+
+    DF:ActivateProfile(name, format(L["%s reset to defaults in profile %s."], L["Group Frames"], name))
+    -- As ResetFullProfile: the refresh re-applies the Aura Designer, not the Text Designer.
+    if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshAll then
+        DF.TextDesigner.Preview:RefreshAll()
+    end
+    return true
+end
+
 -- Copies Party->Raid or Raid->Party within CURRENT profile
 function DF:CopyProfile(srcMode, destMode)
     local L = DF.L

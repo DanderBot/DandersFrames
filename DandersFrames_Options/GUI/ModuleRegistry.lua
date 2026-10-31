@@ -61,7 +61,8 @@ end
 -- status() (one line for Home's tile and the Modules page), description,
 -- noTile (never a Home tile: Home, Modules, Profiles), comingSoon (listed,
 -- nothing to switch on yet), view (a full-window page of its own, shown and
--- hidden through showView / hideView -- Home, Modules).
+-- hidden through showView / hideView -- Home, Modules), reset (the module's
+-- "reset to defaults": the Modules page's Reset button; see MODULE RESET below).
 -- A label may be a string or a function returning one (so a language override
 -- is picked up -- a string resolved from L at file scope freezes on enUS).
 function GUI:RegisterModule(def)
@@ -178,6 +179,34 @@ function GUI:ModuleText(def, field)
     local v = def and def[field]
     if type(v) == "function" then return v() end
     return v
+end
+
+-- ============================================================
+-- MODULE RESET
+-- def.reset = {
+--   run()        -- does it; true when it ran, false when it refused (and said
+--                   why in chat). Owns its own refresh of frames and data.
+--   covers()     -- { line, ... }: what goes back to its defaults, one line each.
+--                   The tooltip and the warning list exactly these.
+--   keeps()      -- optional { line, ... }: what a reader might expect it to touch
+--                   and it leaves alone.
+--   scope()      -- optional: the sentence saying whose settings these are. Default:
+--                   the current profile, named (GUI/Pages/ModulesPage.lua).
+--   available()  -- optional: false hides the button for now (e.g. not loaded).
+-- }
+-- A reset NEVER turns its module on or off. No reset, no button: a placeholder
+-- or coming-soon module never has one.
+-- ============================================================
+function GUI:GetModuleReset(def)
+    if type(def) == "string" then def = modules[def] end
+    if not def or def.placeholder or def.comingSoon then return nil end
+    local r = def.reset
+    if type(r) ~= "table" or type(r.run) ~= "function" or type(r.covers) ~= "function" then return nil end
+    if type(r.available) == "function" then
+        local ok, yes = pcall(r.available)
+        if not (ok and yes) then return nil end
+    end
+    return r
 end
 
 -- Which module a sidebar page belongs to (nil: none claims it). A page given to
@@ -582,6 +611,25 @@ GUI:RegisterModule({
     end,
     -- SelectTab's own switch: the view only; the caller picks the page.
     onEnterForPage = function() GUI:EnterView(false) end,
+    -- DF:ResetGroupFrames (Core/Profile.lua) says exactly what is reset and kept.
+    reset = {
+        covers = function()
+            return {
+                L["Every Party and Raid setting: layout, bars, text, auras and indicators"],
+                L["Frame positions and pinned frames"],
+                L["Auto Layouts"],
+                L["The Party and Raid Aura Designer and Text Designer setups"],
+                L["Sections synced between Party and Raid"],
+            }
+        end,
+        keeps = function()
+            return {
+                L["Settings on the Global tab, such as colors, aura filters and Blizzard frames"],
+                L["Aura Designer and Text Designer presets saved under other names"],
+            }
+        end,
+        run = function() return DF:ResetGroupFrames() end,
+    },
 })
 
 -- ============================================================
@@ -650,6 +698,35 @@ GUI:RegisterModule({
     end,
     description = function() return L["Click-cast bindings for every frame."] end,
     onEnter = EnterClicks,
+    -- CC:ResetActiveProfile (ClickCasting/Profiles.lua): the ACTIVE click-cast
+    -- profile only. Click-cast profiles are per class and apart from the main
+    -- profiles, so the scope sentence names that profile, not the main one.
+    reset = {
+        available = function()
+            local CC = DF.ClickCast
+            return CC and CC.db and CC.ResetActiveProfile and CC.GetActiveProfileName and true or false
+        end,
+        covers = function()
+            return {
+                L["Every binding, custom macro and saved consumable in the profile"],
+                L["The profile's options: cast on key down, quick bind and smart resurrection"],
+            }
+        end,
+        keeps = function()
+            return {
+                L["Settings every click-casting profile shares, such as disable while mounted"],
+            }
+        end,
+        scope = function()
+            local CC = DF.ClickCast
+            local name = CC and CC.GetActiveProfileName and CC:GetActiveProfileName() or ""
+            return format(L["Only the current click-casting profile, %s, is reset. Your other click-casting profiles are untouched."], name)
+        end,
+        run = function()
+            local CC = DF.ClickCast
+            return CC and CC.ResetActiveProfile and CC:ResetActiveProfile() or false
+        end,
+    },
 })
 
 -- ============================================================

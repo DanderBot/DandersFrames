@@ -3391,4 +3391,25 @@ L["That doesn't look like a DandersFrames string."] = true
 L["That filter can't be exported."] = true
 L["The Default profile can't be renamed."] = true
 L["This character uses the profile: %s"] = true
+-- Modules page: a module's Reset button and its warning (GUI/Pages/ModulesPage.lua,
+-- the resets in GUI/ModuleRegistry.lua, Core/Profile.lua and ClickCasting/Profiles.lua).
+L["%s reset to defaults in profile %s."] = true
+L["Aura Designer and Text Designer presets saved under other names"] = true
+L["Every binding, custom macro and saved consumable in the profile"] = true
+L["Every Party and Raid setting: layout, bars, text, auras and indicators"] = true
+L["Finish editing the auto layout first."] = true
+L["Frame positions and pinned frames"] = true
+L["Not reset:"] = true
+L["Only the current click-casting profile, %s, is reset. Your other click-casting profiles are untouched."] = true
+L["Only the current profile, %s, is reset. Your other profiles are untouched."] = true
+L["Reset %s?"] = true
+L["Sections synced between Party and Raid"] = true
+L["Settings every click-casting profile shares, such as disable while mounted"] = true
+L["Settings on the Global tab, such as colors, aura filters and Blizzard frames"] = true
+L["The module stays on or off, as it is now."] = true
+L["The Party and Raid Aura Designer and Text Designer setups"] = true
+L["The profile's options: cast on key down, quick bind and smart resurrection"] = true
+L["These go back to their defaults:"] = true
+L["This cannot be undone."] = true
+L["To keep a copy, export it first: %s > %s."] = true
 --@end-do-not-package@
