@@ -3237,6 +3237,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     if filter == nil then filter = (prefix == "debuff") and "HARMFUL" or "HELPFUL" end
 
     local iconSize = g("Size") or 20
+    -- The row's offsets live in its scaled space (see the layout below).
+    local rowScale = tonumber(g("Scale")) or 1
+    if rowScale <= 0 then rowScale = 1 end
     local dur
     if g("ShowDuration") ~= false then
         local durFormat = g("DurationFormat") or "NUMBER"
@@ -3509,8 +3512,10 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             anchor   = g("Anchor") or "BOTTOMRIGHT",
             growth   = g("Growth") or "LEFT_UP",
             wrap     = g("Wrap") or 3,
-            offsetX  = g("OffsetX") or 0,
-            offsetY  = g("OffsetY") or 0,
+            -- + the frame's extra row offset (opts.extraOffsetX/Y, see rowExtraOffset), in
+            -- the frame's units, so it is turned into the row's scaled space here.
+            offsetX  = (g("OffsetX") or 0) + (tonumber(opts.extraOffsetX) or 0) / rowScale,
+            offsetY  = (g("OffsetY") or 0) + (tonumber(opts.extraOffsetY) or 0) / rowScale,
         },
         style = {
             icon   = { show = true, zoom = true, inset = 0 },
@@ -3845,20 +3850,38 @@ local function confirmRetarget(h, label, unit)
     end
 end
 
+-- ★ A FRAME'S EXTRA ROW OFFSET (optional). A frame may carry
+--     frame.dfAuraRowOffset = function(frame, db, prefix, anchor) -> dx, dy
+-- in the frame's own units, added to that row's configured offset -- for a frame that
+-- draws something of its own where a row would sit. Party, raid and pinned frames never
+-- set it, so for them this is 0, 0 and their rows are exactly as configured.
+-- The answer can move without anything the row drives watch (DF.auraLayoutVersion), so
+-- a drive that sees it move re-applies that row's layout as if the version had bumped.
+local function rowExtraOffset(frame, db, prefix)
+    local fn = frame and frame.dfAuraRowOffset
+    if type(fn) ~= "function" then return 0, 0 end
+    local ok, dx, dy = pcall(fn, frame, db, prefix, db[prefix .. "Anchor"] or "BOTTOMRIGHT")
+    if not ok then return 0, 0 end
+    return tonumber(dx) or 0, tonumber(dy) or 0
+end
+
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
 -- icons (no double row), keeps it on the frame's unit, and applies setting changes. The
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
 function DF:DriveBuffFactory(frame, db)
     local h = frame.buffFactory
+    local extraX, extraY = rowExtraOffset(frame, db, "buff")
     if not h then
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
             testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY,
         }))
         frame.buffFactory = h
         frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
+        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY = extraX, extraY
         if h then
             frame.buffFactoryStructSig = rowStructSig(h.config)
             frame.buffFactoryTuningSig = rowTuningSig(h.config)
@@ -3897,13 +3920,18 @@ function DF:DriveBuffFactory(frame, db)
     -- rebuilds and tuning are legal there, and the engine holds a restyle back by itself
     -- while auras are secret (AuraContainer.AurasRestricted).
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfBuffFactoryVersion ~= ver then
+    -- A frame's extra row offset that moved (rowExtraOffset) counts as a bump for this row.
+    local extraMoved = frame.dfAuraRowOffset ~= nil
+        and (frame.dfBuffRowExtraX ~= extraX or frame.dfBuffRowExtraY ~= extraY)
+    if frame.dfBuffFactoryVersion ~= ver or extraMoved then
         frame.dfBuffFactoryVersion = ver
+        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY = extraX, extraY
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
             testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY,
         })
         -- Re-apply the z-order via the engine (buff rows sit at +32, not ApplyZOrder's 40). Frame Level
         -- is deliberately NOT in the sig, so a level-only change never reaches _build.
@@ -4048,6 +4076,7 @@ function DF:DriveDebuffFactory(frame, db)
     end
 
     local h = frame.debuffFactory
+    local extraX, extraY = rowExtraOffset(frame, db, "debuff")
     if not h then
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
@@ -4061,7 +4090,9 @@ function DF:DriveDebuffFactory(frame, db)
             unit = frame.unit,
             filterList = filterList,
             testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY,
         }))
+        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY = extraX, extraY
         frame.debuffFactory = h
         frame.dfDebuffFactoryVersion = ver
         if h then
@@ -4090,8 +4121,12 @@ function DF:DriveDebuffFactory(frame, db)
         h:SetIntentShown(true)   -- see the buff drive
     end
 
-    if frame.dfDebuffFactoryVersion ~= ver or selfMoved then
+    -- A frame's extra row offset that moved (rowExtraOffset) counts as a bump for this row.
+    local extraMoved = frame.dfAuraRowOffset ~= nil
+        and (frame.dfDebuffRowExtraX ~= extraX or frame.dfDebuffRowExtraY ~= extraY)
+    if frame.dfDebuffFactoryVersion ~= ver or selfMoved or extraMoved then
         frame.dfDebuffFactoryVersion = ver
+        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY = extraX, extraY
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
         filterList = applyDebuffBlacklist(filterList, db)
@@ -4108,6 +4143,7 @@ function DF:DriveDebuffFactory(frame, db)
             unit = frame.unit,
             filterList = filterList,
             testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY,
         })
         -- Re-apply the z-order via the engine. Frame Level is deliberately NOT in the sig,
         -- so a level-only change never reaches _build.

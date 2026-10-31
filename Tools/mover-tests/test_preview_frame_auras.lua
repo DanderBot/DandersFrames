@@ -118,3 +118,50 @@ do
     local _, n = auras:gsub("testSeed = frame%.dfTestAuraSeed,", "")
     eq(n, 4, "buff and debuff drives pass the frame's seed (create and rebuild)")
 end
+
+-- ---- a frame's extra row offset (frame.dfAuraRowOffset) ----------------------
+print("-- Aura rows: a frame's extra row offset")
+do
+    local s = auras:find("local function rowExtraOffset(frame, db, prefix)", 1, true)
+    check(s ~= nil, "setup: found rowExtraOffset")
+    local block = auras:sub(s)
+    block = block:sub(1, block:find("\nend\n", 1, true) + 4)
+    local rowExtraOffset = assert(loadstring(block .. "\nreturn rowExtraOffset", "@rowExtraOffset"))()
+
+    local db = { buffAnchor = "TOPLEFT" }
+    eq(select("#", rowExtraOffset({}, db, "buff")), 2, "two answers")
+    local x, y = rowExtraOffset({}, db, "buff")
+    eq(x .. "," .. y, "0,0", "a frame with no hook (party, raid, pinned): 0, 0")
+    x, y = rowExtraOffset(nil, db, "buff")
+    eq(x .. "," .. y, "0,0", "no frame: 0, 0")
+    local seen
+    local f = { dfAuraRowOffset = function(frame, d, prefix, anchor)
+        seen = { frame = frame, db = d, prefix = prefix, anchor = anchor }
+        return 3, -21
+    end }
+    x, y = rowExtraOffset(f, db, "buff")
+    eq(x .. "," .. y, "3,-21", "a hook's answer")
+    check(seen and seen.frame == f and seen.db == db and seen.prefix == "buff", "...asked with the frame, its table and the row")
+    eq(seen.anchor, "TOPLEFT", "...and the row's anchor")
+    rowExtraOffset(f, {}, "debuff")
+    eq(seen.anchor, "BOTTOMRIGHT", "...the row's default anchor when it has none")
+    f.dfAuraRowOffset = function() error("boom") end
+    x, y = rowExtraOffset(f, db, "buff")
+    eq(x .. "," .. y, "0,0", "a hook that errors: 0, 0 (the row is drawn as configured)")
+    f.dfAuraRowOffset = function() return nil, "x" end
+    x, y = rowExtraOffset(f, db, "buff")
+    eq(x .. "," .. y, "0,0", "a hook that answers nonsense: 0, 0")
+
+    check(auras:find('offsetX  = (g("OffsetX") or 0) + (tonumber(opts.extraOffsetX) or 0) / rowScale,', 1, true) ~= nil,
+        "BuildAuraRowConfig: the extra offset is added, in the row's scaled space (x)")
+    check(auras:find('offsetY  = (g("OffsetY") or 0) + (tonumber(opts.extraOffsetY) or 0) / rowScale,', 1, true) ~= nil,
+        "...(y)")
+    check(auras:find("local rowScale = tonumber(g(\"Scale\")) or 1\n    if rowScale <= 0 then rowScale = 1 end", 1, true) ~= nil,
+        "...a row scale of 0 or nothing counts as 1")
+    local _, n = auras:gsub("extraOffsetX = extraX, extraOffsetY = extraY,", "")
+    eq(n, 4, "buff and debuff drives pass the frame's extra offset (create and rebuild)")
+    local _, m = auras:gsub("local extraMoved = frame%.dfAuraRowOffset ~= nil", "")
+    eq(m, 2, "...and re-apply a row whose extra offset moved, only on a frame with the hook")
+    check(auras:find("if frame.dfBuffFactoryVersion ~= ver or extraMoved then", 1, true) ~= nil, "buff drive: the re-apply gate")
+    check(auras:find("if frame.dfDebuffFactoryVersion ~= ver or selfMoved or extraMoved then", 1, true) ~= nil, "debuff drive: the re-apply gate")
+end
