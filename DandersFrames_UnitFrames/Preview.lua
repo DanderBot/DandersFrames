@@ -1,0 +1,271 @@
+local addonName, UF = ...
+
+-- ============================================================
+-- PREVIEW (spec §1.8)
+-- Sample frames for every unit this build draws, so an absent unit (no target,
+-- no focus, no pet) can be seen, styled and dragged.
+--
+-- ★ SEPARATE NON-SECURE FRAMES. A secure unit button cannot be forced to show
+-- in combat, so the preview never touches the live buttons' shown state. It
+-- builds its own plain Buttons the way DandersFrames' test pool does
+-- (DandersFrames_Options/TestMode/TestFramePool.lua: CreateFrameElements +
+-- ApplyFrameStyle, dfIsTestFrame), makes them standalone frames on the unit's
+-- own settings table, and paints them with DandersFrames' test painter
+-- (DF:UpdateTestFrame), which takes each frame's own fake unit from
+-- frame.dfTestData (DF:GetTestDataForFrame). frame.dfPreview puts them in test
+-- scope (DF:FrameInTestScope).
+-- While the preview is up the live frames' holders are faded to alpha 0 (alpha
+-- is legal in combat; Show/Hide is not) so the two never draw on top of each
+-- other.
+--
+-- Owners -- the preview is up while ANY of them wants it (DandersFrames' test
+-- mode ownership model, TestMode/Shim.lua):
+--   "unlock"    a DandersMover session (Mover.lua's Unlocked / Locked)
+--   "test"      DandersFrames' test mode is on screen and the module-wide
+--               "Include Unit Frames in Test Mode" is ticked (OnTestModeChanged)
+--   "settings"  the Preview switch on the module's Settings page (this session)
+-- ============================================================
+
+local DF = DandersFrames
+if not DF then return end
+
+local pairs, ipairs, type = pairs, ipairs, type
+
+local P = { owners = {}, frames = {}, shown = false }
+UF.Preview = P
+
+-- ============================================================
+-- FAKE UNITS
+-- Shaped like DF:GetTestUnitData's answer (the fields its painter reads), plus
+-- the unit-frame ones: reaction / isTapped (health colour), level and
+-- classification (Text Designer).
+-- ============================================================
+local function Base()
+    return {
+        index = 1, name = "?", class = nil, role = nil, specID = 0,
+        healthPercent = 1, maxHealth = 100000, currentHealth = 100000,
+        powerPercent = 0.8, absorbPercent = 0, reducedMaxPct = 0,
+        healAbsorbPercent = 0, healPredictionPercent = 0,
+        status = nil, outOfRange = false, isLeader = false, isAssist = false,
+        raidTarget = nil, dispelType = nil, centerStatus = nil,
+        isMainTank = false, isMainAssist = false, isAFK = false, isPhased = false,
+        inVehicle = false, isBGCarrier = false, isInCombat = false,
+        targetName = nil, reaction = 5, isTapped = nil, level = nil, classification = nil,
+        showDefensive = false, showMissingBuff = false, showReadyCheck = false, showPing = false,
+    }
+end
+
+local function SetHealth(t, pct)
+    t.healthPercent = pct
+    t.currentHealth = math.floor(pct * t.maxHealth)
+end
+
+function P:PlayerName()
+    local name = UnitName and UnitName("player")
+    if type(name) ~= "string" or (issecretvalue and issecretvalue(name)) then name = "Player" end
+    return name
+end
+
+function P:PlayerClass()
+    local class
+    if UnitClass then class = select(2, UnitClass("player")) end
+    if type(class) ~= "string" or (issecretvalue and issecretvalue(class)) then class = "WARRIOR" end
+    return class
+end
+
+-- Sample names are display-only stand-ins (like the test pool's), never stored.
+function P:TestData(unit)
+    local t = Base()
+    local me, myClass = P:PlayerName(), P:PlayerClass()
+    local lvl = (UnitLevel and UnitLevel("player")) or 80
+    if type(lvl) ~= "number" or (issecretvalue and issecretvalue(lvl)) then lvl = 80 end
+    if unit == "player" or unit == "targettarget" then
+        t.name, t.class, t.role = me, myClass, "DAMAGER"
+        t.level = lvl
+        SetHealth(t, unit == "player" and 0.85 or 0.85)
+        t.absorbPercent = (unit == "player") and 0.10 or 0
+        t.isInCombat = true
+    elseif unit == "target" then
+        t.index = 2
+        t.name, t.reaction, t.classification = "Training Dummy", 2, "elite"
+        t.level = lvl + 1
+        SetHealth(t, 0.62)
+        t.powerPercent = 0.4
+        t.targetName = me
+    elseif unit == "focus" then
+        t.index = 3
+        t.name, t.reaction, t.classification = "Ember Root", 2, "rare"
+        t.level = lvl
+        SetHealth(t, 0.35)
+        t.powerPercent = 0.9
+        t.targetName = me
+    elseif unit == "pet" then
+        t.index = 4
+        t.name, t.reaction = "Wolf", 5
+        t.level = lvl
+        SetHealth(t, 0.9)
+        t.powerPercent = 0.6
+    end
+    return t
+end
+
+-- ============================================================
+-- OWNERS
+-- ============================================================
+function P:IsActive()
+    for _, wanted in pairs(P.owners) do
+        if wanted then return true end
+    end
+    return false
+end
+
+function P:IsOwnedBy(owner) return P.owners[owner] and true or false end
+
+function P:SetOwner(owner, wanted)
+    P.owners[owner] = wanted and true or nil
+    P:Reconcile()
+end
+
+function P:Reconcile()
+    local want = P:IsActive()
+    if want and not P.shown then P:Show()
+    elseif not want and P.shown then P:Hide() end
+end
+
+-- DandersFrames' test mode: on screen in either scope, when the option allows.
+function P:SyncTestMode()
+    local on = DF.IsTestModeActive and (DF:IsTestModeActive("party") or DF:IsTestModeActive("raid"))
+    P:SetOwner("test", (on and UF:IncludeInTestMode()) and true or false)
+end
+
+function P:Init()
+    if P.initialised then return end
+    P.initialised = true
+    if DF.RegisterCallback then
+        DF.RegisterCallback(P, "OnTestModeChanged", function() P:SyncTestMode() end)
+    end
+end
+
+-- ============================================================
+-- FRAMES
+-- ============================================================
+function P:GetParent()
+    if P.parent then return P.parent end
+    local p = CreateFrame("Frame", "DandersUnitFramesPreview", UIParent)
+    p:SetAllPoints(UIParent)
+    P.parent = p
+    return p
+end
+
+local function OnEnter(self)
+    self.dfIsHovered = true
+    if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+end
+
+local function OnLeave(self)
+    self.dfIsHovered = false
+    if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+end
+
+function P:Acquire(unit)
+    local f = P.frames[unit]
+    if f then return f end
+    local names = UF.Units and UF.Units.FRAME_NAMES
+    local db = UF:GetUnitDB(unit)
+    f = CreateFrame("Button", names and names[unit] and (names[unit] .. "Preview") or nil, P:GetParent())
+    -- Marked BEFORE the elements are built, so everything they read resolves to the
+    -- unit's own table and to test scope.
+    f.dfIsTestFrame = true
+    f.dfIsDandersFrame = true
+    f.dfPreview = true
+    f.dfStandalone = true
+    f.dfDB = db
+    f.dfUFUnit = unit
+    f.dfUFPreview = true
+    f.isRaidFrame = false
+    f.unit = unit
+    f.dfTestData = P:TestData(unit)
+    f.index = f.dfTestData.index
+    f:EnableMouse(true)
+    if DF.CreateFrameElements then DF:CreateFrameElements(f, false) end
+    if DF.ApplyFrameStyle then DF:ApplyFrameStyle(f) end
+    if DF.InitStandaloneFrame then DF:InitStandaloneFrame(f, db) end
+    f:SetScript("OnEnter", OnEnter)
+    f:SetScript("OnLeave", OnLeave)
+    f:Hide()
+    P.frames[unit] = f
+    return f
+end
+
+function P:ApplyPosition(unit)
+    local f = P.frames[unit]
+    if not f or not UF.Units then return end
+    UF.Units:PlaceAt(f, UF:GetPositionRecord(unit))
+end
+
+-- The test painter lives in the options addon; without it (it failed to load)
+-- the live refresh still paints the frame in test scope.
+function P:Paint(f)
+    local db = UF:GetUnitDB(f.dfUFUnit)
+    f.dfDB = db
+    f.dfTextPresetOverride = db.textDesignerPreset
+    f.dfTestData = P:TestData(f.dfUFUnit)
+    if DF.ApplyFrameLayout then DF:ApplyFrameLayout(f) end
+    f:SetScale(db.frameScale or 1)
+    P:ApplyPosition(f.dfUFUnit)
+    if DF._optionsAddonLoaded and DF.UpdateTestFrame then
+        DF:UpdateTestFrame(f, f.index)
+    elseif DF.FullFrameRefresh then
+        DF:FullFrameRefresh(f)
+    end
+end
+
+-- The units that get a preview: those this build draws itself.
+function P:Units()
+    local list = {}
+    for _, unit in ipairs(UF.SPAWNED_UNITS) do
+        if UF.frames[unit] then list[#list + 1] = unit end
+    end
+    return list
+end
+
+local function FadeLive(alpha)
+    local holders = UF.Units and UF.Units.holders
+    for _, h in pairs(holders or {}) do h:SetAlpha(alpha) end
+end
+
+function P:Show()
+    -- The painter is in the load-on-demand options addon. Loading it is what
+    -- DandersFrames' own mover session does too; never mid-fight.
+    if not DF._optionsAddonLoaded and DF.EnsureOptionsLoaded and not InCombatLockdown() then
+        DF:EnsureOptionsLoaded()
+    end
+    P.shown = true
+    for _, unit in ipairs(P:Units()) do
+        local f = P:Acquire(unit)
+        f:Show()
+        P:Paint(f)
+    end
+    FadeLive(0)
+    UF.Debug("preview on")
+end
+
+function P:Hide()
+    P.shown = false
+    for _, f in pairs(P.frames) do f:Hide() end
+    FadeLive(1)
+    -- The live frames missed nothing (they kept their events), but a repaint costs
+    -- little and settles anything a settings change did meanwhile.
+    if UF.RequestRefresh then UF:RequestRefresh() end
+    UF.Debug("preview off")
+end
+
+-- Settings changed, or the profile did: repaint what is up.
+function P:Refresh()
+    if not P.shown then return end
+    for _, unit in ipairs(P:Units()) do
+        local f = P:Acquire(unit)
+        if not f:IsShown() then f:Show() end
+        P:Paint(f)
+    end
+end

@@ -1,6 +1,6 @@
 ## Interface: 120105, 16001
 ## Title: DandersFrames |cffa66bffUnit Frames|r
-## Notes: Player, target and target of target frames, drawn and configured by DandersFrames.
+## Notes: Player, target, target of target, focus and pet frames, drawn and configured by DandersFrames.
 ## Author: Danders
 ## Version: v5.7.0-alpha.1
 ## Category: Danders
@@ -18,10 +18,12 @@
 # No DandersUI embed: this addon draws no settings widgets. Its pages live in
 # DandersFrames_Options.
 # Load order: Core (namespace, db accessors) -> Defaults (registers the profile
-# table) -> Units (spawning, events) -> BlizzardHide -> Mover.
+# table) -> Units (spawning, events) -> Preview (sample frames) -> BlizzardHide
+# -> Mover.
 
 Core.lua
 Defaults.lua
 Units.lua
+Preview.lua
 BlizzardHide.lua
 Mover.lua

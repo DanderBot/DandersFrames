@@ -167,8 +167,12 @@ eq(watched[TT], true, "target of target: unit watch")
 eq(DF.ranged[T], true, "target: in the range tick")
 eq(DF.ranged[TT], true, "target of target: in the range tick")
 eq(DF.ranged[P], nil, "player: not (always in range)")
-eq(P:GetParent(), Units.parent, "parented to the unit-frames parent")
-eq(drivers[1] and drivers[1].cond, "[petbattle] hide; show", "the parent hides in pet battles")
+eq(P:GetParent(), Units.holders.player, "parented to the unit's own holder")
+eq(Units.holders.player:GetParent(), Units.parent, "...which sits in the unit-frames parent")
+local vis = {}
+for _, d in ipairs(drivers) do if d.f == Units.holders.player then vis[#vis + 1] = d end end
+eq(vis[1] and vis[1].cond, "[petbattle] hide; show", "the player's holder: hidden in pet battles, else shown")
+eq(vis[1] and vis[1].state, "visibility", "...as a visibility state driver")
 
 print("-- Position without DandersMover")
 local pt = P._points[#P._points]
@@ -304,6 +308,76 @@ eq(P._scale, nil, "in combat: layout skipped (callers queue it)")
 IN_COMBAT = false
 Units:ApplyLayout(P)
 eq(P._scale, 1.5, "scale from the unit's table")
+
+print("-- Focus and pet: spawned like the others")
+local FC, PT = UF.frames.focus, UF.frames.pet
+check(FC ~= nil and PT ~= nil, "focus and pet spawned")
+eq(FC and FC._name, "DandersUnitFrameFocus", "focus: its global name")
+eq(PT and PT._name, "DandersUnitFramePet", "pet: its global name")
+eq(FC._attrs.unit, "focus", "focus: unit attribute")
+eq(PT._attrs.unit, "pet", "pet: unit attribute")
+eq(watched[FC], true, "focus: unit watch (shown only while you have one)")
+eq(watched[PT], true, "pet: unit watch")
+eq(DF.ranged[FC], true, "focus: in the range tick")
+eq(DF.ranged[PT], true, "pet: in the range tick")
+eq(FC._attrs.toggleForVehicle, nil, "focus: no vehicle toggle")
+eq(PT._attrs.toggleForVehicle, true, "pet: clicks follow the vehicle swap")
+eq(FC:GetParent(), Units.holders.focus, "focus: its own holder")
+eq(PT:GetParent(), Units.holders.pet, "pet: its own holder")
+eq(ClickCastFrames[FC], true, "focus: click-casting")
+eq(DF.standalone[PT], UF:GetUnitDB("pet"), "pet: standalone on its own table")
+
+print("-- Focus: events and PLAYER_FOCUS_CHANGED")
+FC:Show()
+eq(FC._events.UNIT_HEALTH and table.concat(FC._events.UNIT_HEALTH, ","), "focus", "focus shown: its own unit only")
+eq(FC._events.UNIT_PET, nil, "...no pet events")
+check(Units.driver._events.PLAYER_FOCUS_CHANGED ~= nil, "the driver listens for focus changes")
+count = {}
+Units:OnDriverEvent("PLAYER_FOCUS_CHANGED")
+eq(n("FullFrameRefresh", "focus"), 1, "focus changed: focus repainted")
+eq(n("FullFrameRefresh", "target"), 0, "...the target is not")
+FC:Hide()
+eq(next(FC._events), nil, "focus hidden: unregistered")
+
+print("-- Pet: events and the vehicle swap")
+inVehicle, exists.vehicle = false, false
+PT:Show()
+eq(PT._events.UNIT_HEALTH and table.concat(PT._events.UNIT_HEALTH, ","), "pet,player", "pet: pet and player")
+eq(PT._events.UNIT_PET and table.concat(PT._events.UNIT_PET, ","), "pet,player", "pet: UNIT_PET (owner's)")
+check(PT._events.UNIT_ENTERED_VEHICLE ~= nil, "pet: vehicle events")
+eq(PT.unit, "pet", "out of a vehicle: the pet frame shows the pet")
+eq(Units:DisplayUnit("pet"), "pet", "DisplayUnit(pet) = pet")
+count = {}
+Units.OnEvent(PT, "UNIT_HEALTH", "player")
+eq(n("UpdateHealthFast", "pet"), 0, "...the player's events are ignored then")
+inVehicle, exists.vehicle = true, true
+eq(Units:DisplayUnit("player"), "vehicle", "in a vehicle: player shows the vehicle")
+eq(Units:DisplayUnit("pet"), "player", "...and pet shows the player (Blizzard's swap)")
+eq(Units:DisplayUnit("target"), "target", "...other units are untouched")
+Units.OnEvent(PT, "UNIT_ENTERED_VEHICLE", "player")
+eq(PT.unit, "player", "entering a vehicle: the pet frame shows the player")
+count = {}
+runTimers()
+eq(n("FullFrameRefresh", "pet"), 1, "...repainted once")
+Units.OnEvent(PT, "UNIT_HEALTH", "player")
+eq(n("UpdateHealthFast", "pet"), 1, "...and follows the player's events")
+Units.OnEvent(P, "UNIT_ENTERED_VEHICLE", "player")
+eq(P.unit, "vehicle", "the player frame swaps on the same event")
+inVehicle, exists.vehicle = false, false
+Units.OnEvent(PT, "UNIT_EXITED_VEHICLE", "player")
+Units.OnEvent(P, "UNIT_EXITED_VEHICLE", "player")
+eq(PT.unit, "pet", "out again: pet frame back on the pet")
+eq(P.unit, "player", "...player frame back on the player")
+runTimers()
+count = {}
+Units.OnEvent(PT, "UNIT_PET", "player")
+runTimers()
+eq(n("FullFrameRefresh", "pet"), 1, "a new pet: full repaint")
+count = {}
+Units.OnEvent(PT, "UNIT_PET", "party1")
+runTimers()
+eq(n("FullFrameRefresh", "pet"), 0, "someone else's pet: ignored")
+PT:Hide()
 
 -- By NAME, not pairs(G): a global that was nil before is skipped by pairs and
 -- would leak this file's stub into every later suite.

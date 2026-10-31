@@ -22,9 +22,9 @@ UF.ADDON = addonName
 
 -- Every unit the settings table knows. boss1-5 share one "boss" table.
 UF.UNITS = { "player", "target", "targettarget", "focus", "pet", "boss" }
--- The units this build spawns. Focus, pet and boss come in later stages; their
--- settings already exist so profiles and exports are shaped for them.
-UF.SPAWNED_UNITS = { "player", "target", "targettarget" }
+-- The units this build spawns. Boss comes in a later stage; its settings already
+-- exist so profiles and exports are shaped for it.
+UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "pet" }
 
 -- Built-in Text Designer presets (preset NAMES are db keys: never localised).
 UF.TEXT_PRESET = "Unit Frames"
@@ -81,6 +81,20 @@ function UF:GetGlobalDB()
     if not root then return nil end
     if type(root.global) ~= "table" then root.global = {} end
     return root.global
+end
+
+-- A module-wide setting, falling back to UF.GlobalDefaults (the stored table is
+-- sparse, like the unit tables).
+function UF:GetGlobalSetting(key)
+    local g = UF:GetGlobalDB()
+    local v = g and g[key]
+    if v == nil and UF.GlobalDefaults then v = UF.GlobalDefaults[key] end
+    return v
+end
+
+-- "Include Unit Frames in Test Mode": DandersFrames' test mode turns the preview on.
+function UF:IncludeInTestMode()
+    return UF:GetGlobalSetting("includeInTestMode") ~= false
 end
 
 -- The default for one key of one unit (unit defaults, then party defaults).
@@ -236,9 +250,11 @@ function UF:RefreshAll()
     for _, f in pairs(UF.frames) do
         f.dfTextPresetOverride = f.dfDB and f.dfDB.textDesignerPreset or nil
         UF:RunOutOfCombat("layout:" .. tostring(f.dfUFUnit), function() UF.Units:ApplyLayout(f) end)
+        if UF.Units.ApplyVisibility then UF.Units:ApplyVisibility(f) end
         -- A hidden frame (no target) has nothing to paint; it repaints when it shows.
         if f:IsVisible() then UF.Units:FullRefresh(f) end
     end
+    if UF.Preview and UF.Preview.Refresh then UF.Preview:Refresh() end
 end
 
 local refreshQueued = false
@@ -280,6 +296,7 @@ function UF:Init()
         if UF.BlizzardHide then UF.BlizzardHide:ApplyAll() end
         if UF.Mover then UF.Mover:Init() end
     end)
+    if UF.Preview and UF.Preview.Init then UF.Preview:Init() end
     -- Settings writes reach the frames after DF's apply drain.
     if DF.Apply and DF.Apply.AddPostDrain then
         DF.Apply:AddPostDrain(function() UF:RefreshAll() end)

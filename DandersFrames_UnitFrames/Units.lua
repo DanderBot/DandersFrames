@@ -16,6 +16,16 @@ local addonName, UF = ...
 --                 so a ticker runs while it is shown: values every tick, a full
 --                 repaint when the unit's GUID changes (a secret GUID counts as
 --                 changed)
+--   focus         as target; PLAYER_FOCUS_CHANGED repaints it
+--   pet           RegisterUnitWatch on "pet" (in a vehicle the vehicle holds the
+--                 pet slot, so the watch shows it then too). Blizzard's convention,
+--                 shared with player: in a vehicle the player frame shows the
+--                 vehicle and the pet frame shows the player; toggleForVehicle
+--                 makes clicks follow the same swap
+--
+-- Each button sits in a holder of its own: the holder carries the unit's
+-- Visibility state driver (Units:VisibilityMacro), so the unit watch on the
+-- button and the visibility rule never fight over one frame's shown state.
 --
 -- Events are registered only while a frame is shown (OnShow / OnHide), and a
 -- frame is repainted in full when it shows, because a hidden frame misses events.
@@ -37,14 +47,20 @@ local FRAME_NAMES = {
     player = "DandersUnitFramePlayer",
     target = "DandersUnitFrameTarget",
     targettarget = "DandersUnitFrameTargetTarget",
+    focus = "DandersUnitFrameFocus",
+    pet = "DandersUnitFramePet",
 }
+Units.FRAME_NAMES = FRAME_NAMES
 
 -- Shown only while the unit exists (secure unit watch).
-local WATCHED = { target = true, targettarget = true }
+local WATCHED = { target = true, targettarget = true, focus = true, pet = true }
 -- No events of their own: polled by the ticker instead.
 local POLLED = { targettarget = true }
 -- In DF's range tick (fade when out of range).
-local RANGED = { target = true, targettarget = true }
+local RANGED = { target = true, targettarget = true, focus = true, pet = true }
+-- Take part in the vehicle swap (toggleForVehicle on the button).
+local VEHICLE = { player = true, pet = true }
+Units.WATCHED, Units.RANGED, Units.VEHICLE = WATCHED, RANGED, VEHICLE
 
 local UNIT_EVENTS = {
     "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_MAX_HEALTH_MODIFIERS_CHANGED",
@@ -55,17 +71,21 @@ local UNIT_EVENTS = {
     "UNIT_THREAT_SITUATION_UPDATE",
 }
 local PLAYER_EVENTS = { "UNIT_ENTERED_VEHICLE", "UNIT_EXITED_VEHICLE", "PLAYER_FLAGS_CHANGED" }
+-- UNIT_PET arrives for the OWNER ("player") when the pet is summoned or swapped.
+local PET_EVENTS = { "UNIT_ENTERED_VEHICLE", "UNIT_EXITED_VEHICLE", "UNIT_PET" }
 
 -- The event list a unit's frame registers (empty for a polled unit).
 function Units:EventsFor(unit)
     if POLLED[unit] then return {} end
     local list = {}
     for _, ev in ipairs(UNIT_EVENTS) do list[#list + 1] = ev end
-    if unit == "player" then
-        for _, ev in ipairs(PLAYER_EVENTS) do list[#list + 1] = ev end
-    end
+    local extra = (unit == "player" and PLAYER_EVENTS) or (unit == "pet" and PET_EVENTS) or nil
+    for _, ev in ipairs(extra or {}) do list[#list + 1] = ev end
     return list
 end
+
+-- The two unit tokens a vehicle-swapping frame listens to (it shows one of them).
+local VEHICLE_PAIR = { player = { "player", "vehicle" }, pet = { "pet", "player" } }
 
 local function IsSecret(v)
     return issecretvalue ~= nil and issecretvalue(v) and true or false
@@ -183,8 +203,13 @@ function Units.OnEvent(self, event, unit)
         if unit == "player" then Units:UpdateVehicle(self) end
         return
     end
-    -- The player button listens to both player and vehicle; only the one it
-    -- shows counts.
+    if event == "UNIT_PET" then
+        -- A new pet (or none): the frame shows someone else now.
+        if unit == "player" then Units:QueueFullRefresh(self) end
+        return
+    end
+    -- The player and pet buttons listen to both units of their vehicle pair;
+    -- only the one they show counts.
     if unit and unit ~= self.unit then return end
     local h = HANDLERS[event]
     if h then h(self, unit) end
@@ -206,8 +231,9 @@ function Units:SetEventsEnabled(f, on)
     -- to register it, and that must cost one event, not the rest of the list.
     for _, ev in ipairs(Units:EventsFor(unit)) do
         if on then
-            if unit == "player" then
-                pcall(f.RegisterUnitEvent, f, ev, "player", "vehicle")
+            local pair = VEHICLE_PAIR[unit]
+            if pair then
+                pcall(f.RegisterUnitEvent, f, ev, pair[1], pair[2])
             else
                 pcall(f.RegisterUnitEvent, f, ev, unit)
             end
@@ -249,19 +275,30 @@ function Units:StopTicker(f)
 end
 
 -- ============================================================
--- VEHICLE (player)
--- The button's toggleForVehicle makes CLICKS go to the vehicle; this makes the
--- frame SHOW it as well.
+-- VEHICLE (player and pet)
+-- The buttons' toggleForVehicle makes CLICKS follow the swap; this makes the
+-- frames SHOW it as well (Blizzard's convention): in a vehicle the player frame
+-- shows the vehicle and the pet frame shows the player.
 -- ============================================================
-function Units:UpdateVehicle(f)
-    local want = "player"
+function Units:InVehicle()
     local inVehicle = UnitHasVehicleUI and UnitHasVehicleUI("player")
     if IsSecret(inVehicle) then inVehicle = false end
     -- Sitting on housing furniture reports a vehicle UI with no vehicle unit.
-    if inVehicle and UnitExists("vehicle") then want = "vehicle" end
+    return (inVehicle and UnitExists("vehicle")) and true or false
+end
+
+-- The unit a frame shows for its base unit right now.
+function Units:DisplayUnit(base)
+    if not VEHICLE[base] or not Units:InVehicle() then return base end
+    if base == "player" then return "vehicle" end
+    return "player"
+end
+
+function Units:UpdateVehicle(f)
+    local want = Units:DisplayUnit(f.dfUFUnit or "player")
     if f.unit ~= want then
         f.unit = want
-        UF.Debug("player frame shows %s", want)
+        UF.Debug("%s frame shows %s", tostring(f.dfUFUnit), want)
         Units:QueueFullRefresh(f)
     end
 end
@@ -278,8 +315,13 @@ end
 
 function Units:ApplyPosition(f)
     if not f or InCombatLockdown() then return end
-    local pos = UF:GetPositionRecord(f.dfUFUnit)
-    if type(pos) ~= "table" then return end
+    Units:PlaceAt(f, UF:GetPositionRecord(f.dfUFUnit))
+end
+
+-- Put a frame at a position record. No combat check: the caller decides (the
+-- preview frames are not secure and may move any time).
+function Units:PlaceAt(f, pos)
+    if not f or type(pos) ~= "table" then return end
     local Lib = UF.Mover and UF.Mover.lib
     if Lib and Lib.ApplyPosition then
         Lib.ApplyPosition(f, pos)
@@ -297,19 +339,78 @@ end
 -- SPAWNING
 -- ============================================================
 
--- Every unit frame's parent: hidden in pet battles, otherwise always shown.
+-- Every unit frame's top parent. Always shown: each unit's Visibility rule
+-- (pet battles included) lives on its own holder below.
 function Units:GetParent()
     if Units.parent then return Units.parent end
     local p = CreateFrame("Frame", "DandersUnitFramesParent", UIParent, "SecureHandlerStateTemplate")
     p:SetAllPoints(UIParent)
-    RegisterStateDriver(p, "visibility", "[petbattle] hide; show")
     Units.parent = p
     return p
 end
 
+-- One holder per unit, carrying that unit's visibility state driver.
+Units.holders = Units.holders or {}
+function Units:GetHolder(unit)
+    local h = Units.holders[unit]
+    if h then return h end
+    h = CreateFrame("Frame", FRAME_NAMES[unit] .. "Holder", Units:GetParent(), "SecureHandlerStateTemplate")
+    h:SetAllPoints(Units:GetParent())
+    Units.holders[unit] = h
+    return h
+end
+
+-- ============================================================
+-- VISIBILITY (the unit's Visibility page)
+-- A macro-condition string for the holder's "visibility" state driver: the Hide
+-- When rules first (any match hides), then Always, or the Show When conditions
+-- (any match shows) and "hide" for everything else. Being in an instance has no
+-- macro condition, so it is resolved here and the string is rebuilt on every
+-- zone change. Secure: the driver is (re)registered out of combat only.
+-- ⚠ [bonusbar:5] as the skyriding bar is unverified in game on 12.x.
+-- ============================================================
+function Units:VisibilityMacro(unit)
+    local db = UF:GetUnitDB(unit)
+    local parts = {}
+    local function add(s) parts[#parts + 1] = s end
+    if db.visHidePetBattle ~= false then add("[petbattle] hide") end
+    if unit == "player" and db.visHideVehicle then add("[vehicleui] hide") end
+    if db.visHideMounted then add("[mounted] hide") end
+    if db.visHideSkyriding then add("[bonusbar:5] hide") end
+    if db.visAlways ~= false then
+        add("show")
+    else
+        if db.visCombat then add("[combat] show") end
+        if db.visNoCombat then add("[nocombat] show") end
+        if db.visGroup then add("[group] show") end
+        if db.visSolo then add("[nogroup] show") end
+        if unit == "player" then
+            if db.visHasTarget then add("[@target,exists] show") end
+            if db.visHasEnemyTarget then add("[@target,harm] show") end
+        end
+        local inInstance = db.visInstance and IsInInstance and IsInInstance()
+        if inInstance and not IsSecret(inInstance) then add("show") else add("hide") end
+    end
+    return table.concat(parts, "; ")
+end
+
+function Units:ApplyVisibility(f)
+    if not f then return end
+    local unit = f.dfUFUnit
+    local h = Units.holders[unit]
+    if not h then return end
+    local macro = Units:VisibilityMacro(unit)
+    if h.dfUFVisMacro == macro then return end
+    UF:RunOutOfCombat("visibility:" .. unit, function()
+        RegisterStateDriver(h, "visibility", macro)
+        h.dfUFVisMacro = macro
+        UF.Debug("%s visibility: %s", unit, macro)
+    end)
+end
+
 local function OnShow(self)
     Units:SetEventsEnabled(self, true)
-    if self.dfUFUnit == "player" then Units:UpdateVehicle(self) end
+    if VEHICLE[self.dfUFUnit] then Units:UpdateVehicle(self) end
     Units:FullRefresh(self)
 end
 
@@ -328,12 +429,13 @@ function Units:Spawn(unit)
         return nil
     end
     local db = UF:GetUnitDB(unit)
-    local f = CreateFrame("Button", FRAME_NAMES[unit], Units:GetParent(),
+    local holder = Units:GetHolder(unit)
+    local f = CreateFrame("Button", FRAME_NAMES[unit], holder,
         "DandersUnitButtonTemplate,SecureUnitButtonTemplate")
     DF:InitStandaloneFrame(f, db)
     f.dfUFUnit = unit
     f.dfTextPresetOverride = db.textDesignerPreset
-    if unit == "player" then f:SetAttribute("toggleForVehicle", true) end
+    if VEHICLE[unit] then f:SetAttribute("toggleForVehicle", true) end
     f:SetAttribute("unit", unit)
     f.unit = f.unit or unit
     if WATCHED[unit] then
@@ -350,6 +452,7 @@ function Units:Spawn(unit)
     UF.frames[unit] = f
     Units:ApplyLayout(f)
     Units:ApplyPosition(f)
+    Units:ApplyVisibility(f)
     if f:IsVisible() then OnShow(f) end
     UF.Debug("spawned %s", unit)
     return f
@@ -382,6 +485,15 @@ function Units:OnDriverEvent(event, unit)
                 if f:IsVisible() then DF:UpdateHighlights(f) end
             end
         end
+    elseif event == "PLAYER_FOCUS_CHANGED" then
+        local fc = frames.focus
+        if fc and fc:IsVisible() then Units:FullRefresh(fc) end
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+        -- "In an Instance" has no macro condition: rebuild the visibility rules.
+        for _, f in pairs(frames) do Units:ApplyVisibility(f) end
+        Units:SweepFrameFade()
+    elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+        Units:SweepFrameFade()
     elseif event == "UNIT_TARGET" then
         -- The target changed ITS target: the target-of-target is someone else now.
         local tt = frames.targettarget
@@ -398,9 +510,28 @@ function Units:OnDriverEvent(event, unit)
     end
 end
 
+-- ============================================================
+-- FRAME FADE (DandersFrames' Frame Fade card, these frames' own keys)
+-- DF's combat-edge sweep walks only the group frames, so the in-combat /
+-- out-of-combat split is applied here on the same edges. Alpha only: legal in
+-- combat. Nothing to do unless a frame has the split on.
+-- ============================================================
+function Units:SweepFrameFade()
+    if not DF.UpdateFrameAppearance then return end
+    for _, f in pairs(UF.frames) do
+        local db = f.dfDB
+        if db and db.frameFadeSplitCombat and f:IsVisible() then DF:UpdateFrameAppearance(f) end
+    end
+end
+
 if CreateFrame then
     local driver = CreateFrame("Frame")
     driver:RegisterEvent("PLAYER_TARGET_CHANGED")
+    driver:RegisterEvent("PLAYER_FOCUS_CHANGED")
+    driver:RegisterEvent("PLAYER_ENTERING_WORLD")
+    driver:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    driver:RegisterEvent("PLAYER_REGEN_DISABLED")
+    driver:RegisterEvent("PLAYER_REGEN_ENABLED")
     driver:RegisterEvent("RAID_TARGET_UPDATE")
     if driver.RegisterUnitEvent then
         driver:RegisterUnitEvent("UNIT_TARGET", "target")

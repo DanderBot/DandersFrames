@@ -47,7 +47,7 @@ load_uf_file_into("Defaults.lua", UF)
 print("-- Namespace")
 eq(DF.UnitFrames, UF, "DandersFrames.UnitFrames is the companion's namespace")
 eq(UF.ADDON, "DandersFrames_UnitFrames", "addon name from the varargs")
-eq(#UF.SPAWNED_UNITS, 3, "this build spawns three units")
+eq(#UF.SPAWNED_UNITS, 5, "this build spawns five units (boss comes later)")
 
 print("-- Registration")
 local spec = DF.registered.unitframes

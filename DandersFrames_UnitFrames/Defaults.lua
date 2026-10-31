@@ -27,7 +27,10 @@ if not DF then return end
 
 UF.DB_VERSION = 1
 
-UF.GlobalDefaults = {}
+UF.GlobalDefaults = {
+    -- DandersFrames' test mode (/df test) shows the unit frame preview too.
+    includeInTestMode = true,
+}
 
 -- Applied to every unit before its own overrides below.
 local COMMON = {
@@ -46,6 +49,12 @@ local COMMON = {
     roleIconShowDPS = false,
     defensiveIconEnabled = false,
     dispelOverlayEnabled = false,
+    -- Visibility page (Units:VisibilityMacro): shown always, hidden in pet battles.
+    visAlways = true,
+    visCombat = false, visNoCombat = false, visGroup = false, visSolo = false,
+    visInstance = false, visHasTarget = false, visHasEnemyTarget = false,
+    visHidePetBattle = true,
+    visHideVehicle = false, visHideMounted = false, visHideSkyriding = false,
 }
 
 -- Enemy-frame aura filter: debuffs you cast, buffs shown in full.

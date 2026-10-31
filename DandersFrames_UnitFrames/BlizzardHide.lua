@@ -44,6 +44,12 @@ BH.FRAMES = {
     player = { "PlayerFrame" },
     target = { "TargetFrame" },
     targettarget = { "TargetFrameToT" },
+    -- FocusFrame carries its own target-of-focus inside it, hidden with it (no
+    -- focus-target frame of ours yet: that is a later unit).
+    focus = { "FocusFrame" },
+    -- Hidden on its own, whatever the player's source (unverified in game whether
+    -- 12.x still parents it to PlayerFrame; the claim + reparent works either way).
+    pet = { "PetFrame" },
 }
 
 BH.ALT_POWER_BARS = { "AlternatePowerBar", "MonkStaggerBar", "EvokerEbonMightBar", "DemonHunterSoulFragmentsBar" }
