@@ -961,6 +961,21 @@ function GUI.PageBuildDb(page)
     if fn then return fn(page.tabName, page) end
 end
 
+-- Where a builder's in-page link to page `id` should go when `page` runs it. A
+-- page drawn from another page's builder against a table of its own (a module's
+-- page) may point the builder's links at pages of its own:
+--   page.mapPageLink(id) -> a page name, or false (no counterpart: leave the link
+--   out), or nil (the id itself).
+-- rawget: a headless frame answers an unset key with a no-op function.
+function GUI.PageLinkFor(page, id)
+    local map = type(page) == "table" and rawget(page, "mapPageLink")
+    if type(map) == "function" then
+        local mapped = map(id)
+        if mapped ~= nil then return mapped end
+    end
+    return id
+end
+
 -- Run every page provider, in the order they were added. Called by DF:CreateGUI
 -- (GUI/Panel.lua) after the built-in pages exist and before the rail is first
 -- painted. One that throws is reported and skipped; the rest still run.

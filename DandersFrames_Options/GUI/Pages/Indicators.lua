@@ -40,7 +40,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- that unit. EVERY writer of showBuffs needs this, not just the checkbox.
                 DF:RefreshAllVisibleFrames()
             elseif data == "openAD" then
-                if GUI.SelectTab then GUI.SelectTab("auras_auradesigner") end
+                -- The page this builder runs on may have an Aura Designer page of its
+                -- own (GUI.PageLinkFor); false means none, and the link goes nowhere.
+                local target = GUI.PageLinkFor and GUI.PageLinkFor(self, "auras_auradesigner")
+                    or "auras_auradesigner"
+                if target and GUI.SelectTab then GUI.SelectTab(target) end
             end
         end
 
@@ -93,8 +97,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
         adPromoBanner.hideOn = function(d)
             -- hide when AD IS active
-            return (DF.IsAuraDesignerEnabledForDB
-                and DF:IsAuraDesignerEnabledForDB(d)) and true or false
+            if DF.IsAuraDesignerEnabledForDB and DF:IsAuraDesignerEnabledForDB(d) then return true end
+            -- ...or when this page has no Aura Designer to open (GUI.PageLinkFor).
+            return GUI.PageLinkFor ~= nil and GUI.PageLinkFor(self, "auras_auradesigner") == false
         end
         Add(adPromoBanner, 32, "both")
 
