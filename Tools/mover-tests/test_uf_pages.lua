@@ -235,12 +235,12 @@ eq(made.catOrder[1], "uf_module", "the module-wide category comes first")
 check(made.pages.uf_settings ~= nil, "the module Settings page exists")
 eq(G:ModuleForPage("uf_settings"), "units", "...on the module's sidebar")
 local WANT = {
-    player = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,defensive,dispel,auradesigner,icons,highlights",
-    target = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,icons,highlights",
+    player = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,classpower,text,buffs,debuffs,defensive,dispel,auradesigner,icons,unitIcons,highlights",
+    target = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     targettarget = "frame,tooltips,health,text,highlights",
-    focus = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,icons,highlights",
-    pet = "frame,visibility,tooltips,fading,health,resource,absorbs,healpred,text,buffs,debuffs,auradesigner,icons,highlights",
-    boss = "frame,tooltips,fading,health,resource,absorbs,text,buffs,debuffs,icons,highlights",
+    focus = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
+    pet = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
+    boss = "frame,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,highlights",
 }
 for _, unit in ipairs(UFO.UNITS) do
     local kinds = {}
@@ -256,9 +256,18 @@ for _, unit in ipairs(UFO.UNITS) do
     end
     eq(table.concat(kinds, ","), WANT[unit], unit .. ": its pages, in sidebar order")
 end
-check(made.pages.uf_boss_bosslayout == nil and made.pages.uf_player_castbar == nil
-      and made.pages.uf_player_classpower == nil and made.pages.uf_player_portrait == nil,
-      "new pages waiting for their runtime are left out")
+check(made.pages.uf_boss_bosslayout == nil, "a new page waiting for its runtime is left out (Boss Layout)")
+check(made.pages.uf_player_castbar ~= nil and made.pages.uf_player_classpower ~= nil
+      and made.pages.uf_player_portrait ~= nil and made.pages.uf_player_unitIcons ~= nil,
+      "Cast Bar, Class Power, Portrait, Unit Icons: built now their runtime exists")
+eq(made.pages.uf_target_classpower, nil, "...Class Power for the player only")
+eq(made.pages.uf_targettarget_castbar, nil, "...no cast bar page for target of target")
+eq(made.pages.uf_pet_unitIcons, nil, "...no Unit Icons page where no card reaches the unit")
+do
+    local icons
+    for _, rec in ipairs(data.pages) do if rec.kind == "icons" then icons = rec end end
+    eq(icons and icons.laterCards, nil, "the Icons page's Unit group moved to a page of its own")
+end
 check(made.pages.uf_player_visibility ~= nil, "Visibility: built now its runtime exists")
 eq(made.pages.uf_targettarget_visibility, nil, "...but not for target of target (no card reaches it)")
 eq(made.pages.uf_target_health.cat, "uf_bars", "a page sits in its own category")
@@ -488,6 +497,144 @@ do
         end
     end
     eq(UFO.Prefixes("visibility")[1], "vis", "Visibility: Reset / Sync / Copy act on the vis keys")
+
+    -- ---- the pages new in Stage F, built for real -------------------------------
+    -- Every factory records the key it binds; the tools record each card and its
+    -- header tick.
+    local built, toggles
+    -- args after the parent: (label, db, key, ...) for most; (label, min, max,
+    -- step, db, key) for sliders; (label, options, db, key) for dropdowns.
+    local function Collect(kind, keyIndex)
+        return function(_, parent, ...)
+            local w = Frame()
+            w.kind = kind
+            w.args = { ... }
+            w.label = w.args[1]
+            w.key = w.args[keyIndex]
+            built[#built + 1] = w
+            return w
+        end
+    end
+    G.CreateCheckbox = Collect("check", 3)
+    G.CreateSlider = Collect("slider", 6)
+    G.CreateDropdown = Collect("dropdown", 4)
+    G.CreateColorPicker = Collect("color", 3)
+    G.CreateTextureDropdown = Collect("texture", 3)
+    G.CreateFontDropdown = Collect("font", 3)
+    G.CreateOutlineDropdown = Collect("outline", 3)
+    G.CreateButtonRow = Collect("buttons", 99)
+    G.CreateLabel = Collect("label", 99)
+    function G:CreatePopoutPageTools()
+        return {
+            OpenSection = function(_, label, key, col, summary, dimFn, hideFn, builder, toggle)
+                local b = Frame(); b.cardKey = key; b.summary = summary
+                b.AddWidget = function(self, w) self.last = w; return w end
+                if toggle then toggles[key] = toggle end
+                Add(b, 36, col)
+                return b
+            end,
+            CloseSection = function() end,
+        }
+    end
+    local function BuildPage(unit, kind)
+        built, toggles, added = {}, {}, {}
+        local pg = made.pages["uf_" .. unit .. "_" .. kind]
+        pg.children = {}
+        pg.RefreshStates = function() end
+        pg.builder(pg, UF:GetUnitDB(unit), Add, noop, noop)
+        local cardKeys, keys = {}, {}
+        for _, x in ipairs(added) do if x.w.cardKey then cardKeys[#cardKeys + 1] = x.w.cardKey end end
+        local byKey = {}
+        for _, w in ipairs(built) do
+            if type(w.key) == "string" then keys[#keys + 1] = w.key; byKey[w.key] = w end
+        end
+        return table.concat(cardKeys, ","), keys, byKey, added
+    end
+    local function has(list, k) for _, x in ipairs(list) do if x == k then return true end end return false end
+
+    print("-- Stage F pages: Cast Bar")
+    local cards, keys, byKey, pAdded = BuildPage("player", "castbar")
+    eq(cards, "uf_cb_settings,uf_cb_size,uf_cb_position,uf_cb_style,uf_cb_colors,uf_cb_icon,uf_cb_border,uf_cb_spell,uf_cb_timer",
+       "Cast Bar: Settings, Size, Position, Bar Style, Colors, Icon, Border, Spell Name, Timer")
+    check(pAdded[1].w.dfUnitRow ~= nil, "Cast Bar: the unit row (Reset / Sync / Copy)")
+    eq(toggles.uf_cb_settings and toggles.uf_cb_settings.key, "castbarEnabled", "Cast Bar: Enable is the Settings card's header tick")
+    eq(toggles.uf_cb_icon and toggles.uf_cb_icon.key, "castbarShowIcon", "...Show Icon on the Icon card")
+    eq(toggles.uf_cb_border and toggles.uf_cb_border.key, "castbarBorderEnabled", "...the cast bar's OWN border key")
+    eq(toggles.uf_cb_spell and toggles.uf_cb_spell.key, "castbarShowSpell", "...Show Spell Name")
+    eq(toggles.uf_cb_timer and toggles.uf_cb_timer.key, "castbarShowTimer", "...Show Timer")
+    check(not has(keys, "castbarEnabled"), "...and the body never repeats a header tick")
+    check(has(keys, "castbarLatency") and has(keys, "castbarEmpower"), "player: Latency and Empower Stages")
+    check(not has(keys, "castbarKickTick"), "player: no kick-ready mark (an enemy-frame setting)")
+    check(has(keys, "castbarDetached"), "Cast Bar: the Detach tick")
+    check(not has(keys, "frameBorderSize"), "Cast Bar: never the frame's own border keys")
+    local w = byKey.castbarLatency
+    check(w and w.disableOn and w.disableOn({ castbarEnabled = false }) and not w.disableOn({ castbarEnabled = true }),
+          "Cast Bar: controls grey while the cast bar is off")
+    w = byKey.castbarSide
+    check(w and w.hideOn and w.hideOn({ castbarDetached = true }) and not w.hideOn({ castbarDetached = false }),
+          "Cast Bar: the attached-only controls hide while detached")
+    cards, keys = BuildPage("target", "castbar")
+    check(has(keys, "castbarKickTick") and has(keys, "castbarImportantGlow"), "target: kick-ready mark, important glow")
+    check(not has(keys, "castbarLatency") and not has(keys, "castbarEmpower"), "target: no latency / empower (player only)")
+    check(has(keys, "castbarKickNotReadyColor"), "target: the Kick Not Ready colour")
+    check(has(keys, "castbarShowTarget"), "target: Show Spell Target")
+    cards, keys = BuildPage("pet", "castbar")
+    check(not has(keys, "castbarShowTarget"), "pet: no Spell Target (the card does not reach it)")
+    eq(table.concat(UFO.Prefixes("castbar"), ","), "castbar", "Cast Bar: Reset / Sync / Copy act on the castbar keys")
+
+    print("-- Stage F pages: Class Power")
+    cards, keys, byKey = BuildPage("player", "classpower")
+    eq(cards, "uf_cp_settings,uf_cp_class,uf_cp_size,uf_cp_position,uf_cp_style,uf_cp_colors,uf_cp_border",
+       "Class Power: Settings, Class Options, Size, Position, Bar Style, Colors, Border")
+    eq(toggles.uf_cp_settings and toggles.uf_cp_settings.key, "classPowerEnabled", "Class Power: Enable is the header tick")
+    check(has(keys, "classPowerRunes") and has(keys, "classPowerStagger") and has(keys, "classPowerDetached"),
+          "Class Power: runes, stagger, Detach")
+    w = byKey.classPowerColor
+    check(w and w.hideOn and w.hideOn({ classPowerColorMode = "CLASS" }) and not w.hideOn({ classPowerColorMode = "CUSTOM" }),
+          "Class Power: Custom Color shows only in Custom mode")
+
+    print("-- Stage F pages: Portrait")
+    cards, keys, byKey = BuildPage("player", "portrait")
+    eq(cards, "uf_po_settings,uf_po_position,uf_po_look,uf_po_border", "Portrait: Settings, Size & Position, Look, Border")
+    eq(toggles.uf_po_settings and toggles.uf_po_settings.key, "portraitEnabled", "Portrait: Show Portrait is the header tick")
+    check(has(keys, "portraitMirror"), "player: Mirror")
+    cards, keys = BuildPage("target", "portrait")
+    check(not has(keys, "portraitMirror"), "target: no Mirror (player / pet only)")
+    cards, keys = BuildPage("pet", "portrait")
+    check(not has(keys, "portraitNpcMode") and not has(keys, "portraitDesatDead"), "pet: no NPC style, no desaturate")
+
+    print("-- Stage F pages: Unit Icons")
+    cards = BuildPage("player", "unitIcons")
+    eq(cards, "uf_icon_resting,uf_icon_pvp", "player Unit Icons: Resting, PvP")
+    eq(toggles.uf_icon_resting and toggles.uf_icon_resting.key, "restingIconEnabled", "...each icon's tick in its header")
+    cards, keys = BuildPage("target", "unitIcons")
+    eq(cards, "uf_icon_pvp,uf_icon_classification", "target Unit Icons: PvP, Elite / Rare")
+    check(has(keys, "classificationStyle"), "...Elite / Rare: icon or text")
+    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification",
+       "Unit Icons: Reset / Sync / Copy act on the three icons' keys")
+
+    print("-- Stage F: Hide Blizzard Player Cast Bar follows ours until set")
+    built = {}
+    added = {}
+    local sp2 = made.pages.uf_settings
+    sp2.children = {}
+    sp2.builder(sp2, UF:GetGlobalDB(), Add, noop, noop)
+    local hb
+    for _, x in ipairs(built) do if x.key == "hideBlizzardCastbar" then hb = x end end
+    local getter = hb and hb.args[5]
+    local setter = hb and hb.args[6]
+    check(getter and setter, "Settings: the tick reads and writes through its own get / set")
+    if getter and setter then
+        UF.BlizzardHide = nil
+        DF.db.unitframes.global.hideBlizzardCastbar = nil
+        eq(getter(), false, "...without the runtime: unset reads off")
+        UF.BlizzardHide = { ShouldHideCastBar = function() return true end }
+        eq(getter(), true, "...with it: unset follows our player cast bar (on by default)")
+        setter(false)
+        eq(DF.db.unitframes.global.hideBlizzardCastbar, false, "...a click stores the user's own choice")
+        DF.db.unitframes.global.hideBlizzardCastbar = nil
+        UF.BlizzardHide = nil
+    end
     UF:GetStoredUnit("player").position = { point = "TOP", x = 1, y = 2 }
     rows[1].buttons[2].onClick()
     eq(UF:GetStoredUnit("player").position, nil, "Reset Position: back to the unit's default")

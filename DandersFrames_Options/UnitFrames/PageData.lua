@@ -51,6 +51,10 @@ DF.UnitFramePageData = {
         {
             kind = "visibility", category = "display", title = "Visibility",
             units = { player = true, target = true, focus = true, pet = true },
+            cards = {
+                show_when = { player = true, target = true, focus = true, pet = true },
+                hide_when = { player = true, target = true, focus = true, pet = true },
+            },
             hide = {
                 visHasEnemyTarget = { target = true, focus = true, pet = true },
                 visHasTarget = { target = true, focus = true, pet = true },
@@ -95,8 +99,20 @@ DF.UnitFramePageData = {
         },
         {
             kind = "portrait", category = "display", title = "Portrait",
-            later = true,
             units = { player = true, target = true, focus = true, pet = true, boss = true },
+            cards = {
+                settings = { player = true, target = true, focus = true, pet = true, boss = true },
+                size_position = { player = true, target = true, focus = true, pet = true, boss = true },
+                look = { player = true, target = true, focus = true, pet = true, boss = true },
+                border = { player = true, target = true, focus = true, pet = true, boss = true },
+            },
+            hide = {
+                portrait2DZoom = { target = true, focus = true, pet = true, boss = true },
+                portraitDesatDead = { pet = true },
+                portraitMirror = { target = true, focus = true, boss = true },
+                portraitNpcMode = { pet = true },
+                portraitShape = { target = true, focus = true, pet = true, boss = true },
+            },
         },
         {
             kind = "health", category = "bars", title = "Health Bar",
@@ -161,13 +177,47 @@ DF.UnitFramePageData = {
         },
         {
             kind = "castbar", category = "bars", title = "Cast Bar",
-            later = true,
             units = { player = true, target = true, focus = true, pet = true, boss = true },
+            cards = {
+                settings = { player = true, target = true, focus = true, pet = true, boss = true },
+                size = { player = true, target = true, focus = true, pet = true, boss = true },
+                position = { player = true, target = true, focus = true, pet = true, boss = true },
+                bar_style = { player = true, target = true, focus = true, pet = true, boss = true },
+                colors = { player = true, target = true, focus = true, pet = true, boss = true },
+                icon = { player = true, target = true, focus = true, pet = true, boss = true },
+                border = { player = true, target = true, focus = true, pet = true, boss = true },
+                spell_name = { player = true, target = true, focus = true, pet = true, boss = true },
+                timer = { player = true, target = true, focus = true, pet = true, boss = true },
+                spell_target = { player = true, target = true, focus = true, boss = true },
+            },
+            hide = {
+                castbarClassColor = { target = true, focus = true, pet = true, boss = true },
+                castbarEmpower = { target = true, focus = true, pet = true, boss = true },
+                castbarIconSide = { target = true, focus = true, pet = true, boss = true },
+                castbarImportantGlow = { player = true, pet = true },
+                castbarImportantGlowColor = { player = true, pet = true, boss = true },
+                castbarKickNotReadyColor = { player = true, pet = true },
+                castbarKickReadyColor = { player = true, pet = true, boss = true },
+                castbarKickSection = { player = true, pet = true },
+                castbarKickTick = { player = true, pet = true },
+                castbarLatency = { target = true, focus = true, pet = true, boss = true },
+                castbarShowTarget = { target = true, focus = true, boss = true },
+            },
         },
         {
             kind = "classpower", category = "bars", title = "Class Power",
-            later = true,
             units = { player = true },
+            cards = {
+                settings = { player = true },
+                class_options = { player = true },
+                size = { player = true },
+                position = { player = true },
+                bar_style = { player = true },
+                colors = { player = true },
+                border = { player = true },
+            },
+            hide = {
+            },
         },
         {
             kind = "text", category = "text", title = "Text Designer",
@@ -283,7 +333,21 @@ DF.UnitFramePageData = {
             },
             hide = {
             },
-            laterCards = { "Resting Icon", "PvP Icon", "Elite / Rare" },
+        },
+        {
+            kind = "unitIcons", category = "indicators", title = "Unit Icons",
+            units = { player = true, target = true, focus = true },
+            cards = {
+                resting_icon = { player = true },
+                pvp_icon = { player = true, target = true, focus = true },
+                elite_rare = { target = true, focus = true },
+            },
+            hide = {
+                eliteIconShowInInstances = { focus = true },
+                pvpIconMode = { target = true, focus = true },
+                pvpIconPlayersOnly = { player = true, focus = true },
+                pvpIconStyle = { player = true, focus = true },
+            },
         },
         {
             kind = "highlights", category = "indicators", title = "Highlights",

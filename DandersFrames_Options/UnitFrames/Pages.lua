@@ -219,7 +219,8 @@ local function Copy(v)
 end
 
 -- Keys a unit-level copy must never move (who draws it, where it is).
-local NEVER_COPIED = { source = true, position = true }
+local NEVER_COPIED = { source = true, position = true,
+                       castbarPosition = true, classPowerPositionRecord = true }
 
 function UFO.Prefixes(kind)
     if UFO.prefixes[kind] then return UFO.prefixes[kind] end
@@ -232,6 +233,10 @@ function UFO.Prefixes(kind)
     if kind == "text" then return { "textDesignerPreset" } end
     if kind == "auradesigner" then return { "auraDesignerEnabled" } end
     if kind == "visibility" then return { "vis" } end
+    if kind == "castbar" then return { "castbar" } end
+    if kind == "classpower" then return { "classPower" } end
+    if kind == "portrait" then return { "portrait" } end
+    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification" } end
     return {}
 end
 
@@ -608,10 +613,14 @@ function UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
 end
 
 -- ---- small card pages of this module's own ---------------------------------
+-- Open(label, key, col, summary, kind[, toggle[, dimFn[, hideFn]]]):
+--   toggle  the card's header tick ({ db, key, label, onChanged }, see
+--           CreateCollapsibleSection opts.toggle); its body never repeats it
+--   dimFn   greys the card's header (its feature is off)
 local function Tools(self, Add)
     local tools = GUI:CreatePopoutPageTools(self)
-    local function Open(label, key, col, summary, kind)
-        return tools.OpenSection(Add, label, key, col, summary, nil, nil, nil, nil,
+    local function Open(label, key, col, summary, kind, toggle, dimFn, hideFn)
+        return tools.OpenSection(Add, label, key, col, summary, dimFn, hideFn, nil, toggle,
             { twoTrack = true, quietLabels = true, kind = kind })
     end
     local function Close(band) tools.CloseSection(Add, band) end
@@ -724,6 +733,424 @@ function UFO.BuildVisibilityPage(self, db, Add, rec, unit)
     Close(band)
 end
 
+-- ============================================================
+-- CAST BAR / CLASS POWER / PORTRAIT / UNIT ICONS (pages new to unit frames)
+-- Built from the shared helpers over the companion's runtime
+-- (DandersFrames_UnitFrames/CastBar.lua, ClassPower.lua, Portrait.lua,
+-- Indicators.lua). A control relevant to some units only reads the page's
+-- generated `hide` list (UFO.VisControlShown); a card reaching some units only
+-- reads its `cards` list (UFO.CardShown).
+--
+-- Inventory controls deliberately NOT drawn (their runtime is not built):
+--   Cast Bar      Show Kick-Ready Section, Kick Ready colour, Icon Zoom, Max
+--                 Length, Spell Target's own font size and separator
+--   Class Power   Vengeance Soul Fragments, Maelstrom Weapon Stacks, Show Rune
+--                 Cooldown Text, Inside Top, Background
+--   Portrait      Push Bars Aside, Shape, 2D Zoom
+--   Unit Icons    PvP Show / Style / Players Only, Show in Instances
+-- ============================================================
+function UFO.CardShown(rec, unit, key)
+    local c = rec and rec.cards and rec.cards[key]
+    if not c then return true end
+    return c[unit] and true or false
+end
+
+local function PointOptions()
+    return { TOPLEFT = L["Top Left"], TOP = L["Top"], TOPRIGHT = L["Top Right"],
+             LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"],
+             BOTTOMLEFT = L["Bottom Left"], BOTTOM = L["Bottom"], BOTTOMRIGHT = L["Bottom Right"],
+             _order = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT",
+                        "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" } }
+end
+
+-- Edit a detached piece in the mover (its own element, `<unit>.<kind>`).
+function UFO.EditChildInMover(unit, kind)
+    local UF = DF.UnitFrames
+    local M = UF and UF.Mover
+    local key = unit .. "." .. kind
+    if M and M.lib and M.children and M.children[key] then
+        M.lib:Unlock({ addon = M.ADDON_KEY, keys = { key } })
+        return true
+    end
+    if DF.Say then DF:Say(L["DandersMover is disabled"]) end
+    return false
+end
+
+-- Follow the Frame (a detached piece anchored to its frame, or free where it
+-- stands): DandersMover's SetAnchor / Detach through the companion.
+function UFO.ChildFollowing(unit, kind)
+    local M = DF.UnitFrames and DF.UnitFrames.Mover
+    return M and M.IsChildFollowing and M:IsChildFollowing(unit, kind) or false
+end
+
+function UFO.SetChildFollowing(unit, kind, v)
+    local M = DF.UnitFrames and DF.UnitFrames.Mover
+    if M and M.SetChildFollowing then return M:SetChildFollowing(unit, kind, v) end
+    return false
+end
+
+-- A border card's two controls (the piece's own keys, prefix .. "Border*");
+-- the card's header tick is the third.
+local function BorderControls(self, band, db, prefix, changed, featureOff)
+    local function off(d) return featureOff(d) or (d and d[prefix .. "BorderEnabled"] == false) end
+    local w = band:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 8, 1, db, prefix .. "BorderSize", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Border Color"], db, prefix .. "BorderColor", true, changed), 30)
+    w.disableOn = off
+end
+
+local function BorderToggle(db, prefix, changed)
+    return { db = db, key = prefix .. "BorderEnabled", label = L["Show Border"], onChanged = changed }
+end
+
+local function OnOff(d, key) return (d and d[key]) and L["On"] or L["Off"] end
+
+-- The Position card's detached half, shared by Cast Bar and Class Power.
+local function DetachedControls(self, band, unit, kind, changed, off, attached)
+    local w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Follow the Frame"], nil, nil, nil,
+        function() return UFO.ChildFollowing(unit, kind) end,
+        function(v) UFO.SetChildFollowing(unit, kind, v); changed() end), 30)
+    w.disableOn, w.hideOn = off, attached
+    w = band:AddWidget(GUI:CreateButtonRow(self.child, {
+        { label = L["Edit in Mover"], width = 120, icon = "open_with",
+          onClick = function() UFO.EditChildInMover(unit, kind) end },
+    }, { width = 250 }), 30)
+    w.disableOn, w.hideOn = off, attached
+end
+
+function UFO.BuildCastBarPage(self, db, Add, rec, unit)
+    Add(UFO.CreatePageRow(self, rec, unit), 25, 2)
+    local Open, Close = Tools(self, Add)
+    local function changed() self:RefreshStates(); RefreshFrames() end
+    local function shown(key) return UFO.VisControlShown(rec, unit, key) end
+    local function off(d) return not (d and d.castbarEnabled) end
+    local function detached(d) return d and d.castbarDetached end
+    local function attached(d) return not detached(d) end
+    local w
+
+    local band = Open(L["Settings"], "uf_cb_settings", 1, function(d) return OnOff(d, "castbarEnabled") end,
+        "settings", { db = db, key = "castbarEnabled", label = L["Enable Cast Bar"], onChanged = changed })
+    for _, c in ipairs({
+        { "castbarHideIdle", L["Hide When Not Casting"] },
+        { "castbarLatency", L["Show Latency"] },
+        { "castbarEmpower", L["Show Empower Stages"] },
+        { "castbarKickTick", L["Show Kick-Ready Mark"] },
+        { "castbarImportantGlow", L["Glow Important Spells"] },
+    }) do
+        if shown(c[1]) then
+            w = band:AddWidget(GUI:CreateCheckbox(self.child, c[2], db, c[1], changed), 30)
+            w.disableOn = off
+        end
+    end
+    Close(band)
+
+    band = Open(L["Size"], "uf_cb_size", 1, function(d)
+        local wtxt = (d and d.castbarMatchWidth ~= false) and L["Frame"] or tostring(d and d.castbarWidth or "")
+        return format("%s x %s", wtxt, tostring(d and d.castbarHeight or ""))
+    end, "size")
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Match Frame Width"], db, "castbarMatchWidth", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Width"], 40, 600, 1, db, "castbarWidth", changed), 55)
+    w.disableOn = off
+    w.hideOn = function(d) return d and d.castbarMatchWidth ~= false end
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Height"], 6, 60, 1, db, "castbarHeight", changed), 55)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Position"], "uf_cb_position", 1,
+        function(d) return detached(d) and L["Detached"] or L["Attached"] end, "position")
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "castbarDetached", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
+        { BOTTOM = L["Bottom"], TOP = L["Top"], _order = { "BOTTOM", "TOP" } }, db, "castbarSide", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 30, 1, db, "castbarGap", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "castbarX", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "castbarY", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    DetachedControls(self, band, unit, "castbar", changed, off, attached)
+    Close(band)
+
+    band = Open(L["Bar Style"], "uf_cb_style", 2, nil, "appearance")
+    w = band:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "castbarTexture", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateTextureDropdown(self.child, L["Background Texture"], db, "castbarBgTexture", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "castbarBgColor", true, changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "castbarReverse", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Spark"], db, "castbarSpark", changed), 30)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Colors"], "uf_cb_colors", 2, nil, "colours")
+    for _, c in ipairs({
+        { "castbarColor", L["Interruptible"] },
+        { "castbarNonInterruptibleColor", L["Not Interruptible"] },
+        { "castbarChannelColor", L["Channel"] },
+        { "castbarFailedColor", L["Interrupted / Failed"] },
+        { "castbarKickNotReadyColor", L["Kick Not Ready"] },
+        { "castbarImportantGlowColor", L["Important Glow"] },
+    }) do
+        if shown(c[1]) then
+            w = band:AddWidget(GUI:CreateColorPicker(self.child, c[2], db, c[1], false, changed), 30)
+            w.disableOn = off
+        end
+    end
+    if shown("castbarClassColor") then
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "castbarClassColor", changed), 30)
+        w.disableOn = off
+    end
+    Close(band)
+
+    band = Open(L["Icon"], "uf_cb_icon", 2, nil, "appearance",
+        { db = db, key = "castbarShowIcon", label = L["Show Icon"], onChanged = changed })
+    local function iconOff(d) return off(d) or (d and d.castbarShowIcon == false) end
+    if shown("castbarIconSide") then
+        w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
+            { LEFT = L["Left"], RIGHT = L["Right"], _order = { "LEFT", "RIGHT" } }, db, "castbarIconSide", changed), 55)
+        w.disableOn = iconOff
+    end
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Size (0 = bar height)"], 0, 60, 1, db, "castbarIconSize", changed), 55)
+    w.disableOn = iconOff
+    Close(band)
+
+    band = Open(L["Border"], "uf_cb_border", 2, nil, "border", BorderToggle(db, "castbar", changed))
+    BorderControls(self, band, db, "castbar", changed, off)
+    Close(band)
+
+    band = Open(L["Spell Name"], "uf_cb_spell", 1, nil, "text",
+        { db = db, key = "castbarShowSpell", label = L["Show Spell Name"], onChanged = changed })
+    local function spellOff(d) return off(d) or (d and d.castbarShowSpell == false) end
+    w = band:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "castbarSpellFont", changed), 55)
+    w.disableOn = spellOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 32, 1, db, "castbarSpellFontSize", changed), 55)
+    w.disableOn = spellOff
+    w = band:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "castbarSpellOutline", changed), 55)
+    w.disableOn = spellOff
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, "castbarSpellAnchor", changed), 55)
+    w.disableOn = spellOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "castbarSpellX", changed), 55)
+    w.disableOn = spellOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "castbarSpellY", changed), 55)
+    w.disableOn = spellOff
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "castbarSpellColor", false, changed), 30)
+    w.disableOn = spellOff
+    if UFO.CardShown(rec, unit, "spell_target") then
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Spell Target"], db, "castbarShowTarget", changed), 30)
+        w.disableOn = spellOff
+    end
+    Close(band)
+
+    band = Open(L["Timer"], "uf_cb_timer", 1, nil, "timer",
+        { db = db, key = "castbarShowTimer", label = L["Show Timer"], onChanged = changed })
+    local function timerOff(d) return off(d) or (d and d.castbarShowTimer == false) end
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Format"], {
+        REMAINING = L["Remaining"], REMAINING_TOTAL = L["Remaining / Total"], ELAPSED = L["Elapsed"],
+        _order = { "REMAINING", "REMAINING_TOTAL", "ELAPSED" } }, db, "castbarTimerFormat", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Decimals"], 0, 2, 1, db, "castbarTimerDecimals", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "castbarTimerFont", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 32, 1, db, "castbarTimerFontSize", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "castbarTimerOutline", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, "castbarTimerAnchor", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "castbarTimerX", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "castbarTimerY", changed), 55)
+    w.disableOn = timerOff
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "castbarTimerColor", false, changed), 30)
+    w.disableOn = timerOff
+    Close(band)
+end
+
+function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
+    Add(UFO.CreatePageRow(self, rec, unit), 25, 2)
+    local Open, Close = Tools(self, Add)
+    local function changed() self:RefreshStates(); RefreshFrames() end
+    local function off(d) return not (d and d.classPowerEnabled) end
+    local function detached(d) return d and d.classPowerDetached end
+    local function attached(d) return not detached(d) end
+    local w
+
+    local band = Open(L["Settings"], "uf_cp_settings", 1, function(d) return OnOff(d, "classPowerEnabled") end,
+        "settings", { db = db, key = "classPowerEnabled", label = L["Enable Class Power"], onChanged = changed })
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Display Mode"],
+        { PIPS = L["Pips"], BAR = L["Single Bar"], _order = { "PIPS", "BAR" } }, db, "classPowerMode", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide When Empty"], db, "classPowerHideEmpty", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Out of Combat"], db, "classPowerHideOOC", changed), 30)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Class Options"], "uf_cp_class", 1, nil, "settings")
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Death Knight Runes"], db, "classPowerRunes", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Brewmaster Stagger"], db, "classPowerStagger", changed), 30)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Size"], "uf_cp_size", 1, nil, "size")
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Match Frame Width"], db, "classPowerMatchWidth", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Width"], 40, 600, 1, db, "classPowerWidth", changed), 55)
+    w.disableOn = off
+    w.hideOn = function(d) return d and d.classPowerMatchWidth ~= false end
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Height"], 2, 30, 1, db, "classPowerHeight", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Pip Gap"], 0, 10, 1, db, "classPowerGap", changed), 55)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Position"], "uf_cp_position", 1,
+        function(d) return detached(d) and L["Detached"] or L["Attached"] end, "position")
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "classPowerDetached", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
+        { TOP = L["Top"], BOTTOM = L["Bottom"], _order = { "TOP", "BOTTOM" } }, db, "classPowerPosition", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "classPowerX", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "classPowerY", changed), 55)
+    w.disableOn, w.hideOn = off, detached
+    DetachedControls(self, band, unit, "classpower", changed, off, attached)
+    Close(band)
+
+    band = Open(L["Bar Style"], "uf_cp_style", 2, nil, "appearance")
+    w = band:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "classPowerTexture", changed), 55)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Colors"], "uf_cp_colors", 2, nil, "colours")
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"],
+        { CLASS = L["Class"], POWER = L["Power Type"], CUSTOM = L["Custom"], _order = { "CLASS", "POWER", "CUSTOM" } },
+        db, "classPowerColorMode", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Custom Color"], db, "classPowerColor", false, changed), 30)
+    w.disableOn = off
+    w.hideOn = function(d) return not (d and d.classPowerColorMode == "CUSTOM") end
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Empty Pip"], db, "classPowerEmptyColor", true, changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Charged Pip"], db, "classPowerChargedColor", false, changed), 30)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Border"], "uf_cp_border", 2, nil, "border", BorderToggle(db, "classPower", changed))
+    BorderControls(self, band, db, "classPower", changed, off)
+    Close(band)
+end
+
+function UFO.PortraitModes()
+    return { ["3D"] = L["3D Model"], ["2D"] = L["2D Portrait"], CLASS = L["Class Icon"], SPEC = L["Spec Icon"],
+             _order = { "3D", "2D", "CLASS", "SPEC" } }
+end
+
+function UFO.BuildPortraitPage(self, db, Add, rec, unit)
+    Add(UFO.CreatePageRow(self, rec, unit), 25, 2)
+    local Open, Close = Tools(self, Add)
+    local function changed() self:RefreshStates(); RefreshFrames() end
+    local function shown(key) return UFO.VisControlShown(rec, unit, key) end
+    local function off(d) return not (d and d.portraitEnabled) end
+    local w
+
+    local band = Open(L["Settings"], "uf_po_settings", 1, function(d)
+        if not (d and d.portraitEnabled) then return L["Off"] end
+        return UFO.PortraitModes()[d.portraitMode or "3D"] or ""
+    end, "settings", { db = db, key = "portraitEnabled", label = L["Show Portrait"], onChanged = changed })
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Style"], UFO.PortraitModes(), db, "portraitMode", changed), 55)
+    w.disableOn = off
+    if shown("portraitNpcMode") then
+        w = band:AddWidget(GUI:CreateDropdown(self.child, L["For NPCs Use"],
+            { ["3D"] = L["3D Model"], ["2D"] = L["2D Portrait"], _order = { "3D", "2D" } }, db, "portraitNpcMode", changed), 55)
+        w.disableOn = off
+        w.hideOn = function(d) return not (d and (d.portraitMode == "CLASS" or d.portraitMode == "SPEC")) end
+    end
+    if shown("portraitDesatDead") then
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Desaturate When Dead"], db, "portraitDesatDead", changed), 30)
+        w.disableOn = off
+    end
+    Close(band)
+
+    band = Open(L["Size & Position"], "uf_po_position", 1, nil, "position")
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], {
+        LEFT = L["Left"], RIGHT = L["Right"], INSIDE_LEFT = L["Inside Left"], INSIDE_RIGHT = L["Inside Right"],
+        _order = { "LEFT", "RIGHT", "INSIDE_LEFT", "INSIDE_RIGHT" } }, db, "portraitSide", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Size (0 = frame height)"], 0, 150, 1, db, "portraitSize", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "portraitX", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "portraitY", changed), 55)
+    w.disableOn = off
+    Close(band)
+
+    band = Open(L["Look"], "uf_po_look", 2, nil, "appearance")
+    local function not3D(d) return not (d and (d.portraitMode or "3D") == "3D") end
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0, 1, 0.05, db, "portraitAlpha", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["3D Zoom"], 0.5, 1.5, 0.05, db, "portrait3DZoom", changed), 55)
+    w.disableOn, w.hideOn = off, not3D
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["3D Rotation"], -180, 180, 1, db, "portrait3DRotation", changed), 55)
+    w.disableOn, w.hideOn = off, not3D
+    w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "portraitBgColor", true, changed), 30)
+    w.disableOn = off
+    if shown("portraitMirror") then
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Mirror"], db, "portraitMirror", changed), 30)
+        w.disableOn = off
+    end
+    Close(band)
+
+    band = Open(L["Border"], "uf_po_border", 2, nil, "border", BorderToggle(db, "portrait", changed))
+    BorderControls(self, band, db, "portrait", changed, off)
+    Close(band)
+end
+
+-- Resting / PvP / Elite & Rare: one card each, for the units that have it.
+UFO.UNIT_ICON_CARDS = {
+    { card = "resting_icon", prefix = "restingIcon", key = "uf_icon_resting", label = function() return L["Resting Icon"] end },
+    { card = "pvp_icon", prefix = "pvpIcon", key = "uf_icon_pvp", label = function() return L["PvP Icon"] end },
+    { card = "elite_rare", prefix = "classification", key = "uf_icon_classification", label = function() return L["Elite / Rare"] end },
+}
+
+function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
+    Add(UFO.CreatePageRow(self, rec, unit), 25, 2)
+    local Open, Close = Tools(self, Add)
+    local function changed() self:RefreshStates(); RefreshFrames() end
+    local col = 0
+    for _, c in ipairs(UFO.UNIT_ICON_CARDS) do
+        if UFO.CardShown(rec, unit, c.card) then
+            local pre = c.prefix
+            local function off(d) return not (d and d[pre .. "Enabled"]) end
+            col = (col % 2) + 1
+            local band = Open(c.label(), c.key, col, function(d) return OnOff(d, pre .. "Enabled") end, "icons",
+                { db = db, key = pre .. "Enabled", label = L["Show"], onChanged = changed })
+            local w
+            if pre == "classification" then
+                w = band:AddWidget(GUI:CreateDropdown(self.child, L["Style"],
+                    { ICON = L["Icon"], TEXT = L["Text"], _order = { "ICON", "TEXT" } }, db, "classificationStyle", changed), 55)
+                w.disableOn = off
+            end
+            w = band:AddWidget(GUI:CreateSlider(self.child, L["Size"], 8, 48, 1, db, pre .. "Size", changed), 55)
+            w.disableOn = off
+            w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, pre .. "Anchor", changed), 55)
+            w.disableOn = off
+            w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, pre .. "X", changed), 55)
+            w.disableOn = off
+            w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, pre .. "Y", changed), 55)
+            w.disableOn = off
+            Close(band)
+        end
+    end
+end
+
 -- ---- moving a frame ----------------------------------------------------------
 function UFO.EditInMover(unit)
     local UF = DF.UnitFrames
@@ -788,6 +1215,14 @@ function UFO.PageBuilder(rec, unit)
             UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
         elseif rec.kind == "visibility" then
             UFO.BuildVisibilityPage(self, db, Add, rec, unit)
+        elseif rec.kind == "castbar" then
+            UFO.BuildCastBarPage(self, db, Add, rec, unit)
+        elseif rec.kind == "classpower" then
+            UFO.BuildClassPowerPage(self, db, Add, rec, unit)
+        elseif rec.kind == "portrait" then
+            UFO.BuildPortraitPage(self, db, Add, rec, unit)
+        elseif rec.kind == "unitIcons" then
+            UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
         end
     end
 end
@@ -835,6 +1270,15 @@ function UFO.SetSource(unit, value)
         UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
     end
     return true
+end
+
+-- Blizzard's player cast bar is hidden (the user's choice, or following ours).
+function UFO.HidesBlizzardCastBar()
+    local UF = DF.UnitFrames
+    local BH = UF and UF.BlizzardHide
+    if BH and BH.ShouldHideCastBar then return BH:ShouldHideCastBar() and true or false end
+    local g = UF and UF:GetGlobalDB()
+    return (g and g.hideBlizzardCastbar) and true or false
 end
 
 function UFO.BuildSettingsPage(self, db, Add)
@@ -894,13 +1338,17 @@ function UFO.BuildSettingsPage(self, db, Add)
     band:AddWidget(GUI:CreateLabel(self.child, L["Target of Target can only be Blizzard when Target is."], 250), 30)
     Close(band)
 
+    -- Q7: unset, the tick FOLLOWS the player cast bar (ticked while ours is on);
+    -- a click stores the user's own choice (BlizzardHide.lua ShouldHideCastBar).
     band = Open(L["Blizzard Frames"], "uf_blizzard", 2,
-        function(d) return (d and d.hideBlizzardCastbar) and format(L["%s hidden"], L["Cast Bar"]) or L["Shown"] end,
+        function() return UFO.HidesBlizzardCastBar() and format(L["%s hidden"], L["Cast Bar"]) or L["Shown"] end,
         "visibility")
     band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Blizzard Player Cast Bar"], db, "hideBlizzardCastbar",
         function()
             UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
-        end), 30)
+        end,
+        function() return UFO.HidesBlizzardCastBar() end,
+        function(v) if db then db.hideBlizzardCastbar = v and true or false end end), 30)
     Close(band)
 end
 

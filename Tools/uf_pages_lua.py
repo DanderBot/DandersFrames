@@ -15,7 +15,11 @@ What the Lua table says, per unit-frames page:
   cards     section key -> the units that see that card (a DF card not listed is never shown)
   hide      db key -> the units a control is hidden for (dropped from, or not relevant to, that unit)
   later     the page is new to unit frames and waits for its runtime (not built yet)
-Cards new to unit frames on a DF page (no DF section key) are listed under `laterCards` and skipped.
+Cards new to unit frames on a DF page (no DF section key) are listed under `laterCards` and skipped,
+unless a page of their own draws them (SPLIT_CARDS: the Icons page's Unit group becomes the
+"Unit Icons" page, because a card of ours may not be added to a page a party builder draws).
+A built new page also carries `cards`: card slug (its title, lower case, words joined by _) ->
+the units that card reaches.
 """
 import json, pathlib, re, sys
 
@@ -39,7 +43,13 @@ KIND = {
 }
 # New pages whose runtime is built: emitted without `later`, with the units their
 # cards reach and the per-unit `hide` list; Pages.lua draws their controls.
-BUILT_NEW = {"uf_visibility"}
+BUILT_NEW = {"uf_visibility", "uf_castbar", "uf_classpower", "uf_portrait"}
+# New cards on a DF page that get a built page of their own instead:
+# source page id -> (kind, category, title) of the page that draws them.
+SPLIT_CARDS = {"indicators_icons": ("unitIcons", "indicators", "Unit Icons")}
+
+def slug(title):
+    return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
 # Section-key prefix of each DF page's cards (tools.OpenSection's collapseKey).
 PREFIX = {
     "general_frame": "frame_", "display_tooltips": "tooltips_", "display_fading": "fading_",
@@ -88,6 +98,7 @@ def main():
         if p["origin"] == "df":
             rec["source"] = pid
         cards, hide, later_cards = [], {}, []
+        split = []                         # (title, units, controls) of SPLIT_CARDS cards
         for g in p["groups"]:
             for c in g["cards"]:
                 cu = [u for u in units if u in (c.get("units") or units)]
@@ -96,7 +107,10 @@ def main():
                     want = PREFIX[pid]
                     hits = sorted({k for t, k in pairs if t == c["title"] and k.startswith(want)})
                     if c.get("new"):
-                        later_cards.append(c["title"])
+                        if pid in SPLIT_CARDS:
+                            split.append((c["title"], cu, c["controls"]))
+                        else:
+                            later_cards.append(c["title"])
                         continue
                     if len(hits) != 1:
                         errors.append(f"{pid}: card {c['title']!r} -> {hits}")
@@ -112,7 +126,7 @@ def main():
                             if hidden:
                                 hide.setdefault(k, set()).update(hidden)
                 else:
-                    cards.append((None, cu))
+                    cards.append((slug(c["title"]), cu))
                     if pid in BUILT_NEW:
                         for ct in c["controls"]:
                             k = ct.get("key")
@@ -129,6 +143,19 @@ def main():
             # Target of Target: every card there is filtered off for it).
             rec["units"] = [u for u in units if any(u in cu for _, cu in cards)]
         out.append(rec)
+        if split:
+            kind2, cat2, title2 = SPLIT_CARDS[pid]
+            srec = {"kind": kind2, "category": cat2, "title": title2, "built": True,
+                    "cards": [(slug(t), cu) for t, cu, _ in split], "hide": {}, "laterCards": []}
+            for t, cu, controls in split:
+                for ct in controls:
+                    k = ct.get("key")
+                    if k and ct.get("units"):
+                        hidden = [u for u in cu if u not in ct["units"]]
+                        if hidden:
+                            srec["hide"].setdefault(k, set()).update(hidden)
+            srec["units"] = [u for u in UNITS if any(u in cu for _, cu in srec["cards"])]
+            out.append(srec)
 
     # Controls the build dropped from a DF card outright (uf_build.py drop_controls):
     # hidden for every unit. Found by diffing the DF inventory against the UF cards.
@@ -202,6 +229,10 @@ def main():
             if rec["laterCards"]:
                 L.append("            laterCards = { " + ", ".join(lua_str(t) for t in rec["laterCards"]) + " },")
         elif rec.get("built"):
+            L.append("            cards = {")
+            for key, cu in rec["cards"]:
+                L.append(f"                {key} = {lua_set(cu)},")
+            L.append("            },")
             L.append("            hide = {")
             for key in sorted(rec["hide"]):
                 L.append(f"                {key} = {lua_set(rec['hide'][key])},")
