@@ -871,6 +871,14 @@ end
 -- (common during a group-wide reshuffle), the callback fires exactly once
 -- for that sortType on the next frame. Safe to re-query
 -- DandersFrames_GetFrameForUnit(unit) from within the callback.
+--
+--   DandersFrames.RegisterCallback(self, "OnProfileChanged", function(event, profileName)
+--       -- profileName is the profile now live (DandersFrames.db is it)
+--   end)
+--
+-- Fires after a profile switch, a profile reset and a profile import, once the
+-- new settings are in place and the frames have been refreshed. A reset fires
+-- with the same name it had; a spec auto-switch is a switch.
 -- ============================================================
 
 local CallbackHandler = LibStub and LibStub("CallbackHandler-1.0", true)

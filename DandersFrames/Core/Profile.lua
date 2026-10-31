@@ -638,6 +638,10 @@ function DF:ActivateProfile(name, message)
             DF.AutoProfilesUI:EvaluateAndApply()
         end
     end)
+
+    -- External subscribers (Core/API.lua, EVENT CALLBACKS): DF.db is the new
+    -- profile and it has been applied. A reset re-activates the same name.
+    if DF.FireAPICallback then DF:FireAPICallback("OnProfileChanged", name) end
 end
 
 -- Delete a profile
@@ -2287,6 +2291,12 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- the user to reload so headers can be (re)created.
     if DF.PromptReloadIfEnableFlagsChanged then
         DF:PromptReloadIfEnableFlagsChanged()
+    end
+
+    -- External subscribers: the live profile's contents were replaced (into a new
+    -- profile or over the current one -- either way DF.db is what was imported).
+    if DF.FireAPICallback then
+        DF:FireAPICallback("OnProfileChanged", DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile)
     end
 
     return true
