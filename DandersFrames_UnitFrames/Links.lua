@@ -728,12 +728,15 @@ end
 -- image of Target". Turned round once, keeping its parts and kept keys; the two
 -- frames are already in step, so nothing is copied. After this a Player-follows-
 -- Target link is the user's own choice and is left alone.
+-- ⚠ EACH ONE-TIME STEP CHECKS ITS OWN VERSION, never Links.VERSION: bumping the
+-- current version for a later step must not run an earlier one a second time (this
+-- one would turn a Player-follows-Target link the user made since round again).
 -- ============================================================
-Links.VERSION = 2
+Links.VERSION = 3
 function Links:RepairOrientation(root)
     local g = Global(root)
-    if (tonumber(g.unitLinksVersion) or 1) >= Links.VERSION then return false end
-    g.unitLinksVersion = Links.VERSION
+    if (tonumber(g.unitLinksVersion) or 1) >= 2 then return false end
+    g.unitLinksVersion = 2
     local t = g.unitLinks
     local d = Links.DEFAULT
     local link = type(t) == "table" and t[d.leader]
@@ -743,6 +746,42 @@ function Links:RepairOrientation(root)
         return true
     end
     return false
+end
+
+-- ============================================================
+-- ONE-TIME TOP-UP (unitLinksVersion 3): a Player/Target link keeps apart every
+-- key whose two defaults deliberately differ (DeliberateDifferences), worked out
+-- when the link is made. The aura rows' defaults added two -- the buff and debuff
+-- rows' vertical offsets (Target shows buffs then debuffs under the frame, Player
+-- debuffs then buffs) -- and a link made before them does not know: its next
+-- apply would copy one frame's rows onto the other's, swapping them. Added once,
+-- for the pair either way round; nothing is copied, nothing is taken out.
+-- ⚠ ONLY THESE KEYS, never the whole DeliberateDifferences set: a link the user
+-- has since set to "same" would otherwise gain its anchors and growth too, and
+-- stop sharing them.
+-- ============================================================
+Links.KEPT_V3 = { "buffOffsetY", "debuffOffsetY" }
+function Links:TopUpKept(root)
+    local g = Global(root)
+    if (tonumber(g.unitLinksVersion) or 1) >= 3 then return 0 end
+    g.unitLinksVersion = 3
+    local d = Links.DEFAULT
+    local link, follower, leader = self:LinkOf(root, d.follower)
+    local pair = link and ((follower == d.follower and leader == d.leader)
+        or (follower == d.leader and leader == d.follower))
+    if not pair or type(link.elements) ~= "table" then return 0 end
+    local differ = Links.DeliberateDifferences(follower, leader, link.elements)
+    local added = 0
+    for _, key in ipairs(Links.KEPT_V3) do
+        if differ[key] then
+            if type(link.except) ~= "table" then link.except = {} end
+            if not link.except[key] then
+                link.except[key] = true
+                added = added + 1
+            end
+        end
+    end
+    return added
 end
 
 -- ============================================================
@@ -756,6 +795,7 @@ function Links:Ensure(root)
     if type(g.unitLinks) ~= "table" then g.unitLinks = {} end
     self:Migrate(root)
     self:RepairOrientation(root)
+    self:TopUpKept(root)
     if first then self:CreateDefault(root) end
 end
 

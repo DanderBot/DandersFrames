@@ -389,9 +389,9 @@ do
     -- Target's defaults are Player's mirrored, for the mirrored pieces' layout.
     local T, P = UF.UnitDefaults.target, UF.UnitDefaults.player
     eq(T.portraitSide, "RIGHT", "target default: portrait on the right")
-    eq(T.buffGrowth, "RIGHT_UP", "target default: buffs grow the other way")
+    eq(T.buffGrowth, "RIGHT_DOWN", "target default: buffs grow the other way")
     eq(T.buffAnchor, "BOTTOMLEFT", "target default: buff anchor mirrored")
-    eq(T.debuffGrowth, "LEFT_UP", "target default: debuffs too")
+    eq(T.debuffGrowth, "RIGHT_DOWN", "target default: debuffs too")
     eq(T.castbarSpellAnchor, "RIGHT", "target default: cast bar spell text on the right")
     eq(T.castbarTimerX, 4, "target default: cast bar timer offset mirrored")
     eq(T.castbarIconSide, "RIGHT", "target default: cast bar icon on the right")
@@ -415,10 +415,10 @@ do
     eq(keys(link.elements), "border,buffs,castbar,debuffs,health,portrait,resource,text", "...on the eight pieces")
     eq(link.elements.health.layout .. "/" .. link.elements.health.look, "mirror/same", "...layout mirrored, look shared")
     eq(link.elements.border.layout .. "/" .. link.elements.border.look, "own/same", "...the border has no layout")
-    eq(keys(link.except), "castbarDetached,castbarLatency,debuffFilterBoss,debuffFilterCrowdControl,"
-        .. "debuffFilterDispellable,debuffFilterMine,debuffFilterPriority,debuffFilterRole,directBuffOnlyMine,"
-        .. "directBuffShowAll,directDebuffShowAll,healthColorMode,showBuffs",
-        "...keeping Target's deliberate own defaults (enemy aura filters, colour mode, cast bar detach)")
+    eq(keys(link.except), "buffOffsetY,castbarDetached,castbarLatency,debuffFilterBoss,debuffFilterCrowdControl,"
+        .. "debuffFilterDispellable,debuffFilterMine,debuffFilterPriority,debuffFilterRole,debuffOffsetY,"
+        .. "directBuffOnlyMine,directBuffShowAll,directDebuffShowAll,healthColorMode,showBuffs",
+        "...keeping Target's deliberate own defaults (enemy aura filters, colour mode, cast bar detach, aura row order)")
     eq(keys(root.units.target), "", "a fresh profile: the initial apply stores nothing on Target")
     eq(keys(root.units.player), "", "...nor on Player")
     eq(Links:IsTextMirrored(root, "target"), true, "Target draws the shared text template mirrored")
@@ -432,12 +432,12 @@ do
 
     -- An existing profile with Player customised: the initial apply carries it.
     local old = newProfile()
-    old.units.player.buffGrowth = "LEFT_DOWN"
+    old.units.player.buffGrowth = "LEFT_UP"
     old.units.player.healthTexture = "Smooth"
     old.units.player.healthColorMode = "CUSTOM"
     old.units.player.castbarDetached = true
     Links:Ensure(old)
-    eq(old.units.target.buffGrowth, "RIGHT_DOWN", "existing profile: Player's layout arrives mirrored")
+    eq(old.units.target.buffGrowth, "RIGHT_UP", "existing profile: Player's layout arrives mirrored")
     eq(old.units.target.healthTexture, "Smooth", "...its look arrives as is")
     eq(old.units.target.healthColorMode, nil, "...a kept key does not")
 
@@ -500,6 +500,203 @@ do
     Links:Ensure(busy)
     eq(busy.global.unitLinks.target and busy.global.unitLinks.target.to, "player", "the repair ignores unrelated links")
     eq(busy.global.unitLinks.focus.to, "pet", "...which stay as they are")
+
+    -- A profile already at version 2 with a Player-follows-Target link the user made:
+    -- the later top-up step must not run the orientation repair a second time.
+    local v2 = newProfile()
+    v2.global.unitLinksVersion = 2
+    v2.global.unitLinks = { player = { to = "target", elements = { health = { layout = "same", look = "same" } } } }
+    Links:Ensure(v2)
+    eq(v2.global.unitLinks.player and v2.global.unitLinks.player.to, "target",
+        "a version-2 profile's own Player-follows-Target link is left alone")
+    eq(v2.global.unitLinksVersion, Links.VERSION, "...and the profile is stamped at the current version")
+end
+
+-- ============================================================
+-- 5c. AURA ROW DEFAULTS
+-- Effective values through the unit's settings chain (stored -> unit defaults ->
+-- party defaults), after Links.MirrorDefaults made Target's from Player's. The rows'
+-- rects come from the legacy row maths (AuraContainer layoutRow: icon i's anchor
+-- point sits on the frame's same point, offset + i steps along the growth), which
+-- the engine's flow is meant to match -- a model, so the game is the final word.
+-- ============================================================
+print("-- Unit frames: aura row defaults")
+do
+    local AXIS = { RIGHT = { 1, 0 }, LEFT = { -1, 0 }, UP = { 0, 1 }, DOWN = { 0, -1 } }
+    -- Rects of the first n icons of `prefix`'s row on a w x h frame: { l, r, b, t }
+    -- with the frame's bottom-left at 0,0 and y growing up.
+    local function rowRects(db, prefix, w, h, n)
+        local s = db[prefix .. "Size"]
+        local step = s + db[prefix .. "PaddingX"]
+        local stepY = s + db[prefix .. "PaddingY"]
+        local anchor = db[prefix .. "Anchor"]
+        local p, q = db[prefix .. "Growth"]:match("^(%a+)_(%a+)$")
+        local wrap = db[prefix .. "Wrap"]
+        local ax = anchor:find("LEFT") and 0 or (anchor:find("RIGHT") and w or w / 2)
+        local ay = anchor:find("BOTTOM") and 0 or (anchor:find("TOP") and h or h / 2)
+        local out = {}
+        for i = 1, n do
+            local col, row = (i - 1) % wrap, math.floor((i - 1) / wrap)
+            local px = ax + db[prefix .. "OffsetX"] + (AXIS[p][1] * col + AXIS[q][1] * row) * step
+            local py = ay + db[prefix .. "OffsetY"] + (AXIS[p][2] * col + AXIS[q][2] * row) * stepY
+            local l = anchor:find("LEFT") and px or (anchor:find("RIGHT") and px - s or px - s / 2)
+            local b = anchor:find("BOTTOM") and py or (anchor:find("TOP") and py - s or py - s / 2)
+            out[i] = { l = l, r = l + s, b = b, t = b + s }
+        end
+        return out
+    end
+    local function span(rects)
+        local l, r, b, t = math.huge, -math.huge, math.huge, -math.huge
+        for _, x in ipairs(rects) do
+            l, r, b, t = math.min(l, x.l), math.max(r, x.r), math.min(b, x.b), math.max(t, x.t)
+        end
+        return l, r, b, t
+    end
+
+    local P, T, F = UF:GetUnitDB("player"), UF:GetUnitDB("target"), UF:GetUnitDB("focus")
+    local Pet, B = UF:GetUnitDB("pet"), UF:GetUnitDB("boss")
+
+    -- Target: buffs right under the frame from the left edge, debuffs the row below.
+    eq(T.showBuffs, true, "target: buffs on")
+    eq(T.showDebuffs, true, "target: debuffs on")
+    eq(T.buffAnchor .. " " .. T.buffGrowth, "BOTTOMLEFT RIGHT_DOWN", "target: buffs from the bottom-left, growing right")
+    eq(T.debuffAnchor .. " " .. T.debuffGrowth, "BOTTOMLEFT RIGHT_DOWN", "target: debuffs the same way")
+    eq(T.buffOffsetX .. "," .. T.buffOffsetY, "0,-22", "target: buff row one row (20 + 2) down")
+    eq(T.debuffOffsetX .. "," .. T.debuffOffsetY, "0,-44", "target: debuff row two rows down")
+    eq(T.buffSize .. "/" .. T.buffMax .. "/" .. T.buffWrap, "20/8/8", "target: 20px buffs, 8 in one row")
+    eq(T.debuffSize .. "/" .. T.debuffMax .. "/" .. T.debuffWrap, "20/5/5", "target: 20px debuffs, 5 in one row")
+    local tw, th = T.frameWidth, T.frameHeight
+    local bl, br, bb, bt = span(rowRects(T, "buff", tw, th, T.buffMax))
+    eq(bl, 0, "target: the buff row starts at the frame's left edge")
+    check(br <= tw, "target: a full buff row stays inside the frame's width (" .. br .. " <= " .. tw .. ")")
+    eq(bt, -2, "target: the buff row's top is 2px under the frame")
+    local dl, dr, db_, dt = span(rowRects(T, "debuff", tw, th, T.debuffMax))
+    eq(dl, 0, "target: the debuff row starts at the left edge too")
+    eq(dt, bb - 2, "target: the debuff row's top is 2px under the buff row")
+    check(dr <= tw, "target: a full debuff row stays inside the frame's width")
+
+    -- Player: debuffs only, right under the frame from the RIGHT edge, growing left.
+    eq(P.showBuffs, false, "player: buffs off")
+    eq(P.showDebuffs, true, "player: debuffs on")
+    eq(P.debuffAnchor .. " " .. P.debuffGrowth, "BOTTOMRIGHT LEFT_DOWN", "player: debuffs from the bottom-right, growing left")
+    eq(P.debuffOffsetX .. "," .. P.debuffOffsetY, "0,-22", "player: debuff row one row down")
+    eq(P.buffAnchor .. " " .. P.buffGrowth, "BOTTOMRIGHT LEFT_DOWN", "player: buffs (when on) the same way")
+    eq(P.buffOffsetY, -44, "player: ...one row under the debuffs")
+    local pw, ph = P.frameWidth, P.frameHeight
+    local pl, pr, _, pt = span(rowRects(P, "debuff", pw, ph, P.debuffMax))
+    eq(pr, pw, "player: the debuff row ends at the frame's right edge")
+    eq(pt, -2, "player: the debuff row's top is 2px under the frame")
+    -- The pet frame sits under Player's left half (left edges aligned).
+    check(pl > Pet.frameWidth, "player: a full debuff row stays clear of the pet frame (" .. pl .. " > " .. Pet.frameWidth .. ")")
+
+    -- The default link: Target's layout IS Player's mirrored, for every row key the
+    -- mirror moves; the rows' vertical offsets are kept per frame.
+    for _, k in ipairs({ "buffAnchor", "buffGrowth", "buffOffsetX", "debuffAnchor", "debuffGrowth", "debuffOffsetX" }) do
+        eq(T[k], Links.Mirror(k, P[k]), "link: target's " .. k .. " is player's mirrored")
+    end
+    for _, k in ipairs({ "buffSize", "buffMax", "buffWrap", "buffPaddingX", "debuffSize", "debuffMax", "debuffWrap", "debuffPaddingX" }) do
+        eq(T[k], P[k], "link: " .. k .. " is shared (a look key)")
+    end
+    local diff = Links.DeliberateDifferences("target", "player", Links.DEFAULT.elements)
+    check(diff.buffOffsetY and diff.debuffOffsetY, "link: the rows' vertical offsets are kept per frame")
+    check(not (diff.buffAnchor or diff.buffGrowth or diff.debuffAnchor or diff.debuffGrowth
+        or diff.buffOffsetX or diff.debuffOffsetX or diff.buffSize or diff.debuffMax),
+        "link: nothing else about the rows is kept apart")
+    -- Through a real profile: a fresh default link stores nothing, and the effective
+    -- values on both sides are the defaults above.
+    local root = newProfile()
+    Links:Ensure(root)
+    eq(keys(root.units.target) .. "|" .. keys(root.units.player), "|", "link: a fresh profile stores no aura keys")
+    -- Player's debuff row moved further down does NOT move Target's (kept), but its
+    -- growth turned round does (mirrored).
+    root.units.player.debuffOffsetY = -30
+    root.units.player.debuffGrowth = "LEFT_UP"
+    Links:ApplyFrom(root, "player")
+    eq(root.units.target.debuffOffsetY, nil, "link: Player's debuff row height stays Player's")
+    eq(root.units.target.debuffGrowth, "RIGHT_UP", "link: Player's debuff growth arrives mirrored")
+
+    -- Focus: Target's rows, its own (not linked). Buffs stay off.
+    eq(F.showBuffs, false, "focus: buffs off (unchanged)")
+    eq(F.showDebuffs, true, "focus: debuffs on")
+    for _, k in ipairs({ "buffAnchor", "buffGrowth", "buffOffsetX", "buffOffsetY", "buffSize", "buffMax", "buffWrap",
+                         "debuffAnchor", "debuffGrowth", "debuffOffsetX", "debuffOffsetY", "debuffSize", "debuffMax", "debuffWrap" }) do
+        eq(F[k], T[k], "focus: " .. k .. " as Target's")
+    end
+    local _, fr = span(rowRects(F, "buff", F.frameWidth, F.frameHeight, F.buffMax))
+    check(fr <= F.frameWidth, "focus: a full buff row stays inside its narrower frame (" .. fr .. " <= " .. F.frameWidth .. ")")
+
+    -- Pet: a few small debuffs under the frame; no buffs.
+    eq(Pet.showBuffs, false, "pet: buffs off")
+    eq(Pet.showDebuffs, true, "pet: debuffs on")
+    eq(Pet.debuffAnchor .. " " .. Pet.debuffGrowth, "BOTTOMLEFT RIGHT_DOWN", "pet: from the bottom-left, growing right")
+    eq(Pet.debuffSize .. "/" .. Pet.debuffMax .. "/" .. Pet.debuffWrap, "16/4/4", "pet: four 16px debuffs in one row")
+    local ql, qr, _, qt = span(rowRects(Pet, "debuff", Pet.frameWidth, Pet.frameHeight, Pet.debuffMax))
+    check(ql == 0 and qr <= Pet.frameWidth, "pet: the row fits under the frame")
+    eq(qt, -2, "pet: 2px under the frame")
+
+    -- Target of target and focus target have no aura pages: nothing shows.
+    for _, u in ipairs({ "targettarget", "focustarget" }) do
+        local d = UF:GetUnitDB(u)
+        eq(tostring(d.showBuffs) .. "/" .. tostring(d.showDebuffs), "false/false", u .. ": no auras")
+        for _, rec in ipairs(PD.pages) do
+            if rec.kind == "buffs" or rec.kind == "debuffs" then
+                check(not rec.units[u], u .. ": no " .. rec.kind .. " page to turn them on from")
+            end
+        end
+    end
+
+    -- Boss: debuffs LEFT of the frame, growing left, as tall as the frame; buffs off,
+    -- and on the right if turned on.
+    eq(B.showBuffs, false, "boss: buffs off")
+    eq(B.showDebuffs, true, "boss: debuffs on")
+    eq(B.debuffAnchor .. " " .. B.debuffGrowth, "TOPLEFT LEFT_DOWN", "boss: debuffs from the top-left, growing left")
+    eq(B.debuffSize, B.frameHeight, "boss: debuff icons as tall as the frame")
+    local xl, xr, xb, xt = span(rowRects(B, "debuff", B.frameWidth, B.frameHeight, B.debuffMax))
+    eq(xr, -2, "boss: the debuff row ends 2px left of the frame")
+    eq(xb .. "," .. xt, "0," .. B.frameHeight, "boss: ...and spans the frame's height")
+    check(xl < xr, "boss: ...growing left")
+    local yl, _, _, yt = span(rowRects(B, "buff", B.frameWidth, B.frameHeight, B.buffMax))
+    eq(yl, B.frameWidth + 2, "boss: buffs (when on) start 2px right of the frame")
+    eq(yt, B.frameHeight, "boss: ...level with its top")
+end
+
+-- ============================================================
+-- 5d. THE ONE-TIME TOP-UP OF KEPT KEYS (unitLinksVersion 3)
+-- ============================================================
+print("-- Links: an older Player/Target link learns the aura rows' kept keys once")
+do
+    -- A version-2 profile whose default link predates the aura rows.
+    local old = newProfile()
+    Links:Ensure(old)
+    local link = old.global.unitLinks.target
+    link.except.buffOffsetY, link.except.debuffOffsetY = nil, nil
+    old.global.unitLinksVersion = 2
+    Links:Ensure(old)
+    check(link.except.buffOffsetY and link.except.debuffOffsetY, "the two row offsets are kept per frame now")
+    check(link.except.healthColorMode and link.except.showBuffs, "...its other kept keys stay")
+    eq(old.global.unitLinksVersion, Links.VERSION, "...and the profile is at the current version")
+    Links:ApplyFrom(old, "player")
+    eq(keys(old.units.target), "", "...so an apply from Player copies nothing onto Target")
+
+    -- Only those two: a link the user set to "same" for buffs keeps sharing its anchors.
+    local same = newProfile()
+    Links:Ensure(same)
+    Links:SetElement(same, "target", "buffs", "same", "same")
+    local sl = same.global.unitLinks.target
+    sl.except.buffOffsetY, sl.except.debuffOffsetY = nil, nil
+    same.global.unitLinksVersion = 2
+    Links:Ensure(same)
+    check(sl.except.buffOffsetY, "a 'same' buffs link: the row offset is kept")
+    eq(sl.except.buffAnchor, nil, "...but its anchor is not (still shared)")
+    eq(sl.except.buffGrowth, nil, "...nor its growth")
+
+    -- Unrelated links are not touched.
+    local other = newProfile()
+    other.global.unitLinks = { focus = { to = "target", elements = { buffs = { layout = "same", look = "same" } } } }
+    other.global.unitLinksVersion = 2
+    eq(Links:TopUpKept(other), 0, "a link that is not Player/Target gains nothing")
+    eq(other.global.unitLinks.focus.except, nil, "...and stays as it was")
+    eq(Links:TopUpKept(other), 0, "the top-up runs once")
 end
 
 -- ============================================================
