@@ -886,7 +886,8 @@ end
 local function CopyAnchor(a)
     if type(a) ~= "table" then return nil end
     return { target = a.target, mode = a.mode, edge = a.edge, align = a.align,
-             point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY }
+             point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY,
+             mirrorX = a.mirrorX, mirrorY = a.mirrorY, mirrorPosX = a.mirrorPosX, mirrorPosY = a.mirrorPosY }
 end
 
 -- What the legacy drag handles, the position panel and the Wago API call "x/y": the

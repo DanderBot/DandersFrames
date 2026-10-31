@@ -1513,6 +1513,14 @@ function P:ShowZones(el)
     if not w then return end
     local descendants = {}
     for _, d in ipairs(Registry:Descendants(el.id)) do descendants[d.id] = true end
+    -- A mirrored child drags its parent along (Session:MirrorPartner), so the parent
+    -- and everything hanging off it move during the drag: zones measured on them now
+    -- would be stale by the first frame. They are left out for this drag.
+    local m = NS.Session and NS.Session.mirror
+    if m then
+        descendants[m.partner.id] = true
+        for _, d in ipairs(Registry:Descendants(m.partner.id)) do descendants[d.id] = true end
+    end
     local n = 0
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
