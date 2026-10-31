@@ -559,8 +559,8 @@ do
     sp.builder(sp, UF:GetGlobalDB(), Add, noop, noop)
     local cards = {}
     for _, a in ipairs(added) do if a.w.cardKey then cards[#cards + 1] = a.w.cardKey end end
-    eq(table.concat(cards, ","), "uf_module,uf_preview,uf_movers,uf_source,uf_blizzard",
-       "Settings: Unit Frames, Preview, Position, Frame Source, Blizzard Frames (Linked Frames is a page of its own)")
+    eq(table.concat(cards, ","), "uf_module,uf_movers,uf_source,uf_blizzard",
+       "Settings: Unit Frames, Position, Frame Source, Blizzard Frames (Linked Frames is a page of its own; no Test Mode card)")
     local sources = {}
     for _, d in ipairs(dropdowns) do if d.opts and d.opts.optionsFunc and d.options and d.options.DF then sources[#sources + 1] = d end end
     eq(#sources, #UF.SPAWNED_UNITS, "Settings: one source dropdown per frame this build draws")
@@ -586,14 +586,14 @@ do
     eq(unlocked and unlocked.keys and unlocked.keys[1], "player", "...and to that unit")
     UF.Mover = nil
 
-    -- The Settings page's Test Mode card: the units test mode's switch, and no
-    -- party / raid test mode option (the two modes never mix).
+    -- No Test Mode switch on the Settings page (the window's Test button opens the
+    -- units test panel), and no party / raid test mode option (the two never mix).
     local testSwitch, inTest
     for _, c in ipairs(checks) do
         if c.label == "Test Mode" then testSwitch = c end
         if c.label == "Include Unit Frames in Test Mode" then inTest = c end
     end
-    check(testSwitch and testSwitch.get and testSwitch.set, "Settings: a Test Mode switch (get/set, not a db key)")
+    check(testSwitch == nil, "Settings: no Test Mode switch (the Test button is the way in)")
     check(inTest == nil, "Settings: no Include Unit Frames in Test Mode any more")
 
     -- The Visibility page, built for real.

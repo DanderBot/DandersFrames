@@ -1631,15 +1631,8 @@ function UFO.BuildSettingsPage(self, db, Add)
         function(v) UFO.SetEnabled(v) end), 30)
     Close(band)
 
-    -- The units test mode: sample frames for every unit this build draws
-    -- (UF.Preview), apart from the party / raid test mode. For this session only;
-    -- its panel (the Test button on any Unit Frames page) holds its options.
-    band = Open(L["Test Mode"], "uf_preview", 1,
-        function() return UFO.IsTestModeOn() and L["On"] or L["Off"] end, "rendering")
-    band:AddWidget(GUI:CreateCheckbox(self.child, L["Test Mode"], nil, nil, nil,
-        function() return UFO.IsTestModeOn() end,
-        function(v) UFO.SetTestMode(v); self:RefreshStates() end), 30)
-    Close(band)
+    -- (The units test mode has no switch here: the window's Test button, on any
+    -- Unit Frames page, opens its panel -- TestPanel.lua.)
 
     -- One row per frame this build draws: its name, Edit in Mover, Reset Position.
     band = Open(L["Position"], "uf_movers", 1, nil, "position")

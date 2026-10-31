@@ -388,7 +388,7 @@ end
 print("-- The Settings page and the panel")
 local pages = options_file_source("UnitFrames/Pages.lua")
 check(not pages:find("Include Unit Frames in Test Mode", 1, true), "Settings page: no party test mode option any more")
-check(pages:find("UFO.SetTestMode(v)", 1, true), "Settings page: its Test Mode switch is the units test mode")
+check(not pages:find("UFO.SetTestMode(v)", 1, true), "Settings page: no Test Mode switch of its own (the Test button)")
 check(pages:find("testMode = {", 1, true), "the module brings its own test mode (the Test button follows it)")
 local panelSrc = options_file_source("GUI/Panel.lua")
 check(panelSrc:find("GUI.ModuleTestRoute()", 1, true), "the window's Test button asks the module first")
