@@ -119,49 +119,97 @@ do
     eq(n, 4, "buff and debuff drives pass the frame's seed (create and rebuild)")
 end
 
--- ---- a frame's extra row offset (frame.dfAuraRowOffset) ----------------------
-print("-- Aura rows: a frame's extra row offset")
+-- ---- a frame's own row placement (frame.dfAuraRowPlacement) ------------------
+print("-- Aura rows: a frame's own row placement")
 do
-    local s = auras:find("local function rowExtraOffset(frame, db, prefix)", 1, true)
-    check(s ~= nil, "setup: found rowExtraOffset")
-    local block = auras:sub(s)
+    local s0 = auras:find("local function rowPlacement(frame, db, prefix)", 1, true)
+    check(s0 ~= nil, "setup: found rowPlacement")
+    local block = auras:sub(s0)
     block = block:sub(1, block:find("\nend\n", 1, true) + 4)
-    local rowExtraOffset = assert(loadstring(block .. "\nreturn rowExtraOffset", "@rowExtraOffset"))()
+    local rowPlacement = assert(loadstring(block .. "\nreturn rowPlacement", "@rowPlacement"))()
 
-    local db = { buffAnchor = "TOPLEFT" }
-    eq(select("#", rowExtraOffset({}, db, "buff")), 2, "two answers")
-    local x, y = rowExtraOffset({}, db, "buff")
-    eq(x .. "," .. y, "0,0", "a frame with no hook (party, raid, pinned): 0, 0")
-    x, y = rowExtraOffset(nil, db, "buff")
-    eq(x .. "," .. y, "0,0", "no frame: 0, 0")
+    local db = { buffAnchor = "TOPLEFT", buffGrowth = "RIGHT_UP" }
+    eq(select("#", rowPlacement({}, db, "buff")), 3, "three answers")
+    local x, y, p = rowPlacement({}, db, "buff")
+    eq(x .. "," .. y .. "," .. tostring(p), "0,0,nil", "a frame with no hook (party, raid, pinned): 0, 0, nil")
+    x, y, p = rowPlacement(nil, db, "buff")
+    eq(x .. "," .. y .. "," .. tostring(p), "0,0,nil", "no frame: 0, 0, nil")
     local seen
-    local f = { dfAuraRowOffset = function(frame, d, prefix, anchor)
-        seen = { frame = frame, db = d, prefix = prefix, anchor = anchor }
-        return 3, -21
+    local f = { dfAuraRowPlacement = function(frame, d, prefix, anchor, growth)
+        seen = { frame = frame, db = d, prefix = prefix, anchor = anchor, growth = growth }
+        return 3, -21, "BOTTOMLEFT"
     end }
-    x, y = rowExtraOffset(f, db, "buff")
-    eq(x .. "," .. y, "3,-21", "a hook's answer")
+    x, y, p = rowPlacement(f, db, "buff")
+    eq(x .. "," .. y .. "," .. p, "3,-21,BOTTOMLEFT", "a hook's answer")
     check(seen and seen.frame == f and seen.db == db and seen.prefix == "buff", "...asked with the frame, its table and the row")
-    eq(seen.anchor, "TOPLEFT", "...and the row's anchor")
-    rowExtraOffset(f, {}, "debuff")
-    eq(seen.anchor, "BOTTOMRIGHT", "...the row's default anchor when it has none")
-    f.dfAuraRowOffset = function() error("boom") end
-    x, y = rowExtraOffset(f, db, "buff")
-    eq(x .. "," .. y, "0,0", "a hook that errors: 0, 0 (the row is drawn as configured)")
-    f.dfAuraRowOffset = function() return nil, "x" end
-    x, y = rowExtraOffset(f, db, "buff")
-    eq(x .. "," .. y, "0,0", "a hook that answers nonsense: 0, 0")
+    eq(seen.anchor .. " " .. seen.growth, "TOPLEFT RIGHT_UP", "...and the row's anchor and growth")
+    rowPlacement(f, {}, "debuff")
+    eq(seen.anchor .. " " .. seen.growth, "BOTTOMRIGHT LEFT_UP", "...the row's defaults when it has none")
+    f.dfAuraRowPlacement = function() return 1, 2 end
+    x, y, p = rowPlacement(f, db, "buff")
+    eq(x .. "," .. y .. "," .. tostring(p), "1,2,nil", "a hook with no row corner: nil (the anchor)")
+    f.dfAuraRowPlacement = function() error("boom") end
+    x, y, p = rowPlacement(f, db, "buff")
+    eq(x .. "," .. y .. "," .. tostring(p), "0,0,nil", "a hook that errors: the row is drawn as configured")
+    f.dfAuraRowPlacement = function() return nil, "x", 7 end
+    x, y, p = rowPlacement(f, db, "buff")
+    eq(x .. "," .. y .. "," .. tostring(p), "0,0,nil", "a hook that answers nonsense: 0, 0, nil")
 
     check(auras:find('offsetX  = (g("OffsetX") or 0) + (tonumber(opts.extraOffsetX) or 0) / rowScale,', 1, true) ~= nil,
         "BuildAuraRowConfig: the extra offset is added, in the row's scaled space (x)")
     check(auras:find('offsetY  = (g("OffsetY") or 0) + (tonumber(opts.extraOffsetY) or 0) / rowScale,', 1, true) ~= nil,
         "...(y)")
+    check(auras:find("rowPoint = opts.rowPoint,", 1, true) ~= nil, "...and the row corner rides the layout")
     check(auras:find("local rowScale = tonumber(g(\"Scale\")) or 1\n    if rowScale <= 0 then rowScale = 1 end", 1, true) ~= nil,
         "...a row scale of 0 or nothing counts as 1")
-    local _, n = auras:gsub("extraOffsetX = extraX, extraOffsetY = extraY,", "")
-    eq(n, 4, "buff and debuff drives pass the frame's extra offset (create and rebuild)")
-    local _, m = auras:gsub("local extraMoved = frame%.dfAuraRowOffset ~= nil", "")
-    eq(m, 2, "...and re-apply a row whose extra offset moved, only on a frame with the hook")
+    local _, n = auras:gsub("extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,", "")
+    eq(n, 4, "buff and debuff drives pass the frame's placement (create and rebuild)")
+    local _, m = auras:gsub("local extraMoved = frame%.dfAuraRowPlacement ~= nil", "")
+    eq(m, 2, "...and re-apply a row whose placement moved, only on a frame with the hook")
     check(auras:find("if frame.dfBuffFactoryVersion ~= ver or extraMoved then", 1, true) ~= nil, "buff drive: the re-apply gate")
     check(auras:find("if frame.dfDebuffFactoryVersion ~= ver or selfMoved or extraMoved then", 1, true) ~= nil, "debuff drive: the re-apply gate")
+end
+
+-- ---- layout.rowPoint: the row's own corner on the anchor -----------------------
+print("-- Aura rows: a row's own corner (layout.rowPoint)")
+do
+    local s1 = src:find("local FLOW_NAME = {", 1, true)
+    check(s1 ~= nil, "setup: found FLOW_NAME")
+    local block = src:sub(s1)
+    block = block:sub(1, block:find("\n-- STRIP RESERVATION", 1, true))
+    local resolve = assert(loadstring("local DF = ...\n" .. block .. "\nreturn resolveGrowthLayout",
+        "@resolveGrowthLayout"))({})
+    local function G(anchor, growth, rowPoint)
+        return resolve({ size = 22, spacingX = 1, spacingY = 1, anchor = anchor, growth = growth, rowPoint = rowPoint })
+    end
+    -- Default: unchanged -- the row's corner IS the anchor (every party/raid/AD row).
+    for _, c in ipairs({ { "BOTTOMRIGHT", "LEFT_UP" }, { "BOTTOMLEFT", "RIGHT_UP" }, { "TOPLEFT", "RIGHT_DOWN" },
+                         { "TOPRIGHT", "DOWN_LEFT" }, { "CENTER", "RIGHT_DOWN" } }) do
+        local g = G(c[1], c[2])
+        eq(g.pinPoint .. "/" .. g.flowAnchor .. "/" .. g.anchor, c[1] .. "/" .. c[1] .. "/" .. c[1],
+            "no rowPoint (" .. c[1] .. " " .. c[2] .. "): pinned and flowing from the anchor")
+    end
+    -- Named: the row's corner and the flow corner follow it; the FRAME point stays the anchor.
+    local g = G("BOTTOMLEFT", "RIGHT_DOWN", "TOPLEFT")
+    eq(g.pinPoint .. "/" .. g.flowAnchor .. "/" .. g.anchor, "TOPLEFT/TOPLEFT/BOTTOMLEFT",
+        "a row under the frame: its TOPLEFT on the frame's BOTTOMLEFT, flowing from its top")
+    eq(g.hName .. "/" .. g.vName, "Right/Down", "...the growth is unchanged")
+    g = G("TOPLEFT", "RIGHT_UP", "BOTTOMLEFT")
+    eq(g.pinPoint .. "/" .. g.anchor, "BOTTOMLEFT/TOPLEFT", "a row above the frame: its BOTTOMLEFT on the frame's TOPLEFT")
+    g = G("TOPLEFT", "LEFT_DOWN", "TOPRIGHT")
+    eq(g.pinPoint .. "/" .. g.flowAnchor .. "/" .. g.anchor, "TOPRIGHT/TOPRIGHT/TOPLEFT",
+        "a row left of the frame: its TOPRIGHT on the frame's TOPLEFT")
+    -- Ignored where it cannot apply.
+    g = G("BOTTOM", "RIGHT_DOWN", "TOP")
+    eq(g.pinPoint, "BOTTOM", "an edge midpoint is not a row corner: ignored")
+    g = G("BOTTOMLEFT", "RIGHT_DOWN", "NONSENSE")
+    eq(g.pinPoint, "BOTTOMLEFT", "nonsense: ignored")
+    g = G("BOTTOMLEFT", "CENTER_DOWN", "TOPLEFT")
+    eq(g.pinPoint, "TOP", "a CENTER row keeps its centre-of-edge pin")
+    -- The other two places a row is placed from its settings follow the same corner.
+    check(src:find('local point = (ROW_POINTS[L.rowPoint] and growth:sub(1, 6) ~= "CENTER") and L.rowPoint or anchor', 1, true) ~= nil,
+        "layoutRow (the fallback maths) pins each button by the same corner")
+    check(src:find("b:SetPoint(point, parent, anchor, x, y)", 1, true) ~= nil, "...on the frame's anchor point")
+    check(src:find("tip:SetPoint(G.pinPoint, self.frame, G.anchor, x, y)", 1, true) ~= nil,
+        "the preview's hover zones too")
 end

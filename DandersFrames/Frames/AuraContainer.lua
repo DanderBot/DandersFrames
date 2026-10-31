@@ -3266,6 +3266,9 @@ local AXIS = {
 -- DF growth token -> AnchorUtil.FlowDirection member name.
 local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 
+-- The corners a layout's rowPoint may name (resolveGrowthLayout).
+local ROW_POINTS = { TOPLEFT = true, TOPRIGHT = true, BOTTOMLEFT = true, BOTTOMRIGHT = true }
+
 -- Translate DF's layout vocabulary (anchor/growth/wrap/size/spacing/offset/scale) onto
 -- the container's NATIVE flow layout. Every setter here is a LIVE mutator (each just
 -- MarkDirty(AuraFrameLayout)-s), so this re-applies on a slider drag without a rebuild.
@@ -3360,6 +3363,16 @@ local function resolveGrowthLayout(L)
     else
         out.hName = FLOW_NAME[primary] or "Right"
         out.vName = FLOW_NAME[secondary] or "Down"
+    end
+    -- ★ L.rowPoint (optional): the ROW's own corner placed on the frame's anchor point,
+    -- and the corner the flow starts from. Default: the anchor itself, as always. Icons
+    -- in a row line up on the flow corner's edges, so a row hanging OUTSIDE an edge
+    -- names the corner nearest that edge (under the frame: TOPLEFT on the frame's
+    -- BOTTOMLEFT) and a bigger icon (an important debuff) grows away from the frame
+    -- instead of back into it. The offsets then place that corner.
+    -- Corners only, directional growth only: a CENTER row pins its centre-of-edge.
+    if not out.center and ROW_POINTS[L.rowPoint] then
+        out.pinPoint, out.flowAnchor = L.rowPoint, L.rowPoint
     end
     return out
 end
@@ -3748,10 +3761,10 @@ end
 --
 -- Declared once rather than inlined as a closure so the pcall stays allocation-free on this
 -- per-button-per-pass path -- same reasoning as ProbeSlotArt.
-local function placeButton(b, scale, anchor, parent, x, y)
+local function placeButton(b, scale, point, parent, anchor, x, y)
     b:SetScale(scale)
     b:ClearAllPoints()
-    b:SetPoint(anchor, parent, anchor, x, y)
+    b:SetPoint(point, parent, anchor, x, y)
 end
 
 local function layoutRow(handle)
@@ -3764,6 +3777,9 @@ local function layoutRow(handle)
     local scale = tonumber(L.scale) or 1
     local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
     local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
+    -- The button's own corner: the layout's rowPoint when it names one (see
+    -- resolveGrowthLayout), else the anchor -- the same pin the flow uses.
+    local point = (ROW_POINTS[L.rowPoint] and growth:sub(1, 6) ~= "CENTER") and L.rowPoint or anchor
     local wrap = L.wrap or #handle.buttons
     if wrap < 1 then wrap = #handle.buttons end
 
@@ -3790,7 +3806,7 @@ local function layoutRow(handle)
             x = ppSnapScaled(x, scale)
             y = ppSnapScaled(y, scale)
         end
-        if not pcall(placeButton, b, scale, anchor, handle.frame, x, y) and not warnedLayout then
+        if not pcall(placeButton, b, scale, point, handle.frame, anchor, x, y) and not warnedLayout then
             warnedLayout = true
             DF:DebugWarn(DBG, "layoutRow: slot %d refused placement (forbidden subtree?)", i)
         end
@@ -5754,7 +5770,7 @@ function Handle:_positionTestTip(tip, index)
         + ((pAxis.x * col + sAxis.x * row) * (sx + spX) + pAxis.x * leadExtra) * scale
     local y = (L.offsetY or 0)
         + ((pAxis.y * col + sAxis.y * row) * strideY + pAxis.y * leadExtra + vSign * inset) * scale
-    tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
+    tip:SetPoint(G.pinPoint, self.frame, G.anchor, x, y)
 end
 
 -- Build the per-button styling callback Blizzard invokes (securecallfunction) for each

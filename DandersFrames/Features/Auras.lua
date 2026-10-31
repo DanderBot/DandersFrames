@@ -3497,10 +3497,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             anchor   = g("Anchor") or "BOTTOMRIGHT",
             growth   = g("Growth") or "LEFT_UP",
             wrap     = g("Wrap") or 3,
-            -- + the frame's extra row offset (opts.extraOffsetX/Y, see rowExtraOffset), in
+            -- + the frame's extra row offset (opts.extraOffsetX/Y, see rowPlacement), in
             -- the frame's units, so it is turned into the row's scaled space here.
             offsetX  = (g("OffsetX") or 0) + (tonumber(opts.extraOffsetX) or 0) / rowScale,
             offsetY  = (g("OffsetY") or 0) + (tonumber(opts.extraOffsetY) or 0) / rowScale,
+            -- The row's own corner on the anchor (nil = the anchor; see rowPlacement).
+            rowPoint = opts.rowPoint,
         },
         style = {
             icon   = { show = true, zoom = true, inset = 0 },
@@ -3835,19 +3837,24 @@ local function confirmRetarget(h, label, unit)
     end
 end
 
--- ★ A FRAME'S EXTRA ROW OFFSET (optional). A frame may carry
---     frame.dfAuraRowOffset = function(frame, db, prefix, anchor) -> dx, dy
--- in the frame's own units, added to that row's configured offset -- for a frame that
--- draws something of its own where a row would sit. Party, raid and pinned frames never
--- set it, so for them this is 0, 0 and their rows are exactly as configured.
+-- ★ A FRAME'S OWN ROW PLACEMENT (optional). A frame may carry
+--     frame.dfAuraRowPlacement = function(frame, db, prefix, anchor, growth)
+--                                -> dx, dy [, rowPoint]
+-- dx/dy, in the frame's own units, are added to that row's configured offset (for a
+-- frame that draws something of its own where a row would sit); rowPoint is the
+-- row's own corner placed on the anchor (layout.rowPoint, AuraContainer
+-- resolveGrowthLayout), for a frame whose rows hang outside it. Party, raid and
+-- pinned frames never set it, so for them this is 0, 0, nil and their rows are
+-- exactly as configured.
 -- The answer can move without anything the row drives watch (DF.auraLayoutVersion), so
 -- a drive that sees it move re-applies that row's layout as if the version had bumped.
-local function rowExtraOffset(frame, db, prefix)
-    local fn = frame and frame.dfAuraRowOffset
-    if type(fn) ~= "function" then return 0, 0 end
-    local ok, dx, dy = pcall(fn, frame, db, prefix, db[prefix .. "Anchor"] or "BOTTOMRIGHT")
-    if not ok then return 0, 0 end
-    return tonumber(dx) or 0, tonumber(dy) or 0
+local function rowPlacement(frame, db, prefix)
+    local fn = frame and frame.dfAuraRowPlacement
+    if type(fn) ~= "function" then return 0, 0, nil end
+    local ok, dx, dy, point = pcall(fn, frame, db, prefix,
+        db[prefix .. "Anchor"] or "BOTTOMRIGHT", db[prefix .. "Growth"] or "LEFT_UP")
+    if not ok then return 0, 0, nil end
+    return tonumber(dx) or 0, tonumber(dy) or 0, (type(point) == "string") and point or nil
 end
 
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
@@ -3855,18 +3862,18 @@ end
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
 function DF:DriveBuffFactory(frame, db)
     local h = frame.buffFactory
-    local extraX, extraY = rowExtraOffset(frame, db, "buff")
+    local extraX, extraY, rowPoint = rowPlacement(frame, db, "buff")
     if not h then
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
             testSeed = frame.dfTestAuraSeed,
-            extraOffsetX = extraX, extraOffsetY = extraY,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
         }))
         frame.buffFactory = h
         frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
-        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY = extraX, extraY
+        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY, frame.dfBuffRowPoint = extraX, extraY, rowPoint
         if h then
             frame.buffFactoryStructSig = rowStructSig(h.config)
             frame.buffFactoryTuningSig = rowTuningSig(h.config)
@@ -3905,18 +3912,19 @@ function DF:DriveBuffFactory(frame, db)
     -- rebuilds and tuning are legal there, and the engine holds a restyle back by itself
     -- while auras are secret (AuraContainer.AurasRestricted).
     local ver = DF.auraLayoutVersion or 0
-    -- A frame's extra row offset that moved (rowExtraOffset) counts as a bump for this row.
-    local extraMoved = frame.dfAuraRowOffset ~= nil
-        and (frame.dfBuffRowExtraX ~= extraX or frame.dfBuffRowExtraY ~= extraY)
+    -- A frame's row placement that moved (rowPlacement) counts as a bump for this row.
+    local extraMoved = frame.dfAuraRowPlacement ~= nil
+        and (frame.dfBuffRowExtraX ~= extraX or frame.dfBuffRowExtraY ~= extraY
+             or frame.dfBuffRowPoint ~= rowPoint)
     if frame.dfBuffFactoryVersion ~= ver or extraMoved then
         frame.dfBuffFactoryVersion = ver
-        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY = extraX, extraY
+        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY, frame.dfBuffRowPoint = extraX, extraY, rowPoint
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
             testSeed = frame.dfTestAuraSeed,
-            extraOffsetX = extraX, extraOffsetY = extraY,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
         })
         -- Re-apply the z-order via the engine (buff rows sit at +32, not ApplyZOrder's 40). Frame Level
         -- is deliberately NOT in the sig, so a level-only change never reaches _build.
@@ -4061,7 +4069,7 @@ function DF:DriveDebuffFactory(frame, db)
     end
 
     local h = frame.debuffFactory
-    local extraX, extraY = rowExtraOffset(frame, db, "debuff")
+    local extraX, extraY, rowPoint = rowPlacement(frame, db, "debuff")
     if not h then
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
@@ -4075,9 +4083,9 @@ function DF:DriveDebuffFactory(frame, db)
             unit = frame.unit,
             filterList = filterList,
             testSeed = frame.dfTestAuraSeed,
-            extraOffsetX = extraX, extraOffsetY = extraY,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
         }))
-        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY = extraX, extraY
+        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY, frame.dfDebuffRowPoint = extraX, extraY, rowPoint
         frame.debuffFactory = h
         frame.dfDebuffFactoryVersion = ver
         if h then
@@ -4106,12 +4114,13 @@ function DF:DriveDebuffFactory(frame, db)
         h:SetIntentShown(true)   -- see the buff drive
     end
 
-    -- A frame's extra row offset that moved (rowExtraOffset) counts as a bump for this row.
-    local extraMoved = frame.dfAuraRowOffset ~= nil
-        and (frame.dfDebuffRowExtraX ~= extraX or frame.dfDebuffRowExtraY ~= extraY)
+    -- A frame's row placement that moved (rowPlacement) counts as a bump for this row.
+    local extraMoved = frame.dfAuraRowPlacement ~= nil
+        and (frame.dfDebuffRowExtraX ~= extraX or frame.dfDebuffRowExtraY ~= extraY
+             or frame.dfDebuffRowPoint ~= rowPoint)
     if frame.dfDebuffFactoryVersion ~= ver or selfMoved or extraMoved then
         frame.dfDebuffFactoryVersion = ver
-        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY = extraX, extraY
+        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY, frame.dfDebuffRowPoint = extraX, extraY, rowPoint
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
         filterList = applyDebuffBlacklist(filterList, db)
@@ -4128,7 +4137,7 @@ function DF:DriveDebuffFactory(frame, db)
             unit = frame.unit,
             filterList = filterList,
             testSeed = frame.dfTestAuraSeed,
-            extraOffsetX = extraX, extraOffsetY = extraY,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
         })
         -- Re-apply the z-order via the engine. Frame Level is deliberately NOT in the sig,
         -- so a level-only change never reaches _build.
