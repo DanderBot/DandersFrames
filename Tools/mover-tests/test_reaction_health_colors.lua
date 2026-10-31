@@ -103,3 +103,20 @@ local page = options_file_source("GUI/Pages/Auras.lua")
 local modes = page:match("local colorModes = (%b{})")
 check(modes ~= nil, "found the party/raid Health Bar mode list")
 check(modes and not modes:find("REACTION", 1, true), "the party/raid dropdown does not offer the new modes")
+
+print("-- The secret check comes BEFORE any truth test of the same value")
+-- A boolean test on a secret value errors in game; `x and not IsSecret(x)` tests
+-- x first. The mock above cannot catch that (a table is just truthy), so the
+-- order is checked on the source.
+local fs = SRC:find("\nfunction DF:GetReactionHealthColor(", 1, true)
+local fe = fs and SRC:find("\nend\n", fs, true)
+local body = fs and fe and SRC:sub(fs, fe) or ""
+check(body ~= "", "found GetReactionHealthColor's body")
+local late = {}
+for v in body:gmatch("IsSecret%((%w+)%)") do
+    if body:find("if " .. v .. " and[^\n]*IsSecret%(" .. v .. "%)")
+        or body:find("if " .. v .. " then[^\n]*\n[^\n]*IsSecret%(" .. v .. "%)") then
+        late[#late + 1] = v
+    end
+end
+eq(table.concat(late, ","), "", "no value is truth-tested before its secret check")

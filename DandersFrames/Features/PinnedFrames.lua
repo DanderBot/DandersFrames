@@ -1269,7 +1269,7 @@ function PinnedFrames:UpdateBossHandlerConfig(setIndex)
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
                 DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
-                f.isRaidFrame = IsInRaid()
+                DF:SetRaidFrameFlag(f, IsInRaid())
             end
         end
     end
@@ -1861,7 +1861,7 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
             child.dfTextPresetOverride = set.textDesignerPreset
             DF:SetPixelPerfectSize(child, frameWidth, frameHeight, effDB or db)
             -- Also update the isRaidFrame flag for proper DB selection in other functions
-            child.isRaidFrame = IsInRaid()
+            DF:SetRaidFrameFlag(child, IsInRaid())
             -- Re-render the border now so border edits apply live (the per-frame
             -- ApplyFrameLayout also picks up dfPinnedBorderDB on its next tick).
             if DF.ApplyFrameBorder then DF:ApplyFrameBorder(child, borderDB) end
@@ -3525,7 +3525,7 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
 
     frame.index = index
     frame.dfTestIndex = index
-    frame.isRaidFrame = isRaidMode
+    DF:SetRaidFrameFlag(frame, isRaidMode)
     frame.dfIsTestFrame = true
     frame.dfIsDandersFrame = true
     frame.dfIsPinnedTestFrame = true  -- distinguish from testPartyFrames/testRaidFrames
@@ -3657,7 +3657,7 @@ function PinnedFrames:EnsurePlayerTestFramePool(setIndex, count, isRaidMode, isB
             pool[i].dfAuraPresetOverride = setDB and setDB.auraDesignerPreset
             pool[i].dfTextPresetOverride = setDB and setDB.textDesignerPreset
             pool[i]:SetSize(fw, fh)
-            pool[i].isRaidFrame = isRaidMode
+            DF:SetRaidFrameFlag(pool[i], isRaidMode)
             pool[i].isPinnedBossFrame = isBossSet or false
         end
     end
@@ -3714,7 +3714,7 @@ function PinnedFrames:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
                 DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
-                f.isRaidFrame = isRaidMode
+                DF:SetRaidFrameFlag(f, isRaidMode)
 
                 local slotIndex = i - 1
                 local row = math.floor(slotIndex / unitsPerRow)
