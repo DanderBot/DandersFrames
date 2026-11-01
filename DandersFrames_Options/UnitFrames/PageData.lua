@@ -403,11 +403,11 @@ DF.UnitFramePageData = {
             cards = {
                 resting_icon = { player = true },
                 pvp_icon = { player = true, target = true, focus = true },
-                elite_rare = { target = true, focus = true },
+                elite_rare = { target = true, focus = true, boss = true },
                 class_decorations = { target = true, focus = true, boss = true },
             },
             hide = {
-                eliteIconShowInInstances = { focus = true },
+                eliteIconShowInInstances = { focus = true, boss = true },
                 pvpIconMode = { target = true, focus = true },
                 pvpIconPlayersOnly = { player = true, focus = true },
                 pvpIconStyle = { player = true, focus = true },

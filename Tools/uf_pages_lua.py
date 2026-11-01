@@ -80,7 +80,12 @@ EXTRA_CARDS = {"unitIcons": [("class_decorations", {"target", "focus", "boss"})]
 #   Selection Highlight  Target of Target / Focus Target: the unit is often you or
 #                        your target, and the highlight runs there (only Target's
 #                        own is off for good, Defaults.lua).
-EXTRA_CARD_UNITS = {"indicators_highlights": {"Selection Highlight": {"targettarget", "focustarget"}}}
+#   Elite / Rare         Boss: its frames draw the icon (Indicators.lua IN.ICONS),
+#                        so it needs the card to switch it off.
+EXTRA_CARD_UNITS = {
+    "indicators_highlights": {"Selection Highlight": {"targettarget", "focustarget"}},
+    "indicators_icons": {"Elite / Rare": {"boss"}},
+}
 
 def slug(title):
     return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
