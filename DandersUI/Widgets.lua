@@ -3895,6 +3895,10 @@ function UI:CreateDropdown(parent, opts)
     -- The opener is exposed for callers that need to hang state off the button
     -- itself (see .openerTooltip below).
     container.opener = btn
+    -- ...and the menu, for a host whose opener sits inside a scroll frame: a
+    -- scroll frame clips its descendants, so the host re-parents the menu out
+    -- of it (it stays anchored to the opener; strata is re-asserted on open).
+    container.menuFrame = menuFrame
 
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)

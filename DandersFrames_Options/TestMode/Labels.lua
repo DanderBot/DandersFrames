@@ -9,6 +9,12 @@
 --     and TAGGED with its name;
 --   * its tooltip names the element and the settings page that owns it — appended to
 --     the game's own tooltip where there is one, shown standalone where there is not.
+--   * a left click on the frame opens that page, in the frame's mode, at the element's
+--     section (CLICK TO OPEN SETTINGS, near the end of the file).
+--
+-- Covered: the aura rows, every bar, all text, every status icon, the rested ZZZ, the
+-- dispel overlay, and the frame itself as the fallback. Other modules can add targets
+-- and frame sources (EXTENSION SEAM, end of file).
 --
 -- ☠ ONLY ONE REGION IS EVER MARKED. Marking them all at once was tried and is
 -- unreadable at real frame sizes: three tags, three bracket sets and three tints on a
@@ -37,13 +43,152 @@ DF.TestLabels = TL
 -- Element identity colours. Deliberately NOT the addon's own semantic colours: these
 -- must not be confused with the dispel ring or the important-debuff marker, which are
 -- usually the things being judged when test mode is open.
+-- The frame elements below the five aura rows are grouped by kind (every bar one
+-- colour, every icon one, all text one) — a colour per icon would just be noise, and
+-- the tag already names which one it is. The dispel overlay's colour is a pale pink
+-- that is none of the dispel TYPE colours, for the same reason as above.
+local C_BARS   = { 0.45, 0.80, 0.74 }
+local C_ICONS  = { 0.93, 0.85, 0.45 }
+local C_TEXT   = { 0.86, 0.86, 0.92 }
+local C_DISPEL = { 0.98, 0.62, 0.80 }
+local C_FRAME  = { 0.60, 0.60, 0.66 }
+
+-- The FILLED part of a status bar. A fill bar (absorb, heal prediction) is often laid
+-- over the whole health bar with only its value showing, so the bar's own rect would
+-- claim the entire health bar; the fill texture is what is actually drawn.
+local function sbFill(bar)
+    if type(bar) ~= "table" then return nil end
+    if bar.GetStatusBarTexture then
+        local ok, tex = pcall(bar.GetStatusBarTexture, bar)
+        if ok and tex then return tex end
+    end
+    return bar
+end
+
+-- ☠ L IS READ AT CALL TIME, through these functions, never at file scope — see
+-- labelFor below.
+local function crumb(cat, page) return function() return L[cat] .. " > " .. L[page] end end
+local function text(key) return function() return L[key] end end
+
+-- One Icons-page card per icon. Label and section are the card's own title, so the
+-- click lands on (and expands) exactly that card.
+local function iconTarget(key, field, title)
+    return {
+        key = key, color = C_ICONS, page = "indicators_icons",
+        label = text(title), section = text(title), crumb = crumb("Indicators", "Icons"),
+        find = function(frame, add) add(frame[field]) end,
+    }
+end
+
+-- ★ THE TARGET LIST. The first five are the aura rows, measured by their own paths
+-- below (scanFrame); every other entry carries a `find` that hands over the regions it
+-- draws. Order matters only on a TIE — the hit test is smallest-region-wins and keeps
+-- the earlier entry when two regions are the same size — so the frame fallback is
+-- last, and the dispel overlay (which spans the whole frame) sits just before it.
+--   page     settings page id the click opens
+--   section  exact section header text on that page (scroll + expand + flash), or nil
 local TARGETS = {
-    { key = "buff",      color = { 0.37, 0.76, 0.48 } },
-    { key = "debuff",    color = { 0.88, 0.37, 0.42 } },
-    { key = "defensive", color = { 0.34, 0.65, 0.85 } },
-    { key = "missing",   color = { 0.77, 0.44, 0.79 } },
-    { key = "ad",        color = { 0.88, 0.66, 0.29 } },
+    { key = "buff",      color = { 0.37, 0.76, 0.48 }, page = "auras_buffs" },
+    { key = "debuff",    color = { 0.88, 0.37, 0.42 }, page = "auras_debuffs" },
+    { key = "defensive", color = { 0.34, 0.65, 0.85 }, page = "auras_defensiveicon" },
+    { key = "missing",   color = { 0.77, 0.44, 0.79 }, page = "auras_missingbuffs" },
+    { key = "ad",        color = { 0.88, 0.66, 0.29 }, page = "auras_auradesigner" },
+
+    iconTarget("role",         "roleIcon",         "Role Icon"),
+    iconTarget("leader",       "leaderIcon",       "Leader Icon"),
+    iconTarget("raidTarget",   "raidTargetIcon",   "Target Marker Icon"),
+    iconTarget("readyCheck",   "readyCheckIcon",   "Ready Check Icon"),
+    iconTarget("ping",         "pingIcon",         "Ping Icon"),
+    iconTarget("summon",       "summonIcon",       "Summon Icon"),
+    iconTarget("resurrection", "resurrectionIcon", "Resurrection Icon"),
+    iconTarget("phased",       "phasedIcon",       "Phased Icon"),
+    iconTarget("afk",          "afkIcon",          "AFK Icon"),
+    iconTarget("vehicle",      "vehicleIcon",      "Vehicle Icon"),
+    iconTarget("raidRole",     "raidRoleIcon",     "Raid Role Icon (MT/MA)"),
+    iconTarget("bgCarrier",    "bgCarrierIcon",    "BG Carrier Icon"),
+    iconTarget("combat",       "combatIcon",       "Combat Icon"),
+    {
+        -- Solo mode's rested ZZZ lives on the Visibility page, under Solo Mode.
+        key = "rested", color = C_ICONS, page = "display_visibility",
+        label = text("Rested Indicator"), section = text("Solo Mode"),
+        crumb = crumb("Display", "Visibility"),
+        find = function(frame, add) add(frame.restedIndicator) end,
+    },
+    {
+        -- Legacy name / health / status strings AND every Text Designer string: the
+        -- designer owns all of them now, so they share one key and one page.
+        key = "text", color = C_TEXT, page = "text_designer",
+        label = text("Text Designer"), crumb = crumb("Text", "Text Designer"),
+        find = function(frame, add)
+            add(frame.nameText); add(frame.healthText); add(frame.statusText)
+            local td = frame._tdFontStrings
+            if type(td) == "table" then for _, fs in pairs(td) do add(fs) end end
+        end,
+    },
+    {
+        key = "absorb", color = C_BARS, page = "bars_absorb",
+        label = text("Absorb Shield"), section = text("Absorb Shield"), crumb = crumb("Bars", "Absorbs"),
+        find = function(frame, add)
+            add(sbFill(frame.dfAbsorbBar)); add(sbFill(frame.absorbOverflowBar))
+            add(frame.absorbOvershieldGlow)
+        end,
+    },
+    {
+        key = "healabsorb", color = C_BARS, page = "bars_absorb",
+        label = text("Heal Absorb"), section = text("Heal Absorb"), crumb = crumb("Bars", "Absorbs"),
+        find = function(frame, add) add(sbFill(frame.dfHealAbsorbBar)) end,
+    },
+    {
+        key = "healpred", color = C_BARS, page = "bars_healpred",
+        label = text("Heal Prediction"), crumb = crumb("Bars", "Heal Prediction"),
+        find = function(frame, add)
+            add(sbFill(frame.dfHealPredictionBar)); add(sbFill(frame.dfHealPredictionBar2))
+        end,
+    },
+    {
+        key = "missinghealth", color = C_BARS, page = "bars_health",
+        label = text("Missing Health"), section = text("Missing Health"), crumb = crumb("Bars", "Health Bar"),
+        find = function(frame, add) add(sbFill(frame.missingHealthBar)) end,
+    },
+    {
+        key = "power", color = C_BARS, page = "bars_resource",
+        label = text("Resource Bar"), crumb = crumb("Bars", "Resource Bar"),
+        find = function(frame, add) add(frame.dfPowerBar) end,
+    },
+    {
+        -- The WHOLE bar, not its fill: the empty part of a health bar is still the
+        -- health bar, and the fills drawn over it (above) are all smaller, so they win.
+        key = "health", color = C_BARS, page = "bars_health",
+        label = text("Health Bar"), crumb = crumb("Bars", "Health Bar"),
+        find = function(frame, add) add(frame.healthBar) end,
+    },
+    {
+        key = "dispel", color = C_DISPEL, page = "auras_dispel",
+        label = text("Dispel Overlay"), crumb = crumb("Auras", "Dispel Overlay"),
+        find = function(frame, add)
+            local o = frame.dfDispelOverlay
+            if type(o) ~= "table" then return end
+            add(o)
+            if type(o.icons) == "table" then
+                for _, ic in pairs(o.icons) do add(ic, L["Dispel Symbol"]) end
+            end
+        end,
+    },
+    {
+        -- Anywhere else on the frame. Always the largest region, so it only ever
+        -- answers for space nothing else claims.
+        key = "frame", color = C_FRAME, page = "general_frame",
+        label = text("Frame"), crumb = crumb("General", "Frame"),
+        find = function(frame, add) add(frame) end,
+    },
 }
+local targetByKey = {}
+for _, t in ipairs(TARGETS) do targetByKey[t.key] = t end
+
+local function resolve(v)
+    if type(v) == "function" then return v() end
+    return v
+end
 
 -- Localised at call time, not at file scope: this file loads before the locale refresh
 -- on some paths, and a cached English string would survive a locale change.
@@ -51,6 +196,8 @@ local TARGETS = {
 -- the CreateSubTab labels in GUI/Pages — a tooltip naming a page that does not exist
 -- under that name is worse than no tooltip. (Note "Missing Buffs" is plural on the
 -- page while the test toggle beside it is singular; the page wins here.)
+-- test_testmode_labels_click.lua pins every crumb against the real tab and category
+-- labels.
 local function labelFor(key)
     -- ☠ PLAIN ">" — the game's fonts have no glyph for "▸" (U+25B8) and rendered it as
     -- a filled diamond in game. Nothing else in the addon uses that character; the
@@ -61,7 +208,61 @@ local function labelFor(key)
     if key == "defensive" then return L["Defensive Icon"], auras .. L["Defensive Icon"] end
     if key == "missing"   then return L["Missing Buffs"],  auras .. L["Missing Buffs"] end
     if key == "ad"        then return L["Aura Designer"],  auras .. L["Aura Designer"] end
+    local t = targetByKey[key]
+    if t and t.label then return resolve(t.label) or key, resolve(t.crumb) or "" end
     return key, ""
+end
+
+-- ============================================================
+-- FRAME SOURCES
+-- ============================================================
+-- Which frames get scanned, and how a click on one opens its settings. Party and raid
+-- test frames are the two built in; see the EXTENSION SEAM section at the end of the
+-- file for adding more.
+-- One toggle drives both halves, asked per pool: party and raid keep separate test
+-- settings, so each pool answers for itself.
+local function poolWants(isRaid)
+    if isRaid then
+        if not (DF.raidTestMode and DF.testRaidFrames) then return false end
+        local db = DF.GetRaidDB and DF:GetRaidDB()
+        return (db and db.testShowLabels) and true or false
+    end
+    if not (DF.testMode and DF.testPartyFrames) then return false end
+    local db = DF.GetDB and DF:GetDB()
+    return (db and db.testShowLabels) and true or false
+end
+
+local SOURCES = {
+    {
+        id = "party", mode = "party",
+        wants = function() return poolWants(false) end,
+        each = function(fn)
+            for i = 0, 4 do
+                local f = DF.testPartyFrames and DF.testPartyFrames[i]
+                if f then fn(f) end
+            end
+        end,
+    },
+    {
+        id = "raid", mode = "raid",
+        wants = function() return poolWants(true) end,
+        each = function(fn)
+            for i = 1, 40 do
+                local f = DF.testRaidFrames and DF.testRaidFrames[i]
+                if f then fn(f) end
+            end
+        end,
+    },
+}
+-- frame -> the source that scanned it, filled by TL:Update. Weak: a frame is never
+-- freed, but a source's frames may stop being ours.
+local frameSource = setmetatable({}, { __mode = "k" })
+
+local function anySourceWants()
+    for _, src in ipairs(SOURCES) do
+        if src.wants() then return true end
+    end
+    return false
 end
 
 -- ============================================================
@@ -494,19 +695,18 @@ local function regionForOwner(owner)
     return nil
 end
 
--- Is either test pool asking for labels? One toggle now drives both halves, and the
--- tooltip hook fires from anywhere, so it has to ask both dbs rather than assume a mode.
+-- Is any frame source asking for labels? One toggle drives both test pools, and the
+-- tooltip hook fires from anywhere, so it has to ask every source rather than assume
+-- a mode.
 local function labelsWanted()
-    if not (DF.testMode or DF.raidTestMode) then return false end
-    if DF.testMode then
-        local db = DF.GetDB and DF:GetDB()
-        if db and db.testShowLabels then return true end
-    end
-    if DF.raidTestMode then
-        local db = DF.GetRaidDB and DF:GetRaidDB()
-        if db and db.testShowLabels then return true end
-    end
-    return false
+    return anySourceWants()
+end
+
+-- The "you can click this" hint, on both tooltips. Only while a click would actually
+-- do something: the click is refused in combat.
+local function addClickHint(tt)
+    if InCombatLockdown and InCombatLockdown() then return end
+    tt:AddLine(L["Click to open settings"], 0.45, 0.80, 0.45)
 end
 
 local hooked = false
@@ -525,6 +725,7 @@ local function ensureTooltipHook()
         tt:AddLine(" ")
         tt:AddLine(name, 0.58, 0.51, 0.79)
         if page ~= "" then tt:AddLine(page, 0.62, 0.6, 0.66) end
+        if targetByKey[key] and targetByKey[key].page then addClickHint(tt) end
         tt:Show()   -- re-layout: added lines do not resize an already-shown tooltip
     end)
 end
@@ -717,7 +918,96 @@ local function addRegion(frame, target, reg)
         frame = frame, key = target.key, color = target.color,
         l = reg.l, r = reg.r, t = reg.t, b = reg.b, host = reg.host,
         scale = (okScale and scale) or 1,
+        -- Set for the `find` elements only: the drawn region itself, re-asked for
+        -- visibility at hover time, and a per-region section that outranks the
+        -- target's own (the dispel symbol inside the dispel overlay).
+        obj = reg.obj, section = reg.section,
     }
+end
+
+-- ============================================================
+-- FRAME ELEMENTS (the `find` targets)
+-- ============================================================
+-- ⚠ FAIL OPEN, as elementShown does: a refused or secret read keeps a mark rather than
+-- dropping one. Every element measured here is a plain DF region on a test frame.
+local function objVisible(obj)
+    if type(obj) ~= "table" or not obj.IsVisible then return false end
+    local ok, v = pcall(obj.IsVisible, obj)
+    if not ok then return true end
+    if issecretvalue and issecretvalue(v) then return true end
+    return v and true or false
+end
+
+-- A texture or font string has no scale of its own: it draws in its parent's.
+local function scaleOf(obj)
+    local probe = obj
+    if not probe.GetEffectiveScale and probe.GetParent then
+        local ok, p = pcall(probe.GetParent, probe)
+        probe = ok and p or nil
+    end
+    if not (probe and probe.GetEffectiveScale) then return nil end
+    local ok, s = pcall(probe.GetEffectiveScale, probe)
+    if ok and type(s) == "number" and s > 0 then return s end
+    return nil
+end
+
+-- The region's rect IN THE PARTY/RAID FRAME'S OWN SPACE. ☠ CONVERTED, NOT READ RAW: the status
+-- icons carry their own scale setting, and GetLeft answers in the region's own
+-- effective scale — compared raw against a cursor divided by the frame's scale, a
+-- scaled icon would be hit-tested somewhere it is not. Every rect handed to the hover
+-- list is therefore in one space, the frame's, which is also what `place` anchors in.
+-- Second return on failure: "unmeasured" (no rect at all, the creation-tick case the
+-- settle retry waits out) vs nil (measured, and simply too small to mark — an empty
+-- string, a bar at zero).
+local function objRect(obj, frameScale)
+    local ok, l, r, t, b = pcall(function()
+        return obj:GetLeft(), obj:GetRight(), obj:GetTop(), obj:GetBottom()
+    end)
+    if not ok then return nil, "unmeasured" end
+    if not (l and r and t and b) then return nil, "unmeasured" end
+    if issecretvalue and (issecretvalue(l) or issecretvalue(r) or issecretvalue(t) or issecretvalue(b)) then
+        return nil
+    end
+    local s = scaleOf(obj)
+    local k = (s and frameScale and frameScale > 0) and (s / frameScale) or 1
+    l, r, t, b = l * k, r * k, t * k, b * k
+    if (r - l) < 1 or (t - b) < 1 then return nil end
+    return l, r, t, b
+end
+
+-- Every region a `find` target hands over, measured. Anchored to the party/raid FRAME ITSELF (the
+-- rects are in its space, above) and ☠ registered as tooltip host for NOTHING: the
+-- health bar and the overlay frames are ancestors of the aura buttons, so a host here
+-- would make the owner walk name every aura on the frame as a bar.
+local function findRegions(frame, target)
+    local regs, pending = {}, false
+    local okFs, fs = pcall(frame.GetEffectiveScale, frame)
+    fs = (okFs and fs) or 1
+    local seen = {}
+    local function add(obj, section)
+        if type(obj) ~= "table" or seen[obj] then return end
+        seen[obj] = true
+        if not objVisible(obj) then return end
+        local l, r, t, b = objRect(obj, fs)
+        if not l then
+            if r == "unmeasured" then pending = true end
+            return
+        end
+        regs[#regs + 1] = { l = l, r = r, t = t, b = b, host = frame, hosts = {},
+                            obj = obj, section = section }
+    end
+    local ok, err = pcall(target.find, frame, add)
+    if not ok and DF.DebugWarn then
+        DF:DebugWarn("TEST", "Indicator Info: target %s failed: %s", tostring(target.key), tostring(err))
+    end
+    return regs, pending
+end
+
+-- Is this hover region still on screen? `find` regions re-ask their own drawn region;
+-- the aura rows go through elementShown.
+local function regionAlive(reg)
+    if reg.obj then return objVisible(reg.obj) end
+    return elementShown(reg.frame, reg.key)
 end
 
 -- Returns whether anything on this frame is RENDERING BUT NOT YET MEASURABLE, which is
@@ -729,7 +1019,11 @@ local function scanFrame(frame)
     local pending = false
     for _, target in ipairs(TARGETS) do
         local before = #hoverRegions
-        if target.key == "ad" then
+        if target.find then
+            local regs, unmeasured = findRegions(frame, target)
+            for _, reg in ipairs(regs) do addRegion(frame, target, reg) end
+            if unmeasured then pending = true end
+        elseif target.key == "ad" then
             -- Many regions, one per placement. Gathered into a scratch list rather
             -- than appended directly so the "did this element produce anything"
             -- test below reads the same for every key.
@@ -748,7 +1042,7 @@ local function scanFrame(frame)
         -- signal a container has been rebuilt this tick and has no rect yet — the
         -- creation-tick rule — and it is the ONLY thing that distinguishes "not ready"
         -- from "legitimately switched off".
-        if #hoverRegions == before and elementShown(frame, target.key) then
+        if not target.find and #hoverRegions == before and elementShown(frame, target.key) then
             pending = true
         end
     end
@@ -767,7 +1061,7 @@ local function regionUnderCursor()
         -- the marks reflect only what was switched on when test mode opened. The rect can
         -- go stale the same way, but a rebuild follows every settings change that MOVES a
         -- row — where an on/off flip has to read true the moment it happens.
-        if s and s > 0 and elementShown(reg.frame, reg.key) then
+        if s and s > 0 and regionAlive(reg) then
             local x, y = cx / s, cy / s
             if x >= reg.l and x <= reg.r and y >= reg.b and y <= reg.t then
                 local area = (reg.r - reg.l) * (reg.t - reg.b)
@@ -808,6 +1102,7 @@ local function showOwnTip(reg)
     tt:ClearLines()
     tt:AddLine(name, 1, 1, 1)
     if page ~= "" then tt:AddLine(page, 0.58, 0.51, 0.79) end
+    if targetByKey[reg.key] and targetByKey[reg.key].page then addClickHint(tt) end
     tt:Show()
 end
 
@@ -1015,28 +1310,10 @@ local function ensureHoverDriver()
     return hoverDriver
 end
 
+-- Every frame of every source, wanted or not: teardown has to reach frames whose
+-- source has just stopped asking.
 local function eachTestFrame(fn)
-    for i = 0, 4 do
-        local f = DF.testPartyFrames and DF.testPartyFrames[i]
-        if f then fn(f) end
-    end
-    for i = 1, 40 do
-        local f = DF.testRaidFrames and DF.testRaidFrames[i]
-        if f then fn(f) end
-    end
-end
-
--- One toggle drives both halves, asked per pool: party and raid keep separate test
--- settings, so each pool answers for itself.
-local function poolWants(isRaid)
-    if isRaid then
-        if not (DF.raidTestMode and DF.testRaidFrames) then return false end
-        local db = DF.GetRaidDB and DF:GetRaidDB()
-        return (db and db.testShowLabels) and true or false
-    end
-    if not (DF.testMode and DF.testPartyFrames) then return false end
-    local db = DF.GetDB and DF:GetDB()
-    return (db and db.testShowLabels) and true or false
+    for _, src in ipairs(SOURCES) do src.each(fn) end
 end
 
 -- ☠ THE FIRST PASS AFTER A RELOAD MEASURES NOTHING, AND ONE TICK IS NOT ENOUGH.
@@ -1063,7 +1340,7 @@ local function scheduleSettle()
     C_Timer.After(SETTLE_GAP, function()
         -- Superseded by a newer full pass: that one owns the budget now.
         if gen ~= settleGen then return end
-        if not (poolWants(false) or poolWants(true)) then return end
+        if not anySourceWants() then return end
         TL:Update(true)
     end)
 end
@@ -1085,12 +1362,16 @@ function TL:Update(settling)
     for i = #hoverRegions, 1, -1 do hoverRegions[i] = nil end
     for k in pairs(regionOf) do regionOf[k] = nil end
 
+    for k in pairs(frameSource) do frameSource[k] = nil end
+
     local pending = false
-    if poolWants(false) then
-        for i = 0, 4 do if scanFrame(DF.testPartyFrames[i]) then pending = true end end
-    end
-    if poolWants(true) then
-        for i = 1, 40 do if scanFrame(DF.testRaidFrames[i]) then pending = true end end
+    for _, src in ipairs(SOURCES) do
+        if src.wants() then
+            src.each(function(f)
+                frameSource[f] = src
+                if scanFrame(f) then pending = true end
+            end)
+        end
     end
 
     -- Drive whatever DID measure straight away; a partial answer beats a blank one
@@ -1111,7 +1392,7 @@ function TL:Update(settling)
     -- worth retrying into, and elementShown fails OPEN on a refused read, so the cost
     -- is bounded and the alternative is dropping the case this exists for.
     if (pending or #hoverRegions == 0)
-        and settleLeft > 0 and (poolWants(false) or poolWants(true)) then
+        and settleLeft > 0 and anySourceWants() then
         settleLeft = settleLeft - 1
         scheduleSettle()
     else
@@ -1132,6 +1413,7 @@ function TL:Clear()
     for i = #hoverRegions, 1, -1 do hoverRegions[i] = nil end
     eachTestFrame(hideWidgets)
     for k in pairs(regionOf) do regionOf[k] = nil end
+    for k in pairs(frameSource) do frameSource[k] = nil end
 end
 
 -- ============================================================
@@ -1167,6 +1449,136 @@ function TL:Invalidate()
         -- between the request and the pass.
         if labelsWanted() then TL:Update() end
     end)
+end
+
+-- ============================================================
+-- CLICK TO OPEN SETTINGS
+-- ============================================================
+-- A left click on a test frame opens the settings page of whatever is marked under
+-- the cursor, in that frame's mode, and scrolls to (expands, flashes) its section.
+-- ☠ STILL NOTHING TAKES THE MOUSE. The click arrives through the test frame's OWN
+-- OnClick (TestFramePool) — the frame was already mouse-enabled for hover — and the
+-- region is resolved by the same cursor-vs-rect test the hover uses. Aura buttons on
+-- test frames pass clicks through to the frame (SetMouseClickEnabled(false)), so a
+-- click on an icon reaches here too.
+-- Refused: with Indicator Info off (identical to before this existed), in combat (the
+-- window and its mode switch are not safe there), and during a mover session (the
+-- click belongs to the slabs).
+
+-- The group-frames navigation, the same steps as the mover panel's Configure button
+-- (Features/MoverBridge.lua openOptionsPage): window up, mode switched only when it
+-- differs, then the shared link action owns the tab switch, scroll, expand and flash.
+local function openGroupPage(mode, pageId, section)
+    local GUI = DF.GUI
+    if not GUI then return end
+    if not (DF.GUIFrame and DF.GUIFrame:IsShown()) then
+        if DF.ToggleGUI then DF:ToggleGUI() end
+    end
+    if not (DF.GUIFrame and DF.GUIFrame:IsShown()) then return end
+    -- ⚠ A mode switch carries test mode across with it (ModuleRegistry's EnterParty /
+    -- EnterRaid). Asked only when the window shows the other mode, which with one
+    -- preview up is the only time it can differ from the frame clicked.
+    if mode and GUI.SelectedMode ~= mode and GUI.SelectModule then
+        GUI:SelectModule("group", (mode == "raid") and "raid" or "party")
+    end
+    if GUI.LinkToSetting then
+        GUI:LinkToSetting({
+            page = pageId,
+            section = section,
+            -- Border only: a section is a large target; see Search's own jump.
+            flash = section and { fill = false, border = true } or false,
+        })
+    elseif GUI.SelectTab then
+        GUI.SelectTab(pageId)
+    end
+end
+
+-- Returns true when the click opened something.
+function TL:HandleClick(frame, button)
+    if button and button ~= "LeftButton" then return false end
+    if InCombatLockdown and InCombatLockdown() then return false end
+    if moverSessionOpen() then return false end
+    local src = frameSource[frame]
+    if not (src and src.wants()) then return false end
+    local reg = regionUnderCursor()
+    if not reg then return false end
+    local target = targetByKey[reg.key]
+    if not (target and target.page) then return false end
+    local section = reg.section or resolve(target.section)
+    -- The MARKED region's frame decides the mode, not the clicked one: a row can hang
+    -- past its own frame's edge over a neighbour.
+    local owner = frameSource[reg.frame] or src
+    if owner.open then
+        owner.open(reg.frame, target, section)
+    else
+        openGroupPage(owner.mode, target.page, section)
+    end
+    if ownTip then ownTip:Hide() end
+    return true
+end
+
+-- ============================================================
+-- EXTENSION SEAM — targets and frame sources from other modules
+-- ============================================================
+-- Kept deliberately small. Both calls take effect on the next TL:Update.
+--
+-- TL:RegisterTarget(def) -> true, or false when the key is taken / def is invalid
+--   key      unique string (also the per-frame widget pool key)
+--   color    { r, g, b } — keep it clear of the addon's semantic colours (see TARGETS)
+--   page     settings page id the click opens
+--   section  optional: string, or function returning the EXACT section header text
+--   label    string, or function returning the element's name (tag + tooltip)
+--   crumb    string, or function returning "Category > Page" — identical to the real
+--            tab labels
+--   find     function(frame, add): call add(region [, sectionOverride]) for every
+--            region the element draws on `frame`. Called for every frame of every
+--            source; a frame without the element adds nothing. Hidden or unmeasurable
+--            regions are dropped for you. Smallest region under the cursor wins.
+--   Registered targets go just before the frame fallback, so they beat it on a tie.
+--
+-- TL:RegisterFrameSource(def) -> true, or false when the id is taken / def is invalid
+--   id       unique string
+--   each     function(fn): call fn(frame) for every frame this source owns
+--   wants    function(): true while its frames should be labelled
+--   open     optional function(frame, target, section): replaces the default
+--            navigation (group settings, in `mode`)
+--   mode     optional "party" | "raid", for the default navigation
+--   The source's frames must call DandersFrames.TestLabels:HandleClick(frame, button)
+--   from their own OnClick; nothing here hooks a frame it does not own.
+function TL:RegisterTarget(def)
+    if type(def) ~= "table" or type(def.key) ~= "string" or targetByKey[def.key]
+        or type(def.find) ~= "function" or type(def.page) ~= "string" then
+        return false
+    end
+    def.color = def.color or C_FRAME
+    -- Before the frame fallback: always the last entry.
+    table.insert(TARGETS, #TARGETS, def)
+    targetByKey[def.key] = def
+    return true
+end
+
+function TL:RegisterFrameSource(def)
+    if type(def) ~= "table" or type(def.id) ~= "string"
+        or type(def.each) ~= "function" or type(def.wants) ~= "function" then
+        return false
+    end
+    for _, src in ipairs(SOURCES) do
+        if src.id == def.id then return false end
+    end
+    SOURCES[#SOURCES + 1] = def
+    return true
+end
+
+-- Read-only view of every target, resolved (labels and sections localised now). For
+-- tests and diagnostics; the tables handed back are copies.
+function TL:DescribeTargets()
+    local out = {}
+    for _, t in ipairs(TARGETS) do
+        local label, crumbText = labelFor(t.key)
+        out[#out + 1] = { key = t.key, page = t.page, section = resolve(t.section),
+                          label = label, crumb = crumbText }
+    end
+    return out
 end
 
 function DF:UpdateTestLabels() TL:Update() end

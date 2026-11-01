@@ -526,6 +526,11 @@ function UI:CreateRowList(parent, opts)
             row.Control:SetSize(M.dropdownW, M.dropdownH)
             row.Control:SetPoint("RIGHT", row, "RIGHT", 0, 0)
             row.controlWidth = M.dropdownW
+            -- ☠ The rows live in a scroll frame, which clips its descendants: a
+            -- menu parented under the opener was cut off at the list's bottom
+            -- edge, hiding most of its options. Parent it to the list itself.
+            local menu = row.Control.menuFrame
+            if menu and menu.SetParent then menu:SetParent(list) end
         end
         return row
     end
