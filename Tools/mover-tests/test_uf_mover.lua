@@ -75,7 +75,7 @@ check(M:Init(), "a second init is a no-op")
 local A = "DandersFrames_UnitFrames"
 eq(M.ADDON_KEY, A, "addon key")
 check(lib.addons[A] ~= nil, "addon registered")
-eq(lib.addons[A] and lib.addons[A].title, "L:Unit Frames", "...titled from the locale")
+eq(lib.addons[A] and lib.addons[A].title, "Danders Unit Frames", "...titled with its brand name (never localised)")
 
 local P, T, TT = lib.defs[A .. ":player"], lib.defs[A .. ":target"], lib.defs[A .. ":targettarget"]
 check(P and T and TT, "player, target and target of target registered")

@@ -313,10 +313,11 @@ function M:Init()
     if not Lib then return false end
     if M.initialised then return true end
     M.initialised = true
-    local L = DF.L or {}
     Lib:RegisterAddon(M.ADDON_KEY, {
-        title = L["Unit Frames"] or "Unit Frames",
-        icon  = "Interface\\AddOns\\DandersFrames\\Media\\DF_Icon",
+        -- A brand name, like "DandersFrames" beside it: never localised. Says
+        -- where these movers come from in DandersMover's Registered addons.
+        title = "Danders Unit Frames",
+        icon  ="Interface\\AddOns\\DandersFrames\\Media\\DF_Icon",
     })
     for _, unit in ipairs(UF.SPAWNED_UNITS) do
         if unit == "boss" then
