@@ -50,6 +50,15 @@ local group = { unit = "target", dfPowerBar = bar() }
 DFs:UpdateResourceBar(group)
 check(not group.dfPowerBar.shown, "a group frame on a non-group unit still hides it, as before")
 
+-- The same unit gate in the absorb, heal absorb and heal prediction painters:
+-- every one exempts a standalone frame, so a target or focus frame paints them.
+do
+    local _, n = SRC:gsub("not frame%.dfStandalone and unit ~= \"player\"", "")
+    eq(n, 4, "resource, absorb, heal absorb and heal prediction all exempt a standalone frame")
+    local _, raw = SRC:gsub("%(unit ~= \"player\" and not unit:match", "")
+    eq(raw, 0, "...and no ungated copy of the check is left")
+end
+
 local party = { unit = "party2", dfPowerBar = bar() }
 DFs:UpdateResourceBar(party)
 check(party.dfPowerBar.shown and party.dfPowerBar.value == 40, "a party unit is unchanged")
