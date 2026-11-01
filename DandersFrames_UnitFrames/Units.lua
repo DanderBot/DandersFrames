@@ -502,6 +502,8 @@ function Units:Build(key, unit, token, name, parent, slot)
     f.dfUFSlot = slot
     -- Where its aura rows sit: their own corner and the cast bar reserve (Elements.lua).
     f.dfAuraRowPlacement = UF.AuraRowPlacement
+    -- Its highlights trace the frame with its portrait and class power bar (Indicators.lua).
+    f.dfHighlightShape = UF.Indicators and UF.Indicators.HighlightShape or nil
     UF:StampDesigners(f, db)
     f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(unit) or false
     if VEHICLE[unit] then f:SetAttribute("toggleForVehicle", true) end

@@ -829,20 +829,24 @@ local function Bridge(cells, nx, ny, xs, ys, maxLen, along)
     return changed
 end
 
--- The pieces that glow the outline of the rects' union, spread px wide:
--- a list of { kind, x, y, w, h [, texcoords [, band]] } (host units, y
--- downwards; kind keys GLOW_COORDS, which a cut piece overrides; band = the
--- carry-on of a strip past a cut inside corner, the one piece that may overlap
--- another -- a step's outside corner). nil / empty rects = none.
-local function GlowOutlinePieces(rects, spread)
+-- The union of the rects as a cell grid: cells[i][j] = true where covered, cell
+-- (i, j) spanning xs[i]..xs[i + 1] by ys[j]..ys[j + 1]. Steps 1 and 2 above
+-- (snap, then bridge empty runs no longer than maxGap; 0 / nil = none). nil
+-- when no rect has an area.
+-- exact: skip the rounding and the snap -- the rects are already final (pixel-
+-- snapped by the caller, who needs the union as given rather than tidied).
+local function OutlineGrid(rects, maxGap, exact)
     local work = {}
     for _, r in ipairs(rects or {}) do
-        local l, t, rr, b = Round(r[1]), Round(r[2]), Round(r[3]), Round(r[4])
+        local l, t, rr, b = r[1], r[2], r[3], r[4]
+        if not exact then l, t, rr, b = Round(l), Round(t), Round(rr), Round(b) end
         if rr > l and b > t then work[#work + 1] = { l, t, rr, b } end
     end
-    if #work == 0 then return {} end
-    SnapEdges(work, 1, true); SnapEdges(work, 3, false)
-    SnapEdges(work, 2, true); SnapEdges(work, 4, false)
+    if #work == 0 then return nil end
+    if not exact then
+        SnapEdges(work, 1, true); SnapEdges(work, 3, false)
+        SnapEdges(work, 2, true); SnapEdges(work, 4, false)
+    end
 
     local xs, ys = UniqueSorted(work, 1, 3), UniqueSorted(work, 2, 4)
     local nx, ny = #xs - 1, #ys - 1
@@ -856,12 +860,103 @@ local function GlowOutlinePieces(rects, spread)
             for j = yi[r[2]], yi[r[4]] - 1 do cells[i][j] = true end
         end
     end
-    local maxGap = spread * 2
-    for _ = 1, 4 do
-        local a = Bridge(cells, nx, ny, xs, ys, maxGap, "x")
-        local b = Bridge(cells, nx, ny, xs, ys, maxGap, "y")
-        if not (a or b) then break end
+    if maxGap and maxGap > 0 then
+        for _ = 1, 4 do
+            local a = Bridge(cells, nx, ny, xs, ys, maxGap, "x")
+            local b = Bridge(cells, nx, ny, xs, ys, maxGap, "y")
+            if not (a or b) then break end
+        end
     end
+    return cells, xs, ys, nx, ny
+end
+DF.OutlineGrid = OutlineGrid
+
+-- The outline of an OutlineGrid union as closed loops of corners. Each loop is
+-- { n = corners, x = {}, y = {}, dx = {}, dy = {}, convex = {} }: edge k runs
+-- from corner k to corner k + 1 (n wraps to 1) in direction dx[k], dy[k] (one
+-- of them 0, the other +-1), and convex[k] says whether the outline turns
+-- outwards at corner k. Every loop runs with the covered side on its RIGHT
+-- (y downwards: clockwise round the outside, anticlockwise round a hole), so an
+-- edge's inside is always (-dy, dx). Where two covered cells meet only at a
+-- corner the tightest right turn is taken, so the two stay separate loops.
+local function OutlineLoops(cells, xs, ys, nx, ny)
+    local function C(i, j) return i >= 1 and i <= nx and j >= 1 and j <= ny and cells[i][j] == true end
+    local stride = ny + 2
+    local out, segs = {}, {}
+    local function Add(i1, j1, i2, j2)
+        local id = i1 * stride + j1
+        local list = out[id]
+        if not list then list = {}; out[id] = list end
+        local s = { i1, j1, i2, j2, i2 - i1, j2 - j1 }
+        list[#list + 1] = s
+        segs[#segs + 1] = s
+    end
+    for j = 1, ny + 1 do
+        for i = 1, nx do
+            local above, below = C(i, j - 1), C(i, j)
+            if below and not above then Add(i, j, i + 1, j)
+            elseif above and not below then Add(i + 1, j, i, j) end
+        end
+    end
+    for i = 1, nx + 1 do
+        for j = 1, ny do
+            local left, right = C(i - 1, j), C(i, j)
+            if left and not right then Add(i, j, i, j + 1)
+            elseif right and not left then Add(i, j + 1, i, j) end
+        end
+    end
+
+    local used, loops = {}, {}
+    -- Right turn first, then straight on, then left (cross > 0 is a right turn
+    -- with y downwards).
+    local function Next(seg, first)
+        local best, bestRank
+        for _, c in ipairs(out[seg[3] * stride + seg[4]] or {}) do
+            if not used[c] or c == first then
+                local cross = seg[5] * c[6] - seg[6] * c[5]
+                local rank = (cross > 0 and 1) or (cross == 0 and 2) or 3
+                if not bestRank or rank < bestRank then best, bestRank = c, rank end
+            end
+        end
+        return best
+    end
+    for _, first in ipairs(segs) do
+        if not used[first] then
+            local chain, seg = {}, first
+            repeat
+                used[seg] = true
+                chain[#chain + 1] = seg
+                seg = Next(seg, first)
+            until not seg or seg == first
+            -- corners only: a segment that carries on in the same direction
+            -- extends the edge before it
+            local lp = { n = 0, x = {}, y = {}, dx = {}, dy = {}, convex = {} }
+            local m = #chain
+            for k = 1, m do
+                local prev, s = chain[(k == 1) and m or k - 1], chain[k]
+                if prev[5] ~= s[5] or prev[6] ~= s[6] then
+                    local n = lp.n + 1
+                    lp.n = n
+                    lp.x[n], lp.y[n] = xs[s[1]], ys[s[2]]
+                    lp.dx[n], lp.dy[n] = s[5], s[6]
+                    lp.convex[n] = (prev[5] * s[6] - prev[6] * s[5]) > 0
+                end
+            end
+            if lp.n >= 4 then loops[#loops + 1] = lp end
+        end
+    end
+    return loops
+end
+DF.OutlineLoops = OutlineLoops
+
+-- The pieces that glow the outline of the rects' union, spread px wide:
+-- a list of { kind, x, y, w, h [, texcoords [, band]] } (host units, y
+-- downwards; kind keys GLOW_COORDS, which a cut piece overrides; band = the
+-- carry-on of a strip past a cut inside corner, the one piece that may overlap
+-- another -- a step's outside corner). nil / empty rects = none.
+local function GlowOutlinePieces(rects, spread)
+    local cells, xs, ys, nx, ny = OutlineGrid(rects, spread * 2)
+    if not cells then return {} end
 
     local function C(i, j) return i >= 1 and i <= nx and j >= 1 and j <= ny and cells[i][j] == true end
 

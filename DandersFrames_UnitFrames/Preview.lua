@@ -450,6 +450,8 @@ function P:Build(unit, name, parent, slot)
     f.dfTestAuraSeed = P.AURA_SEEDS[unit]
     -- Where its aura rows sit, as on the live frame (Elements.lua).
     f.dfAuraRowPlacement = UF.AuraRowPlacement
+    -- Its highlights' outline, as on the live frame (Indicators.lua).
+    f.dfHighlightShape = UF.Indicators and UF.Indicators.HighlightShape or nil
     f.index = f.dfTestData.index
     f.dfTestSelected = (unit == P.SELECTED_UNIT)
     f:EnableMouse(true)

@@ -1817,6 +1817,15 @@ function DF:LightweightUpdateHighlight(highlightType)
             -- them. Drop it or the next full update sees a matching signature and
             -- skips, leaving these drag-time values in place permanently.
             if DF.InvalidateHighlightStyle then DF:InvalidateHighlightStyle(highlight) end
+            -- ☠ AN OUTLINED HIGHLIGHT (frame.dfHighlightShape, Features/Highlights.lua)
+            -- is not drawn with the four lines at all -- they sit hidden while its own
+            -- strips trace the outline. Writing them here would paint a rectangle over
+            -- the outline for the rest of the drag, so it takes the full redraw instead
+            -- (the cache is already dropped above, so it runs in full).
+            if frame.dfHighlightShape then
+                if DF.UpdateHighlights then DF:UpdateHighlights(frame) end
+                return
+            end
             highlight:SetAlpha(alpha)
 
             -- ☠ SNAP THE SAME WAY THE REAL RENDERER DOES. Because this writes the

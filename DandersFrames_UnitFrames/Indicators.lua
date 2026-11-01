@@ -156,16 +156,45 @@ end
 -- The rects the resting glow traces the outline of: the frame, an attached
 -- class power bar, and an outside portrait while Include Portrait is on. One
 -- outline round their union (an L or a step), never an empty glowing corner.
-function IN.GlowRects(f, db)
+local function UnitRects(f, db, withPortrait)
     local rects = { { 0, 0, K.FrameWidth(f, db), K.FrameHeight(f, db) } }
     local l, t, r, b = IN.ClassPowerRect(f, db)
     if l then rects[#rects + 1] = { l, t, r, b } end
     local PO = UF.Portrait
-    if db and db.restingIconGlowPortrait ~= false and PO and PO.OutsideRect then
+    if withPortrait and PO and PO.OutsideRect then
         l, t, r, b = PO.OutsideRect(f, db)
         if l then rects[#rects + 1] = { l, t, r, b } end
     end
     return rects
+end
+
+function IN.GlowRects(f, db)
+    return UnitRects(f, db, db and db.restingIconGlowPortrait ~= false)
+end
+
+-- The Selection / Hover / Aggro highlights trace the same outline (DandersFrames'
+-- frame.dfHighlightShape, Features/Highlights.lua): the frame, an attached class
+-- power bar and an outside portrait -- the portrait ALWAYS; Include Portrait is
+-- the resting glow's own switch. Never the cast bar or anything detached. Set on
+-- every unit button, live (Units.lua) and preview (Preview.lua).
+function IN.HighlightShape(f)
+    local db = K.DB(f)
+    if not db then return nil end
+    return UnitRects(f, db, true)
+end
+
+-- The outline moves with the frame's size, the portrait and the class power bar,
+-- and a highlight only re-traces when it is next applied. Every one of those
+-- settings lays this element out (Units:ApplyLayout, the live slider path's
+-- portrait / class power entries, the preview's own), so a highlight that is up
+-- is re-applied from here; one that is not picks the new outline up when it shows
+-- (the shape is part of its style signature).
+function IN.RefreshHighlights(f)
+    if not (f.dfHighlightShape and DF.UpdateHighlights) then return end
+    local s, h, a = f.dfSelectionHighlight, f.dfHoverHighlight, f.dfAggroHighlight
+    if (s and s:IsShown()) or (h and h:IsShown()) or (a and a:IsShown()) then
+        DF:UpdateHighlights(f)
+    end
 end
 
 function IN:Layout(f)
@@ -173,6 +202,7 @@ function IN:Layout(f)
     local db = K.DB(f)
     if not db then return end
     IN.PaintCombatBorder(f, db)
+    IN.RefreshHighlights(f)
     local icons = f.dfUFIcons
     if not icons then return end
     icons.host:SetFrameLevel(f:GetFrameLevel() + 30)

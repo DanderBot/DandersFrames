@@ -188,9 +188,62 @@ local function DrawVerticalEdge(ch, border, dashes, isRight, edgeOffset, height,
     end
 end
 
+-- The marching ants of an OUTLINED highlight (see SHAPED OUTLINE below): one pool,
+-- dashes laid along each strip in the strip's own travel direction. A strip is
+-- { x, y, w, h, horizontal, dir, s0, len } in the highlight's units from its
+-- TOPLEFT, y down; s0 is where along the loop its travel-start end sits, so the
+-- pattern runs on round every corner and the whole outline marches as one loop.
+-- Same per-dash caching as the edge drawers above.
+local function DrawLoopDashes(ch, border, strips, offset)
+    local dashes = border.loopDashes
+    if not dashes then
+        dashes = {}
+        border.loopDashes = dashes
+    end
+    local r, g, b, a = ch.animR or 1, ch.animG or 1, ch.animB or 1, ch.animA or 1
+    local used = 0
+    for n = 1, #strips do
+        local st = strips[n]
+        local x, y, w, h, horizontal, dir, len = st[1], st[2], st[3], st[4], st[5], st[6], st[8]
+        local start = ((offset - st[7]) % PATTERN_LENGTH) - PATTERN_LENGTH
+        while start < len do
+            local va, vb = math.max(0, start), math.min(len, start + DASH_LENGTH)
+            if vb > va then
+                used = used + 1
+                if used > #dashes then GrowEdgeDashes(ch, dashes, used) end
+                local dash = dashes[used]
+                local dx, dy, dw, dh
+                if horizontal then
+                    dw, dh, dy = vb - va, h, y
+                    dx = (dir > 0) and (x + va) or (x + w - vb)
+                else
+                    dw, dh, dx = w, vb - va, x
+                    dy = (dir > 0) and (y + va) or (y + h - vb)
+                end
+                dash:ClearAllPoints()
+                if dash.dfLastW ~= dw or dash.dfLastH ~= dh then
+                    dash:SetSize(dw, dh)
+                    dash.dfLastW, dash.dfLastH = dw, dh
+                end
+                dash:SetPoint("TOPLEFT", ch, "TOPLEFT", dx, -dy)
+                if dash.dfLastR ~= r or dash.dfLastG ~= g or dash.dfLastB ~= b or dash.dfLastA ~= a then
+                    dash:SetColorTexture(r, g, b, a)
+                    dash.dfLastR, dash.dfLastG, dash.dfLastB, dash.dfLastA = r, g, b, a
+                end
+                dash:Show()
+            end
+            start = start + PATTERN_LENGTH
+        end
+    end
+    for i = used + 1, #dashes do dashes[i]:Hide() end
+end
+
 function DF:UpdateAnimatedBorder(ch, offset)
     local border = ch.animBorder
     if not border then return end
+    -- An outlined highlight marches along its own strips (nil on every plain one).
+    local strips = ch.dfHlLoopStrips
+    if strips then return DrawLoopDashes(ch, border, strips, offset) end
     local thick = ch.animThickness or 2
     local inset = ch.animInset or 0
     local r, g, b, a = ch.animR or 1, ch.animG or 1, ch.animB or 1, ch.animA or 1
@@ -418,6 +471,231 @@ function DF:SnapHighlightInset(inset, scale)
     return math.floor(inset * ppu + 0.5) / ppu
 end
 
+-- ============================================================
+-- SHAPED OUTLINE
+-- A frame may say its highlight should trace more than its own rectangle:
+-- frame.dfHighlightShape = function(frame) -> list of { left, top, right, bottom }
+-- in the FRAME's own units from its TOPLEFT, x right and y DOWN (the frame
+-- itself = { 0, 0, width, height }), or nil for the plain rectangle. SOLID,
+-- ANIMATED, DASHED and GLOW then draw along the outline of the rects' union --
+-- one outline round an L or a step, small gaps between the pieces bridged --
+-- the same union the outer glow traces (Frames/Create.lua, DF.OutlineGrid).
+-- CORNERS stays on the frame's rectangle.
+-- ☠ A FRAME WITHOUT THE FIELD NEVER REACHES ANY OF THIS: ApplyHighlightStyle reads
+-- the one field, finds nil and runs exactly the code it always did. Keep it that
+-- way -- the plain path is the hot one (see the signature notes below).
+-- ============================================================
+
+-- Gaps up to this wide (frame units) between two of the rects are bridged: a
+-- piece sitting a couple of pixels off the frame still reads as one outline.
+local SHAPE_BRIDGE = 6
+local SHAPED_MODE = { SOLID = true, ANIMATED = true, DASHED = true, GLOW = true }
+
+local function SnapTo(v, ppu)
+    if not ppu then return v end
+    return math.floor(v * ppu + 0.5) / ppu
+end
+
+-- The owner's rects, a signature of them and the frame-to-highlight unit ratio.
+-- The highlight hangs off UIParent, so it does not inherit the frame's own scale:
+-- a frame unit is k highlight units. Thickness and inset stay in highlight units,
+-- as on a plain frame. nil = draw the plain rectangle.
+local function ReadShape(frame, ch, scale)
+    local rects = frame:dfHighlightShape()
+    if type(rects) ~= "table" or #rects == 0 then return nil end
+    local fs = frame.GetEffectiveScale and frame:GetEffectiveScale()
+    local k = (fs and fs > 0 and scale and scale > 0) and (fs / scale) or 1
+    local parts = { k }
+    for n, r in ipairs(rects) do
+        parts[n + 1] = r[1] .. "," .. r[2] .. "," .. r[3] .. "," .. r[4]
+    end
+    return table.concat(parts, "|"), rects, k
+end
+
+-- The union as pixel-snapped rects in highlight units (one per covered cell).
+local function ShapeBase(rects, k, ppu)
+    local cells, xs, ys, nx, ny = DF.OutlineGrid(rects, SHAPE_BRIDGE)
+    if not cells then return nil end
+    local base = {}
+    for i = 1, nx do
+        for j = 1, ny do
+            if cells[i][j] then
+                local l, t = SnapTo(xs[i] * k, ppu), SnapTo(ys[j] * k, ppu)
+                local r, b = SnapTo(xs[i + 1] * k, ppu), SnapTo(ys[j + 1] * k, ppu)
+                if r > l and b > t then base[#base + 1] = { l, t, r, b } end
+            end
+        end
+    end
+    return (#base > 0) and base or nil
+end
+
+-- Move every edge of a loop d inwards (negative = outwards). Each corner joins one
+-- horizontal and one vertical edge, so it moves with both. An edge shorter than
+-- the move turns inside out; the strip builder skips it.
+local function OffsetLoop(lp, d, ppu)
+    local n, X, Y, DX, DY = lp.n, lp.x, lp.y, lp.dx, lp.dy
+    local nxs, nys = {}, {}
+    for c = 1, n do
+        local p = (c == 1) and n or c - 1
+        -- the edge leaving corner c and the one arriving at it: one moves x, one y
+        local hx, vy
+        if DY[c] == 0 then hx, vy = DX[c], DY[p] else hx, vy = DX[p], DY[c] end
+        nxs[c] = SnapTo(X[c] - d * vy, ppu)
+        nys[c] = SnapTo(Y[c] + d * hx, ppu)
+    end
+    lp.x, lp.y = nxs, nys
+end
+
+-- The outline loops of the union moved by d (positive = inwards). Outwards grows
+-- every rect and traces the union again, which is exact (a notch narrower than
+-- the growth fills in). Inwards moves the edges; that is exact until a piece
+-- narrower than twice the inset collapses.
+local function ShapeLoops(base, d, ppu)
+    local rects = base
+    if d < 0 then
+        rects = {}
+        for n, rc in ipairs(base) do
+            rects[n] = { SnapTo(rc[1] + d, ppu), SnapTo(rc[2] + d, ppu), SnapTo(rc[3] - d, ppu), SnapTo(rc[4] - d, ppu) }
+        end
+    end
+    local cells, xs, ys, nx, ny = DF.OutlineGrid(rects, 0, true)
+    if not cells then return {} end
+    local loops = DF.OutlineLoops(cells, xs, ys, nx, ny)
+    if d > 0 then
+        for _, lp in ipairs(loops) do OffsetLoop(lp, d, ppu) end
+    end
+    return loops
+end
+
+-- The band `t` deep just inside each loop, as one strip per edge (appended to out):
+-- { x, y, w, h, horizontal, dir, s0, len } -- see DrawLoopDashes.
+--   * An INSIDE (reflex) corner would leave a notch t square where the two strips
+--     meet, so the horizontal strip carries on t past it.
+--   * At an OUTSIDE corner the horizontal strip owns the corner square and the
+--     vertical one stops t short of it -- no square drawn twice, which a
+--     translucent colour or a glow layer would show as a brighter corner.
+--     overlap = true keeps the vertical strip's full length instead (the dashes:
+--     a dash rounding the corner then reads unbroken, as on a plain frame).
+local function LoopStrips(loops, t, overlap, out)
+    for _, lp in ipairs(loops) do
+        local n, X, Y, DX, DY, CV = lp.n, lp.x, lp.y, lp.dx, lp.dy, lp.convex
+        local s = 0
+        for c = 1, n do
+            local q = (c == n) and 1 or c + 1
+            local dx, dy = DX[c], DY[c]
+            local px, py = X[c], Y[c]
+            local L = (X[q] - px) * dx + (Y[q] - py) * dy
+            if L > 0 then
+                local u0, u1 = 0, L
+                if dy == 0 then
+                    if not CV[c] then u0 = -t end
+                    if not CV[q] then u1 = L + t end
+                elseif not overlap then
+                    if CV[c] then u0 = t end
+                    if CV[q] then u1 = L - t end
+                end
+                if u1 > u0 then
+                    local x, y, w, h
+                    if dy == 0 then
+                        x = (dx > 0) and (px + u0) or (px - u1)
+                        y = (dx > 0) and py or (py - t)
+                        w, h = u1 - u0, t
+                    else
+                        x = (dy > 0) and (px - t) or px
+                        y = (dy > 0) and (py + u0) or (py - u1)
+                        w, h = t, u1 - u0
+                    end
+                    out[#out + 1] = { x, y, w, h, dy == 0, (dy == 0) and dx or dy, s + u0, u1 - u0 }
+                end
+                s = s + L
+            end
+        end
+    end
+    return out
+end
+
+local function HideShapePieces(ch)
+    local pool = ch.dfShapeTex
+    if pool then
+        for i = 1, #pool do pool[i]:Hide() end
+    end
+end
+
+-- Paint strips as solid textures from the highlight's pool, from index `used` + 1.
+-- The pool only grows to the largest outline drawn; spares are hidden up front.
+local function PaintStrips(ch, strips, used, r, g, b, a)
+    local pool = ch.dfShapeTex
+    if not pool then
+        pool = {}
+        ch.dfShapeTex = pool
+    end
+    for n = 1, #strips do
+        local st = strips[n]
+        used = used + 1
+        local tex = pool[used]
+        if not tex then
+            tex = ch:CreateTexture(nil, "OVERLAY")
+            pool[used] = tex
+        end
+        tex:ClearAllPoints()
+        tex:SetPoint("TOPLEFT", ch, "TOPLEFT", st[1], -st[2])
+        tex:SetSize(st[3], st[4])
+        tex:SetColorTexture(r, g, b, a)
+        tex:Show()
+    end
+    return used
+end
+
+-- ⚠ The plain rectangle follows its owner for free -- its lines are anchored to the
+-- container's edges, which are anchored to the owner's. The outline's strips are
+-- OFFSETS, laid out for one size and one scale, so a resize or rescale that nothing
+-- re-applies would leave them where the frame used to be. The container spans the
+-- owner in its own units, so either change resizes it: re-apply from there.
+-- Installed on outlined highlights only.
+local function ShapedOnSizeChanged(self)
+    local owner = self.ownerFrame
+    if self._hlShape and self:IsShown() and owner and owner.dfHighlightShape then
+        DF:UpdateHighlights(owner)
+    end
+end
+
+-- Draw SOLID / ANIMATED / DASHED / GLOW along the shape. Thickness and inset are
+-- already snapped. false = nothing to trace (the caller draws the rectangle).
+local function ApplyShapedStyle(ch, mode, rects, k, thickness, inset, r, g, b, alpha, scale)
+    local ppu = HighlightPixelsPerUnit(scale)
+    local base = ShapeBase(rects, k, ppu)
+    if not base then return false end
+    if not ch.dfShapeSizeHooked then
+        ch:SetScript("OnSizeChanged", ShapedOnSizeChanged)
+        ch.dfShapeSizeHooked = true
+    end
+    if mode == "SOLID" then
+        PaintStrips(ch, LoopStrips(ShapeLoops(base, inset, ppu), thickness, false, {}), 0, r, g, b, alpha)
+    elseif mode == "GLOW" then
+        -- The plain GLOW's four layers, step and alpha ramp (see there): layer i is
+        -- the outline grown by (i - 1) * step + inset, thickness deep inside it.
+        local step = math.min(thickness, 2)
+        local used = 0
+        for i = 1, 4 do
+            local offset = (i - 1) * step + inset
+            local strips = LoopStrips(ShapeLoops(base, -offset, ppu), thickness, false, {})
+            used = PaintStrips(ch, strips, used, r, g, b, math.max(0, alpha * (1.1 - (i * 0.25))))
+        end
+    else
+        DF:InitAnimatedBorder(ch)
+        ch.animThickness, ch.animInset = thickness, inset
+        ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
+        ch.dfHlLoopStrips = LoopStrips(ShapeLoops(base, inset, ppu), thickness, true, {})
+        if mode == "ANIMATED" then
+            SelectionAnimator_Add(ch)
+            DF:UpdateAnimatedBorder(ch, (SelectionAnimator.elapsed * ANIMATION_SPEED) % PATTERN_LENGTH)
+        else
+            DF:UpdateAnimatedBorder(ch, 0)
+        end
+    end
+    return true
+end
+
 -- ☠ THE SIGNATURE MUST INCLUDE THE THREE IMPLICIT INPUTS, not just the arguments.
 -- This function is 22.4% of trash-fight allocation and target-switch driven, so it
 -- is worth skipping -- but "hide everything then re-apply" means a missed input
@@ -427,12 +705,20 @@ end
 --   * ch:GetWidth()/GetHeight() -- CORNERS mode derives cornerLen from them, so a
 --     frame resize must re-run.
 --   * db.pixelPerfect -- the only field read off db.
+--   * the owner's dfHighlightShape (SHAPED OUTLINE), as a signature string -- only
+--     when the owner has one, so a plain frame reads one nil field and allocates
+--     nothing.
 local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, db)
     if not ch then return end
 
     local scale = ch:GetEffectiveScale()
     local w, h = ch:GetWidth(), ch:GetHeight()
     local pp = (db and db.pixelPerfect) and 1 or 0
+    local shapeSig, shapeRects, shapeK
+    local owner = ch.ownerFrame
+    if owner and owner.dfHighlightShape and SHAPED_MODE[mode] and DF.OutlineGrid then
+        shapeSig, shapeRects, shapeK = ReadShape(owner, ch, scale)
+    end
     -- ☠ SHOW FIRST, AHEAD OF THE EARLY-OUT. Showing the highlight is an OUTPUT of this
     -- function, not part of the styling the signature guards, and several paths hide `ch`
     -- WITHOUT touching the signature: the owner frame's own OnHide hook (installed in
@@ -448,13 +734,15 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     if ch._hlSig
         and ch._hlMode == mode and ch._hlThick == thickness and ch._hlInset == inset
         and ch._hlR == r and ch._hlG == g and ch._hlB == b and ch._hlA == alpha
-        and ch._hlPP == pp and ch._hlScale == scale and ch._hlW == w and ch._hlH == h then
+        and ch._hlPP == pp and ch._hlScale == scale and ch._hlW == w and ch._hlH == h
+        and ch._hlShape == shapeSig then
         return
     end
     ch._hlSig = true
     ch._hlMode, ch._hlThick, ch._hlInset = mode, thickness, inset
     ch._hlR, ch._hlG, ch._hlB, ch._hlA = r, g, b, alpha
     ch._hlPP, ch._hlScale, ch._hlW, ch._hlH = pp, scale, w, h
+    ch._hlShape = shapeSig
 
     local top, bottom, left, right = ch.topLine, ch.bottomLine, ch.leftLine, ch.rightLine
 
@@ -463,6 +751,8 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     HideAnimatedBorder(ch)
     HideCornerTextures(ch)
     HideGlowLayers(ch)
+    HideShapePieces(ch)
+    ch.dfHlLoopStrips = nil
     SelectionAnimator_Remove(ch)
 
     -- Through the shared helpers, so the drag-time preview snaps identically.
@@ -470,7 +760,11 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     -- so what gets cached and what gets applied can never disagree.
     thickness = DF:SnapHighlightThickness(thickness, scale)
     inset = DF:SnapHighlightInset(inset, scale)
-    
+
+    if shapeRects and ApplyShapedStyle(ch, mode, shapeRects, shapeK, thickness, inset, r, g, b, alpha, scale) then
+        return
+    end
+
     if mode == "NONE" then
         ch:Hide()
         return
