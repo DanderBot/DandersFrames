@@ -155,6 +155,72 @@ local function TextRing(parent, size)
     return holder
 end
 
+-- ============================================================
+-- TRANSPARENT RING (2026-11-01): the technique the real ring frames use. Each
+-- texture of a ring (track and fill) takes TWO masks: Blizzard's disc at the
+-- ring's OUTER diameter (CLAMPTOBLACKADDITIVE: nothing outside it), and our
+-- inverted disc (Media/RingInnerMask.tga: white outside, black inside) at the
+-- INNER diameter with CLAMPTOWHITE, so everything outside that square stays and
+-- only the hole is cut. No dark disc on top: the world shows through the middle
+-- and through the gap between two rings. Drawn OUTSIDE the panel (no backdrop
+-- behind it) so that is visible. Check: no dark centre, no dark gap, round edges,
+-- and nothing missing at the 3 / 6 / 9 / 12 o'clock points of the inner edge
+-- (where the hole touches its mask's square: CLAMPTOWHITE must not bleed in).
+-- ============================================================
+local HOLE = "Interface\\AddOns\\DandersFrames_UnitFrames\\Media\\RingInnerMask"
+
+local function MaskRing(tex, owner, outer, inner)
+    local o = owner:CreateMaskTexture()
+    o:SetTexture(DISC, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    o:SetPoint("CENTER", owner, "CENTER")
+    o:SetSize(outer, outer)
+    try("ring outer mask", tex.AddMaskTexture, tex, o)
+    local i = owner:CreateMaskTexture()
+    i:SetTexture(HOLE, "CLAMPTOWHITE", "CLAMPTOWHITE")
+    i:SetPoint("CENTER", owner, "CENTER")
+    i:SetSize(inner, inner)
+    try("ring inner mask", tex.AddMaskTexture, tex, i)
+end
+
+-- One see-through ring: a track (dark, half alpha) and a radial fill, both masked.
+local function SeeThroughRing(parent, outer, thickness, list, color)
+    local inner = outer - 2 * thickness
+    local track = CreateFrame("StatusBar", nil, parent)
+    track:SetSize(outer, outer)
+    track:SetPoint("CENTER")
+    track:SetStatusBarTexture(WHITE)
+    track:SetStatusBarColor(0, 0, 0, 0.5)
+    track:SetMinMaxValues(0, 1)
+    track:SetValue(1)
+    try("track SetRenderMode", track.SetRenderMode, track, Enum.StatusBarRenderMode.Radial)
+    MaskRing(track:GetStatusBarTexture(), track, outer, inner)
+
+    local bar = CreateFrame("StatusBar", nil, parent)
+    bar:SetSize(outer, outer)
+    bar:SetPoint("CENTER")
+    bar:SetFrameLevel(track:GetFrameLevel() + 1)
+    bar:SetStatusBarTexture(WHITE)
+    bar:SetStatusBarColor(color[1], color[2], color[3], 1)
+    bar:SetMinMaxValues(0, 1)
+    bar:SetValue(1)
+    try("ring SetRenderMode", bar.SetRenderMode, bar, Enum.StatusBarRenderMode.Radial)
+    MaskRing(bar:GetStatusBarTexture(), bar, outer, inner)
+    list[#list + 1] = bar
+end
+
+local function TransparentRing(panel)
+    local holder = CreateFrame("Frame", nil, panel)
+    holder:SetSize(140, 160)
+    holder:SetPoint("TOPLEFT", panel, "TOPRIGHT", 12, 0)
+    -- Outer: power, 6 thick. A 6px gap. Inner: health, 10 thick.
+    SeeThroughRing(holder, 120, 6, P.powerBars, { 0.25, 0.5, 1 })
+    SeeThroughRing(holder, 120 - 2 * (6 + 6), 10, P.bars, { 0.2, 0.85, 0.3 })
+    local text = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("BOTTOM")
+    text:SetText("Transparent ring")
+    return holder
+end
+
 -- A normal linear bar cut by a rounded-corner mask: the shape test.
 local function ShapedLinearBar(parent)
     local bar = CreateFrame("StatusBar", nil, parent)
@@ -253,6 +319,8 @@ local function Build()
     local lt = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     lt:SetPoint("LEFT", linear, "RIGHT", 10, 0)
     lt:SetText("Linear bar, rounded mask")
+
+    TransparentRing(f)
     return f
 end
 
