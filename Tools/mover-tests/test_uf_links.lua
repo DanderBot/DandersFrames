@@ -464,7 +464,8 @@ do
     eq(keys(link.elements), "border,buffs,castbar,debuffs,health,portrait,resource,text", "...on the eight pieces")
     eq(link.elements.health.layout .. "/" .. link.elements.health.look, "mirror/same", "...layout mirrored, look shared")
     eq(link.elements.border.layout .. "/" .. link.elements.border.look, "own/same", "...the border has no layout")
-    eq(keys(link.except), "castbarDetached,castbarLatency,debuffFilterBoss,debuffFilterCrowdControl,"
+    -- buffPurgeableEnabled: on for the enemy frames only (Target's default; Player never glows).
+    eq(keys(link.except), "buffPurgeableEnabled,castbarDetached,castbarLatency,debuffFilterBoss,debuffFilterCrowdControl,"
         .. "debuffFilterDispellable,debuffFilterMine,debuffFilterPriority,debuffFilterRole,"
         .. "directBuffOnlyMine,directBuffShowAll,healthColorMode,showBuffs",
         "...keeping Target's deliberate own defaults (enemy aura filters, colour mode, cast bar detach)")

@@ -166,7 +166,7 @@ do
     eq(n, 4, "buff and debuff drives pass the frame's placement (create and rebuild)")
     local _, m = auras:gsub("local extraMoved = frame%.dfAuraRowPlacement ~= nil", "")
     eq(m, 2, "...and re-apply a row whose placement moved, only on a frame with the hook")
-    check(auras:find("if frame.dfBuffFactoryVersion ~= ver or extraMoved then", 1, true) ~= nil, "buff drive: the re-apply gate")
+    check(auras:find("if frame.dfBuffFactoryVersion ~= ver or extraMoved or purgeMoved then", 1, true) ~= nil, "buff drive: the re-apply gate")
     check(auras:find("if frame.dfDebuffFactoryVersion ~= ver or selfMoved or extraMoved then", 1, true) ~= nil, "debuff drive: the re-apply gate")
 end
 

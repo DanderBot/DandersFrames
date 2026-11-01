@@ -5857,6 +5857,45 @@ function styleConfigFor(handle, button)   -- assigns the forward-declared local
     return handle.config
 end
 
+-- ★ RECORD HIGHLIGHT (recStyle.highlight = { db, prefix }): a second DF.Border ring
+-- on every button of one record, drawn from that db's `<prefix>Border*` keys -- the
+-- purgeable-buff ring (Features/Auras.lua SplitBuffRowForPurge). Its holder shares
+-- the PANDEMIC_BORDER rung (both trace the edge over everything; the ladder's budget
+-- note says share a rung, never add one), and DF.Border sits inside it, so the
+-- holder is the only thing shown / hidden and the pieces stay ours. The db is read
+-- on every restyle, so a colour change reaches standing buttons without a rebuild.
+-- STATIC only, as every row border (the animation filter's reasons, above).
+local function applyRecordHighlight(button, handle, hl)
+    if not button then return end
+    if not (hl and hl.db and hl.prefix and DF.Border) then
+        if button.dfRecHighlightHolder then button.dfRecHighlightHolder:SetShown(false) end
+        return
+    end
+    if not button.dfRecHighlightHolder then
+        button.dfRecHighlightHolder = makeHolder(button.dfLevelHost or button, LEVELS.PANDEMIC_BORDER)
+        local ok, w = pcall(function()
+            return DF.Border:New(button.dfRecHighlightHolder, {
+                solidOnly = true, secretRect = true, frameLevelOffset = 0,
+            })
+        end)
+        if ok then button.dfRecHighlight = w end
+    end
+    if not button.dfRecHighlight then return end
+    local lay = handle and handle.config and handle.config.layout
+    local sx = lay and (lay.sizeX or lay.size) or nil
+    local sy = lay and (lay.sizeY or lay.size) or sx
+    local ok = pcall(function()
+        local spec = DF.Border:BuildSpec(hl.db, hl.prefix,
+            { unit = handle and handle.config and handle.config.unit, frame = button, iconMode = true })
+        if not spec then return end
+        spec.knownWidth, spec.knownHeight = sx, sy
+        spec.animation = nil
+        if spec.renderScale == nil then spec.renderScale = tonumber(lay and lay.scale) or 1 end
+        DF.Border:Apply(button.dfRecHighlight, spec)
+    end)
+    button.dfRecHighlightHolder:SetShown(ok and true or false)
+end
+
 function applyRecordStyle(button, handle, recStyle)
     if not recStyle then
         -- Styled -> plain TRANSITION (own-preview pool only): a native button belongs
@@ -5865,8 +5904,11 @@ function applyRecordStyle(button, handle, recStyle)
         -- a stamped badge shown unless the off-path runs here. Size needs no revert:
         -- _acceptSlot has just re-sized the button from the shared layout.
         if button and button.dfImpBadgeHost then button.dfImpBadgeHost:SetShown(false) end
+        if button and button.dfRecHighlightHolder then button.dfRecHighlightHolder:SetShown(false) end
         return
     end
+
+    applyRecordHighlight(button, handle, recStyle.highlight)
 
     if recStyle.scale and recStyle.scale ~= 1 then
         local lay = handle.config and handle.config.layout

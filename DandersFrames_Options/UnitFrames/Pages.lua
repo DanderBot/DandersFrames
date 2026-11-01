@@ -1145,8 +1145,45 @@ function UFO.ExtraCards(page, rec, unit)
     local cards = {}
     if rec.kind == "resource" then
         cards.resource_detached = function(ctx) UFO.BuildResourceDetachedCard(page, ctx, changed) end
+    elseif rec.kind == "buffs" then
+        cards.buffs_purgeable = function(ctx) UFO.BuildPurgeableCard(page, ctx) end
     end
     return cards
+end
+
+-- Purgeable (the Buff Bar's Effects): an enemy's buffs the player can purge or
+-- steal lead the row, ringed (Features/Auras.lua SplitBuffRowForPurge). The ring
+-- is a DF.Border on the `buffPurgeable` keys, so it takes the shared border
+-- controls; the switch is the header tick. Greys with Show Buffs.
+function UFO.BuildPurgeableCard(page, ctx)
+    local db = ctx.db
+    local function changed()
+        page:RefreshStates()
+        -- The split is part of the row's structure: the aura layout moves on.
+        if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        RefreshFrames()
+    end
+    local band = ctx.OpenSection(L["Purgeable"], "buffs_purgeable", ctx.col or 1, function(d)
+        if not (d and d.buffPurgeableEnabled) then return "" end
+        return L["Border"]
+    end, ctx.offRow, nil, nil, {
+        db = db, key = "buffPurgeableEnabled", label = L["Enable"],
+        disableOn = ctx.offRow, onChanged = changed,
+    })
+    local off = UFO.Gate(L["Purgeable"], function(d) return not (d and d.buffPurgeableEnabled) end,
+        UFO.Gate(L["Show Buffs"], function(d) return ctx.offRow(d) end))
+    local w = band:AddWidget(GUI:CreateLabel(page.child,
+        L["Rings the buffs you can purge or steal from an enemy and shows them first. They count toward Max Buffs on their own."], 250), 44)
+    w.disableOn = off
+    GUI:CreateBorderControls(band, db, "buffPurgeable", {
+        parent = page.child,
+        noShowToggle = true,
+        include = { inset = true },
+        fullUpdate = changed,
+        refreshStates = function() page:RefreshStates() end,
+        disableWhen = off,
+    })
+    ctx.CloseSection(band)
 end
 
 -- Detach (the Resource Bar page): the bar's own size, outside the frame at a

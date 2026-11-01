@@ -273,6 +273,14 @@ local ELEMENTS = {
     resourceBarDetachedX = 0,
     resourceBarDetachedY = -2,
 
+    -- Purgeable buffs (Elements.lua UF.BuffPurgeable; DandersFrames' Features/Auras.lua
+    -- SplitBuffRowForPurge): the buffs the player can purge or steal from an enemy lead
+    -- its buff row, ringed by a DF.Border from the buffPurgeableBorder* keys. On for the
+    -- enemy frames (ENEMY_AURAS below); any unit that is not an enemy never glows.
+    buffPurgeableEnabled = false,
+    buffPurgeableBorderSize = 2,
+    buffPurgeableBorderColor = { r = 1, g = 0.82, b = 0, a = 1 },
+
     -- A border round DandersFrames' combat icon, unit frames only.
     combatIconBorderEnabled = false,
     combatIconBorderSize = 1,
@@ -315,6 +323,7 @@ local ENEMY_AURAS = {
     debuffFilterDispellable = false,
     directBuffShowAll = true,
     directBuffOnlyMine = false,
+    buffPurgeableEnabled = true,
 }
 
 -- ============================================================

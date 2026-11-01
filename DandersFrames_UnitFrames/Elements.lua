@@ -255,6 +255,37 @@ function K.RowPoint(anchor, growth)
     return point
 end
 
+-- ============================================================
+-- PURGEABLE BUFFS (DandersFrames' frame.dfBuffPurgeable, Features/Auras.lua
+-- SplitBuffRowForPurge). Set on every unit frame, live and preview (Units:Build,
+-- Preview:Build). The ENGINE decides which buffs the player can purge; this only
+-- says whether the unit is one to ask about:
+--   nil    the plain row: the setting is off, or a unit that is never an enemy
+--   true   a unit the player can attack: purgeable buffs lead the row, ringed
+--   false  the split held dark (a friendly unit, or no answer): nothing glows
+-- ☠ UnitCanAttack is checked with issecretvalue; a secret answer glows nothing.
+-- A preview asks its sample unit's reaction instead (hostile and neutral glow).
+-- ============================================================
+UF.PURGE_UNITS = { target = true, focus = true, boss = true }
+
+function UF.BuffPurgeable(f, db)
+    if not (f and db and db.buffPurgeableEnabled) then return nil end
+    if not UF.PURGE_UNITS[f.dfUFUnit] then return nil end
+    if f.dfPreview then
+        local t = f.dfTestData
+        local reaction = type(t) == "table" and tonumber(t.reaction) or 2
+        if reaction > 4 then return nil end
+        return true
+    end
+    local unit = f.unit
+    if not (unit and UnitExists and UnitCanAttack) then return false end
+    local exists = UnitExists(unit)
+    if IsSecret(exists) or not exists then return false end
+    local can = UnitCanAttack("player", unit)
+    if IsSecret(can) then return false end
+    return can and true or false
+end
+
 function UF.AuraRowPlacement(f, db, prefix, anchor, growth)
     local dy = 0
     if type(anchor) == "string" and anchor:find("BOTTOM", 1, true) then

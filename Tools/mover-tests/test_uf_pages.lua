@@ -873,6 +873,52 @@ do
         page.children = {}
     end
 
+    print("-- Cards of ours through a party page's door: Buff Bar > Purgeable")
+    do
+        local rec
+        for _, r in ipairs(data.pages) do if r.kind == "buffs" then rec = r end end
+        eq(rec.laterCards, nil, "Buff Bar: the Purgeable placeholder is gone")
+        for _, u in ipairs({ "target", "focus", "boss" }) do
+            check(rec.cards.buffs_purgeable and rec.cards.buffs_purgeable[u], u .. ": the Purgeable card reaches it")
+        end
+        for _, u in ipairs({ "player", "pet" }) do
+            check(not (rec.cards.buffs_purgeable and rec.cards.buffs_purgeable[u]), u .. ": never (not an enemy)")
+        end
+        check(rec.cardKeys.buffs_purgeable ~= nil, "...so a copy onto Player / Pet steps round its keys")
+        local pg = made.pages.uf_target_buffs
+        pg.RefreshStates = function() end
+        local extra = UFO.ExtraCards(pg, rec, "target")
+        check(type(extra.buffs_purgeable) == "function", "Buff Bar: the Purgeable card goes through the page's door")
+        built, toggles, added = {}, {}, {}
+        page.children = {}
+        local borderOpts
+        local heldBC = G.CreateBorderControls
+        function G:CreateBorderControls(group, dbT, prefix, opts) borderOpts = { db = dbT, prefix = prefix, opts = opts } end
+        local tools = G:CreatePopoutPageTools(pg)
+        local db = UF:GetUnitDB("target")
+        local function offRow(d) return not (d or db).showBuffs end
+        extra.buffs_purgeable({
+            OpenSection = function(label, key, col, summary, dimFn, hideFn, builder, toggle)
+                return tools.OpenSection(Add, label, key, col, summary, dimFn, hideFn, builder, toggle)
+            end,
+            CloseSection = function(band) tools.CloseSection(Add, band) end,
+            db = db, offRow = offRow, col = 1,
+        })
+        G.CreateBorderControls = heldBC
+        eq(added[1] and added[1].w.cardKey, "buffs_purgeable", "Purgeable: one card, keyed as the page data lists it")
+        eq(toggles.buffs_purgeable and toggles.buffs_purgeable.key, "buffPurgeableEnabled", "...its switch is the header tick")
+        eq(borderOpts and borderOpts.prefix, "buffPurgeable", "...the ring takes the shared border controls on its own keys")
+        check(borderOpts and borderOpts.db == db and borderOpts.opts.noShowToggle, "...the unit's table, no second switch")
+        local gate = borderOpts and borderOpts.opts.disableWhen
+        check(gate and gate({ showBuffs = true, buffPurgeableEnabled = true }) == false, "...live while on")
+        check(gate and gate({ showBuffs = true }) == true, "...grey while off")
+        check(gate and gate({ buffPurgeableEnabled = true }) == true, "...grey while the buff row is off")
+        local src = options_file_source("GUI/Pages/Indicators.lua")
+        check(src:find("ufCards.buffs_purgeable", 1, true) and src:find('"buffs_pandemic", "buffs_purgeable"', 1, true),
+            "the Buff Bar builder opens its door with rawget and mounts the card under Effects")
+        page.children = {}
+    end
+
     print("-- Per-unit designers (phase 2): the designer itself on the unit's page")
     do
         local heldA, heldT, heldD, heldC, heldI, heldU, heldBT, heldBA =

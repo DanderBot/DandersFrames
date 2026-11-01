@@ -1264,6 +1264,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             CloseSection(band)
         end)
+        -- Unit frame pages add their Purgeable card here (UnitFrames/Pages.lua,
+        -- UFO.ExtraCards; Features/Auras.lua SplitBuffRowForPurge). The party / raid
+        -- page never sets the table, so it never draws (or defers) the card.
+        local ufCards = rawget(self, "dfExtraCards")
+        local purgeableCard = type(ufCards) == "table" and ufCards.buffs_purgeable
+        if purgeableCard then
+            tools.DeferCard("buffs_purgeable", function()
+                purgeableCard({ OpenSection = OpenSection, CloseSection = CloseSection, db = db,
+                                offRow = BuffsOffRow, col = 1 })
+            end)
+        end
         -- The cards mount by group (tools.MountCardGroups), so a group's cards
         -- stand together in a one-column window as well as two. Expand All /
         -- Collapse All first, at "both": they act on every card.
@@ -1283,9 +1294,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { label = L["Text"], col = 1, keys = {
                 "buffs_duration", "buffs_stack", "buffs_caster",
             } },
-            -- Its only card hides without the factory row, so the heading must too.
+            -- Its cards hide without the factory row, so the heading must too.
+            -- buffs_purgeable is a unit frame page's only (deferred above when it is).
             { label = L["Effects"], col = 1, keys = {
-                "buffs_pandemic",
+                "buffs_pandemic", "buffs_purgeable",
             }, hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end },
         })
 

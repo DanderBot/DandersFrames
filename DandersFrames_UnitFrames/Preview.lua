@@ -456,6 +456,8 @@ function P:Build(unit, name, parent, slot)
     f.dfTestAuraSeed = P.AURA_SEEDS[unit]
     -- Where its aura rows sit, as on the live frame (Elements.lua).
     f.dfAuraRowPlacement = UF.AuraRowPlacement
+    -- Purgeable enemy buffs lead its buff row, ringed (Elements.lua UF.BuffPurgeable).
+    f.dfBuffPurgeable = UF.BuffPurgeable
     -- Its highlights' outline, as on the live frame (Indicators.lua).
     f.dfHighlightShape = UF.Indicators and UF.Indicators.HighlightShape or nil
     f.index = f.dfTestData.index

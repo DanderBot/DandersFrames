@@ -96,8 +96,10 @@ EXTRA_CARD_UNITS = {
 # the section key the builder opens it with. Listed like any DF card, so the page's
 # `cards` filter reaches them per unit.
 #   Detach     bars_resource (Auras.lua), after Position: the detached resource bar.
+#   Purgeable  auras_buffs (Indicators.lua), in Effects: purgeable enemy buffs ringed.
 HOOKED_CARDS = {
     "bars_resource": {"Detach": "resource_detached"},
+    "auras_buffs": {"Purgeable": "buffs_purgeable"},
 }
 
 def slug(title):

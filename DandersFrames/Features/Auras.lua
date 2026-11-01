@@ -3224,6 +3224,65 @@ local function SplitBuffRowForOwnCasts(filter, candidateFilters, mineOnly)
     }, candidateFilters
 end
 
+-- ============================================================
+-- PURGEABLE BUFFS (a frame's own hook: frame.dfBuffPurgeable, see rowPurge below)
+-- Which enemy buff the player can purge or spellsteal is NOT readable by addon code
+-- (isStealable is secret, or matches nothing in instanced PvP). The ENGINE knows:
+-- RAID_PLAYER_DISPELLABLE on HELPFUL is "a buff with a dispel type the player can
+-- remove" -- the purge set on an enemy. So the row is split into two groups by that
+-- token: the purgeable group FIRST (so those buffs lead the row), wearing a record
+-- style that rings each icon (`highlight`, Frames/AuraContainer.lua applyRecordStyle,
+-- drawn from the `buffPurgeable` DF.Border keys), then the rest with the token negated.
+-- Nothing here reads an aura.
+--
+-- ☠ FRIENDLY UNITS NEVER GLOW. The token's meaning on a friendly unit's buffs is not
+-- documented, so on a unit the player cannot attack the purgeable group gets the dead
+-- candidate map (nothing passes) and the rest group takes the plain filter: every buff
+-- in one plain group. The SPLIT stays (same record keys), so a target that turns from
+-- hostile to friendly is a TUNING change, which applies in place and in combat; only
+-- switching the feature itself rebuilds the row.
+--
+-- ⚠ Blizzard caps each GROUP at the row's Max (GetDebuffRowGroupCount), so a split row
+-- can show Max purgeable buffs AND Max others.
+--
+-- `hostile`: true = split by the token; false = split held dark (friendly / unknown).
+-- Accepts the plain string list (BuildDirectBuffFilters) or the record list of
+-- SplitBuffRowForOwnCasts; anything else comes back unchanged.
+local PURGE_DEAD_CF = { maxDuration = 0 }
+local function SplitBuffRowForPurge(filter, hostile, db)
+    if type(filter) == "string" then filter = { filter } end
+    if type(filter) ~= "table" or #filter == 0 then return filter end
+    local token = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
+    local recs = {}
+    for i, e in ipairs(filter) do
+        if type(e) == "string" then
+            recs[i] = { f = e, key = "row" .. i }
+        elseif type(e) == "table" and type(e.filter) == "string" then
+            recs[i] = { f = e.filter, key = tostring(e.key or i), cf = e.candidateFilters, noVisLatch = e.noVisLatch }
+        else
+            return filter
+        end
+    end
+    -- ONE style table for every purgeable record (the test preview tells "one styled
+    -- treatment" from "a layout group" by identity -- AuraContainer's test shapes).
+    local style = { highlight = { db = db, prefix = "buffPurgeable" } }
+    local out = {}
+    for _, r in ipairs(recs) do
+        -- ⚠ Not `hostile and r.cf or DEAD`: a record with no candidate filters of its
+        -- own (nil: the row's apply) would fall through to the dead map.
+        local cf = PURGE_DEAD_CF
+        if hostile then cf = r.cf end
+        out[#out + 1] = { filter = r.f .. "|" .. token, key = r.key .. "_purge",
+                          candidateFilters = cf, noVisLatch = r.noVisLatch, style = style }
+    end
+    for _, r in ipairs(recs) do
+        out[#out + 1] = { filter = hostile and (r.f .. "|!" .. token) or r.f, key = r.key .. "_rest",
+                          candidateFilters = r.cf, noVisLatch = r.noVisLatch }
+    end
+    return out
+end
+DF.SplitBuffRowForPurge = SplitBuffRowForPurge
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -3402,6 +3461,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- My Buffs ids hide only your own casts -- see SplitBuffRowForOwnCasts.
         if adMineOnly then
             filter, candidateFilters = SplitBuffRowForOwnCasts(filter, candidateFilters, adMineOnly)
+        end
+        -- Purgeable buffs lead the row, ringed (SplitBuffRowForPurge): only a frame
+        -- whose hook answers (opts.purge true / false; nil = the plain row).
+        if opts.purge ~= nil then
+            filter = SplitBuffRowForPurge(filter, opts.purge, db)
         end
     end
 
@@ -3623,7 +3687,8 @@ end
 local function recStyleSig(s)
     if type(s) ~= "table" then return "" end
     local b = s.badge
-    return "@" .. tostring(s.scale) .. "/" .. (b and (tostring(b.size) .. ","
+    return "@" .. tostring(s.scale) .. (s.highlight and ("/hl=" .. tostring(s.highlight.prefix)) or "")
+        .. "/" .. (b and (tostring(b.size) .. ","
         .. tostring(b.point) .. "," .. tostring(b.offsetX) .. "," .. tostring(b.offsetY) .. ","
         .. tostring(b.color and b.color.r) .. "," .. tostring(b.color and b.color.g) .. ","
         .. tostring(b.color and b.color.b) .. ","
@@ -3872,12 +3937,27 @@ local function rowPlacement(frame, db, prefix)
     return tonumber(dx) or 0, tonumber(dy) or 0, (type(point) == "string") and point or nil
 end
 
+-- ★ A FRAME'S PURGEABLE-BUFF SPLIT (optional). A frame may carry
+--     frame.dfBuffPurgeable = function(frame, db) -> nil | true | false
+-- nil: the plain row (party, raid and pinned frames never set it); true: the unit is
+-- hostile, purgeable buffs lead the row and are ringed; false: the split is kept but
+-- held dark (a friendly unit). See SplitBuffRowForPurge. Asked on every drive (a
+-- target change re-drives the row), so a hostile <-> friendly flip re-applies the row.
+local function rowPurge(frame, db)
+    local fn = frame and frame.dfBuffPurgeable
+    if type(fn) ~= "function" then return nil end
+    local ok, v = pcall(fn, frame, db)
+    if not ok or v == nil then return nil end
+    return v and true or false
+end
+
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
 -- icons (no double row), keeps it on the frame's unit, and applies setting changes. The
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
 function DF:DriveBuffFactory(frame, db)
     local h = frame.buffFactory
     local extraX, extraY, rowPoint = rowPlacement(frame, db, "buff")
+    local purge = rowPurge(frame, db)
     if not h then
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
@@ -3885,10 +3965,12 @@ function DF:DriveBuffFactory(frame, db)
             filterList = BuildDirectBuffFilters(db),
             testSeed = frame.dfTestAuraSeed,
             extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
+            purge = purge,
         }))
         frame.buffFactory = h
         frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
         frame.dfBuffRowExtraX, frame.dfBuffRowExtraY, frame.dfBuffRowPoint = extraX, extraY, rowPoint
+        frame.dfBuffRowPurge = purge
         if h then
             frame.buffFactoryStructSig = rowStructSig(h.config)
             frame.buffFactoryTuningSig = rowTuningSig(h.config)
@@ -3931,15 +4013,19 @@ function DF:DriveBuffFactory(frame, db)
     local extraMoved = frame.dfAuraRowPlacement ~= nil
         and (frame.dfBuffRowExtraX ~= extraX or frame.dfBuffRowExtraY ~= extraY
              or frame.dfBuffRowPoint ~= rowPoint)
-    if frame.dfBuffFactoryVersion ~= ver or extraMoved then
+    -- ...and so does a purgeable split that moved (on / off, hostile / friendly).
+    local purgeMoved = frame.dfBuffPurgeable ~= nil and frame.dfBuffRowPurge ~= purge
+    if frame.dfBuffFactoryVersion ~= ver or extraMoved or purgeMoved then
         frame.dfBuffFactoryVersion = ver
         frame.dfBuffRowExtraX, frame.dfBuffRowExtraY, frame.dfBuffRowPoint = extraX, extraY, rowPoint
+        frame.dfBuffRowPurge = purge
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
             testSeed = frame.dfTestAuraSeed,
             extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
+            purge = purge,
         })
         -- Re-apply the z-order via the engine (buff rows sit at +32, not ApplyZOrder's 40). Frame Level
         -- is deliberately NOT in the sig, so a level-only change never reaches _build.

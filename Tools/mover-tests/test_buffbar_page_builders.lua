@@ -247,7 +247,7 @@ do
         gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
     end
     eq(table.concat(gotGroups, " | "),
-       "Content@1: buffs_visibility, buffs_filters, buffs_order | Layout@2: buffs_layout, buffs_position | Appearance@2: buffs_appearance, buffs_border, buffs_durationbar | Text@1: buffs_duration, buffs_stack, buffs_caster | Effects@1: buffs_pandemic",
+       "Content@1: buffs_visibility, buffs_filters, buffs_order | Layout@2: buffs_layout, buffs_position | Appearance@2: buffs_appearance, buffs_border, buffs_durationbar | Text@1: buffs_duration, buffs_stack, buffs_caster | Effects@1: buffs_pandemic, buffs_purgeable",
        "groups: Content, Layout, Appearance, Text, Effects, each over its cards")
     for _, key in ipairs({ "buffs_visibility", "buffs_filters", "buffs_order", "buffs_appearance", "buffs_layout", "buffs_position", "buffs_border", "buffs_duration", "buffs_stack", "buffs_caster", "buffs_durationbar", "buffs_pandemic" }) do
         check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,

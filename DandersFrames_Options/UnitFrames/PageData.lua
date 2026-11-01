@@ -278,13 +278,14 @@ DF.UnitFramePageData = {
                 buffs_stack = { player = true, target = true, focus = true, pet = true, boss = true },
                 buffs_caster = { player = true, target = true, focus = true },
                 buffs_pandemic = { player = true },
+                buffs_purgeable = { target = true, focus = true, boss = true },
             },
             hide = {
             },
-            laterCards = { "Purgeable" },
             cardKeys = {
                 buffs_caster = { "buffCasterAnchor", "buffCasterClassColor", "buffCasterColor", "buffCasterFont", "buffCasterName", "buffCasterOutline", "buffCasterRealm", "buffCasterScale", "buffCasterX", "buffCasterY" },
                 buffs_pandemic = { "buffPandemicBorderAnimationBlendMode", "buffPandemicBorderAnimationColor", "buffPandemicBorderAnimationFrequency", "buffPandemicBorderAnimationInset", "buffPandemicBorderAnimationLength", "buffPandemicBorderAnimationOffsetX", "buffPandemicBorderAnimationOffsetY", "buffPandemicBorderAnimationParticles", "buffPandemicBorderAnimationProcStart", "buffPandemicBorderAnimationScale", "buffPandemicBorderAnimationThickness", "buffPandemicBorderAnimationType", "buffPandemicBorderBlendMode", "buffPandemicBorderColor", "buffPandemicBorderGradientDirection", "buffPandemicBorderGradientEndColor", "buffPandemicBorderGradientStartColor", "buffPandemicBorderInset", "buffPandemicBorderOffsetX", "buffPandemicBorderOffsetY", "buffPandemicBorderShadowColor", "buffPandemicBorderShadowEnabled", "buffPandemicBorderShadowOffsetX", "buffPandemicBorderShadowOffsetY", "buffPandemicBorderShadowSize", "buffPandemicBorderSize", "buffPandemicBorderStyle", "buffPandemicBorderTexture", "buffPandemicEnabled", "buffPandemicFlash", "buffPandemicFlashSpeed", "buffPandemicMode", "buffPandemicTintAlpha", "buffPandemicTintColor", "buffPandemicTintInset" },
+                buffs_purgeable = { "buffPurgeableBorderColor", "buffPurgeableBorderInset", "buffPurgeableBorderSize", "buffPurgeableBorderStyle", "buffPurgeableBorderTexture", "buffPurgeableEnabled" },
             },
         },
         {
