@@ -1556,9 +1556,9 @@ end
 -- the cursor, in that frame's mode, and scrolls to (expands, flashes) its section.
 -- ☠ STILL NOTHING TAKES THE MOUSE. The click arrives through the test frame's OWN
 -- OnClick (TestFramePool) — the frame was already mouse-enabled for hover — and the
--- region is resolved by the same cursor-vs-rect test the hover uses. Aura buttons on
--- test frames pass clicks through to the frame (SetMouseClickEnabled(false)), so a
--- click on an icon reaches here too.
+-- region is resolved by the same cursor-vs-rect test the hover uses. An aura's test
+-- tooltip frame takes the click itself and hands it here with its test frame
+-- (AuraContainer.lua): passing it through reached nothing in game.
 -- Refused: with Indicator Info off (identical to before this existed), in combat (the
 -- window and its mode switch are not safe there), and during a mover session (the
 -- click belongs to the slabs).

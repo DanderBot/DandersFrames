@@ -5330,7 +5330,12 @@ function Handle:_paintTestSlot(slot, index)
     -- the throw silently aborted this paint and took the ring tint with it).
     -- LAST in the paint so any residual error can't take other art down.
     -- Index-keyed + handle-owned: rebuilds reposition instead of leaking;
-    -- _teardownContainer hides the lot. Clicks pass through.
+    -- _teardownContainer hides the lot.
+    -- ★ CLICKS ARE HANDED TO THE TEST FRAME, not passed through. Click-through
+    -- left nothing under an aura to catch them in game, so Indicator Info's click
+    -- to open settings never fired on an aura. The tip takes the click and hands it
+    -- to the test frame it sits on. Tips exist only on test-mode containers, never
+    -- on live frames, so no click casting is in the way.
     -- ☠ CONTAINER-ONLY BLOCK, AND THE GUARD IS self.frame, NOT the tooltips flag.
     -- Everything below needs a REAL handle: self.frame to parent and level the hover
     -- frame against, and self:_positionTestTip (which in turn calls self:_slotCount).
@@ -5346,7 +5351,16 @@ function Handle:_paintTestSlot(slot, index)
             tip = CreateFrame("Frame", nil, self.frame)
             self._testTips[index] = tip
             tip:EnableMouse(true)
-            if tip.SetMouseClickEnabled then tip:SetMouseClickEnabled(false) end
+            tip:SetScript("OnMouseUp", function(s, button)
+                local TL = DF.TestLabels
+                if not (TL and TL.HandleClick) then return end
+                local owner = s:GetParent()
+                for _ = 1, 8 do
+                    if not owner or owner.dfIsTestFrame then break end
+                    owner = owner.GetParent and owner:GetParent() or nil
+                end
+                if owner and owner.dfIsTestFrame then TL:HandleClick(owner, button) end
+            end)
             local handle = self
             tip:SetScript("OnEnter", function(s)
                 if not GameTooltip then return end

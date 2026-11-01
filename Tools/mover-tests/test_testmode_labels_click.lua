@@ -212,6 +212,13 @@ do
     check(pool:find("TL:HandleClick(self, button)", 1, true) ~= nil, "click: ...which hands off to Indicator Info")
     check(pool:find('SetScript("OnEnter"', 1, true) and pool:find('SetScript("OnLeave"', 1, true),
           "click: ...and OnEnter / OnLeave are still set")
+    -- An aura's test tooltip frame hands its click to the test frame under it.
+    local ac = options_file_source("../DandersFrames/Frames/AuraContainer.lua")
+    local a = ac:find('tip:SetScript("OnMouseUp"', 1, true)
+    check(a ~= nil, "click: an aura's test tooltip takes the click")
+    check(a and ac:find("TL:HandleClick(owner, button)", a, true) ~= nil,
+          "click: ...and hands it to Indicator Info with its test frame")
+    check(a and ac:find("owner.dfIsTestFrame", a, true) ~= nil, "click: ...only ever a test frame")
 end
 
 -- ============================================================
