@@ -11,6 +11,7 @@ ignore:
   - DandersFrames
   - DandersFrames_Options
   - CHANGELOG.md
+  - RELEASE_NOTES.md
   - CHANGELOG_ARCHIVE.md
   - README.md
   - TRANSLATING.md
@@ -30,7 +31,8 @@ ignore:
   - DandersMover/Demo.lua
 
 manual-changelog:
-  filename: CHANGELOG.md
+  # Written by release.yml: this build's section of CHANGELOG.md only.
+  filename: RELEASE_NOTES.md
   markup-type: markdown
 
 embedded-libraries:
