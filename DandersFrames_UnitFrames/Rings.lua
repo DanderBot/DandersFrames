@@ -207,7 +207,12 @@ function R.Arc(sec, multi)
 end
 
 -- Start / end offsets of the arc a..a+len (see ARC MATHS above).
-function R.Offsets(a, len)
+-- REVERSED (SetRadialProgressBarReverse(true), seen in game 2026-11-01): Start is
+-- still a clockwise angle from the bottom, but the fill runs COUNTER-clockwise
+-- from it. So the same arc filled the other way starts at its far end, a + len;
+-- starting at `a` drew the mirror arc (a bottom half came out as the top half).
+function R.Offsets(a, len, reverse)
+    if reverse then return (a + len) % 1, 1 - len end
     return a % 1, 1 - len
 end
 
@@ -347,7 +352,7 @@ function R.ShapeArcBar(bar, center, outer, inner, start, len, reverse, feather)
     local hole = inner > 0 and inner or 0.01
     bar.dfInnerMask:SetSize(hole, hole)
     local tex = bar:GetStatusBarTexture()
-    local s, e = R.Offsets(start, len)
+    local s, e = R.Offsets(start, len, reverse)
     if tex.SetRadialProgressBarStartOffset then tex:SetRadialProgressBarStartOffset(s) end
     if tex.SetRadialProgressBarEndOffset then tex:SetRadialProgressBarEndOffset(e) end
     if tex.SetRadialProgressBarReverse then tex:SetRadialProgressBarReverse(reverse and true or false) end

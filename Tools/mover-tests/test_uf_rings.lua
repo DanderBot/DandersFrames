@@ -201,6 +201,46 @@ a, len = R.Arc({ coverage = "HALF", position = "TOP" }, true)
 check(near(a, 0.25 + R.SECTION_GAP) and near(len, 0.5 - 2 * R.SECTION_GAP),
       "two sections on a ring: each pulled in at both ends")
 
+print("-- Rings: reverse keeps the arc where it is (every coverage x position)")
+do
+    -- What a radial fill covers, as seen in game: forward, Start .. Start + length
+    -- clockwise; reversed, Start - length .. Start (counter-clockwise from Start).
+    local function covered(st, en, rev)
+        local len = 1 - en
+        if rev then return (st - len) % 1, len end
+        return st % 1, len
+    end
+    local positions = { "TOP", "BOTTOM", "LEFT", "RIGHT", "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
+    local bar = R.NewArcBar(Make("Frame", UIParent))
+    local all, n = true, 0
+    for _, cov in ipairs({ "FULL", "HALF", "QUARTER" }) do
+        for _, pos in ipairs(positions) do
+            for _, multi in ipairs({ false, true }) do
+                local sec = { coverage = cov, position = pos }
+                local a0, l0 = R.Arc(sec, multi)
+                for _, rev in ipairs({ false, true }) do
+                    R.ShapeArcBar(bar, bar, 64, 48, a0, l0, rev, 0)
+                    local c = bar:GetStatusBarTexture()._calls
+                    local ca, cl = covered(c.SetRadialProgressBarStartOffset, c.SetRadialProgressBarEndOffset, rev)
+                    local same = near(cl, l0) and (near(ca, a0 % 1) or near(math.abs(ca - a0 % 1), 1) or l0 >= 1)
+                    if not same then
+                        all = false
+                        print(string.format("    mismatch %s %s multi=%s rev=%s: want %.3f+%.3f got %.3f+%.3f",
+                            cov, pos, tostring(multi), tostring(rev), a0, l0, ca, cl))
+                    end
+                    if c.SetRadialProgressBarReverse ~= rev then all = false end
+                    n = n + 1
+                end
+            end
+        end
+    end
+    check(all, "reverse: the same arc, filled from the other end (" .. n .. " combinations)")
+    local st = select(1, R.Offsets(0.75, 0.5, true))
+    check(near(st, 0.25), "bottom half reversed: Start at 0.25 (its far end), not 0.75")
+    local st2, en2 = R.Offsets(0.75, 0.5, false)
+    check(near(st2, 0.75) and near(en2, 0.5), "bottom half forward: unchanged")
+end
+
 print("-- Rings: pips")
 local pips = R.PipArcs(0, 1, 5, 0.01)
 eq(#pips, 5, "five pips")
@@ -326,7 +366,7 @@ R:Layout(F)
 eq(#F.dfUFRingHealth, 1, "half health...")
 eq(#F.dfUFRingPower, 1, "...half power, one ring")
 local ht = F.dfUFRingHealth[1]:GetStatusBarTexture()._calls
-check(near(ht.SetRadialProgressBarStartOffset, R.SECTION_GAP), "left half starts at the bottom, pulled in")
+check(near(ht.SetRadialProgressBarStartOffset, 0.5 - R.SECTION_GAP), "left half, reversed: starts at its far (top) end, pulled in")
 check(near(ht.SetRadialProgressBarEndOffset, 0.5 + 2 * R.SECTION_GAP), "...and cuts off the other half and the gaps")
 check(ht.SetRadialProgressBarReverse == true and ht.SetRadialProgressBarFeather == 0.3, "reverse and feather")
 check(c.arcs[2].track._shown and c.arcs[2].fill._shown, "two arcs drawn")
@@ -409,6 +449,15 @@ eq(cp.active[2]._value, 3, "all fed the same value")
 local linearShown = false
 for _, pip in ipairs(cp.pips) do if pip._shown then linearShown = true end end
 check(not linearShown, "the linear pips hide")
+pdbe.rings[2].sections[1].reverse = true
+CP:Layout(PL)
+local rp1 = cp.active[1]:GetStatusBarTexture()._calls
+local rp5 = cp.active[5]:GetStatusBarTexture()._calls
+check(near(rp1.SetRadialProgressBarStartOffset, 0.75 - R.PIP_GAP) and rp1.SetRadialProgressBarReverse,
+      "reversed: pip 1 at the far end of the top half, filling back from its own far end")
+local slice = 0.5 / 5
+check(near(rp5.SetRadialProgressBarStartOffset, 0.25 + slice - R.PIP_GAP), "reversed: pip 5 at the start of the arc")
+pdbe.rings[2].sections[1].reverse = nil
 pdbe.frameStyle = "BARS"
 PL.dfDB = UF:FrameDB("player")
 CP:Layout(PL)
