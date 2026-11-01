@@ -407,4 +407,79 @@ end
 
 SLASH_DANDERSFRAMESRINGPROBE1 = "/dfring"
 SlashCmdList.DANDERSFRAMESRINGPROBE = Toggle
+
+-- ============================================================
+-- SECRET SetEnabled TRAP (dev only)
+-- /dfsecretbtn swaps the shared Button:SetEnabled for a wrapper that, when handed
+-- a SECRET value, records the button's debug name (and a short stack if the game
+-- allows one) BEFORE the real call errors. Results are listed on a small panel.
+-- ☠ Replacing a shared widget method taints every Button: use it to find the
+-- caller, then /reload. Never leave it on.
+-- ============================================================
+local trap = { hits = {}, order = {} }
+
+local function TrapPanel()
+    if trap.panel then return trap.panel end
+    local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    f:SetSize(620, 200)
+    f:SetPoint("TOP", 0, -80)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    if f.SetBackdrop then
+        f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        f:SetBackdropColor(0.05, 0.05, 0.05, 0.92)
+        f:SetBackdropBorderColor(0.6, 0.2, 0.2, 1)
+    end
+    local t = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    t:SetPoint("TOPLEFT", 8, -8)
+    t:SetPoint("BOTTOMRIGHT", -8, 8)
+    t:SetJustifyH("LEFT")
+    t:SetJustifyV("TOP")
+    t:SetWordWrap(true)
+    trap.text = t
+    trap.panel = f
+    return f
+end
+
+local function TrapRefresh()
+    local lines = { "Secret SetEnabled trap ON (/reload to remove). Buttons handed a secret:" }
+    for i = 1, math.min(#trap.order, 5) do
+        local h = trap.hits[trap.order[i]]
+        lines[#lines + 1] = format("%dx  %s\n     %s", h.count, trap.order[i], h.stack or "(no stack)")
+    end
+    trap.text:SetText(table.concat(lines, "\n"))
+end
+
+local function ArmTrap()
+    TrapPanel():Show()
+    if trap.armed then TrapRefresh(); return end
+    trap.armed = true
+    local mt = getmetatable(CreateFrame("Button")).__index
+    local real = mt.SetEnabled
+    mt.SetEnabled = function(self, value, ...)
+        if issecretvalue and issecretvalue(value) then
+            local okName, name = pcall(self.GetDebugName, self)
+            name = okName and type(name) == "string" and name or tostring(self)
+            local h = trap.hits[name]
+            if not h then
+                local okStack, stack = pcall(debugstack, 2, 4, 0)
+                if not okStack or type(stack) ~= "string" or (issecretvalue and issecretvalue(stack)) then stack = nil end
+                h = { count = 0, stack = stack }
+                trap.hits[name] = h
+                trap.order[#trap.order + 1] = name
+            end
+            h.count = h.count + 1
+            TrapRefresh()
+        end
+        return real(self, value, ...)
+    end
+    TrapRefresh()
+end
+
+SLASH_DANDERSFRAMESSECRETBTN1 = "/dfsecretbtn"
+SlashCmdList.DANDERSFRAMESSECRETBTN = ArmTrap
 --@end-do-not-package@
