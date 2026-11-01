@@ -19,7 +19,7 @@ local WHITE = "Interface\\Buttons\\WHITE8X8"
 local DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 local ROUNDED = "Interface\\Common\\common-iconmask"
 
-local P = { bars = {}, powerBars = {}, pips = {}, errors = 0, updates = 0, lastError = nil }
+local P = { bars = {}, powerBars = {}, pips = {}, texts = {}, errors = 0, updates = 0, lastError = nil }
 
 -- Class power by class (spec-only classes fall back to combo points, which just
 -- reads 0 for them). Pip count is read once at build; a secret max falls back to 5.
@@ -123,6 +123,38 @@ local function PipRing(parent, size, label, count, span)
     return holder
 end
 
+-- Text around a ring. No curved text exists in the API; the only tool is turning
+-- a whole FontString (SetRotation, radians). Each label is placed at a clock angle
+-- just outside the ring and fed hidden values the same way health text is, so this
+-- shows whether rotated secret text renders and which spots read well.
+-- angle: 0 = 12 o'clock, clockwise in degrees. rot: the text's own turn in degrees.
+local function TextRing(parent, size)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetSize(size + 120, size + 60)
+    local ring = RadialBar(holder, size, "", nil, true)
+    ring:ClearAllPoints()
+    ring:SetPoint("CENTER", holder, "CENTER", 0, -7)
+    local r = size / 2 + 12
+    local function label(kind, angle, rot, inside)
+        local fs = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        local rad = math.rad(angle)
+        if inside then
+            fs:SetPoint("CENTER", ring, "CENTER", 0, 7)
+        else
+            fs:SetPoint("CENTER", ring, "CENTER", r * math.sin(rad), 7 + r * math.cos(rad))
+        end
+        if rot ~= 0 then try("FontString:SetRotation", fs.SetRotation, fs, math.rad(rot)) end
+        fs.kind = kind
+        P.texts[#P.texts + 1] = fs
+    end
+    label("pct", 0, 0, true)          -- centre, straight
+    label("name", 0, 0)               -- top, straight
+    label("power", 270, 90)           -- left side, reads bottom to top
+    label("health", 90, -90)          -- right side, reads top to bottom
+    label("pct", 45, -45)             -- top-right, tilted along the ring
+    return holder
+end
+
 -- A normal linear bar cut by a rounded-corner mask: the shape test.
 local function ShapedLinearBar(parent)
     local bar = CreateFrame("StatusBar", nil, parent)
@@ -144,7 +176,7 @@ end
 
 local function Build()
     local f = CreateFrame("Frame", "DandersFramesRingProbe", UIParent, "BackdropTemplate")
-    f:SetSize(560, 400)
+    f:SetSize(560, 520)
     f:SetPoint("CENTER", 0, 120)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -213,8 +245,11 @@ local function Build()
     place2(PipRing(f, 80, token .. " ring", n))
     place2(PipRing(f, 80, token .. " arc", n, { 0.25, 0.75 }))
 
+    local tr = TextRing(f, 120)
+    tr:SetPoint("TOPLEFT", 12, -270)
+
     local linear = ShapedLinearBar(f)
-    linear:SetPoint("TOPLEFT", 12, -270)
+    linear:SetPoint("TOPLEFT", 280, -330)
     local lt = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     lt:SetPoint("LEFT", linear, "RIGHT", 10, 0)
     lt:SetText("Linear bar, rounded mask")
@@ -248,6 +283,18 @@ local function Feed()
             local i = bar.pipIndex
             try("pip SetMinMaxValues", bar.SetMinMaxValues, bar, (i - 1) * mod, i * mod)
             try("pip SetValue", bar.SetValue, bar, ccur)
+        end
+    end
+    -- Text: the same secret-safe calls the frames' health text uses.
+    for _, fs in ipairs(P.texts) do
+        if fs.kind == "pct" and UnitHealthPercent and CurveConstants then
+            try("pct text", fs.SetFormattedText, fs, "%.0f%%", UnitHealthPercent(unit, true, CurveConstants.ScaleTo100))
+        elseif fs.kind == "health" then
+            try("health text", fs.SetText, fs, AbbreviateNumbers(UnitHealth(unit, true)))
+        elseif fs.kind == "power" then
+            try("power text", fs.SetText, fs, AbbreviateNumbers(pcur))
+        elseif fs.kind == "name" then
+            try("name text", fs.SetText, fs, UnitName(unit))
         end
     end
     P.updates = P.updates + 1
