@@ -36,3 +36,6 @@ Preview.lua
 Boss.lua
 BlizzardHide.lua
 Mover.lua
+#@do-not-package@
+RingProbe.lua
+#@end-do-not-package@
