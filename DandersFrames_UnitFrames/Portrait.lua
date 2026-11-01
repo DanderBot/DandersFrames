@@ -309,12 +309,20 @@ function PO:PlayerSpecIcon()
 end
 
 -- What to draw for `unit` with these settings: "3D" | "2D" | "CLASS" | "SPEC".
+-- ☠ RING STYLE DRAWS NO 3D MODEL. A model cannot take a mask, so a shaped 3D
+-- portrait is the model fitted as the square inside the circle (MODEL_INSET) --
+-- and at portrait zoom the head fills that square, so in the middle of a ring it
+-- reads as a SQUARE portrait (seen in game 2026-11-01; 3D is the default style).
+-- In Ring style 3D is drawn as Blizzard's 2D portrait of the same unit, which the
+-- circle mask does cut round. Bars frames keep the model.
 function PO:StyleFor(db, unit, class)
     local mode = PO.MODES[db.portraitMode] and db.portraitMode or "3D"
     if (mode == "CLASS" or mode == "SPEC") and not class then
-        return (db.portraitNpcMode == "2D") and "2D" or "3D"
+        mode = (db.portraitNpcMode == "2D") and "2D" or "3D"
+    elseif mode == "SPEC" and unit ~= "player" then
+        mode = "CLASS"
     end
-    if mode == "SPEC" and unit ~= "player" then return "CLASS" end
+    if mode == "3D" and UF.Rings and UF.Rings.IsRing(db) then return "2D" end
     return mode
 end
 
