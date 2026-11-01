@@ -244,6 +244,36 @@ function R.ClassPowerArc(db)
 end
 
 -- ============================================================
+-- A 3D PORTRAIT IN THE MIDDLE (ringPortrait3D; Portrait.lua RING 3D)
+--   FIT    the model as the largest square inside the portrait's circle
+--   COVER  the model filling the circle's square, its four corners covered in the
+--          portrait background colour. Only with nothing see-through round the
+--          portrait (the innermost ring's Gap is 0, so the ring hides the rest of
+--          the corners): with a gap it is drawn as FIT.
+--   2D     Blizzard's 2D portrait, cut round
+-- ============================================================
+R.PORTRAIT_3D = { FIT = true, COVER = true, ["2D"] = true }
+
+-- Can COVER be drawn? Nothing see-through between the portrait and ring 1.
+function R.CoverAllowed(db)
+    local first = R.List(db)[1]
+    return (first and first.gap == 0) and true or false
+end
+
+-- The mode in effect (COVER falls back to FIT with a gap).
+function R.Portrait3D(db)
+    local m = db and db.ringPortrait3D
+    if not R.PORTRAIT_3D[m] then m = "FIT" end
+    if m == "COVER" and not R.CoverAllowed(db) then m = "FIT" end
+    return m
+end
+
+-- Frame levels in RING style, from the frame's own: the portrait (its model and
+-- corner cover just above it) UNDER the rings, so a ring hides anything of the
+-- portrait's square that reaches it; class power pips over the rings.
+R.LEVEL_PORTRAIT, R.LEVEL_RINGS, R.LEVEL_CLASSPOWER = 2, 5, 6
+
+-- ============================================================
 -- THE ROUND OUTLINE (DandersFrames' circle shape spec, Frames/Create.lua CIRCLE
 -- BANDS): what the resting glow and the selection / hover / aggro highlights trace
 -- on a Ring frame instead of its square -- a circle on the frame's centre, the
@@ -518,7 +548,7 @@ function R:Layout(f)
     c:SetPoint("CENTER", f, "CENTER", 0, 0)
     c:SetSize(geo.size, geo.size)
     -- Over the (hidden) bars, under the text and the frame's icons.
-    c:SetFrameLevel(f:GetFrameLevel() + 2)
+    c:SetFrameLevel(f:GetFrameLevel() + R.LEVEL_RINGS)
 
     local used, health, power = 0, {}, {}
     for _, ring in ipairs(geo.rings) do

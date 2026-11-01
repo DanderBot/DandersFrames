@@ -65,7 +65,7 @@ Links.KIND_PREFIXES = {
     text = { "textDesignerPreset" }, auradesigner = { "auraDesignerEnabled", "auraDesignerPreset" },
     visibility = { "vis" }, castbar = { "castbar" }, classpower = { "classPower" },
     portrait = { "portrait" },
-    rings = { "frameStyle", "ringSize", "rings" },
+    rings = { "frameStyle", "ringSize", "rings", "ringPortrait3D" },
     unitIcons = { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" },
     bosslayout = { "boss" },
 }

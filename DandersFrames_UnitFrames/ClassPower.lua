@@ -347,8 +347,8 @@ function CP:LayoutRing(f, cp, db, res, ring, sec, multi)
     cp:ClearAllPoints()
     cp:SetPoint("CENTER", f, "CENTER", 0, 0)
     cp:SetSize(ring.outer, ring.outer)
-    -- Over the rings' container (+2), under the text.
-    cp:SetFrameLevel(f:GetFrameLevel() + 3)
+    -- Over the rings' arcs, under the text.
+    cp:SetFrameLevel(f:GetFrameLevel() + (R.LEVEL_CLASSPOWER or 6))
 
     cp.ringPips = cp.ringPips or {}
     cp.active = {}

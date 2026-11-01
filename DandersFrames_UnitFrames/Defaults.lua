@@ -133,6 +133,8 @@ local ELEMENTS = {
     frameStyle = "BARS",
     ringSize = 64,
     rings = UF.RING_DEFAULTS,
+    -- A 3D portrait in RING style (Portrait.lua RING 3D): FIT | COVER | 2D.
+    ringPortrait3D = "FIT",
 
     -- Cast bar (CastBar.lua)
     castbarEnabled = false,

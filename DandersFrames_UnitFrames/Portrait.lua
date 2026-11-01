@@ -91,6 +91,7 @@ end
 function PO:Model(p)
     if p.model then return p.model end
     local m = CreateFrame("PlayerModel", nil, p)
+    m:SetFrameLevel(p:GetFrameLevel() + 1)
     p.model = m
     PO:PlaceModel(p)
     return m
@@ -213,7 +214,6 @@ function PO:Layout(f)
     local side = db.portraitSide or "LEFT"
     if ringSize then
         p:SetPoint("CENTER", f, "CENTER", 0, 0)
-        side = "INSIDE_LEFT"   -- for the frame level below: over the bars, under the text
     elseif side == "RIGHT" then
         p:SetPoint("LEFT", f, "RIGHT", 2 + x, y)
     elseif side == "INSIDE_LEFT" then
@@ -223,13 +223,25 @@ function PO:Layout(f)
     else
         p:SetPoint("RIGHT", f, "LEFT", -2 + x, y)
     end
-    -- Inside the frame it sits over the bars and under the text.
-    p:SetFrameLevel(f:GetFrameLevel() + ((side == "INSIDE_LEFT" or side == "INSIDE_RIGHT") and 4 or 1))
+    -- Inside the frame it sits over the bars and under the text; in a ring, under
+    -- the rings (Rings.lua R.LEVEL_PORTRAIT).
+    if ringSize then
+        p:SetFrameLevel(f:GetFrameLevel() + (UF.Rings.LEVEL_PORTRAIT or 2))
+    else
+        p:SetFrameLevel(f:GetFrameLevel() + ((side == "INSIDE_LEFT" or side == "INSIDE_RIGHT") and 4 or 1))
+    end
     p:SetAlpha(tonumber(db.portraitAlpha) or 1)
     -- Hovered right now (or the designer's Show Hover State): dimmed.
     if f.dfIsHovered or rawget(f, "_tdForceHover") then PO:SetHover(f, true) end
     p.bg:SetVertexColor(K.RGBA(db.portraitBgColor, 0, 0, 0, 0.8))
     PO:ApplyShape(p, db, size)
+    -- RING 3D: COVER fills the circle's square (no inset) and covers the corners
+    -- when a model draws (PO:Paint); FIT keeps the shape's inset.
+    p.dfRingCover = (PO.Ring3DMode(db) == "COVER") or nil
+    if p.dfRingCover then
+        p.dfModelInset = 0
+        PO:PlaceModel(p)
+    end
     if not f.dfUFPreview then PO:Update(f) end
 end
 
@@ -309,12 +321,48 @@ function PO:PlayerSpecIcon()
 end
 
 -- What to draw for `unit` with these settings: "3D" | "2D" | "CLASS" | "SPEC".
--- ☠ RING STYLE DRAWS NO 3D MODEL. A model cannot take a mask, so a shaped 3D
--- portrait is the model fitted as the square inside the circle (MODEL_INSET) --
--- and at portrait zoom the head fills that square, so in the middle of a ring it
--- reads as a SQUARE portrait (seen in game 2026-11-01; 3D is the default style).
--- In Ring style 3D is drawn as Blizzard's 2D portrait of the same unit, which the
--- circle mask does cut round. Bars frames keep the model.
+-- ============================================================
+-- RING 3D (ringPortrait3D, Rings.lua A 3D PORTRAIT IN THE MIDDLE). A model cannot
+-- take a mask, so a 3D portrait in a ring is one of:
+--   FIT    the model as the square inside the circle (MODEL_INSET, as the shapes
+--          do on a Bars frame) over the round background
+--   COVER  the model filling the circle's square, with a CORNER COVER over it: a
+--          texture in the background colour cut by Media/RingInnerMask (opaque
+--          outside the disc, clear inside) at the circle's size, hiding the four
+--          corners. The portrait sits under the rings (R.LEVEL_*), and COVER needs
+--          ring 1's Gap at 0, so the ring hides what is left of the corners.
+--   2D     drawn as Blizzard's 2D portrait (StyleFor), cut round
+-- ============================================================
+function PO.Ring3DMode(db)
+    local R = UF.Rings
+    if not (R and R.IsRing(db)) then return nil end
+    return R.Portrait3D(db)
+end
+
+function PO:ShowCover(p, on, db)
+    if not on then
+        if p.cover then p.cover:Hide() end
+        return
+    end
+    if not p.cover then
+        local c = CreateFrame("Frame", nil, p)
+        c:SetAllPoints(p)
+        c.tex = c:CreateTexture(nil, "ARTWORK")
+        c.tex:SetAllPoints(c)
+        c.tex:SetTexture(K.WHITE)
+        c.mask = c:CreateMaskTexture()
+        c.mask:SetTexture(UF.Rings.HOLE, "CLAMPTOWHITE", "CLAMPTOWHITE")
+        c.mask:SetAllPoints(c)
+        c.tex:AddMaskTexture(c.mask)
+        p.cover = c
+    end
+    local r, g, b = K.RGBA(db.portraitBgColor, 0, 0, 0, 1)
+    p.cover.tex:SetVertexColor(r, g, b, 1)
+    -- Over the model (a child of the portrait, a level above it).
+    p.cover:SetFrameLevel(p:GetFrameLevel() + 2)
+    p.cover:Show()
+end
+
 function PO:StyleFor(db, unit, class)
     local mode = PO.MODES[db.portraitMode] and db.portraitMode or "3D"
     if (mode == "CLASS" or mode == "SPEC") and not class then
@@ -322,7 +370,7 @@ function PO:StyleFor(db, unit, class)
     elseif mode == "SPEC" and unit ~= "player" then
         mode = "CLASS"
     end
-    if mode == "3D" and UF.Rings and UF.Rings.IsRing(db) then return "2D" end
+    if mode == "3D" and PO.Ring3DMode(db) == "2D" then return "2D" end
     return mode
 end
 
@@ -357,6 +405,7 @@ end
 
 function PO:Paint(p, db, style, unit, class)
     local mirror = db.portraitMirror and true or false
+    PO:ShowCover(p, style == "3D" and p.dfRingCover, db)
     if style == "3D" then
         p.tex:Hide()
         local m = PO:Model(p)
@@ -468,6 +517,7 @@ function PO:Preview(f)
         PO:Paint(p, db, PO:StyleFor(db, "player", class), "player", class)
     else
         if p.model then p.model:Hide() end
+        PO:ShowCover(p, false)
         p.tex:Show()
         p.tex:SetTexture(PO.QUESTION_ICON)
         p.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)

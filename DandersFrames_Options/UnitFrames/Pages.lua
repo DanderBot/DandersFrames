@@ -272,7 +272,7 @@ function UFO.Prefixes(kind)
     if kind == "castbar" then return { "castbar" } end
     if kind == "classpower" then return { "classPower" } end
     if kind == "portrait" then return { "portrait" } end
-    if kind == "rings" then return { "frameStyle", "ringSize", "rings" } end
+    if kind == "rings" then return { "frameStyle", "ringSize", "rings", "ringPortrait3D" } end
     if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
     if kind == "bosslayout" then return { "boss" } end
     return {}
@@ -1879,6 +1879,11 @@ function UFO.FrameStyleOptions()
     return { BARS = L["Bars"], RING = L["Ring"], _order = { "BARS", "RING" } }
 end
 
+function UFO.RingPortrait3DOptions()
+    return { FIT = L["Fit Inside"], COVER = L["Fill and Cover Corners"], ["2D"] = L["2D Portrait"],
+             _order = { "FIT", "COVER", "2D" } }
+end
+
 function UFO.RingBarOptions()
     return { HEALTH = L["Health"], POWER = L["Power"], CLASSPOWER = L["Class Power"],
              _order = { "HEALTH", "POWER", "CLASSPOWER" } }
@@ -1966,6 +1971,21 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
     band:AddWidget(GUI:CreateDropdown(self.child, L["Frame Style"], UFO.FrameStyleOptions(), db, "frameStyle", changed), 55)
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Ring Size"], 24, 256, 1, db, "ringSize", changed), 55)
     w.disableOn = off
+    -- A 3D portrait in the middle (Portrait.lua RING 3D): only when the portrait is
+    -- a 3D model; Fill and Cover Corners needs ring 1 flush against the portrait.
+    local function not3D(d)
+        return not (d and d.portraitEnabled and (d.portraitMode or "3D") == "3D")
+    end
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["3D Portrait"], UFO.RingPortrait3DOptions(), db,
+        "ringPortrait3D", changed), 55)
+    w.disableOn, w.hideOn = off, not3D
+    w.tooltip = L["How a 3D portrait sits in the round middle: fitted inside the circle, filling it with its corners covered, or drawn as the 2D portrait."]
+    w = band:AddWidget(GUI:CreateLabel(self.child,
+        L["Fill and Cover Corners needs the innermost ring's Gap at 0. Until then the model is fitted inside."], 250), 44)
+    w.hideOn = function(d)
+        local R = DF.UnitFrames and DF.UnitFrames.Rings
+        return not3D(d) or not (d and d.ringPortrait3D == "COVER") or (R and R.CoverAllowed(d))
+    end
     band:AddWidget(GUI:CreateLabel(self.child,
         L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar; absorbs and heal prediction are not drawn on rings."], 250), 70)
     Close(band)

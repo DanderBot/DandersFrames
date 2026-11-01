@@ -421,10 +421,48 @@ eq(p._points[#p._points][1], "CENTER", "centred")
 eq(select(1, PO.OutsideExtent(PP, PP.dfDB)), 0, "reaches nothing outside the frame")
 eq(PP.dfDB.portraitShape, "CIRCLE", "round")
 check(p.masked and p.mask._texture == PO.MASKS.CIRCLE, "the picture and background are cut by the circle mask")
-eq(PO:StyleFor(PP.dfDB, "target", nil), "2D", "a 3D style draws 2D in a ring: a model cannot be masked round")
-eq(PO:StyleFor(PP.dfDB, "player", "MAGE"), "2D", "...for a player too")
-eq(PO:StyleFor({ portraitMode = "CLASS", frameStyle = "RING" }, "player", "MAGE"), "CLASS", "class icons stay icons")
-eq(PO:StyleFor({ portraitMode = "3D" }, "player", "MAGE"), "3D", "Bars: the model as before")
+eq(p._level, PP._level + R.LEVEL_PORTRAIT, "under the rings")
+check(R.LEVEL_PORTRAIT < R.LEVEL_RINGS and R.LEVEL_RINGS < R.LEVEL_CLASSPOWER, "portrait < rings < class power")
+
+print("-- Rings: a 3D portrait in the middle")
+eq(UF:GetUnitDB("target").ringPortrait3D, "FIT", "Fit by default")
+eq(PO:StyleFor(PP.dfDB, "target", nil), "3D", "FIT: the model stays")
+local fitInset = math.floor(p._w * PO.MODEL_INSET.CIRCLE + 0.5)
+eq(p.dfModelInset, fitInset, "FIT: the square inside the circle")
+PO:Paint(p, PP.dfDB, "3D", "target", nil)
+check(not (p.cover and p.cover._shown), "FIT: no corner cover")
+eq(p.model._level, p._level + 1, "the model just over the portrait (and so under the rings)")
+-- COVER with the default gap (2): drawn as FIT
+eff.ringPortrait3D = "COVER"
+check(not R.CoverAllowed(PP.dfDB), "COVER: not with a gap round the portrait")
+eq(R.Portrait3D(PP.dfDB), "FIT", "...so it falls back to FIT")
+PO:Layout(PP)
+eq(p.dfModelInset, fitInset, "...fitted inside")
+PO:Paint(p, PP.dfDB, "3D", "target", nil)
+check(not (p.cover and p.cover._shown), "...with no cover")
+-- COVER with ring 1 flush against the portrait
+eff.rings = deepcopy(UF.RING_DEFAULTS)
+eff.rings[1].gap = 0
+check(R.CoverAllowed(PP.dfDB), "COVER: allowed with the innermost Gap at 0")
+PO:Layout(PP)
+eq(p._w, R.Geometry(PP.dfDB).hole - 2, "the portrait grows into the closed gap")
+eq(p.dfModelInset, 0, "COVER: the model fills the circle's square")
+PO:Paint(p, PP.dfDB, "3D", "target", nil)
+local cv = p.cover
+check(cv and cv._shown, "COVER: a corner cover over it")
+check(cv.mask._texture == R.HOLE and cv.mask._wrap == "CLAMPTOWHITE", "...cut by the hole mask: only the corners show")
+check(cv.tex._masks[1] == cv.mask, "...on the cover's texture")
+eq(cv._level, p._level + 2, "...above the model")
+PO:Paint(p, PP.dfDB, "2D", "target", nil)
+check(not cv._shown, "a 2D picture never gets the cover")
+-- 2D
+eff.ringPortrait3D = "2D"
+eq(PO:StyleFor(PP.dfDB, "target", nil), "2D", "2D: Blizzard's 2D portrait, cut round")
+eq(PO:StyleFor({ portraitMode = "CLASS", frameStyle = "RING", ringPortrait3D = "2D" }, "player", "MAGE"), "CLASS",
+   "class icons stay icons")
+eq(PO:StyleFor({ portraitMode = "3D", ringPortrait3D = "2D" }, "player", "MAGE"), "3D", "Bars: the model whatever the setting")
+eq(R.Portrait3D({ frameStyle = "RING", ringPortrait3D = "bogus" }), "FIT", "an unknown value: FIT")
+eff.ringPortrait3D, eff.rings = nil, nil
 eff.frameStyle = "BARS"
 PP.dfDB = UF:FrameDB("target")
 check(PO.RingSize(PP.dfDB) == nil, "Bars: the normal size")
@@ -475,6 +513,7 @@ Lk.ResetCaches()
 eq(Lk.OwnerOf("frameStyle"), "rings", "frameStyle: the Frame Style element's, not the Frame page's")
 eq(Lk.OwnerOf("rings"), "rings", "rings")
 eq(Lk.OwnerOf("ringSize"), "rings", "ringSize")
+eq(Lk.OwnerOf("ringPortrait3D"), "rings", "ringPortrait3D")
 check(Lk.OwnerOf("frameWidth") ~= "rings", "frameWidth stays the Frame page's")
 
 print("-- Rings: the settings page's list edits")
