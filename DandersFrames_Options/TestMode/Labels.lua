@@ -1335,6 +1335,73 @@ end
 local SETTLE_GAP, SETTLE_TRIES = 0.15, 10
 local settleGen, settleLeft = 0, 0
 
+-- ============================================================
+-- CLICK AREA -- the parts drawn outside a test frame's edge
+-- ============================================================
+-- A Button only receives clicks inside its own rect, so a marked part hanging off
+-- the frame (a portrait or cast bar outside it, an icon past its edge) said "Click
+-- to open settings" and did nothing. While Indicator Info is on, a test frame's
+-- hit rect grows to cover the parts it draws outside itself; it goes back the
+-- moment the labels stop.
+-- ☠ TEST FRAMES ONLY, NEVER A LIVE ONE. A live frame is a secure unit button: its
+-- hit rect is where click casting lands, and growing it would steal clicks meant
+-- for its neighbours. Only a frame that is dfIsTestFrame AND not protected is ever
+-- touched -- both, so a source that hands over the wrong frame still cannot reach
+-- a secure one.
+-- ⚠ The aura rows are left out (only the `find` targets count): an aura icon past
+-- the frame's edge keeps its own tooltip and gets no click area from here.
+-- ⚠ Hover follows the hit rect, so the frame's own hover highlight now also lights
+-- over those parts. Test mode only, and pointing there is asking about this frame.
+local grownFrames = {}   -- frame -> { l, r, t, b } insets it had before
+
+local function canGrow(frame)
+    if not (frame and frame.dfIsTestFrame and frame.SetHitRectInsets and frame.GetHitRectInsets) then
+        return false
+    end
+    if frame.IsProtected then
+        local ok, prot = pcall(frame.IsProtected, frame)
+        if not ok or prot then return false end
+    end
+    return true
+end
+
+local function restoreClickArea(frame)
+    local was = grownFrames[frame]
+    if not was then return end
+    grownFrames[frame] = nil
+    pcall(frame.SetHitRectInsets, frame, was[1], was[2], was[3], was[4])
+end
+
+local function restoreAllClickAreas()
+    for frame in pairs(grownFrames) do restoreClickArea(frame) end
+end
+
+-- The union of the frame's measured `find` regions, as insets past its own edges.
+local function growClickArea(frame)
+    if not canGrow(frame) or moverSessionOpen() then return end
+    local fl, fr, ft, fb = frame:GetLeft(), frame:GetRight(), frame:GetTop(), frame:GetBottom()
+    if not (fl and fr and ft and fb) then return end
+    local l, r, t, b = 0, 0, 0, 0
+    for _, reg in ipairs(hoverRegions) do
+        if reg.frame == frame and reg.obj and reg.host == frame then
+            if fl - reg.l > l then l = fl - reg.l end
+            if reg.r - fr > r then r = reg.r - fr end
+            if reg.t - ft > t then t = reg.t - ft end
+            if fb - reg.b > b then b = fb - reg.b end
+        end
+    end
+    if l == 0 and r == 0 and t == 0 and b == 0 then return end
+    if not grownFrames[frame] then
+        local ok, il, ir, it, ib = pcall(frame.GetHitRectInsets, frame)
+        if not ok then return end
+        grownFrames[frame] = { il or 0, ir or 0, it or 0, ib or 0 }
+    end
+    local was = grownFrames[frame]
+    -- Never smaller than the frame's own: only the grown part is ours.
+    pcall(frame.SetHitRectInsets, frame, math.min(was[1], -l), math.min(was[2], -r),
+          math.min(was[3], -t), math.min(was[4], -b))
+end
+
 local function scheduleSettle()
     local gen = settleGen
     C_Timer.After(SETTLE_GAP, function()
@@ -1374,6 +1441,11 @@ function TL:Update(settling)
         end
     end
 
+    -- The click area follows the fresh rects: every frame back to its own, then the
+    -- labelled ones grown over what they draw past their edge.
+    restoreAllClickAreas()
+    for f in pairs(frameSource) do growClickArea(f) end
+
     -- Drive whatever DID measure straight away; a partial answer beats a blank one
     -- while the rest settles.
     if #hoverRegions > 0 then ensureHoverDriver():Show() end
@@ -1412,6 +1484,7 @@ function TL:Clear()
     stopHover()
     for i = #hoverRegions, 1, -1 do hoverRegions[i] = nil end
     eachTestFrame(hideWidgets)
+    restoreAllClickAreas()
     for k in pairs(regionOf) do regionOf[k] = nil end
     for k in pairs(frameSource) do frameSource[k] = nil end
 end

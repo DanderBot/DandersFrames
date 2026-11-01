@@ -364,6 +364,48 @@ opened = nil
 check(not TL:HandleClick(other, "LeftButton"), "seam: a source that stops wanting is not clickable")
 
 -- ============================================================
+-- (d) the click area grows over parts drawn past the frame's edge
+-- ============================================================
+local function hitRect(f)
+    f._hit = { 0, 0, 0, 0 }
+    function f:SetHitRectInsets(l, r, t, b) self._hit = { l, r, t, b } end
+    function f:GetHitRectInsets() return unpack(self._hit) end
+end
+hitRect(party)
+hitRect(raid)
+party.dfIsTestFrame = true
+raid.dfIsTestFrame = true
+function raid:IsProtected() return true end   -- a secure frame: never touched
+-- The leader icon, shown past the party frame's right edge (220) by 15 and its
+-- top (160) by 5.
+party.leaderIcon = frame("Frame", { 225, 235, 150, 165 })
+raid.leaderIcon = frame("Frame", { 425, 435, 150, 165 })
+otherWants = false
+DFt:UpdateTestLabels()
+eq(table.concat(party._hit, ","), "0,-15,-5,0", "click area: grows right and up over the icon past the edge")
+eq(table.concat(raid._hit, ","), "0,0,0,0", "click area: a protected frame is never touched")
+CX, CY = 230, 162
+clear()
+check(TL:HandleClick(party, "LeftButton"), "click area: a click past the edge opens the icon")
+eq(last()[2], "indicators_icons", "click area: ...its page")
+
+party.leaderIcon:Hide()
+DFt:UpdateTestLabels()
+eq(table.concat(party._hit, ","), "0,0,0,0", "click area: back to the frame's own once nothing hangs off it")
+party.leaderIcon:Show()
+DFt:UpdateTestLabels()
+eq(party._hit[2], -15, "click area: (grown again)")
+partyDb.testShowLabels = false
+DFt:ClearTestLabels()
+eq(table.concat(party._hit, ","), "0,0,0,0", "click area: test mode teardown restores it")
+partyDb.testShowLabels = true
+
+party.dfIsTestFrame = nil   -- a frame not marked as a test frame
+DFt:UpdateTestLabels()
+eq(table.concat(party._hit, ","), "0,0,0,0", "click area: only a frame marked as a test frame grows")
+party.dfIsTestFrame = true
+
+-- ============================================================
 -- TEARDOWN
 -- ============================================================
 DFt:ClearTestLabels()
