@@ -2773,15 +2773,42 @@ end
 -- hand-anchored inside frames the page harness never sees. It is why this page
 -- had to force the settings window 210px wider than its own default.
 -- ============================================================
-local function BuildTextDesignerIsland(GUI, page, db)
+-- ============================================================
+-- WHAT THE PAGE EDITS
+-- ------------------------------------------------------------
+-- By default the template the selected MODE uses. A caller editing a settings
+-- table that names its own template passes opts.target instead:
+--   target.getName()   the template it uses now (a name in the library)
+--   target.sizeDB      the settings table the preview's frame size comes from
+--   target.bar         extra GUI:CreateDesignerPresetBar opts (getRef / setRef /
+--                      getLabel / leadItems / tailItems / listUsers / registryKey)
+--   target.onChange()  after the template choice changed
+-- Returns the template's config, its name, and the size table.
+-- ============================================================
+local function TDEditTarget(GUI, db, target)
+    if target then
+        local name = target.getName and target.getName() or nil
+        local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+        local cfg = lib and ((name and lib[name]) or lib[DF.DEFAULT_PRESET]) or nil
+        return cfg, name, target.sizeDB or db or {}
+    end
+    local mode = (GUI and GUI.SelectedMode) or "party"
+    local cfg = DF.GetModeBaseTextDesigner and DF:GetModeBaseTextDesigner(mode)
+    local name = DF.GetModeDesignerPresetName and DF:GetModeDesignerPresetName("text", mode)
+    return cfg, name, (DF.GetDB and DF:GetDB(mode)) or {}
+end
+DF.TextDesigner._EditTarget = TDEditTarget
+
+local function BuildTextDesignerIsland(GUI, page, db, opts)
+    local target = opts and opts.target or nil
     -- TD is mode-tabbed: edit the preset the active mode uses (edited == used,
     -- so live frames stay in sync with the editor). EnsureDB guarantees the
     -- preset carries the full TD schema.
-    local _tdEditMode = (GUI and GUI.SelectedMode) or "party"
     -- Base variant: the editor edits your base raid preset, not the active runtime
     -- auto-layout's overlay (it edits the layout only while IN edit-auto-layout).
-    local tdDB = (DF.GetModeBaseTextDesigner and DF:GetModeBaseTextDesigner(_tdEditMode))
-        or (DF.TextDesigner:EnsureDB(db))
+    -- A target (above) names its own template and its own frame size instead.
+    local tdDB, _tdTargetName, _tdSizeDB = TDEditTarget(GUI, db, target)
+    tdDB = tdDB or (DF.TextDesigner:EnsureDB(db))
     DF.TextDesigner:EnsureDB({ textDesigner = tdDB })
     local state = GetState(page)
 
@@ -2807,6 +2834,12 @@ local function BuildTextDesignerIsland(GUI, page, db)
         if state.previewPanel and state.previewPanel.RefreshGeometry then
             state.previewPanel.RefreshGeometry()
         end
+        -- ONE PREVIEW BINDING FOR EVERY TEXT DESIGNER PAGE. Preview binds one mock
+        -- frame and one template at a time, and more than one page can build this
+        -- island; whichever is on screen takes the binding back, or its edits paint
+        -- the other page's mock.
+        local PV = DF.TextDesigner.Preview
+        if state.mockFrame and PV and PV.Bind then PV:Bind(state.mockFrame, tdDB) end
     end
 
     -- Detect mode change OR auto-layout switch: tear down every cached widget so
@@ -2814,24 +2847,24 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- reference; an auto-layout switch keeps the SAME raid db but changes
     -- frameWidth/Height — both must rebuild so the preview mock resizes to the
     -- active layout's frame size.
-    local _tdMode = (GUI and GUI.SelectedMode) or "party"
-    local _tdFDB = (DF.GetDB and DF:GetDB(_tdMode)) or {}
+    local _tdFDB = _tdSizeDB or {}
     local _tdW, _tdH = _tdFDB.frameWidth or 125, _tdFDB.frameHeight or 64
     -- Auto-layout identity: two raid layouts share the SAME db proxy (DF.db.raid)
     -- and may share frame dimensions, so neither check above distinguishes them.
     -- Without this, switching between same-size raid layouts reuses the stale page
     -- (cards bound to the previous layout's elements; Preview never re-Init'd), so
     -- TD edits stop showing on the preview/test frames until /reload.
-    local _tdLayout = (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
+    local _tdLayout = (not target) and (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
     -- Editing identity: entering edit of the CURRENTLY-ACTIVE layout keeps the
     -- same table object (editingProfile == activeRuntimeProfile), so _tdLayout
     -- alone misses the transition and the page never rebuilds with the editing
     -- banner offset (-56) — the banner overlays the preset/controls bars (and
     -- exiting leaves a stale gap).
-    local _tdEditing = (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
+    -- (A target sits inside a page the harness has already moved clear of that banner.)
+    local _tdEditing = (not target) and (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
     -- Preset identity: switching the mode's preset keeps the same db/size/layout,
     -- so without this the stale page (bound to the old preset) would be reused.
-    local _tdPreset = DF.GetModeDesignerPresetName and DF:GetModeDesignerPresetName("text", _tdMode)
+    local _tdPreset = _tdTargetName
     if state.built and (state.activeDB ~= db or state.builtFrameW ~= _tdW or state.builtFrameH ~= _tdH or state.builtLayout ~= _tdLayout or state.builtPreset ~= _tdPreset or state.builtEditing ~= _tdEditing) then
         if state.cardFrames then
             for _, card in pairs(state.cardFrames) do
@@ -2930,17 +2963,18 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- While editing a raid auto-layout, the AutoProfiles editing banner (~50px)
     -- overlays the top of the content frame; push the top row down to clear it.
     local _tdTopY = -8  -- top gap; kept equal to the Aura Designer's yPos for a consistent header gap
-    if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
+    if _tdEditing then
         _tdTopY = -56
     end
 
     -- ── PRESET BAR (which named preset this mode uses + library management) ──
     local presetBar
     if GUI.CreateDesignerPresetBar then
-        presetBar = GUI:CreateDesignerPresetBar(page.child, {
+        local barOpts = {
             kind = "text",
             getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
             onChange = function()
+                if target and target.onChange then target.onChange() end
                 -- Re-invoke the build NEXT frame: the builtPreset check above sees
                 -- the changed preset and rebuilds (rebinding the editor + preview
                 -- to the new preset). Deferred so we don't tear the bar down from
@@ -2948,13 +2982,16 @@ local function BuildTextDesignerIsland(GUI, page, db)
                 -- rebuild's teardown path runs.
                 if C_Timer and C_Timer.After then
                     C_Timer.After(0, function()
-                        if DF.BuildTextDesignerPage then DF.BuildTextDesignerPage(GUI, page, db) end
+                        if DF.BuildTextDesignerPage then DF.BuildTextDesignerPage(GUI, page, db, nil, nil, opts) end
                         if DF.TextDesigner and DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
                         if DF.UpdateAllFrames then DF:UpdateAllFrames() end
                     end)
                 end
             end,
-        })
+        }
+        -- A target's own reference rides on the same bar (getRef / setRef / ...).
+        for k, v in pairs(target and target.bar or {}) do barOpts[k] = v end
+        presetBar = GUI:CreateDesignerPresetBar(page.child, barOpts)
         -- Anchored BELOW the controls box further down (after the box exists).
         state.presetBar = presetBar
     end
@@ -3014,8 +3051,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- Mock unit frame (centred in panel) — visual clone of AD's mockFrame.
     local mockFrame
     do
-        local mode = (GUI and GUI.SelectedMode) or "party"
-        local frameDB = (DF.GetDB and DF:GetDB(mode)) or DF.PartyDefaults or {}
+        local frameDB = _tdSizeDB or DF.PartyDefaults or {}
         local FRAME_W = frameDB.frameWidth or 125
         local FRAME_H = frameDB.frameHeight or 64
         local POWER_H = frameDB.powerBarHeight or 4
@@ -3110,7 +3146,8 @@ local function BuildTextDesignerIsland(GUI, page, db)
     previewPanel.RefreshGeometry = function()
         local m = state.mockFrame
         if not m then return end
-        local fdb = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
+        local _, _, fdb = TDEditTarget(GUI, db, target)
+        fdb = fdb or DF.PartyDefaults or {}
         local w = fdb.frameWidth or 125
         local h = fdb.frameHeight or 64
         m:SetSize(w, h)
@@ -3244,6 +3281,8 @@ end
 -- still accepted so BuildPage's contract is unchanged; the island does not use
 -- them.
 -- ============================================================
-function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
-    return BuildTextDesignerIsland(GUI, page, db)
+-- `opts.target` edits a template some other settings table names, instead of the
+-- selected mode's (WHAT THE PAGE EDITS, above). Without it nothing changes.
+function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace, opts)
+    return BuildTextDesignerIsland(GUI, page, db, opts)
 end

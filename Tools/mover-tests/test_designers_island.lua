@@ -47,9 +47,9 @@ do
           "switch: the Text Designer has no rows arm")
     check(FD:find("CreatePopoutPageTools", 1, true) == nil,
           "switch: the Filter Designer has no band arm")
-    check(EDIT:find("return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)", 1, true) ~= nil,
+    check(EDIT:find("return BuildAuraDesignerIsland(guiRef, pageRef, dbRef, opts)", 1, true) ~= nil,
           "switch: the Aura Designer builds its island")
-    check(TD:find("return BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
+    check(TD:find("return BuildTextDesignerIsland(GUI, page, db, opts)", 1, true) ~= nil,
           "switch: the Text Designer builds its island")
 end
 
@@ -171,7 +171,7 @@ end
 -- ============================================================
 print("-- Aura Designer: the split panel mounts the pools and the spec picker")
 do
-    local island = cut(EDIT, "local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)")
+    local island = cut(EDIT, "local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef, opts)")
     check(island ~= nil, "island: its body can be read")
     island = island or ""
     check(island:find("S.BuildPoolStrip(poolHost)", 1, true) ~= nil,
@@ -377,7 +377,14 @@ do
             end,
         }
         W.GUI = GUI
+        -- What the page edits (Options.lua P.EditTarget): the mode tab, unless a
+        -- test names a target template (W.targetName).
         local P = {
+            EditTarget = function()
+                if W.targetName then return { name = W.targetName } end
+                return { mode = GUI.SelectedMode }
+            end,
+            EditTargetEnabled = function() return W.enabled end,
             GroupTileMetrics = { picH = 40, gap = 6 },
             PaintGroupIconRow = function(_, colors, ghost)
                 W.painted[#W.painted + 1] = { n = #colors, ghost = ghost }
@@ -666,6 +673,12 @@ do
         t6.GUI.SelectedMode = "raid"
         t6.S.SwitchTab("effects")
         eq(t6.Last(), "list:indicator", "add: a party/raid switch ends it")
+    end
+    local t6b = Running({})
+    if t6b.ok then
+        t6b.targetName = "Player"
+        t6b.S.SwitchTab("effects")
+        eq(t6b.Last(), "list:indicator", "add: moving the page to an edit target ends it")
     end
     local t7 = Running({})
     if t7.ok then

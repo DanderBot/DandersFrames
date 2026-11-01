@@ -542,6 +542,13 @@ UF.UNIT_TEMPLATE_NAMES = {
     focus = "Focus", focustarget = "Focus Target", pet = "Pet", boss = "Boss",
 }
 
+-- How a unit names itself in DandersFrames' "also used by" list of a template.
+function UF:CarrierLabel(unit)
+    local L = DF.L
+    if not L then return nil end
+    return string.format(L["%s (%s)"], L[UF.UNIT_TEMPLATE_NAMES[unit] or unit], L["Unit Frames"])
+end
+
 -- The Aura Designer template a unit's frames draw with (a name).
 function UF:AuraTemplateFor(db)
     local name = db and db.auraDesignerPreset
@@ -592,10 +599,7 @@ function UF.DesignerRefWalker(profile, fn)
     for _, unit in ipairs(UF.UNITS) do
         local stored = root.units[unit]
         if type(stored) == "table" then
-            local label
-            if L then
-                label = string.format(L["%s (%s)"], L[UF.UNIT_TEMPLATE_NAMES[unit] or unit], L["Unit Frames"])
-            end
+            local label = L and UF:CarrierLabel(unit) or nil
             if live then
                 local eff = UF:GetUnitDB(unit)
                 -- What it draws with: an unset Aura template follows Party's.

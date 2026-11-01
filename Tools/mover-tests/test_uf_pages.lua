@@ -813,10 +813,12 @@ do
     cards, keys = BuildPage("pet", "portrait")
     check(not has(keys, "portraitNpcMode") and not has(keys, "portraitDesatDead"), "pet: no NPC style, no desaturate")
 
-    print("-- Phase 5.1 pages: Text Designer / Aura Designer templates")
+    print("-- Per-unit designers (phase 2): the designer itself on the unit's page")
     do
-        local heldA, heldT, heldD, heldC, heldI = DF.GetAuraDesignerPresets, DF.GetTextDesignerPresets,
-            DF.DuplicateDesignerPreset, DF.CreateDesignerPreset, DF.InvalidateAuraLayout
+        local heldA, heldT, heldD, heldC, heldI, heldU, heldBT, heldBA =
+            DF.GetAuraDesignerPresets, DF.GetTextDesignerPresets, DF.DuplicateDesignerPreset,
+            DF.CreateDesignerPreset, DF.InvalidateAuraLayout, DF.ListDesignerPresetUsers,
+            DF.BuildTextDesignerPage, DF.BuildAuraDesignerPage
         local alib = { Default = {}, Party = {}, Mine = {} }
         local tlib = { Default = {}, ["Unit Frames"] = {}, ["Unit Frames (Small)"] = {} }
         function DF:GetAuraDesignerPresets() return alib end
@@ -829,44 +831,103 @@ do
         function DF:CreateDesignerPreset(_, name) return name end
         local invalidated = 0
         function DF:InvalidateAuraLayout() invalidated = invalidated + 1 end
-
-        local cards, keys, byKey = BuildPage("player", "auradesigner")
-        eq(cards, "uf_auradesigner", "Aura Designer page: one card")
-        check(has(keys, "auraDesignerEnabled"), "...its own enable")
-        local dd, row
-        for _, w in ipairs(built) do
-            if w.kind == "dropdown" then dd = w end
-            if w.kind == "buttons" then row = w end
+        local islands = {}
+        function DF.BuildTextDesignerPage(_, pg, db, Add_, AddSpace_, opts)
+            islands[#islands + 1] = { kind = "text", page = pg, db = db, opts = opts, add = Add_ }
         end
-        check(dd and dd.label == "Template:", "...a Template picker")
-        eq(dd.args[2]._order[1], UFO.FOLLOW_PARTY, "...Same as Party Frames first")
-        eq(dd.args[2][UFO.FOLLOW_PARTY], "Same as Party Frames", "...labelled so")
-        check(has(dd.args[2]._order, "Mine"), "...then the library")
-        local db = UF:GetStoredUnit("player")
-        eq(dd.args[6](), UFO.FOLLOW_PARTY, "unset: shows Same as Party Frames")
-        dd.args[7]("Mine")
-        eq(db.auraDesignerPreset, "Mine", "pick: stores the name")
-        dd.args[5]()
-        eq(invalidated, 1, "...and the aura layout re-syncs")
-        dd.args[7](UFO.FOLLOW_PARTY)
-        eq(db.auraDesignerPreset, nil, "Same as Party Frames: stores nothing")
-        check(row and row.args[1][1].label == "Make Own Template", "a Make Own Template button")
-        DF.GetModeDesignerPresetName = function() return "Party" end
-        row.args[1][1].onClick()
-        eq(dup[#dup], "aura:Party>Player", "...copies the template it draws (Party's) as Player")
-        eq(db.auraDesignerPreset, "Player", "...and picks it")
-        DF.GetModeDesignerPresetName = nil
+        function DF.BuildAuraDesignerPage(_, pg, db, Add_, AddSpace_, opts)
+            islands[#islands + 1] = { kind = "aura", page = pg, db = db, opts = opts, add = Add_ }
+        end
 
-        cards = BuildPage("pet", "text")
-        eq(cards, "uf_text_template", "Text page: one card")
-        for _, w in ipairs(built) do if w.kind == "buttons" then row = w end end
-        row.args[1][1].onClick()
+        -- The page: the head (link banner, Reset / Copy row), then ONE slot that
+        -- fills the rest -- and no cards of its own.
+        local cards, _, _, pAdded = BuildPage("player", "auradesigner")
+        eq(cards, "", "Aura Designer page: no cards -- the designer is the page")
+        check(pAdded[1].w.dfLinkBanner and pAdded[2].w.dfUnitRow ~= nil, "...under the page's head")
+        local slot = pAdded[3] and pAdded[3].w
+        check(slot and slot.dfDesignerSlot == "aura", "...then the designer's slot")
+        check(slot and slot.layoutFill == true and pAdded[3].col == "both", "...full width, filling the viewport")
+        eq(pAdded[3] and pAdded[3].h, UFO.DESIGNER_MIN_H, "...never shorter than its minimum")
+        check(slot and slot.child ~= nil, "...with a child the island builds into")
+
+        -- ☠ never built by the page builder: the search index builds pages headlessly.
+        eq(#islands, 0, "headless build: the island is not built")
+        slot.IsVisible = function() return true end
+        slot.dfShowDesigner()
+        eq(#islands, 1, "shown: the island is built")
+        local isl = islands[1] or {}
+        eq(isl.kind, "aura", "...the Aura Designer's")
+        eq(isl.page, slot, "...into the slot")
+        eq(isl.db, UF:GetUnitDB("player"), "...against the unit's table")
+        eq(isl.add, nil, "...as an island (no Add handed over)")
+        local refreshed = 0
+        slot.RefreshStates = function() refreshed = refreshed + 1 end
+        slot.dfShowDesigner()
+        eq(#islands, 1, "shown again: not built twice")
+        eq(refreshed, 1, "...its RefreshStates runs instead (takes the island back)")
+
+        -- The edit target.
+        local t = isl.opts and isl.opts.target or {}
+        local db = UF:GetStoredUnit("player")
+        db.auraDesignerPreset = nil
+        DF.GetModeDesignerPresetName = function() return "Party" end
+        eq(t.getName and t.getName(), "Party", "target: an unset Aura template is Party's")
+        eq(t.db, UF:GetUnitDB("player"), "target: the enable and size table is the unit's")
+        eq(t.sizeDB, UF:GetUnitDB("player"), "...and so is the preview's size")
+        local bar = t.bar or {}
+        eq(bar.getRef and bar.getRef(), "Party", "bar: shows the template the unit draws")
+        eq(bar.getLabel and bar.getLabel(), "Same as Party Frames", "bar: ...labelled Same as Party Frames while it follows")
+        eq(bar.leadItems and bar.leadItems[1].label, "Same as Party Frames", "bar: Same as Party Frames is listed first")
+        eq(bar.tailItems and bar.tailItems[1].label, "Make Own Template", "bar: Make Own Template after the library")
+        check(bar.registryKey and bar.registryKey ~= "aura", "bar: its own refresh slot, never the Aura Designer page's")
+        bar.setRef("Mine")
+        eq(db.auraDesignerPreset, "Mine", "bar: a pick stores the unit's template")
+        eq(bar.getRef(), "Mine", "...and is what it shows")
+        eq(bar.getLabel(), nil, "...by name")
+        eq(t.getName(), "Mine", "...and what the designer edits")
+        bar.leadItems[1].onClick()
+        eq(db.auraDesignerPreset, nil, "bar: Same as Party Frames stores nothing")
+        bar.tailItems[1].onClick()
+        eq(dup[#dup], "aura:Party>Player", "bar: Make Own Template copies the template it draws (Party's) as Player")
+        eq(db.auraDesignerPreset, "Player", "...and picks it")
+        local before = invalidated
+        t.onChange()
+        eq(invalidated, before + 1, "a change: the aura layout re-syncs")
+
+        -- The sharing glyph names everyone else, never the unit itself.
+        function DF:ListDesignerPresetUsers(kind, name)
+            return { "Party", UF:CarrierLabel("player"), UF:CarrierLabel("pet") }
+        end
+        local users = bar.listUsers("Player")
+        eq(table.concat(users, "|"), "Party|" .. UF:CarrierLabel("pet"), "bar: also used by -- everyone but this unit")
+
+        -- Text: the same seam, no Same as Party Frames.
+        islands = {}
+        local _, _, _, tAdded = BuildPage("pet", "text")
+        local tslot = tAdded[3] and tAdded[3].w
+        check(tslot and tslot.dfDesignerSlot == "text" and tslot.layoutFill, "Text page: the designer's slot")
+        tslot.IsVisible = function() return true end
+        tslot.dfShowDesigner()
+        local tt = islands[1] and islands[1].opts and islands[1].opts.target or {}
+        eq(islands[1] and islands[1].kind, "text", "...the Text Designer's island")
+        eq(tt.getName and tt.getName(), "Unit Frames (Small)", "target: the unit's own template")
+        eq(tt.bar and tt.bar.leadItems, nil, "bar: no Same as Party Frames on Text")
+        tt.bar.tailItems[1].onClick()
         eq(dup[#dup], "text:Unit Frames (Small)>Pet", "Text: Make Own Template copies the unit's template")
         eq(UF:GetStoredUnit("pet").textDesignerPreset, "Pet", "...and picks it")
-        db.auraDesignerPreset, UF:GetStoredUnit("pet").textDesignerPreset = nil, nil
+        tt.bar.setRef("Unit Frames")
+        eq(UF:GetStoredUnit("pet").textDesignerPreset, "Unit Frames", "bar: a pick stores the unit's text template")
 
+        -- The window takes the designer's width on these pages.
+        local mw = G.PageMinWidths and G.PageMinWidths["uf_player_auradesigner"]
+        check(type(mw) == "function" and mw() >= 850, "the designer pages ask for the designer's width")
+
+        db.auraDesignerPreset, UF:GetStoredUnit("pet").textDesignerPreset = nil, nil
+        DF.GetModeDesignerPresetName = nil
         DF.GetAuraDesignerPresets, DF.GetTextDesignerPresets, DF.DuplicateDesignerPreset,
-            DF.CreateDesignerPreset, DF.InvalidateAuraLayout = heldA, heldT, heldD, heldC, heldI
+            DF.CreateDesignerPreset, DF.InvalidateAuraLayout, DF.ListDesignerPresetUsers,
+            DF.BuildTextDesignerPage, DF.BuildAuraDesignerPage =
+            heldA, heldT, heldD, heldC, heldI, heldU, heldBT, heldBA
     end
 
     print("-- Unit Icons: Show Tail")

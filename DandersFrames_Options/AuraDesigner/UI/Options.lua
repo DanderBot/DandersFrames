@@ -125,19 +125,78 @@ RefreshLocaleStrings()
 DF:RegisterLocaleRefresh(RefreshLocaleStrings)
 
 
+-- ============================================================
+-- WHAT THE EDITOR EDITS (the edit target)
+-- ------------------------------------------------------------
+-- By default the template the selected MODE uses, with the mode's own enable and
+-- frame size. A caller editing a settings table that names its own template
+-- builds the page with opts.target (S.editTarget for that build):
+--   target.getName()   the template it draws with (a name in the library)
+--   target.db          its settings table: the enable (DF:IsAuraDesignerEnabledForDB),
+--                      the preview's frame size, the Buff Bar defaults to import
+--   target.bar         extra GUI:CreateDesignerPresetBar opts (getRef / setRef / ...)
+--   target.onChange()  after the template choice or the enable changed
+--
+-- ☠ EVERY "WHICH MODE?" QUESTION IN THESE FILES GOES THROUGH HERE. A direct read
+-- of GUI.SelectedMode anywhere else answers for the mode tab while the page is
+-- editing something else -- the enable box ticking the party designer from a
+-- page that is not about party. A source-shape test holds the line.
+-- Returns { mode = "party"|"raid" or nil, name = template, db = settings table,
+-- target = the target or nil }.
+-- ============================================================
+function P.ResolveEditTarget(target, mode)
+    if target then
+        return { name = target.getName and target.getName() or nil, db = target.db or {}, target = target }
+    end
+    mode = mode or "party"
+    return {
+        mode = mode,
+        name = DF.GetModeDesignerPresetName and DF:GetModeDesignerPresetName("aura", mode) or nil,
+        db = (DF.GetDB and DF:GetDB(mode)) or DF.PartyDefaults or {},
+    }
+end
+
+function P.EditTarget()
+    return P.ResolveEditTarget(S.editTarget, (GUI and GUI.SelectedMode) or "party")
+end
+
+-- The enable of what is being edited: a mode's (DF:IsAuraDesignerEnabledForMode),
+-- or the target table's own key.
+function P.EditTargetEnabled(t)
+    t = t or P.EditTarget()
+    if t.mode then
+        return (DF.IsAuraDesignerEnabledForMode and DF:IsAuraDesignerEnabledForMode(t.mode)) and true or false
+    end
+    return (DF.IsAuraDesignerEnabledForDB and DF:IsAuraDesignerEnabledForDB(t.db)) and true or false
+end
+
+function P.SetEditTargetEnabled(t, on)
+    t = t or P.EditTarget()
+    if t.mode then
+        if DF.SetAuraDesignerEnabledForMode then DF:SetAuraDesignerEnabledForMode(t.mode, on) end
+    elseif t.db then
+        t.db.auraDesignerEnabled = on and true or false
+    end
+    if t.target and t.target.onChange then t.target.onChange() end
+end
+
 local function GetAuraDesignerDB()
     -- The editor is mode-tabbed: it edits the preset the active mode uses
     -- (party → its assigned preset, etc.). Because edited == used, live
     -- frames stay in sync with the editor automatically.
     -- Base variant: the editor edits your base raid preset, not the active runtime
     -- auto-layout's overlay (it edits the layout only while IN edit-auto-layout).
+    -- An edit target (above) names its own template instead.
     local adDB
-    if DF.GetModeBaseAuraDesigner then
-        local mode = (GUI and GUI.SelectedMode) or "party"
-        adDB = DF:GetModeBaseAuraDesigner(mode)
+    if S.editTarget then
+        local lib = DF.GetAuraDesignerPresets and DF:GetAuraDesignerPresets()
+        local name = S.editTarget.getName and S.editTarget.getName()
+        adDB = lib and ((name and lib[name]) or lib[DF.DEFAULT_PRESET]) or nil
+    elseif DF.GetModeBaseAuraDesigner then
+        adDB = DF:GetModeBaseAuraDesigner(P.EditTarget().mode)
     end
     -- Pre-migration / very-early fallback to the legacy inline config.
-    adDB = adDB or (S.db and S.db.auraDesigner)
+    if not S.editTarget then adDB = adDB or (S.db and S.db.auraDesigner) end
     -- The migrations now live in AuraDesigner/Migrations.lua, which stays
     -- resident so saved data is migrated whether or not this editor is loaded.
     -- Same functions, reached by their published names instead of file locals.

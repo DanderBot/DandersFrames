@@ -1638,11 +1638,30 @@ function GUI:CreateButtonRow(parent, buttons, opts)
     return row
 end
 
+-- A designer's template bar: which named template the thing being edited uses,
+-- plus the library actions (New / Duplicate / Rename / Delete).
+--
+-- By default it points a MODE at a template (opts.getMode, "party" when absent).
+-- A caller editing something other than a mode -- a settings table that names its
+-- own template -- passes the reference as two callbacks instead:
+--   opts.getRef()      the template name it uses now
+--   opts.setRef(name)  point it at `name`
+-- and may add:
+--   opts.getLabel()    the dropdown's text, when the reference is not a plain name
+--                      (nil = the name)
+--   opts.leadItems / opts.tailItems   { { label, onClick }, ... } listed before /
+--                      after the library in the dropdown
+--   opts.listUsers(name)   who else draws with `name` (the sharing glyph's list)
+--   opts.registryKey   its slot for GUI:RefreshDesignerPresetBars (default: kind),
+--                      so it never takes the slot of the mode's own bar
+-- The raid auto-layout states are a mode's only; a reference never shows them.
 function GUI:CreateDesignerPresetBar(parent, opts)
     opts = opts or {}
     local kind = opts.kind or "aura"
     local getMode = opts.getMode or function() return "party" end
     local onChange = opts.onChange or function() end
+    local getRef, setRef = opts.getRef, opts.setRef
+    if not (getRef and setRef) then getRef, setRef = nil, nil end
 
     local bar = CreateFrame("Frame", nil, parent)
     bar:SetHeight(24)
@@ -1653,7 +1672,14 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local function CurrentName()
+        if getRef then return getRef() or DF.DEFAULT_PRESET end
         return DF:GetModeDesignerPresetName(kind, getMode())
+    end
+
+    -- Point whatever this bar edits at `name`.
+    local function SetCurrent(name)
+        if setRef then return setRef(name) end
+        DF:SetModeDesignerPreset(kind, getMode(), name)
     end
 
     -- True while editing a raid auto-layout (the only context with an "inherit
@@ -1663,6 +1689,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     -- PARTY preset bar must not show layout state, and its "Inherit (Global)"
     -- click must never clear the RAID layout's override.
     local function IsEditingLayout()
+        if getRef then return false end
         return getMode() == "raid"
             and DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()
     end
@@ -1672,6 +1699,10 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local function CurrentLabel()
         if IsEditingLayout() and DF.IsLayoutDesignerInheriting and DF:IsLayoutDesignerInheriting(kind) then
             return L["Inherit (Global)"]
+        end
+        if opts.getLabel then
+            local text = opts.getLabel()
+            if text then return text end
         end
         return CurrentName()
     end
@@ -1750,9 +1781,11 @@ function GUI:CreateDesignerPresetBar(parent, opts)
                 if DF.InheritLayoutDesignerPreset then DF:InheritLayoutDesignerPreset(kind) end
             end)
         end
+        for _, item in ipairs(opts.leadItems or {}) do AddItem(item.label, item.onClick) end
         for _, name in ipairs(DF:ListDesignerPresets(kind)) do
-            AddItem(name, function() DF:SetModeDesignerPreset(kind, getMode(), name) end)
+            AddItem(name, function() SetCurrent(name) end)
         end
+        for _, item in ipairs(opts.tailItems or {}) do AddItem(item.label, item.onClick) end
         menu:SetHeight(-y + 4)
     end
     ddBtn:SetScript("OnClick", function()
@@ -1789,6 +1822,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         if IsEditingLayout() and DF.IsLayoutDesignerInheriting and DF:IsLayoutDesignerInheriting(kind) then
             return {}   -- inheriting: this bar isn't sitting on a preset of its own
         end
+        if opts.listUsers then return opts.listUsers(CurrentName()) or {} end
         return (DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers(kind, CurrentName(), getMode())) or {}
     end
 
@@ -1860,7 +1894,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         PromptPresetName(L["Name the new template:"], EditingLayoutName() or "", L["Create"], function(text)
             local n = DF:CreateDesignerPreset(kind, text)
             if n then
-                DF:SetModeDesignerPreset(kind, getMode(), n)
+                SetCurrent(n)
                 bar:Refresh(); onChange()
             end
         end)
@@ -1873,7 +1907,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         PromptPresetName(L["Name the duplicated template:"], cur .. " copy", L["Duplicate"], function(text)
             local n = DF:DuplicateDesignerPreset(kind, cur, text)
             if n then
-                DF:SetModeDesignerPreset(kind, getMode(), n)
+                SetCurrent(n)
                 bar:Refresh(); onChange()
             end
         end)
@@ -2071,7 +2105,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     -- overwrites its own entry, and a torn-down bar is hidden, so nothing
     -- accumulates.
     GUI._designerPresetBars = GUI._designerPresetBars or {}
-    GUI._designerPresetBars[kind] = bar
+    GUI._designerPresetBars[opts.registryKey or kind] = bar
     return bar
 end
 

@@ -2356,8 +2356,8 @@ local function BuildGlobalView(parent)
         local importBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
         DF.GUI:StyleButton(importBtn, { height = 26, text = L["Import Buffs Tab Defaults"] })
         importBtn:SetScript("OnClick", function()
-            local mode = (GUI and GUI.SelectedMode) or "party"
-            local buffsDB = DF:GetDB(mode)
+            -- The Buff Bar of whatever is being edited (P.EditTarget).
+            local buffsDB = P.EditTarget().db
             if buffsDB and defaults then
                 if buffsDB.buffSize then defaults.iconSize = buffsDB.buffSize end
                 if buffsDB.buffScale then defaults.iconScale = buffsDB.buffScale end
@@ -2408,42 +2408,46 @@ local function BuildGlobalView(parent)
 
     -- ── ACTIONS ──
     AddGroup(L["Actions"], function(g)
-        -- Copy Settings to Other Mode button
-        local currentMode = (GUI and GUI.SelectedMode) or "party"
+        -- Copy Settings to Other Mode button. Between the two MODES only: a page
+        -- editing some other target (P.EditTarget) has no other mode to copy to.
+        local currentMode = P.EditTarget().mode
         local targetMode = (currentMode == "party") and "raid" or "party"
         local targetLabel = (targetMode == "raid") and L["Raid"] or L["Party"]
 
-        local copyBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        DF.GUI:StyleButton(copyBtn, { height = 26, text = format(L["Copy Settings to %s"], targetLabel) })
-        copyBtn:SetScript("OnClick", function()
-            local srcMode = (GUI and GUI.SelectedMode) or "party"
-            local dstMode = (srcMode == "party") and "raid" or "party"
-            -- Copy at the preset level: the source mode's preset content is
-            -- copied INTO the dest mode's preset, in place, so the dest preset
-            -- object identity (and every consumer bound to it) is preserved.
-            -- BASE resolvers: this S.page edits the user's BASE presets — with a
-            -- runtime auto-layout active, the ACTIVE resolver would copy
-            -- from/into the layout's preset instead.
-            local source = (DF.GetModeBaseAuraDesigner and DF:GetModeBaseAuraDesigner(srcMode))
-                or (DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(srcMode))
-                or (DF:GetDB(srcMode) and DF:GetDB(srcMode).auraDesigner)
-            local dest = (DF.GetModeBaseAuraDesigner and DF:GetModeBaseAuraDesigner(dstMode))
-                or (DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(dstMode))
-                or (DF:GetDB(dstMode) and DF:GetDB(dstMode).auraDesigner)
-            if source and dest and source ~= dest then
-                local function DeepCopy(src)
-                    if type(src) ~= "table" then return src end
-                    local copy = {}
-                    for k, v in pairs(src) do copy[k] = DeepCopy(v) end
-                    return copy
+        local copyBtn = currentMode and CreateFrame("Button", nil, parent, "BackdropTemplate")
+        if copyBtn then
+            DF.GUI:StyleButton(copyBtn, { height = 26, text = format(L["Copy Settings to %s"], targetLabel) })
+            copyBtn:SetScript("OnClick", function()
+                local srcMode = P.EditTarget().mode
+                if not srcMode then return end
+                local dstMode = (srcMode == "party") and "raid" or "party"
+                -- Copy at the preset level: the source mode's preset content is
+                -- copied INTO the dest mode's preset, in place, so the dest preset
+                -- object identity (and every consumer bound to it) is preserved.
+                -- BASE resolvers: this S.page edits the user's BASE presets — with a
+                -- runtime auto-layout active, the ACTIVE resolver would copy
+                -- from/into the layout's preset instead.
+                local source = (DF.GetModeBaseAuraDesigner and DF:GetModeBaseAuraDesigner(srcMode))
+                    or (DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(srcMode))
+                    or (DF:GetDB(srcMode) and DF:GetDB(srcMode).auraDesigner)
+                local dest = (DF.GetModeBaseAuraDesigner and DF:GetModeBaseAuraDesigner(dstMode))
+                    or (DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(dstMode))
+                    or (DF:GetDB(dstMode) and DF:GetDB(dstMode).auraDesigner)
+                if source and dest and source ~= dest then
+                    local function DeepCopy(src)
+                        if type(src) ~= "table" then return src end
+                        local copy = {}
+                        for k, v in pairs(src) do copy[k] = DeepCopy(v) end
+                        return copy
+                    end
+                    -- Clear stale dest keys the source no longer has, then overwrite.
+                    for k in pairs(dest) do dest[k] = nil end
+                    for k, v in pairs(source) do dest[k] = DeepCopy(v) end
                 end
-                -- Clear stale dest keys the source no longer has, then overwrite.
-                for k in pairs(dest) do dest[k] = nil end
-                for k, v in pairs(source) do dest[k] = DeepCopy(v) end
-            end
-            DF:Debug("AD", "Copied %s settings to %s", tostring(srcMode), tostring(dstMode))
-        end)
-        g:AddWidget(copyBtn, 32)
+                DF:Debug("AD", "Copied %s settings to %s", tostring(srcMode), tostring(dstMode))
+            end)
+            g:AddWidget(copyBtn, 32)
+        end
 
         -- Reset All button
         local resetBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -2513,7 +2517,7 @@ local function CreateEnableBanner(parent)
     -- the preset made this box show -- and set -- the OTHER mode's value whenever both
     -- modes pointed at the same template. See DF:IsAuraDesignerEnabledForMode.
     local adDB = GetAuraDesignerDB()
-    cb:SetChecked(DF.IsAuraDesignerEnabledForMode and DF:IsAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party")))
+    cb:SetChecked(P.EditTargetEnabled())
 
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
@@ -2530,7 +2534,7 @@ local function CreateEnableBanner(parent)
             -- db.showBuffs, so a spurious trip through here would flip the Buff Bar's own Show Buffs
             -- behind the user's back. A checkbox that is already checked has nothing to ask and nothing
             -- to write; re-sync it and stop.
-            if DF:IsAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party")) then
+            if P.EditTargetEnabled() then
                 self:SetChecked(true)
                 return
             end
@@ -2542,12 +2546,12 @@ local function CreateEnableBanner(parent)
             -- been; the first cut of the per-mode enable read GUI.SelectedMode inside
             -- the callback, which was this comment's warning re-instantiated.
             local targetDB = S.db
-            local targetMode = (GUI and GUI.SelectedMode) or "party"
+            local targetEdit = P.EditTarget()
             -- Show popup asking about buff coexistence
             ShowBuffCoexistPopup(function(keepBuffs)
-                -- targetMode/targetDB, captured above and for the same reason: the
-                -- answer must land on the mode the click was made against.
-                DF:SetAuraDesignerEnabledForMode(targetMode, true)
+                -- targetEdit/targetDB, captured above and for the same reason: the
+                -- answer must land on the mode (or target) the click was made against.
+                P.SetEditTargetEnabled(targetEdit, true)
                 -- This is a real edit to another page's setting, so SAY so. It is the
                 -- whole point of the question, but the page that owns the key is two
                 -- clicks away and the user has no other way to know it moved.
@@ -2557,6 +2561,9 @@ local function CreateEnableBanner(parent)
                     buffsChanged = true
                     DF:Say(keepBuffs and L["Buffs kept alongside Aura Designer."]
                         or L["Buffs turned off — Aura Designer is replacing them."])
+                    -- A target hears of this write too (the enable told it already).
+                    local tgt = targetEdit.target
+                    if tgt and tgt.onChange then tgt.onChange() end
                 end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
@@ -2584,11 +2591,11 @@ local function CreateEnableBanner(parent)
         else
             -- Mirror of the guard above: an already-disabled designer has nothing to turn
             -- off, and the teardown below is not free (ForceRefreshAllFrames).
-            if not DF:IsAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party")) then
+            if not P.EditTargetEnabled() then
                 self:SetChecked(false)
                 return
             end
-            DF:SetAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party"), false)
+            P.SetEditTargetEnabled(nil, false)
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
@@ -2867,9 +2874,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local placement = not (opts and opts.placement == false)
     local unitText  = not (opts and opts.unitText == false)
     local thumb     = opts and opts.thumb or nil
-    -- Read current frame settings for the preview
-    local mode = (GUI and GUI.SelectedMode) or "party"
-    local frameDB = DF:GetDB(mode) or DF.PartyDefaults
+    -- Read current frame settings for the preview (whatever is being edited:
+    -- P.EditTarget)
+    local frameDB = P.EditTarget().db or DF.PartyDefaults
     local FRAME_W = frameDB.frameWidth or 125
     local FRAME_H = frameDB.frameHeight or 64
     local POWER_H = frameDB.powerBarHeight or 4
@@ -2955,7 +2962,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- inside. Fitting to the smaller of the two ratios keeps the preview honest
     -- about proportions — it shrinks, it does not letterbox.
     container.RefreshGeometry = function()
-        local fdb = DF:GetDB((GUI and GUI.SelectedMode) or "party") or DF.PartyDefaults
+        local fdb = P.EditTarget().db or DF.PartyDefaults
         local w = fdb.frameWidth or 125
         local h = fdb.frameHeight or 64
         mockFrame:SetSize(w, h)
@@ -3418,7 +3425,7 @@ end
 -- builder that creates it.
 function P.CanvasWantedHeight(compact, scaleDB)
     if not compact then return 132 end
-    local fdb  = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
+    local fdb  = P.EditTarget().db or DF.PartyDefaults or {}
     local fh   = fdb.frameHeight or 64
     -- The SAME table the canvas's slider writes -- the host passes it, defaulting
     -- to the Aura Designer's config for every caller that names none.
@@ -8173,14 +8180,14 @@ end
 -- flow shows.
 S.AddContext = function()
     local shared = IsOtherTab() or IsDebuffTab()
-    return tostring((GUI and GUI.SelectedMode) or "party") .. "|" .. tostring(S.activeBuffTab)
+    local edit = P.EditTarget()
+    return tostring(edit.mode or ("@" .. tostring(edit.name))) .. "|" .. tostring(S.activeBuffTab)
         .. "|" .. (shared and "-" or tostring(ResolveSpec()))
 end
 
 -- The designer-enabled gate, read from the MODE (see DF:IsAuraDesignerEnabledForMode).
 S.AddEnabled = function()
-    return (DF.IsAuraDesignerEnabledForMode
-        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")) and true or false
+    return P.EditTargetEnabled()
 end
 
 -- ☠ WHY AN ADD CANNOT HAPPEN HERE, OR NIL. My Buffs stores effects and layout

@@ -153,11 +153,11 @@ print("-- Text Designer: the page is the split panel")
 do
     check(AURAS:find("DF.BuildTextDesignerPage(GUI, self, db, Add, AddSpace)", 1, true) ~= nil,
           "harness: the page registration passes Add and AddSpace through")
-    check(TD:find("function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)", 1, true) ~= nil,
+    check(TD:find("function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace, opts)", 1, true) ~= nil,
           "harness: ...and the entry point takes them")
     check(TD:find("BuildTextDesignerRowsPage", 1, true) == nil,
           "harness: the designer has no rows arm")
-    check(TD:find("return BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
+    check(TD:find("return BuildTextDesignerIsland(GUI, page, db, opts)", 1, true) ~= nil,
           "harness: ...and builds the split panel")
     check(TOC:find("TextDesigner\\UI\\Rows.lua", 1, true) == nil,
           "toc: the row page is gone from the companion's manifest")
@@ -498,7 +498,7 @@ do
     -- ---- class two: the preset bar --------------------------------------
     -- ...and the split panel, which still has the 850px the labels were chosen
     -- for, still gets them.
-    local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
+    local ISLAND = TD:gsub("\r\n", "\n"):match('local barOpts = {(.-)\n        }\n')
     check(ISLAND ~= nil, "narrow: the split panel's own preset bar can be read")
     check((ISLAND or ""):find("iconButtons", 1, true) == nil,
           "narrow: ...and it is untouched -- it keeps the labelled actions")
@@ -539,7 +539,7 @@ do
           "diet: ...which is the shared bar's own option, not a copy here")
     -- ...and the split panel, which has the 850px the labels were chosen for, is
     -- untouched: it asks for neither the icons nor the menu.
-    local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
+    local ISLAND = TD:gsub("\r\n", "\n"):match('local barOpts = {(.-)\n        }\n')
     check(ISLAND ~= nil, "diet: the split panel's own preset bar can be read")
     check((ISLAND or ""):find("overflowActions", 1, true) == nil,
           "diet: ...and keeps its four labelled buttons")

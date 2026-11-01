@@ -1125,35 +1125,21 @@ local function Tools(self, Add)
     return Open, Close
 end
 
-local function PresetOptions(kind)
-    return function()
-        local lib = (kind == "aura") and (DF.GetAuraDesignerPresets and DF:GetAuraDesignerPresets())
-            or (DF.GetTextDesignerPresets and DF:GetTextDesignerPresets())
-        local opts = { _order = {} }
-        for name in pairs(lib or {}) do
-            if type(name) == "string" then
-                opts[name] = name
-                opts._order[#opts._order + 1] = name
-            end
-        end
-        tsort(opts._order)
-        return opts
-    end
-end
-
 local function RefreshFrames()
     local UF = DF.UnitFrames
     if UF and UF.RequestRefresh then UF:RequestRefresh() end
 end
 
 -- ---- Text Designer / Aura Designer (spec 2026-11-01-uf-per-unit-designers.md) ---
--- Phase 1: each unit names its own template of each designer (textDesignerPreset /
+-- Each unit names its own template of each designer (textDesignerPreset /
 -- auraDesignerPreset in its own table: Copy, Reset and Links cover them like any
--- key of the page) and can make one of its own -- a copy of the template it uses
--- now, named for the unit. The templates are still edited on the designers' own
--- pages; editing one from here is phase 2.
+-- key of the page). Phase 2: the designer itself sits on the unit's page and edits
+-- the template the unit draws -- DandersFrames' own designer island, given the
+-- unit as its EDIT TARGET (DF.BuildTextDesignerPage / DF.BuildAuraDesignerPage
+-- opts.target): its template bar points the UNIT at a template, its preview takes
+-- the unit's frame size, and the Aura Designer's enable is the unit's own.
 -- The Aura Designer's unset value follows the Party frames' current template
--- (UF:AuraTemplateFor); the picker shows it as Same as Party Frames.
+-- (UF:AuraTemplateFor); the bar shows it as Same as Party Frames.
 UFO.FOLLOW_PARTY = "@party"
 
 -- After a template change: the aura layout version moves (the factory re-syncs
@@ -1161,16 +1147,6 @@ UFO.FOLLOW_PARTY = "@party"
 local function DesignerChanged(kind)
     if kind == "aura" and DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
     RefreshFrames()
-end
-
--- The template picker. Aura: Same as Party Frames first, then the library.
-function UFO.TemplateOptions(kind)
-    local opts = PresetOptions(kind)()
-    if kind == "aura" then
-        table.insert(opts._order, 1, UFO.FOLLOW_PARTY)
-        opts[UFO.FOLLOW_PARTY] = L["Same as Party Frames"]
-    end
-    return opts
 end
 
 function UFO.GetTemplate(db, kind)
@@ -1190,56 +1166,118 @@ end
 -- Make Own Template: the unit's copy of its current template, picked at once.
 function UFO.MakeOwnTemplate(unit, kind)
     local UF = DF.UnitFrames
-    local name = UF and UF.MakeOwnTemplate and UF:MakeOwnTemplate(unit, kind)
-    if not name then return nil end
-    UFO.PushLinks(unit)
-    DesignerChanged(kind)
-    AfterChange(unit)
-    return name
+    return UF and UF.MakeOwnTemplate and UF:MakeOwnTemplate(unit, kind) or nil
 end
 
-local function TemplateCard(self, db, Add, unit, kind, title, cardKey, cardKind, note, extra)
-    local Open, Close = Tools(self, Add)
-    local band = Open(title, cardKey, 1,
-        function(d)
-            local v = UFO.GetTemplate(d, kind)
-            return (v == UFO.FOLLOW_PARTY) and L["Same as Party Frames"] or (v or "")
-        end, cardKind)
-    if extra then extra(band) end
-    local function options() return UFO.TemplateOptions(kind) end
-    local dd = band:AddWidget(GUI:CreateDropdown(self.child, L["Template:"], options(), nil, nil,
-        function() DesignerChanged(kind) end,
-        function() return UFO.GetTemplate(db, kind) end,
-        function(v) UFO.SetTemplate(db, kind, v) end,
-        { optionsFunc = options }), 55)
-    band:AddWidget(GUI:CreateButtonRow(self.child, {
-        { label = L["Make Own Template"], width = 150,
-          onClick = function() UFO.MakeOwnTemplate(unit, kind) end },
-    }, { width = 250 }), 30)
-    band:AddWidget(GUI:CreateLabel(self.child, note, 250), 45)
-    Close(band)
-    return dd
+-- What the designer edits on a unit's page. `kind` is "text" or "aura".
+--   * the template: the one the unit draws (UF:UnitTemplate -- for Aura, Party's
+--     while it follows Party)
+--   * the template bar: picks the UNIT's template; Aura lists Same as Party Frames
+--     first; Make Own Template after the library; the sharing glyph names everyone
+--     else drawing with it, the unit itself left out
+--   * a change: the unit's link partner follows, the frames re-stamp and repaint.
+--     It never refreshes the page itself -- the designer rebuilds its own island,
+--     and a page rebuild underneath it would hand that rebuild a retired frame.
+function UFO.DesignerTarget(unit, kind)
+    local UF = DF.UnitFrames
+    local db = UF and UF:GetUnitDB(unit)
+    local function live() return UF and UF:GetUnitDB(unit) end
+    local function name() return UF and UF:UnitTemplate(unit, kind) or nil end
+    local bar = {
+        registryKey = "unit:" .. tostring(unit) .. ":" .. kind,
+        getRef = name,
+        setRef = function(n) UFO.SetTemplate(live(), kind, n) end,
+        tailItems = {
+            { label = L["Make Own Template"], onClick = function() UFO.MakeOwnTemplate(unit, kind) end },
+        },
+        listUsers = function(n)
+            local all = (DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers(kind, n)) or {}
+            local me = UF and UF.CarrierLabel and UF:CarrierLabel(unit)
+            local out = {}
+            for _, label in ipairs(all) do
+                if label ~= me then out[#out + 1] = label end
+            end
+            return out
+        end,
+    }
+    if kind == "aura" then
+        bar.getLabel = function()
+            if UFO.GetTemplate(live(), "aura") == UFO.FOLLOW_PARTY then return L["Same as Party Frames"] end
+            return nil
+        end
+        bar.leadItems = {
+            { label = L["Same as Party Frames"], onClick = function() UFO.SetTemplate(live(), "aura", UFO.FOLLOW_PARTY) end },
+        }
+    end
+    return {
+        getName = name,
+        db = db,
+        sizeDB = db,
+        bar = bar,
+        onChange = function()
+            UFO.PushLinks(unit)
+            DesignerChanged(kind)
+            UFO.RefreshLinkMarks()
+        end,
+    }
+end
+
+-- The designer's lowest height on a unit page; a taller window gives it the rest.
+UFO.DESIGNER_MIN_H = 420
+
+-- The designer in a full-width slot under the page's head (layoutFill: it takes
+-- the viewport's height below the head, and the page itself does not scroll).
+-- ☠ BUILT ON FIRST SHOW, NEVER BY THE PAGE BUILDER. Unit pages are built
+-- headlessly for the search index, and the Aura Designer's island is ONE frame:
+-- building it there would take it off the designer page that has it. Each show
+-- after the first runs the island's own RefreshStates, which takes the island
+-- back from another page and re-binds the Text Designer's preview.
+function UFO.AddDesignerSlot(self, db, Add, unit, kind)
+    local slot = CreateFrame("Frame", nil, self.child)
+    slot.child = CreateFrame("Frame", nil, slot)
+    slot.child:SetAllPoints()
+    slot.layoutFill = true
+    slot.dfDesignerSlot = kind
+    local built = false
+    local function Show()
+        if not slot:IsVisible() then return end
+        if built then
+            if slot.RefreshStates then slot:RefreshStates() end
+            return
+        end
+        built = true
+        local opts = { target = UFO.DesignerTarget(unit, kind) }
+        if kind == "aura" then
+            if DF.BuildAuraDesignerPage then DF.BuildAuraDesignerPage(GUI, slot, db, nil, nil, opts) end
+        elseif DF.BuildTextDesignerPage then
+            DF.BuildTextDesignerPage(GUI, slot, db, nil, nil, opts)
+        end
+    end
+    slot:SetScript("OnShow", Show)
+    slot:SetScript("OnSizeChanged", function()
+        if built and slot.RefreshStates and slot:IsVisible() then slot:RefreshStates() end
+    end)
+    slot.dfShowDesigner = Show
+    Add(slot, UFO.DESIGNER_MIN_H, "both")
+    if C_Timer and C_Timer.After then C_Timer.After(0, Show) end
+    return slot
 end
 
 function UFO.BuildTextPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
-    TemplateCard(self, db, Add, unit, "text", L["Text Designer"], "uf_text_template", "text",
-        L["Pick a template, or make this frame one of its own. Templates are edited on the Text Designer page."])
+    UFO.AddDesignerSlot(self, db, Add, unit, "text")
 end
 
 -- Its own enable (DF:IsAuraDesignerEnabled: a standalone frame answers from its
--- own table, before the template stamp).
+-- own table, before the template stamp) -- the designer's Enable box edits it.
 function UFO.BuildAuraDesignerPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
-    TemplateCard(self, db, Add, unit, "aura", L["Aura Designer"], "uf_auradesigner", "effects",
-        L["Pick a template, or make this frame one of its own. Templates are edited on the Aura Designer page."],
-        function(band)
-            band:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Aura Designer"], db, "auraDesignerEnabled", function()
-                local AD = DF.AuraDesigner
-                if AD and AD.Engine and AD.Engine.ForceRefreshAllFrames then AD.Engine:ForceRefreshAllFrames() end
-                RefreshFrames()
-            end), 30)
-        end)
+    UFO.AddDesignerSlot(self, db, Add, unit, "aura")
+end
+
+-- The designers want the width their own pages force (GUI/Panel.lua WIDE_PAGES).
+function UFO.DesignerPageMinWidth()
+    return 850 + (GUI.RailWidth or 0)
 end
 
 -- ---- Visibility (a page new to unit frames) ---------------------------------
@@ -2290,6 +2328,11 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                         -- the search index only once a search is typed or the
                         -- Unit Frames ledger is asked for (Search DEFERRED PAGES).
                         pg.deferIndex = true
+                        -- The designers' pages: the designer's own width (UFO.AddDesignerSlot).
+                        if rec.kind == "text" or rec.kind == "auradesigner" then
+                            GUI.PageMinWidths = GUI.PageMinWidths or {}
+                            GUI.PageMinWidths[name] = UFO.DesignerPageMinWidth
+                        end
                         if rec.kind == "health" then
                             pg.extraHealthColorModes = { REACTION = L["Reaction"], CLASS_REACTION = L["Class / Reaction"] }
                         end

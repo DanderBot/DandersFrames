@@ -450,6 +450,12 @@ local function PageRefreshStatesBody(self)
     -- Layout - adjust column positions based on available width
     local x1, maxY = SettingsBox.colMargin, 0
     local col2X = usesTwoColumns and GUI.Column2X(contentWidth) or x1
+    -- ★ A FILL WIDGET (widget.layoutFill, full width) takes the viewport height left
+    -- below where it lands, never less than its layoutHeight -- a panel that scrolls
+    -- inside itself (a designer island) on a page with other content above it.
+    -- Its bottom then ends the page, so the page has no scroll range of its own.
+    local FILL_PAD = 10
+    local fillBottom
     -- The page's TOP margin, deliberately still a literal: it happens to equal
     -- colMargin today, and tying the vertical rhythm to a horizontal number is
     -- how one edit moves the other axis by accident.
@@ -535,6 +541,11 @@ local function PageRefreshStatesBody(self)
 
             if widget.layoutCol == "both" then
                 local startY = math.min(y1, y2)
+                if widget.layoutFill then
+                    h = math.max(h, math.floor((self:GetHeight() or 0) + startY - FILL_PAD))
+                    widget:SetHeight(SnapLen(widget, h))
+                    fillBottom = -startY + h
+                end
                 widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
                 y1 = startY - h
                 y2 = startY - h
@@ -555,6 +566,18 @@ local function PageRefreshStatesBody(self)
         end
     end
     local contentH = maxY + 40 + bannerOffset
+    if fillBottom and fillBottom >= maxY then contentH = fillBottom + FILL_PAD end
+    -- A fill widget follows the viewport's height, which this pass does not re-run
+    -- for on its own (it runs on content and width changes).
+    if fillBottom and not self._fillHooked then
+        self._fillHooked = true
+        self:HookScript("OnSizeChanged", function(page, _, h)
+            if page._fillLastH ~= h and page.RefreshStates then
+                page._fillLastH = h
+                page:RefreshStates()
+            end
+        end)
+    end
 
     -- FOOTER: the See-Also bar is designed as one, so on a page whose
     -- content does not fill the viewport it should sit at the BOTTOM

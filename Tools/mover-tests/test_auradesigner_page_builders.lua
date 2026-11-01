@@ -178,12 +178,12 @@ do
     -- into the page's column -- and is also how the builder tells which arm it is.
     check(AURAS:find("DF.BuildAuraDesignerPage(GUI, self, db, Add, AddSpace)", 1, true) ~= nil,
           "harness: the page registration passes Add and AddSpace through")
-    check(EDIT:find("function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)", 1, true) ~= nil,
+    check(EDIT:find("function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace, opts)", 1, true) ~= nil,
           "harness: ...and the entry point takes them")
     -- 2026-09-26: the rows arm is gone; the designer builds its split panel.
     check(EDIT:find("BuildAuraDesignerRowsPage", 1, true) == nil,
           "harness: the designer has no rows arm")
-    check(EDIT:find("local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)", 1, true) ~= nil,
+    check(EDIT:find("local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef, opts)", 1, true) ~= nil,
           "harness: ...and the split panel is its build")
 end
 

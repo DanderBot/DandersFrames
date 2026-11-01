@@ -29,6 +29,13 @@ function Preview:Init(mockFrame, tdDB)
     self:RefreshAll()
 end
 
+-- Bind only when this is not already the binding: a page coming back into view
+-- takes the preview back without a full refresh of every frame.
+function Preview:Bind(mockFrame, tdDB)
+    if activeMockFrame == mockFrame and activeTdDB == tdDB then return end
+    self:Init(mockFrame, tdDB)
+end
+
 -- Refreshes all TD FontStrings on the bound mock frame using
 -- synthetic mock data. Called on settings changes (FullRebuildCards,
 -- eye-icon toggle, master toggle).
@@ -76,6 +83,13 @@ function Preview:RefreshLiveFrames()
     -- never picked up TD element edits until a full rebuild (e.g. test-mode toggle).
     if DF.PinnedFrames and DF.PinnedFrames.RefreshTextDesigner then
         DF.PinnedFrames:RefreshTextDesigner()
+    end
+    -- Standalone frames (DF:InitStandaloneFrame) are in neither pool. Shown ones only:
+    -- a hidden one repaints when it next shows.
+    if DF.UpdateTextDesigner and DF.StandaloneFrames then
+        for f in pairs(DF.StandaloneFrames) do
+            if f.IsVisible and f:IsVisible() then DF:UpdateTextDesigner(f, "all") end
+        end
     end
 end
 
