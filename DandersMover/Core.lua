@@ -110,6 +110,7 @@ NS.DEFAULTS = {
     -- NS:ChromeScale in Proxy.lua.
     scale = 1,
     stripCollapsed = false,               -- top strip folded to its slim tab
+    settingsSection = "general",          -- the settings window's last-picked rail section
     addons = {}, demo = {},
 }
 
