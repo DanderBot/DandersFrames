@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [5.6.1]
+
+### Bug Fixes
+
+- (Text Designer) Text groups have their Items list back, so you can add, reorder, remove and customise the data a group shows again.
+
 ## [5.6.0]
 
 ### New Features
