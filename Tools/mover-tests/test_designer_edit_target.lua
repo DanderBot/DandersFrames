@@ -314,6 +314,10 @@ do
         eq(size, pet, "td target: its frame size")
         cfg = TDEditTarget({}, pet, { getName = function() return "Gone" end })
         eq(cfg, lib.Default, "td target: a missing template edits Default")
+        local ring = { frameWidth = 64 }
+        cfg, name, size = TDEditTarget({}, pet, { getName = function() return "Pet" end, sizeDB = pet,
+            getSizeDB = function() return ring end })
+        eq(size, ring, "td target: getSizeDB, asked each time, wins over sizeDB (a unit's frame view)")
     end
     -- Built through the target everywhere the mode used to be read.
     local island = cutBetween(TD, "local function BuildTextDesignerIsland(GUI, page, db, opts)", "\nend\n") or ""
@@ -328,6 +332,38 @@ do
           "td: the bar's rebuild keeps the target")
     check(code:find("PV:Bind(state.mockFrame, tdDB)", 1, true) ~= nil,
           "td: a page coming back into view takes the shared preview back")
+    -- A target may preview on a REAL frame (a unit frame's own sample): it is bound
+    -- in place of the mock, sources its own text, and is repainted, never resized.
+    check(code:find("local sample = target and target.previewFrame and target.previewFrame(previewPanel) or nil", 1, true) ~= nil,
+          "td: a target's own preview frame replaces the mock")
+    check(code:find("mockFrame.dfTDSelfSource = true", 1, true) ~= nil,
+          "td: ...and draws its text itself")
+    check(code:find("if not sample then", 1, true) ~= nil, "td: the mock chrome only without one")
+    check(code:find("if target and target.refreshPreviewFrame then target.refreshPreviewFrame(m) end", 1, true) ~= nil,
+          "td: the geometry pass repaints a real frame instead of sizing it")
+end
+
+print("-- Designer edit target: a self-sourcing preview frame")
+do
+    local PVsrc = df_file_source("TextDesigner/Preview.lua")
+    local DF = { TextDesigner = {} }
+    local rendered, updated = {}, {}
+    DF.TextDesigner.Render = { UpdateFrame = function(_, f) updated[#updated + 1] = f end, Teardown = function() end }
+    DF.TextDesigner.DataSource = { Mock = function() return {} end }
+    function DF:RenderTextDesignerNow(f, hint) rendered[#rendered + 1] = { f, hint } end
+    function DF:Debug() end
+    local chunk = loadstring(PVsrc, "@TD:Preview")
+    setfenv(chunk, setmetatable({ }, { __index = _G }))
+    chunk("DandersFrames", DF)
+    local PV = DF.TextDesigner.Preview
+    local mock, real = {}, { dfTDSelfSource = true }
+    PV.RefreshLiveFrames = function() end
+    PV:Init(mock, { elements = {} })
+    eq(#updated, 1, "a static mock: painted with the mock data")
+    PV:Init(real, { elements = {} })
+    eq(#rendered, 1, "a real frame: its own Text Designer pass")
+    check(rendered[1][1] == real and rendered[1][2] == "all", "...in full")
+    eq(#updated, 1, "...never the mock data")
 end
 
 -- ============================================================

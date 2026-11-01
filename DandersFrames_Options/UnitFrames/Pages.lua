@@ -1297,7 +1297,7 @@ function UFO.DesignerTarget(unit, kind)
             { label = L["Same as Party Frames"], onClick = function() UFO.SetTemplate(live(), "aura", UFO.FOLLOW_PARTY) end },
         }
     end
-    return {
+    local target = {
         getName = name,
         db = db,
         sizeDB = db,
@@ -1308,6 +1308,29 @@ function UFO.DesignerTarget(unit, kind)
             UFO.RefreshLinkMarks()
         end,
     }
+    if kind == "text" then UFO.AddTextPreviewFrame(target, unit) end
+    return target
+end
+
+-- The Text Designer's preview on a unit page is the unit's OWN frame, built and
+-- painted by the unit frames' preview code exactly as test mode draws it
+-- (DandersFrames_UnitFrames/Preview.lua P:BuildSample): rings, the round
+-- portrait, a detached resource bar, auras -- the real look, not the party mock.
+-- One per unit page, made on first need and handed back to every rebuild of the
+-- designer's island. Its size is the frame view's (a Ring frame's ringSize).
+function UFO.AddTextPreviewFrame(target, unit)
+    local UF = DF.UnitFrames
+    local P = UF and UF.Preview
+    if not (P and P.BuildSample) then return end
+    local sample
+    target.getSizeDB = function() return UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit) end
+    target.previewFrame = function(parent)
+        if not sample then sample = P:BuildSample(unit, parent) end
+        return sample
+    end
+    target.refreshPreviewFrame = function(f)
+        if f and P.PaintSample then P:PaintSample(f) end
+    end
 end
 
 -- The designer's lowest height on a unit page; a taller window gives it the rest.

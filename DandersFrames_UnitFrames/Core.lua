@@ -356,6 +356,8 @@ function UF:RefreshAll()
         UF:RunOutOfCombat("layout:bosscontainer", function() UF.Boss:ApplyLayout() end)
     end
     if UF.Preview and UF.Preview.Refresh then UF.Preview:Refresh() end
+    -- A settings page's own sample of a unit (the Text Designer's preview).
+    if UF.Preview and UF.Preview.RefreshSamples then UF.Preview:RefreshSamples() end
     -- A portrait or frame-size change re-sizes an outer rect without moving its
     -- frame: re-solve whatever is anchored to one (Mover.lua, OUTER RECTS).
     if UF.Mover and UF.Mover.RefreshOuter then UF.Mover:RefreshOuter() end

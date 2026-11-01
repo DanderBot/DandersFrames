@@ -2783,6 +2783,13 @@ end
 --   target.bar         extra GUI:CreateDesignerPresetBar opts (getRef / setRef /
 --                      getLabel / leadItems / tailItems / listUsers / registryKey)
 --   target.onChange()  after the template choice changed
+--   target.getSizeDB()  optional: the size table, asked each time (wins over sizeDB)
+--   target.previewFrame(parent)    optional: a REAL frame to preview on instead of
+--                      the static mock (a unit frame's own test-mode preview, built
+--                      by its owner). It sources its own text: the binding repaints
+--                      it through the frame's own Text Designer pass, with its own
+--                      sample data (frame.dfTDSelfSource, TextDesigner/Preview.lua).
+--   target.refreshPreviewFrame(f)  optional: repaint that frame (geometry refresh)
 -- Returns the template's config, its name, and the size table.
 -- ============================================================
 local function TDEditTarget(GUI, db, target)
@@ -2790,7 +2797,8 @@ local function TDEditTarget(GUI, db, target)
         local name = target.getName and target.getName() or nil
         local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
         local cfg = lib and ((name and lib[name]) or lib[DF.DEFAULT_PRESET]) or nil
-        return cfg, name, target.sizeDB or db or {}
+        local size = target.getSizeDB and target.getSizeDB() or nil
+        return cfg, name, size or target.sizeDB or db or {}
     end
     local mode = (GUI and GUI.SelectedMode) or "party"
     local cfg = DF.GetModeBaseTextDesigner and DF:GetModeBaseTextDesigner(mode)
@@ -3049,8 +3057,25 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     previewLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Mock unit frame (centred in panel) — visual clone of AD's mockFrame.
+    -- A target may hand a real frame instead (target.previewFrame): its owner's
+    -- own preview of the frame, drawn as it really looks.
     local mockFrame
-    do
+    local sample = target and target.previewFrame and target.previewFrame(previewPanel) or nil
+    if sample then
+        mockFrame = sample
+        mockFrame:SetParent(previewPanel)
+        mockFrame:ClearAllPoints()
+        mockFrame:SetPoint("CENTER", previewPanel, "CENTER", 0, -4)
+        mockFrame.dfTDSelfSource = true
+        previewPanel.mockFrame = mockFrame
+        previewPanel.sampleFrame = mockFrame
+        state.mockFrame = mockFrame
+        if target.refreshPreviewFrame then target.refreshPreviewFrame(mockFrame) end
+        if DF.TextDesigner.Preview then
+            DF.TextDesigner.Preview:Init(state.mockFrame, tdDB)
+        end
+    end
+    if not sample then
         local frameDB = _tdSizeDB or DF.PartyDefaults or {}
         local FRAME_W = frameDB.frameWidth or 125
         local FRAME_H = frameDB.frameHeight or 64
@@ -3150,9 +3175,17 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
         fdb = fdb or DF.PartyDefaults or {}
         local w = fdb.frameWidth or 125
         local h = fdb.frameHeight or 64
-        m:SetSize(w, h)
-        if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
-        if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
+        if previewPanel.sampleFrame == m then
+            -- A real frame sizes itself (its owner's layout); repaint it, then put
+            -- the binding's text back on it.
+            if target and target.refreshPreviewFrame then target.refreshPreviewFrame(m) end
+            local PV = DF.TextDesigner.Preview
+            if PV and PV.RefreshPreview then PV:RefreshPreview() end
+        else
+            m:SetSize(w, h)
+            if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
+            if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
+        end
 
         -- Preview Scale is relative to the LIVE frame, so the window's own scale is
         -- divided back out (GUI.PreviewUnscale).
@@ -3190,10 +3223,13 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     state.scaleSlider = scaleSlider
 
     -- Placeholder note so users know this panel is purely cosmetic for now.
-    local previewNote = previewPanel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
-    previewNote:SetText(L["Preview placeholder (visual mockup)"])
-    previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+    -- (Not over a real frame: that one is the frame's own preview.)
+    if not sample then
+        local previewNote = previewPanel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
+        previewNote:SetText(L["Preview placeholder (visual mockup)"])
+        previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+    end
 
     -- The Aura Designer's preview width, so the two designers share one layout.
     tdPreviewNeed = math.max(TD_LEFT_FLOOR,

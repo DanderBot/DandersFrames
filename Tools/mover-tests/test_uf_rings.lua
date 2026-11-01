@@ -449,6 +449,36 @@ do
     check(U.RingSectionRemove(rings[1], 2) and #rings[1].sections == 3, "remove a section")
 end
 
+print("-- Rings: a settings sample of a unit (the Text Designer's preview)")
+do
+    local P = UF.Preview
+    eff.frameStyle = "RING"
+    local panel = Make("Frame", UIParent)
+    local smp = P:BuildSample("target", panel)
+    check(smp.dfUFSample and smp.dfUFPreview and smp.dfIsTestFrame, "built as a preview frame, marked a sample")
+    check(P.frames.target ~= smp, "never one of the preview's own frames")
+    eq(UF.Elements.Kit.DetachedParent(smp), smp.dfUFSampleHold, "its detached pieces go to its hidden holder")
+    check(not smp.dfUFSampleHold._shown, "...which never shows")
+    smp:SetScale(0.6)
+    smp._points = {}
+    P:PaintSample(smp)
+    check(smp._shown, "painted and shown")
+    eq(smp._scale, 0.6, "its owner's scale is kept")
+    eq(#smp._points, 0, "never placed on the screen")
+    check(smp.dfUFRings._shown, "drawn as the unit really looks: rings")
+    eq(smp.dfDB.frameWidth, 72, "...at the ring's size")
+    smp._painted = 0
+    local paint = P.Paint
+    P.Paint = function(self, f) f._painted = (f._painted or 0) + 1 end
+    P:RefreshSamples()
+    eq(smp._painted, 1, "RefreshSamples repaints a visible sample")
+    smp:Hide()
+    P:RefreshSamples()
+    eq(smp._painted, 1, "...and leaves a hidden one")
+    P.Paint = paint
+    eff.frameStyle = "BARS"
+end
+
 eq(#errs, 0, "no element errors")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

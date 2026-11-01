@@ -46,6 +46,13 @@ end
 -- release.
 function Preview:RefreshPreview()
     if not activeMockFrame or not activeTdDB then return end
+    -- A REAL frame bound as the preview (a unit frame's own sample, Options.lua
+    -- target.previewFrame) draws the template it carries with its own sample data,
+    -- through its own Text Designer pass. Party / raid bind the static mock.
+    if activeMockFrame.dfTDSelfSource and DF.RenderTextDesignerNow then
+        DF:RenderTextDesignerNow(activeMockFrame, "all")
+        return
+    end
     local Render = DF.TextDesigner.Render
     local DataSource = DF.TextDesigner.DataSource
     if not Render or not DataSource then return end
