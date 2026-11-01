@@ -271,7 +271,7 @@ eq(mode.order, 30, "after Party (10) and Raid (20)")
 check(tostring(mode.icon):find("person.png", 1, true), "icon: the settings rail's unit frames icon")
 local secIds = {}
 for _, s in ipairs(DF:GetTestModeSections("units")) do secIds[#secIds + 1] = s.id end
-eq(table.concat(secIds, ","), "general,frames,target,bars,auras,icons", "sections: the old panel's, in order")
+eq(table.concat(secIds, ","), "general,frames,target,bars,auras,icons,highlights", "sections: the old panel's, in order, then Highlights")
 eq(mode.presets, nil, "no presets (the old panel had none)")
 eq(DF:IsTestModeAvailable("units"), true, "available while the companion is loaded")
 local toc = options_file_source("DandersFrames_Options.toc")
@@ -291,7 +291,7 @@ eq(P:IsTestMode(), true, "...the units preview comes on")
 check(not owners.party.user and not owners.raid.user, "...and the party / raid preview goes (never both)")
 check(panel:IsShown(), "...the popup stays open")
 local railIds = table.concat(panel.rail:GetItemIds(), ",")
-eq(railIds, "mode:party,mode:raid,mode:units,sec:general,sec:frames,sec:target,sec:bars,sec:auras,sec:icons",
+eq(railIds, "mode:party,mode:raid,mode:units,sec:general,sec:frames,sec:target,sec:bars,sec:auras,sec:icons,sec:highlights",
    "rail: Party, Raid, Units, then the Units sections")
 check(panel.rail:IsFilled("mode:units"), "rail: Units filled")
 check(panel.previewBtn:IsShown() and panel.previewBtn.glyph:find("preview.png", 1, true), "header: the preview is on")
@@ -338,6 +338,7 @@ local want = {
     testShowAbsorbs = "bars", testShowHealPrediction = "bars", showCastBars = "bars", showClassPower = "bars",
     testShowAuras = "auras", testBuffCount = "auras", testDebuffCount = "auras",
     testShowStatusIcons = "icons", showRaidTarget = "icons", showLeader = "icons", showCombat = "icons",
+    testShowSelection = "highlights", testShowAggro = "highlights",
 }
 for k, s in pairs(want) do eq(keys[k], s, "row: " .. k .. " under " .. s) end
 

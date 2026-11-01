@@ -209,7 +209,15 @@ P.TEST_KEYS = {
     testShowAuras = true, testBuffCount = true, testDebuffCount = true,
     testShowAbsorbs = true, testShowHealPrediction = true,
     testShowStatusIcons = true, testAnimateHealth = true,
+    testShowSelection = true, testShowAggro = true,
 }
+
+-- Which preview shows the Selection highlight (DF:UpdateHighlights reads
+-- frame.dfTestSelected ahead of its party-slot rule). The pet: a friendly frame,
+-- where a selection outline means something, and Target's own is off for good.
+-- Aggro follows the slot rule on frame.index: the player tanks (1), the pet
+-- holds high threat (4); hostile frames have their aggro highlight off.
+P.SELECTED_UNIT = "pet"
 
 -- A preview frame's settings table: the unit's own (UF:GetUnitDB), with the keys
 -- above read from the units test settings. Writes go to the unit's table. One per
@@ -432,6 +440,7 @@ function P:Build(unit, name, parent, slot)
     -- Where its aura rows sit, as on the live frame (Elements.lua).
     f.dfAuraRowPlacement = UF.AuraRowPlacement
     f.index = f.dfTestData.index
+    f.dfTestSelected = (unit == P.SELECTED_UNIT)
     f:EnableMouse(true)
     if DF.CreateFrameElements then DF:CreateFrameElements(f, false) end
     if DF.ApplyFrameStyle then DF:ApplyFrameStyle(f) end

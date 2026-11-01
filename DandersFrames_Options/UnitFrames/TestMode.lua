@@ -196,6 +196,13 @@ local function BuildIcons(rows)
     Switch(rows, L["Combat Icon"], "showCombat", nil, { disabled = iconsOff })
 end
 
+-- Selection on the pet's preview, aggro on the player's and the pet's
+-- (Preview.lua P.SELECTED_UNIT). Off by default, as on Party / Raid.
+local function BuildHighlights(rows)
+    Switch(rows, L["Selection"], "testShowSelection", PageOf("highlights"), { default = false })
+    Switch(rows, L["Aggro"], "testShowAggro", PageOf("highlights"), { default = false })
+end
+
 local SECTIONS = {
     { id = "general", label = function() return L["General"] end,
       icon = ICONS .. "tune.png", build = BuildGeneral },
@@ -211,6 +218,8 @@ local SECTIONS = {
     { id = "icons", label = function() return L["Icons"] end,
       title = function() return L["Indicators & Icons"] end,
       icon = ICONS .. "widget_small.png", build = BuildIcons },
+    { id = "highlights", label = function() return L["Highlights"] end,
+      icon = ICONS .. "border_style.png", build = BuildHighlights },
 }
 
 -- ============================================================

@@ -64,6 +64,9 @@ UF.TestDefaults = {
     showRaidTarget = true,
     showLeader = true,
     showCombat = true,
+    -- Highlights (Preview.lua picks which frames show them)
+    testShowSelection = false,
+    testShowAggro = false,
 }
 
 -- Applied to every unit before its own overrides below.

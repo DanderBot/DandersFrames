@@ -754,7 +754,12 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         -- Apply test mode highlights based on settings
         if frameIndex ~= nil then
             if db.testShowSelection then
-                forceSelection = (frameIndex == 0)  -- First frame gets selection
+                -- First frame gets selection, unless the frame names its own answer.
+                if frame.dfTestSelected ~= nil then
+                    forceSelection = frame.dfTestSelected and true or false
+                else
+                    forceSelection = (frameIndex == 0)
+                end
             end
             if db.testShowAggro then
                 -- ☠ WAS A BOOLEAN, WHICH MADE TWO OF THE THREE AGGRO COLOURS
