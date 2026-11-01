@@ -257,8 +257,8 @@ eq(G:ModuleForPage("uf_settings"), "units", "...on the module's sidebar")
 local WANT = {
     player = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,classpower,text,buffs,debuffs,defensive,dispel,auradesigner,icons,unitIcons,highlights",
     target = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
-    targettarget = "frame,tooltips,health,text,highlights",
-    focustarget = "frame,tooltips,health,text,highlights",
+    targettarget = "frame,tooltips,fading,health,text,highlights",
+    focustarget = "frame,tooltips,fading,health,text,highlights",
     focus ="frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     pet = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
     boss = "frame,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
@@ -291,6 +291,15 @@ do
     local icons
     for _, rec in ipairs(data.pages) do if rec.kind == "icons" then icons = rec end end
     eq(icons and icons.laterCards, nil, "the Icons page's Unit group moved to a page of its own")
+end
+do
+    local fading
+    for _, rec in ipairs(data.pages) do if rec.kind == "fading" then fading = rec end end
+    for _, unit in ipairs(UFO.UNITS) do
+        check(fading and fading.cards.fading_health and fading.cards.fading_health[unit],
+            unit .. ": Health Threshold Fading (fade at full health) reaches it")
+    end
+    eq(fading and fading.cardKeys.fading_health, nil, "...every unit sees it, so a copy never has to step round its keys")
 end
 check(made.pages.uf_player_visibility ~= nil, "Visibility: built now its runtime exists")
 eq(made.pages.uf_targettarget_visibility, nil, "...but not for target of target (no card reaches it)")
@@ -1475,7 +1484,7 @@ do
     local n, total = UFO.LinkedPartCount("target", "player")
     eq(n .. "/" .. total, "8/17", "8 of 17 parts linked")
     linked, separate = UFO.LinkPageGroups("targettarget", "focustarget")
-    eq(ids(linked) .. "|" .. ids(separate), "health,text,border|tooltips,frame,highlights", "a pair with fewer parts lists only those")
+    eq(ids(linked) .. "|" .. ids(separate), "health,text,border|tooltips,fading,frame,highlights", "a pair with fewer parts lists only those")
 
     -- ---- the layout decision -----------------------------------------------------
     local m = UFO.LinkDefaultMeasures()

@@ -82,9 +82,13 @@ EXTRA_CARDS = {"unitIcons": [("class_decorations", {"target", "focus", "boss"})]
 #                        own is off for good, Defaults.lua).
 #   Elite / Rare         Boss: its frames draw the icon (Indicators.lua IN.ICONS),
 #                        so it needs the card to switch it off.
+#   Health Threshold     Every unit: the fade is DandersFrames' own (HealthFade.lua,
+#   Fading               curve-based), it runs on any standalone frame, and "fade
+#                        at full health" is as useful on a target as on the player.
 EXTRA_CARD_UNITS = {
     "indicators_highlights": {"Selection Highlight": {"targettarget", "focustarget"}},
     "indicators_icons": {"Elite / Rare": {"boss"}},
+    "display_fading": {"Health Threshold Fading": {"target", "targettarget", "focus", "focustarget", "boss"}},
 }
 
 def slug(title):

@@ -125,9 +125,15 @@ function DF:ApplyHealthFadeAlpha(frame)
     -- alphas come out. Everything after this point is shared.
     -- ⚠ The comparison is `>` to match the curve, whose points sit at
     -- threshold/100 -/+ 0.001: at exactly the threshold the curve returns belowAlpha.
+    -- ⚠ EXCEPT AT A 100% THRESHOLD (the default): BuildHealthFadeCurve skips the
+    -- +0.001 point there, so the curve's last point (1.0) is aboveAlpha and full
+    -- health IS faded live. `>` alone never faded a full-health preview.
     local alpha
     if frame.dfHealthPct then
-        alpha = (frame.dfHealthPct > (threshold / 100)) and aboveAlpha or belowAlpha
+        local pos = threshold / 100
+        local above
+        if pos >= 0.999 then above = frame.dfHealthPct >= 1 else above = frame.dfHealthPct > pos end
+        alpha = above and aboveAlpha or belowAlpha
     else
         -- Build curve and resolve via WoW engine (no secret number comparison)
         local curve = BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)

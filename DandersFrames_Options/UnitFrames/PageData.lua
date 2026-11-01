@@ -101,12 +101,12 @@ DF.UnitFramePageData = {
         {
             kind = "fading", category = "display", title = "Fading",
             source = "display_fading",
-            units = { player = true, target = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
                 fading_range = { target = true, focus = true, pet = true, boss = true },
                 fading_elements = { target = true, focus = true, pet = true, boss = true },
                 fading_dead = { player = true, target = true, focus = true, boss = true },
-                fading_health = { player = true, pet = true },
+                fading_health = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 fading_unhealable = { player = true },
             },
             hide = {
@@ -118,7 +118,6 @@ DF.UnitFramePageData = {
             cardKeys = {
                 fading_dead = { "fadeDeadAuras", "fadeDeadBackground", "fadeDeadBackgroundColor", "fadeDeadFrames", "fadeDeadHealthBar", "fadeDeadIcons", "fadeDeadName", "fadeDeadPowerBar", "fadeDeadStatusText", "fadeDeadUseCustomColor" },
                 fading_elements = { "oorAuraDesignerAlpha", "oorAurasAlpha", "oorBackgroundAlpha", "oorBorderAlpha", "oorDefensiveIconAlpha", "oorDispelOverlayAlpha", "oorEnabled", "oorHealthBarAlpha", "oorIconsAlpha", "oorMissingBuffAlpha", "oorMissingHealthAlpha", "oorPowerBarAlpha", "oorTextAlpha" },
-                fading_health = { "healthFadeAlpha", "healthFadeEnabled", "healthFadeThreshold", "hfCancelOnDispel" },
                 fading_range = { "rangeCheckSpellID", "rangeFadeAlpha", "rangeUpdateInterval" },
                 fading_unhealable = { "fadeUnhealableAlpha", "fadeUnhealableColor", "fadeUnhealableEnabled" },
             },
