@@ -1129,9 +1129,9 @@ local function buildLegend()
     f.entries[3] = entry(f.entries[2], C_ROOT,     L["Anchor root"])
 
     -- Session verbs on the same row, right-aligned: the strip doubles as the
-    -- action bar (EUI has a separate one; ours merges into the legend so there
-    -- is a single top element). Declared widths are floors -- fitText grows
-    -- them for longer localisations, and Layout re-measures.
+    -- action bar, merged into the legend so there is a single top element.
+    -- Declared widths are floors -- fitText grows them for longer
+    -- localisations, and Layout re-measures.
     --
     -- These are the verbs SPELLED OUT. The element panel carries the same five
     -- as a compact icon row, which is the copy you reach for while working on a
