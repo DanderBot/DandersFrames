@@ -335,8 +335,13 @@ function DF:UpdateResourceBar(frame)
     local bar = frame.dfPowerBar
     local unit = frame.unit
     
-    -- Only process player, party, and raid units
-    if unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$") then
+    -- Only process player, party, and raid units -- or a standalone frame
+    -- (DF:InitStandaloneFrame), which shows one fixed unit of any kind.
+    -- ☠ Without that exemption this hid a standalone frame's bar straight after
+    -- ApplyResourceBarLayout showed it (FullFrameRefresh runs the two back to back),
+    -- so the bar stayed hidden until the unit's power next changed.
+    if not frame.dfStandalone and unit ~= "player"
+        and not unit:match("^party%d$") and not unit:match("^raid%d+$") then
         bar:Hide()
         return
     end
