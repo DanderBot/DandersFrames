@@ -93,6 +93,11 @@ local function RadialBar(parent, size, label, setup, ring, list, color, noBg)
     return holder
 end
 
+-- ARC MATHS (seen in game, 2026-11-01; the API notes say otherwise): StartOffset
+-- is where the fill begins (0 = bottom, clockwise), EndOffset is how much of the
+-- circle is CUT OFF the end -- the arc's length is 1 - EndOffset, not End - Start.
+-- So the arc a..b is Start = a, End = 1 - (b - a).
+
 -- Class power as a ring of pips: one radial bar per pip, each covering its own
 -- slice of the circle (or of `span`, an arc) and ranged i-1..i, all fed the SAME
 -- secret value -- the bar clamps, so a pip is full, empty or part-filled without
@@ -107,7 +112,7 @@ local function PipRing(parent, size, label, count, span)
         local b = from + (to - from) * i / count
         local pip = RadialBar(holder, size, "", function(tex)
             try("pip start", tex.SetRadialProgressBarStartOffset, tex, a + gap)
-            try("pip end", tex.SetRadialProgressBarEndOffset, tex, b - gap)
+            try("pip end", tex.SetRadialProgressBarEndOffset, tex, 1 - ((b - gap) - (a + gap)))
         end, i == count, P.pips, { 0.95, 0.75, 0.2 }, i > 1)
         pip:SetPoint("TOP")
         P.pips[#P.pips].pipIndex = i
@@ -178,7 +183,7 @@ local function Build()
     place(RadialBar(f, 80, "Ring", nil, true))
     place(RadialBar(f, 80, "Half arc", function(tex)
         try("SetStartOffset", tex.SetRadialProgressBarStartOffset, tex, 0.25)
-        try("SetEndOffset", tex.SetRadialProgressBarEndOffset, tex, 0.75)
+        try("SetEndOffset", tex.SetRadialProgressBarEndOffset, tex, 0.5)
     end, true))
     place(RadialBar(f, 80, "Feather", function(tex)
         try("SetFeather", tex.SetRadialProgressBarFeather, tex, 0.15)
@@ -196,7 +201,7 @@ local function Build()
     place2(RadialBar(f, 80, "Power ring", nil, true, P.powerBars, { 0.25, 0.5, 1 }))
     place2(RadialBar(f, 80, "Power arc", function(tex)
         try("power start", tex.SetRadialProgressBarStartOffset, tex, 0.25)
-        try("power end", tex.SetRadialProgressBarEndOffset, tex, 0.75)
+        try("power end", tex.SetRadialProgressBarEndOffset, tex, 0.5)
     end, true, P.powerBars, { 0.25, 0.5, 1 }))
     local _, class = UnitClass("player")
     local token = CLASS_POWER[class] or "ComboPoints"
