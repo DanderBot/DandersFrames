@@ -65,6 +65,16 @@ eq(ctl.hideOn, Never, "filtered single controls count as filtered")
 eq(l5[2].hideOn, Never, "...and the controls themselves are hidden")
 check(l5[4].hideOn == nil, "the next header, over a real control, stays")
 
+print("-- a full-width row closes the section (Highlights' Threat on Target of Target)")
+local threat = header(1)
+local l6 = { threat, card(1, true), card(1, true), spacer("both"), { layoutCol = "both" } }
+UFO.HideFilteredControls(l6)
+eq(threat.hideOn, Never, "See Also under filtered cards does not keep the header")
+local kept = header(1)
+local l7 = { kept, card(1), { layoutCol = "both" } }
+UFO.HideFilteredControls(l7)
+check(kept.hideOn == nil, "a real card before the full-width row keeps it")
+
 print("-- the markers the rule reads are stamped at the source")
 local CONTROLS = norm(options_file_source("GUI/Controls.lua"))
 check(CONTROLS:find("if filtered then section.dfFilteredOut = true end", 1, true)

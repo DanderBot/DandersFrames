@@ -418,7 +418,7 @@ DF.UnitFramePageData = {
             source = "indicators_highlights",
             units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
-                highlights_selection = { player = true, focus = true, pet = true, boss = true },
+                highlights_selection = { player = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 highlights_hover = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 highlights_aggro = { player = true, target = true, focus = true, pet = true, boss = true },
                 highlights_threat = { player = true, target = true, focus = true, pet = true, boss = true },

@@ -972,7 +972,14 @@ function UFO.HideOrphanHeaders(list)
             local filtered, content = 0, 0
             for j = i + 1, #list do
                 local w = list[j]
-                if type(w) == "table" and SameCol(rawget(w, "layoutCol") or 1, col) then
+                local wcol = type(w) == "table" and (rawget(w, "layoutCol") or 1)
+                -- A full-width row (a See Also strip) closes every column's
+                -- section: it is never one header's card. Counting it left the
+                -- Highlights page's Threat header over nothing on Target of Target.
+                if wcol == "both" and col ~= "both" and not (rawget(w, "isSpacer") or rawget(w, "isSyncPoint")) then
+                    break
+                end
+                if type(w) == "table" and SameCol(wcol, col) then
                     if rawget(w, "isSectionHeader") then break end
                     if rawget(w, "dfFilteredOut") then
                         filtered = filtered + 1

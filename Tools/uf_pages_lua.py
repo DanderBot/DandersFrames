@@ -76,6 +76,11 @@ SPLIT_CARDS = {"indicators_icons": ("unitIcons", "indicators", "Unit Icons")}
 #                      (Indicators.lua): every unit with a classification, Boss
 #                      included -- Boss has no Elite / Rare icon card, only these.
 EXTRA_CARDS = {"unitIcons": [("class_decorations", {"target", "focus", "boss"})]}
+# Units added to an inventory card since the inventory: page id -> card title -> units.
+#   Selection Highlight  Target of Target / Focus Target: the unit is often you or
+#                        your target, and the highlight runs there (only Target's
+#                        own is off for good, Defaults.lua).
+EXTRA_CARD_UNITS = {"indicators_highlights": {"Selection Highlight": {"targettarget", "focustarget"}}}
 
 def slug(title):
     return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
@@ -131,7 +136,8 @@ def main():
         split = []                         # (title, units, controls) of SPLIT_CARDS cards
         for g in p["groups"]:
             for c in g["cards"]:
-                cu = [u for u in units if u in (c.get("units") or units)]
+                extra = EXTRA_CARD_UNITS.get(pid, {}).get(c["title"], set())
+                cu = [u for u in units if u in (c.get("units") or units) or u in extra]
                 key = None
                 if p["origin"] == "df":
                     want = PREFIX[pid]
