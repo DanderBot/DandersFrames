@@ -1493,6 +1493,11 @@ do
     eq(UFO.LinkHeaderLines(5000, m), 1, "header: one line when everything fits")
     eq(UFO.LinkHeaderLines(2 * m.pad + m.pickersW + m.gap + m.summaryW, m), 2, "...buttons below when they do not")
     eq(UFO.LinkHeaderLines(stackedNeed, m) >= 2, true, "...never one line at the stacked minimum")
+    local fitsBoth = 2 * m.pad + m.pickersW + m.gap + m.summaryW + m.gap + m.buttonsW
+    eq(UFO.LinkHeaderLines(fitsBoth, m), 1, "header: one line exactly at its width")
+    eq(UFO.LinkHeaderLines(fitsBoth, m, 140), 2, "...the add button on the line pushes the buttons below")
+    eq(UFO.LinkHeaderLines(2 * m.pad + m.pickersW + m.gap + m.summaryW, m, 140), 3,
+       "...and a line too narrow for summary plus add button breaks again")
     check(stackedNeed >= 2 * m.pad + m.buttonsW and stackedNeed >= 2 * m.pad + m.pickersW,
           "the stacked minimum holds the buttons and the pickers on their own lines")
     eq(UFO.LinksMinWindowWidth(m, 281), 281 + UFO.LinksMinUsableWidth(m), "min window = chrome + the narrow layout's need")
@@ -1563,6 +1568,10 @@ do
     eq(byId.health.badge:GetText(), "+1", "Health: one thing kept apart")
     eq(byId.portrait.badge:GetText(), "", "Portrait: nothing kept apart")
     eq(card.summary:GetText(), "8 of 17 parts linked", "the card's summary")
+    -- "+ Link Two Frames" sits on the first card's header line, not on the page head.
+    check(card.addButton ~= nil, "the first link card carries + Link Two Frames")
+    eq(rawget(blocks[1].w, "addButton"), nil, "...and the page head does not")
+    eq(UFO.linkMeasured.addW ~= nil, true, "...its width counts toward the card's header")
     -- The leader reads first: "Player linked with Target", results from Target's side.
     eq(card.leaderDD.get(), "player", "the first picker shows the leader (Player)")
     eq(card.followerDD.get(), "target", "...the second the follower (Target)")
@@ -1654,6 +1663,8 @@ do
     blocks = {}
     page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
     local dr = blocks[3].w
+    eq(rawget(dr, "addButton"), nil, "draft open: no + Link Two Frames on the draft card")
+    eq(rawget(blocks[1].w, "addButton"), nil, "...nor on the page head")
     dr.leaderDD.set("target")
     eq(UFO.linkDraft.leader .. ">" .. UFO.linkDraft.follower, "target>player", "draft: picking the other frame swaps them")
     UFO.linkDraft = nil
@@ -1682,6 +1693,12 @@ do
     eq(UFO.Partner("target"), nil, "...Target is free")
     eq(select(2, Lk:Aspects(root, "focus", "absorbs")), "same", "...and the parts came along")
     Lk:Unlink(root, "focus")
+
+    -- No link and no draft: the page head is the only place left for the button.
+    eq(#UFO.AllLinks(), 0, "(no links left)")
+    blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
+    check(rawget(blocks[1].w, "addButton") ~= nil, "no link card: + Link Two Frames sits on the page head")
 
     CreateFrame = savedCF
     G.CreateLabelNative, G.CreateElementBackdrop, G.StyleButton, G.CreateSegmentToggle, G.CreateDropdown,

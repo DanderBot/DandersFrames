@@ -272,7 +272,9 @@ end
 function UFO.LinkCardNeeds(m)
     local inner = function(w) return w + 2 * m.pad end
     local wide = inner(m.nameW + m.gap + m.posW + m.gap + m.lookW + m.gap + m.resultMin)
-    local header = max(m.pickersW or 0, m.summaryW or 0, m.buttonsW or 0)
+    -- The summary line also carries "+ Link Two Frames" on the first card.
+    local summaryLine = (m.summaryW or 0) + (m.addW and (m.gap + m.addW) or 0)
+    local header = max(m.pickersW or 0, summaryLine, m.buttonsW or 0)
     local stacked = inner(max(m.posW + m.gap + m.lookW, m.nameW + m.gap + m.resultMinStacked, header))
     return wide, stacked
 end
@@ -294,11 +296,13 @@ function UFO.LinkCardLayout(width, m)
 end
 
 -- How a card header breaks: one line, two (buttons below) or three (summary,
--- then buttons, each on its own line).
-function UFO.LinkHeaderLines(width, m)
+-- then buttons, each on its own line). `addW`: the width of the card's
+-- "+ Link Two Frames" button, which ends the first line (nil: none).
+function UFO.LinkHeaderLines(width, m, addW)
     local inner = width - 2 * m.pad
-    if m.pickersW + m.gap + m.summaryW + m.gap + m.buttonsW <= inner then return 1 end
-    if m.pickersW + m.gap + m.summaryW <= inner then return 2 end
+    local add = addW and (m.gap + addW) or 0
+    if m.pickersW + m.gap + m.summaryW + m.gap + m.buttonsW + add <= inner then return 1 end
+    if m.pickersW + m.gap + m.summaryW + add <= inner then return 2 end
     return 3
 end
 
@@ -817,7 +821,9 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
         local pad, gap = M.pad, M.gap
         local y = pad
         -- header
-        local lines = UFO.LinkHeaderLines(width, m)
+        local add = rawget(self, "addButton")
+        local addW = add and (add:GetWidth() or 140) or nil
+        local lines = UFO.LinkHeaderLines(width, m, addW)
         self.leaderDD:ClearAllPoints()
         self.leaderDD:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
         self.linkIcon:ClearAllPoints()
@@ -837,10 +843,20 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
             buttonsY = y + lineH + 8
         else
             self.summary:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -(y + lineH + 6))
-            buttonsY = y + lineH + 6 + 14 + 8
+            buttonsY = y + lineH + 6 + (add and max(14, M.btnH) or 14) + 8
         end
-        -- buttons: right-aligned on the header line, else left-aligned below
-        local prev
+        -- "+ Link Two Frames" ends the summary's line, right-aligned.
+        if add then
+            add:ClearAllPoints()
+            if lines == 3 then
+                add:SetPoint("RIGHT", self, "TOPRIGHT", -pad, -(y + lineH + 6 + max(14, M.btnH) / 2))
+            else
+                add:SetPoint("TOPRIGHT", self, "TOPRIGHT", -pad, -y)
+            end
+        end
+        -- buttons: right-aligned on the header line (left of the add button),
+        -- else left-aligned below
+        local prev = (lines == 1) and add or nil
         for i = #self.buttons, 1, -1 do
             local b = self.buttons[i]
             b:ClearAllPoints()
@@ -939,26 +955,38 @@ end
 -- ============================================================
 -- THE PAGE'S HEAD AND THE THREE EXPLAINERS
 -- ============================================================
-local function HeadBlock(parent)
+-- "+ Link Two Frames". It sits on the first link card's header line (by its
+-- "parts linked" count); only with no card on the page does the head carry it.
+-- While a draft card is open there is none: the pair is being picked already.
+local function AddLinkButton(parent)
+    local b = Button(parent, L["Link Two Frames"], { primary = true, width = 140,
+        icon = { texture = ICONS .. "add.png", size = 14 } })
+    b:SetScript("OnClick", function() UFO.StartLinkDraft() end)
+    TipButton(parent, b, { title = L["Link Two Frames"],
+        lines = { L["Pick two frames to link, like Focus and Target. A frame can be linked to one other frame at a time."] } })
+    return b
+end
+
+local function HeadBlock(parent, withAdd)
     local f = CreateFrame("Frame", nil, parent)
     f.title = Label(f, L["Linked Frames"], 16, C("text"))
     f.intro = Label(f, L["Link two frames so that changing one also changes the other. For each part of the frame, choose what the two frames share."],
         12, C("textDim"), true)
-    f.add = Button(f, L["Link Two Frames"], { primary = true, width = 140,
-        icon = { texture = ICONS .. "add.png", size = 14 } })
-    f.add:SetScript("OnClick", function() UFO.StartLinkDraft() end)
-    TipButton(f, f.add, { title = L["Link Two Frames"],
-        lines = { L["Pick two frames to link, like Focus and Target. A frame can be linked to one other frame at a time."] } })
+    if withAdd then f.addButton = AddLinkButton(f) end
     function f:Layout(width)
         self:SetWidth(width)
-        local tw, bw = TextW(self.title, 9), self.add:GetWidth() or 140
-        self.title:ClearAllPoints(); self.add:ClearAllPoints(); self.intro:ClearAllPoints()
+        local addB = rawget(self, "addButton")
+        local tw, bw = TextW(self.title, 9), addB and (addB:GetWidth() or 140) or 0
+        self.title:ClearAllPoints(); self.intro:ClearAllPoints()
+        if addB then addB:ClearAllPoints() end
         self.title:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
         local y = 24
-        if tw + M.gap + bw <= width then
-            self.add:SetPoint("TOPRIGHT", self, "TOPRIGHT", 0, 0)
+        if not addB then
+            -- nothing beside the title
+        elseif tw + M.gap + bw <= width then
+            addB:SetPoint("TOPRIGHT", self, "TOPRIGHT", 0, 0)
         else
-            self.add:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -y)
+            addB:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -y)
             y = y + M.btnH + 8
         end
         local ih = WrappedH(self.intro, width)
@@ -1125,7 +1153,8 @@ function UFO.BuildLinksPage(self, db, Add)
 
     local m = Measure(self.child)
     UFO.linkMeasured = m
-    Block(HeadBlock(self.child), Add)
+    local links = UFO.AllLinks()
+    Block(HeadBlock(self.child, #links == 0 and not UFO.linkDraft), Add)
     Block(TilesBlock(self.child), Add)
     local cards = {}
     if UFO.linkDraft then
@@ -1134,10 +1163,13 @@ function UFO.BuildLinksPage(self, db, Add)
         MeasureButtons(card, m)
         Block(card, Add)
     end
-    local links = UFO.AllLinks()
-    for _, l in ipairs(links) do
+    for i, l in ipairs(links) do
         local card = UFO.CreateLinkCard(self.child, l.follower, l.leader, m, false)
         MeasureButtons(card, m)
+        if i == 1 and not UFO.linkDraft then
+            card.addButton = AddLinkButton(card)
+            m.addW = ceil(card.addButton:GetWidth() or 140)
+        end
         cards[#cards + 1] = card
         card.dfLinkCard = true
         Block(card, Add)
