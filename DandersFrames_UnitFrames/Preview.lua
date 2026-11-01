@@ -210,7 +210,7 @@ P.TEST_KEYS = {
     testShowAbsorbs = true, testShowHealPrediction = true,
     testShowStatusIcons = true, testAnimateHealth = true,
     testShowSelection = true, testShowAggro = true,
-    testShowLabels = true,
+    testShowLabels = true, testShowAuraDesigner = true,
 }
 
 -- Which preview shows the Selection highlight (DF:UpdateHighlights reads
@@ -367,6 +367,12 @@ function P:Init()
     P.initialised = true
     if hooksecurefunc and type(DF.SetTestModeOwner) == "function" then
         hooksecurefunc(DF, "SetTestModeOwner", OnGroupOwner)
+    end
+    -- An Aura Designer edit refreshes the designer on every frame through the
+    -- engine; the previews' half of that is P:RefreshAuraDesigner.
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    if hooksecurefunc and Engine and type(Engine.ForceRefreshAllFrames) == "function" then
+        hooksecurefunc(Engine, "ForceRefreshAllFrames", function() P:RefreshAuraDesigner() end)
     end
     if CreateFrame then
         local ev = CreateFrame("Frame")
@@ -545,6 +551,65 @@ local function AnimateFrame(f)
     if DF.UpdateTestFrameHealthOnly then DF:UpdateTestFrameHealthOnly(f, f.index) end
 end
 
+-- ============================================================
+-- AURA DESIGNER (docs/superpowers/specs/2026-11-01-uf-per-unit-designers.md, phase 3)
+-- The test painter runs the Aura Designer on every preview it paints
+-- (DF:UpdateTestFrame -> the factory), gated on testShowAuraDesigner -- a units
+-- test key (P.TEST_KEYS), on by default -- and on the unit's OWN enable
+-- (DF:IsAuraDesignerEnabled answers a standalone frame from its own table). The
+-- template is the unit's own stamp (UF:StampDesigners in P:Paint): its own, or
+-- Party's while it follows Party.
+-- ⚠ An editor change does not repaint whole frames: it calls the engine's
+-- ForceRefreshAllFrames, whose test refresh (DF:UpdateAllTestAuraDesigner) walks
+-- the party and raid test frames only, and only in their test mode. Its standalone
+-- walk skips preview frames on purpose. P:RefreshAuraDesigner is the previews'
+-- half, hooked onto it (P:Init): the same gate, the same factory calls and the
+-- same appearance pass after them, as that test refresh does per frame.
+-- Sound alerts never arm from a preview (the factory's sound reconcile skips
+-- dfPreview frames; its sync skips sound in test scope).
+-- ============================================================
+function P:AuraDesignerWanted(f)
+    local db = f.dfDB
+    if not (db and db.testShowAuraDesigner) then return false end
+    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(f)) then return false end
+    return not (DF.IsTestFrameDead and DF:IsTestFrameDead(f))
+end
+
+function P:SyncAuraDesigner(f)
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    if not Factory then return end
+    local db = P:PreviewDB(f.dfUFUnit)
+    f.dfDB = db
+    -- Re-stamped: a unit following Party draws whatever Party points at NOW.
+    UF:StampDesigners(f, db)
+    if P:AuraDesignerWanted(f) then
+        Factory:SyncFrame(f)
+    else
+        Factory:ClearFrame(f)
+    end
+    -- The appearance pass goes after the sync (SyncFrame re-styles to base alpha).
+    if DF.UpdateAuraDesignerAppearance then DF:UpdateAuraDesignerAppearance(f) end
+    if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(f) end
+end
+
+function P:RefreshAuraDesigner()
+    if not P.shown then return end
+    EachShownFrame(function(f) P:SyncAuraDesigner(f) end)
+end
+
+-- Every preview drops what the designer drew on it (the preview going away).
+-- Only frames that ever drew it: ClearFrame has nothing to do on the rest.
+function P:ClearAuraDesigner()
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    if not Factory then return end
+    local function Clear(f)
+        if rawget(f, "dfADFactory") then Factory:ClearFrame(f) end
+    end
+    for _, f in pairs(P.frames) do Clear(f) end
+    local boss = UF.Boss and UF.Boss.preview
+    for _, f in pairs(boss or {}) do Clear(f) end
+end
+
 function P:AnimateStep()
     P.animPhase = ((P.animPhase or 0) + 0.02) % 1
     EachShownFrame(AnimateFrame)
@@ -609,6 +674,7 @@ function P:Hide()
     P:SyncAnimation()
     for _, f in pairs(P.frames) do f:Hide() end
     if UF.Boss and UF.Boss.PreviewHide then UF.Boss:PreviewHide() end
+    P:ClearAuraDesigner()
     if P.parent then P.parent:Hide() end
     FadeLive(1)
     -- The live frames missed nothing (they kept their events), but a repaint costs

@@ -4369,7 +4369,11 @@ local function reconcileSoundNow(frame)
     local enabled = DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
     local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     local owns = DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)
-    if enabled and owns and frame.unit then
+    -- ☠ NEVER FOR A PREVIEW FRAME (frame.dfPreview). It shows sample auras under a
+    -- real unit token, so registering would arm real alerts on that unit from a frame
+    -- that is only a preview -- and ClearFrame, which ends here, is its teardown.
+    -- Desired stays nil, so anything it holds is unregistered.
+    if enabled and owns and frame.unit and not frame.dfPreview then
         local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
         -- ☠ soundEnabled IS THE MASTER MUTE (the Global tab's "Sound Alerts -> Enabled"), and
         -- this gate is its only reader: SoundEngine:StopAll() is inert (STATE_PLAYING is never

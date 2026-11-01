@@ -59,6 +59,10 @@ UF.TestDefaults = {
     testShowAuras = true,
     testBuffCount = 2,
     testDebuffCount = 2,
+    -- Aura Designer: drawn where the unit's own enable is on (Preview.lua). No
+    -- switch of its own yet; the key is here so the preview answers it from the
+    -- units test settings, not the unit's (party-default) table.
+    testShowAuraDesigner = true,
     -- Icons
     testShowStatusIcons = true,
     showRaidTarget = true,
