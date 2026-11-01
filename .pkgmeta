@@ -23,6 +23,7 @@ move-folders:
 
 ignore:
   - CHANGELOG.md
+  - RELEASE_NOTES.md
   # 4.x history, split out so the release body stays under GitHub's 125k limit.
   - CHANGELOG_ARCHIVE.md
   - README.md
@@ -45,7 +46,8 @@ ignore:
   - DandersMover/Demo.lua
 
 manual-changelog:
-  filename: CHANGELOG.md
+  # Written by release.yml: this build's section of CHANGELOG.md only.
+  filename: RELEASE_NOTES.md
   markup-type: markdown
 
 # CurseForge/Wago relation metadata: stamped on every upload by the packager.
