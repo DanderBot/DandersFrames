@@ -859,8 +859,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             absorbs = 0
         end
     else
-        -- Only process player, party, and raid units for real data
-        if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
+        -- Only process player, party, and raid units for real data (or a standalone
+        -- frame, DF:InitStandaloneFrame: it shows one fixed unit of any kind)
+        if not unit or (not frame.dfStandalone and unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
             return
         end
 
@@ -1951,8 +1952,9 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             healAbsorb = 0
         end
     else
-        -- Only process player, party, and raid units for real data
-        if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
+        -- Only process player, party, and raid units for real data (or a standalone
+        -- frame, DF:InitStandaloneFrame: it shows one fixed unit of any kind)
+        if not unit or (not frame.dfStandalone and unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
             return
         end
         
@@ -2475,8 +2477,9 @@ function DF:UpdateHealPrediction(frame, testIndex)
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
         haveOverheal = true
     else
-        -- Only process valid units for real data
-        if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
+        -- Only process valid units for real data (or a standalone frame, which
+        -- shows one fixed unit of any kind)
+        if not unit or (not frame.dfStandalone and unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
             return
         end
         
