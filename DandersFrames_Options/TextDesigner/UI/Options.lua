@@ -522,9 +522,9 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         -- outline, anchor and offset remain group-level (Appearance / Position
         -- sections) since the group renders as a single FontString.
 
-        -- ⚠ THE ITEM LIST IS ITS OWN SECTION. The split panel renders it straight
-        -- on under the separator, as it always has; the popout layout gives it a
-        -- row of its own and calls the same builder from there.
+        -- ⚠ THE ITEM LIST IS ITS OWN SECTION. Hand-placed (no group), it renders
+        -- straight on under the separator; in group mode the element's "Items"
+        -- card (TD_SECTIONS, groupOnly) calls the same builder.
         if not group then
             y = BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, y)
         end
@@ -1508,8 +1508,12 @@ end
 -- never frees, which is why the element cards themselves fold the same way. onResize
 -- hands the element card its new body height so it can re-size and re-stack its list.
 -- Folds persist per section, shared by every element ("tdSection:<key>").
+-- `groupOnly` sections are built for text groups only. Items is the group's item
+-- list (BuildGroupItemsSection): the Content card in group mode stops at the
+-- separator, so without this card a group's data could not be chosen at all.
 local TD_SECTIONS = {
     { key = "content",    label = function() return L["Content"] end,    kind = "text" },
+    { key = "items",      label = function() return L["Items"] end,      kind = "text", groupOnly = true },
     { key = "appearance", label = function() return L["Appearance"] end, kind = "appearance" },
     { key = "position",   label = function() return L["Position"] end,   kind = "position" },
 }
@@ -1546,7 +1550,12 @@ local function BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card
         return h
     end
 
+    -- Items is offered to text groups only (groupOnly).
+    local defs = {}
     for _, def in ipairs(TD_SECTIONS) do
+        if not def.groupOnly or elem.contentType == "group" then defs[#defs + 1] = def end
+    end
+    for _, def in ipairs(defs) do
         local section = GUI:CreateCollapsibleSection(body, def.label(), true, w, {
             card = true, collapseKey = "tdSection:" .. def.key, kind = def.kind,
         })
@@ -1554,6 +1563,9 @@ local function BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card
         section:RegisterChild(group)   -- the card's body: its inset, its gap, its fold
         if def.key == "content" then
             BuildContentSection(GUI, body, elem, tdDB, state, page, card, 0, false, group)
+        elseif def.key == "items" then
+            elem.groupItems = elem.groupItems or {}
+            BuildGroupItemsSection(GUI, body, elem, tdDB, state, page, card, 0, group)
         elseif def.key == "appearance" then
             BuildAppearanceSection(GUI, body, elem, card, 0, group)
         else
