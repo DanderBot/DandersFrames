@@ -226,6 +226,8 @@ function PO:Layout(f)
     -- Inside the frame it sits over the bars and under the text.
     p:SetFrameLevel(f:GetFrameLevel() + ((side == "INSIDE_LEFT" or side == "INSIDE_RIGHT") and 4 or 1))
     p:SetAlpha(tonumber(db.portraitAlpha) or 1)
+    -- Hovered right now (or the designer's Show Hover State): dimmed.
+    if f.dfIsHovered or rawget(f, "_tdForceHover") then PO:SetHover(f, true) end
     p.bg:SetVertexColor(K.RGBA(db.portraitBgColor, 0, 0, 0, 0.8))
     PO:ApplyShape(p, db, size)
     if not f.dfUFPreview then PO:Update(f) end
@@ -417,6 +419,22 @@ function PO:Refresh(f)
 end
 
 function PO:OnUnitChanged(f) PO:Update(f) end
+
+-- ============================================================
+-- DIM ON HOVER (portraitDimHover): the portrait fades to PO.DIM of its alpha while
+-- the frame is hovered (UF.OnHover), so text shown on hover over it reads. Frame
+-- alpha only: the portrait is a plain frame, safe in combat.
+-- ============================================================
+PO.DIM = 0.35
+
+function PO:SetHover(f, on)
+    local p = f and f.dfUFPortrait
+    if not p then return end
+    local db = K.DB(f)
+    local base = tonumber(db and db.portraitAlpha) or 1
+    if on and db and db.portraitDimHover then base = base * PO.DIM end
+    p:SetAlpha(base)
+end
 
 -- Dead / alive changes the desaturation only (a model repaint per health tick
 -- would flicker).

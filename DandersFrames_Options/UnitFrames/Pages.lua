@@ -1323,6 +1323,9 @@ function UFO.AddTextPreviewFrame(target, unit)
     local P = UF and UF.Preview
     if not (P and P.BuildSample) then return end
     local sample
+    -- The ring spots in its Anchor To lists, markers for them on the preview, and a
+    -- Show Hover State switch (TextDesigner/UI/Options.lua).
+    target.ringAnchors = true
     target.getSizeDB = function() return UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit) end
     target.previewFrame = function(parent)
         if not sample then sample = P:BuildSample(unit, parent) end
@@ -1824,6 +1827,9 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0, 1, 0.05, db, "portraitAlpha", changed), 55)
     w.disableOn = off
+    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Dim on Hover"], db, "portraitDimHover", changed), 30)
+    w.disableOn = off
+    w.tooltip = L["Fade the portrait while the mouse is over the frame, so text shown on hover reads over it."]
     w = band:AddWidget(GUI:CreateSlider(self.child, L["3D Zoom"], 0.5, 1.5, 0.05, db, "portrait3DZoom", changed), 55)
     w.disableOn, w.hideOn = off, not3D
     w = band:AddWidget(GUI:CreateSlider(self.child, L["3D Rotation"], -180, 180, 1, db, "portrait3DRotation", changed), 55)

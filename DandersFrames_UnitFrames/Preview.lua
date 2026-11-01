@@ -425,11 +425,13 @@ end
 local function OnEnter(self)
     self.dfIsHovered = true
     if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+    if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(self, true) end
 end
 
 local function OnLeave(self)
     self.dfIsHovered = false
     if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+    if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(self, false) end
 end
 
 -- Indicator Info's click-to-open-settings (DandersFrames_Options/TestMode/Labels.lua,
@@ -467,6 +469,9 @@ function P:Build(unit, name, parent, slot)
     f.dfBuffPurgeable = UF.BuffPurgeable
     -- Its highlights' outline, as on the live frame (Indicators.lua).
     f.dfHighlightShape = UF.Indicators and UF.Indicators.HighlightShape or nil
+    -- Text Designer ring anchors and hover, as on the live frame (Units:Build).
+    f.dfTDAnchorSpot = UF.Rings and UF.Rings.AnchorSpot or nil
+    f.dfHoverHook = UF.OnHover
     f.index = f.dfTestData.index
     f.dfTestSelected = (unit == P.SELECTED_UNIT)
     f:EnableMouse(true)

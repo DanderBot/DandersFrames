@@ -224,6 +224,16 @@ function K.PowerBarBelow(f, db)
 end
 
 -- ============================================================
+-- HOVER (frame.dfHoverHook, called by DandersFrames' DF:OnFrameHoverChanged from
+-- every frame's own OnEnter / OnLeave, after the hover highlight): the pieces of
+-- ours that answer hover. Plain frames only, so it runs in combat.
+-- ============================================================
+function UF.OnHover(f, on)
+    local PO = UF.Portrait
+    if PO and PO.SetHover then PO:SetHover(f, on) end
+end
+
+-- ============================================================
 -- AURA ROW PLACEMENT (DandersFrames' frame.dfAuraRowPlacement, Features/Auras.lua)
 -- Set on every unit frame, live and preview (Units:Build, Preview:Build). Two parts:
 --   * the ROW'S OWN CORNER (K.RowPoint): a row that grows AWAY from the edge it is

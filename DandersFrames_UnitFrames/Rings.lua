@@ -239,6 +239,47 @@ function R.ClassPowerArc(db)
 end
 
 -- ============================================================
+-- TEXT DESIGNER SPOTS (frame.dfTDAnchorSpot; DandersFrames' TextDesigner/Render.lua
+-- SPOT ANCHORS). Where each ring anchor sits, as x, y from the frame's centre, from
+-- the last ring layout (f.dfUFRingGeom). nil on a Bars frame: the renderer then
+-- uses the frame's own edges (top, bottom, centre, left, right).
+--   RING_ABOVE / RING_BELOW   the outer ring's top / bottom edge
+--   RING_CENTER               the middle
+--   RING_GAP_LEFT / _RIGHT    the middle of the outer ring's band on that side when
+--                             no section of it covers that side (an open gap), else
+--                             the ring's outer edge there
+-- ============================================================
+R.SIDE_ANGLE = { RING_GAP_LEFT = 0.25, RING_GAP_RIGHT = 0.75 }
+
+-- Does any section of `ring` cover the point `angle` (a share of a turn clockwise
+-- from the bottom)?
+function R.Covers(ring, angle)
+    local multi = #ring.sections > 1
+    for _, s in ipairs(ring.sections) do
+        local a, len = R.Arc(s, multi)
+        if len >= 1 then return true end
+        local d = (angle - a) % 1
+        if d <= len then return true end
+    end
+    return false
+end
+
+function R.AnchorSpot(f, key)
+    local geo = rawget(f, "dfUFRingGeom")
+    local outer = geo and geo.rings[#geo.rings]
+    if not outer then return nil end
+    local r = outer.outer / 2
+    if key == "RING_ABOVE" then return 0, r end
+    if key == "RING_BELOW" then return 0, -r end
+    if key == "RING_CENTER" then return 0, 0 end
+    local angle = R.SIDE_ANGLE[key]
+    if not angle then return nil end
+    local sign = (key == "RING_GAP_LEFT") and -1 or 1
+    if R.Covers(outer, angle) then return sign * r, 0 end
+    return sign * (outer.outer + outer.inner) / 4, 0
+end
+
+-- ============================================================
 -- THE FRAME VIEW's answers (Core.lua UF:FrameDB, Preview.lua P:PreviewDB).
 -- handled, value for `key` on a RING-style unit; false for anything else.
 -- ============================================================

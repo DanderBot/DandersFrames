@@ -195,6 +195,12 @@ print("-- Text Designer: the Content section's census")
 do
     checkCensus(census(funcBody(TD, "local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, yStart, isGroupItem, group)")), {
         { "editbox",  "Label (optional)",   "elem", "label" },
+        -- background (a shape, no text)
+        { "slider",   "Width",              "elem", "width" },
+        { "slider",   "Height",             "elem", "height" },
+        { "dropdown", "Shape",              "elem", "shape" },
+        { "dropdown", "Layer",              "elem", "layer" },
+        { "colorpicker", "Color",           "elem", "color" },
         -- numeric amounts
         { "checkbox", "Abbreviate",         "elem", "abbreviate" },
         { "checkbox", "Hide when 0",        "elem", "hideWhenZero" },
@@ -276,6 +282,8 @@ do
         { "slider",   "Offset X",  "elem", "offsetX" },
         { "slider",   "Offset Y",  "elem", "offsetY" },
         { "dropdown", "Anchor To", "elem", "anchorTo" },
+        { "checkbox", "Show on Hover", "elem", "showOnHover" },
+        { "slider",   "Slide In",  "elem", "hoverSlide" },
     }, "position")
     checkPlaced(funcBody(TD, "local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group)"), "position")
 

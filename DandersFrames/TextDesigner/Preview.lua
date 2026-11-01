@@ -56,6 +56,8 @@ function Preview:RefreshPreview()
     local Render = DF.TextDesigner.Render
     local DataSource = DF.TextDesigner.DataSource
     if not Render or not DataSource then return end
+    -- The mock is never hovered: Show on Hover elements are drawn shown on it.
+    activeMockFrame._tdHoverT = 1
     Render:UpdateFrame(activeMockFrame, activeTdDB, DataSource.Mock(), "all", true)
 end
 

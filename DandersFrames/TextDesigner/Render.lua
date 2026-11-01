@@ -66,6 +66,8 @@ local CONTENT_HINTS = {
     range_text        = "range",
     -- group (refreshes on any hint since it can mix categories)
     group             = "all",
+    -- a plain backing shape (no text): changes with settings only
+    backdrop          = "name",
 }
 
 -- ============================================================
@@ -148,13 +150,62 @@ end
 -- anchorTo == <element id string> → that element's FontString on the same frame.
 -- A disabled target counts as absent: its FontString is hidden with stale
 -- geometry, so dependents re-anchor to the frame instead of hanging off it.
+-- ============================================================
+-- SPOT ANCHORS (2026-11-01, ring unit frames)
+-- anchorTo may name a SPOT on the frame instead of the frame or an element:
+--   RING_ABOVE / RING_BELOW   just above / below the frame's ring
+--   RING_CENTER               the middle
+--   RING_GAP_LEFT / _RIGHT    the outer ring's open side, or its edge when closed
+-- The frame says where (frame.dfTDAnchorSpot(frame, key) -> x, y from its centre:
+-- DandersFrames_UnitFrames/Rings.lua R.AnchorSpot answers from the ring layout);
+-- a frame that does not answer (a Bars frame, party / raid, the mock) uses its own
+-- edges (SPOT_FALLBACK). A spot is a 1px region, and an element pins the SAME point
+-- of itself to it (SetPoint(point, spot, point)), so the element's anchor reads as
+-- "which part of the text sits on the spot". Mirrored text swaps left and right.
+-- ============================================================
+local SPOT_FALLBACK = { RING_ABOVE = "TOP", RING_BELOW = "BOTTOM", RING_CENTER = "CENTER",
+                        RING_GAP_LEFT = "LEFT", RING_GAP_RIGHT = "RIGHT" }
+Render.SPOTS = SPOT_FALLBACK
+local SPOT_MIRROR = { RING_GAP_LEFT = "RING_GAP_RIGHT", RING_GAP_RIGHT = "RING_GAP_LEFT" }
+
+local function spotRegion(frame, key)
+    if frame.dfMirrorText == true and SPOT_MIRROR[key] then key = SPOT_MIRROR[key] end
+    local spots = frame._tdSpots
+    if not spots then
+        spots = {}
+        frame._tdSpots = spots
+    end
+    local spot = spots[key]
+    if not spot then
+        spot = CreateFrame("Frame", nil, frame)
+        spot:SetSize(1, 1)
+        spots[key] = spot
+    end
+    local fn = rawget(frame, "dfTDAnchorSpot")
+    local x, y
+    if fn then x, y = fn(frame, key) end
+    local rel
+    if x then rel = "CENTER" else rel, x, y = SPOT_FALLBACK[key], 0, 0 end
+    -- Re-anchored only when it moved: this runs per element per update.
+    if spot._tdRel ~= rel or spot._tdX ~= x or spot._tdY ~= y then
+        spot:ClearAllPoints()
+        spot:SetPoint("CENTER", frame, rel, x, y)
+        spot._tdRel, spot._tdX, spot._tdY = rel, x, y
+    end
+    return spot
+end
+Render.SpotRegion = spotRegion
+
 local function resolveAnchorTarget(elem, frame, fontStringsById, enabledById)
     local target = elem.anchorTo or "FRAME"
     if target == "FRAME" then return frame end
+    if SPOT_FALLBACK[target] then return spotRegion(frame, target) end
     local targetId = tonumber(target)
-    if targetId and fontStringsById and fontStringsById[targetId]
-        and (not enabledById or enabledById[targetId]) then
-        return fontStringsById[targetId]
+    if targetId and (not enabledById or enabledById[targetId]) then
+        if fontStringsById and fontStringsById[targetId] then return fontStringsById[targetId] end
+        -- A background element is a region of its own, not a FontString.
+        local bd = frame._tdBackdrops and frame._tdBackdrops[targetId]
+        if bd then return bd end
     end
     return frame  -- fallback
 end
@@ -247,6 +298,12 @@ end
 -- A local (published below): applyPosition runs per element per health tick.
 local function placement(frame, elem)
     local point, x, y = elem.anchor or "CENTER", elem.offsetX or 0, elem.offsetY or 0
+    -- Show on Hover with a slide: the element starts `hoverSlide` px out and slides
+    -- home as it fades in (Render:SetHover). Plain numbers only.
+    local slide = elem.showOnHover and tonumber(elem.hoverSlide)
+    if slide and slide ~= 0 and frame then
+        x = x + slide * (1 - (frame._tdHoverT or 0))
+    end
     if frame and frame.dfMirrorText == true then
         point = mirrorPoint(point)
         if x ~= 0 then x = -x end
@@ -514,6 +571,198 @@ local function syncMirrors(frame)
 end
 
 -- ============================================================
+-- BACKGROUND ELEMENTS (contentType "backdrop", 2026-11-01)
+-- A plain backing shape with no text -- a rounded box or a pill -- that text
+-- elements can anchor to (resolveAnchorTarget finds it in frame._tdBackdrops).
+--   width / height     its size
+--   shape              "BOX" (small corners) | "PILL" (round ends at the kit's
+--                      largest corner art: a true pill up to 16px tall)
+--   color              { r, g, b, a } its fill (default black, 0.6)
+--   borderColor        optional { r, g, b, a }: a 1px ring
+--   layer              "FRONT" (under the text, over the frame's bars) | "BEHIND"
+--                      (under the frame's bars and rings, e.g. tucked behind a ring)
+-- Drawn with the kit's rounded surface (DandersUI Round.lua) on the TEXT overlay's
+-- background layer (FRONT) or on an underlay frame just above the frame itself
+-- (BEHIND); the region it is laid out on is an empty child frame, so the shape's
+-- textures stay on the layer that orders them. Each background on a frame takes
+-- its own surface slot (sublevel), so several can share a layer.
+-- Not secure, not secret: plain sizes and colours, safe in combat.
+-- ============================================================
+local function ensureUnderlay(frame)
+    local u = frame._tdUnderlay
+    if u then return u end
+    u = CreateFrame("Frame", nil, frame)
+    u:SetAllPoints(frame)
+    u:SetFrameLevel(frame:GetFrameLevel() + 1)
+    frame._tdUnderlay = u
+    return u
+end
+
+local BACKDROP_SLOTS = 14     -- fill sublevels -8 .. 5 (a ring lands 2 higher)
+local function acquireBackdrop(frame, elem)
+    frame._tdBackdrops = frame._tdBackdrops or {}
+    local bd = frame._tdBackdrops[elem.id]
+    if bd then return bd end
+    bd = CreateFrame("Frame", nil, ensureTdOverlay(frame))
+    frame._tdBackdropSlot = (frame._tdBackdropSlot or 0) + 1
+    bd._tdSlot = -8 + ((frame._tdBackdropSlot - 1) % BACKDROP_SLOTS)
+    frame._tdBackdrops[elem.id] = bd
+    return bd
+end
+
+local function backdropTextures(bd)
+    local s = bd._tdSurface
+    if s then return s.textures or {} end
+    return bd._tdPlain and { bd._tdPlain } or {}
+end
+
+local function hideBackdrop(bd)
+    if bd._tdSurface and bd._tdSurface.Hide then bd._tdSurface:Hide() end
+    if bd._tdPlain then bd._tdPlain:Hide() end
+    bd:Hide()
+end
+
+local function paintBackdrop(frame, elem, bd, fontStringsById, enabledById)
+    local w = tonumber(elem.width) or 60
+    local h = tonumber(elem.height) or 18
+    bd:SetSize(w > 1 and w or 1, h > 1 and h or 1)
+    applyPosition(bd, frame, elem, fontStringsById, enabledById)
+    local host = (elem.layer == "BEHIND") and ensureUnderlay(frame) or ensureTdOverlay(frame)
+    -- A layer change moves the shape to the other host's textures.
+    if bd._tdHost ~= host then
+        if bd._tdSurface and bd._tdSurface.Hide then bd._tdSurface:Hide() end
+        if bd._tdPlain then bd._tdPlain:Hide() end
+        bd._tdSurface, bd._tdPlain, bd._tdHost = nil, nil, host
+    end
+    local c = elem.color or {}
+    local r, g, b, a = c.r or 0, c.g or 0, c.b or 0, c.a or 0.6
+    local border = type(elem.borderColor) == "table" and elem.borderColor or false
+    local radius = (elem.shape == "PILL") and 8 or 4
+    local UI = DF.GUI
+    if UI and UI.CreateRoundedSurface then
+        bd._tdSurface = UI:CreateRoundedSurface(host, {
+            radius = radius, fill = { r, g, b, a }, border = border, borderWidth = 1,
+            sublevel = bd._tdSlot, anchorTo = bd,
+        })
+        if bd._tdSurface and bd._tdSurface.Show then bd._tdSurface:Show() end
+    else
+        -- No kit (a stripped client): a square fill.
+        local t = bd._tdPlain
+        if not t then
+            t = host:CreateTexture(nil, "BACKGROUND", nil, bd._tdSlot)
+            bd._tdPlain = t
+        end
+        t:SetAllPoints(bd)
+        t:SetColorTexture(r, g, b, a)
+        t:Show()
+    end
+    bd:Show()
+end
+
+-- ============================================================
+-- SHOW ON HOVER (elem.showOnHover, 2026-11-01)
+-- TD has no condition engine of its own: an element's visibility is its enable,
+-- the master / test toggles, the resolver's own blanks (Hide When 0, dead /
+-- offline) and the overlay's out-of-range fade. Hover joins the element-level
+-- rules here: an element marked Show on Hover renders like any other (text,
+-- colour, position) and only its ALPHA follows the frame's hover state
+-- (frame._tdHoverT, 0 .. 1), with an optional slide (placement above).
+-- Render:SetHover is driven by the frame's own OnEnter / OnLeave (DF:OnFrameHoverChanged,
+-- called from the same hover handlers that set dfIsHovered for the highlights), so
+-- click-casting and the hover highlight are untouched. Alpha and anchors of the
+-- overlay's own FontStrings only: never a secure frame, so it runs in combat.
+-- ============================================================
+Render.HOVER_FADE = 0.15
+
+local function hoverRegion(frame, id)
+    return (frame._tdFontStrings and frame._tdFontStrings[id]) or (frame._tdBackdrops and frame._tdBackdrops[id])
+end
+
+local function setRegionAlpha(region, a)
+    if not region then return end
+    if region._tdSlot then
+        for _, t in ipairs(backdropTextures(region)) do t:SetAlpha(a) end
+    else
+        region:SetAlpha(a)
+    end
+end
+
+-- Track whether `elem` is a hover element on this frame and give its region the
+-- alpha it should have now.
+local function applyHover(frame, elem, region)
+    local els = frame._tdHoverEls
+    if elem.showOnHover then
+        if not els then
+            els = {}
+            frame._tdHoverEls = els
+        end
+        els[elem.id] = elem
+        setRegionAlpha(region, frame._tdHoverT or 0)
+    else
+        if els and els[elem.id] then els[elem.id] = nil end
+        if region._tdHoverA ~= 1 then
+            setRegionAlpha(region, 1)
+        end
+    end
+    region._tdHoverA = elem.showOnHover and (frame._tdHoverT or 0) or 1
+end
+
+local function hoverStep(frame)
+    local t = frame._tdHoverT or 0
+    local els = frame._tdHoverEls
+    if not els then return end
+    for id, elem in pairs(els) do
+        local region = hoverRegion(frame, id)
+        if region then
+            setRegionAlpha(region, t)
+            region._tdHoverA = t
+            if elem.hoverSlide and elem.hoverSlide ~= 0 then
+                applyPosition(region, frame, elem, frame._tdFontStrings, nil)
+            end
+        end
+    end
+end
+
+-- The frame's hover went on or off: fade its hover elements in / out (and slide
+-- them). frame._tdForceHover (the designer's "Show Hover State") holds it on.
+function Render:SetHover(frame, on)
+    if not frame then return end
+    on = (on or frame._tdForceHover) and true or false
+    frame._tdHoverOn = on
+    local goal = on and 1 or 0
+    local els = frame._tdHoverEls
+    if not (els and next(els)) or not frame._tdOverlay then
+        frame._tdHoverT = goal
+        return
+    end
+    if (frame._tdHoverT or 0) == goal then
+        hoverStep(frame)
+        return
+    end
+    local ov = frame._tdOverlay
+    ov:SetScript("OnUpdate", function(self, elapsed)
+        local t = frame._tdHoverT or 0
+        local step = (elapsed or 0) / Render.HOVER_FADE
+        if frame._tdHoverOn then t = t + step else t = t - step end
+        if t >= 1 then t = 1 elseif t <= 0 then t = 0 end
+        frame._tdHoverT = t
+        hoverStep(frame)
+        if t == (frame._tdHoverOn and 1 or 0) then self:SetScript("OnUpdate", nil) end
+    end)
+end
+
+-- Every frame's hover handler (Frames/Create.lua, Frames/Headers.lua, the unit
+-- frames' preview) calls this. The Text Designer's hover elements, then whatever
+-- the frame itself asked to hear (frame.dfHoverHook(frame, on): unit frames dim
+-- their portrait).
+function DF:OnFrameHoverChanged(frame, on)
+    if not frame then return end
+    Render:SetHover(frame, on)
+    local hook = rawget(frame, "dfHoverHook")
+    if hook then hook(frame, on and true or false) end
+end
+
+-- ============================================================
 -- RENDER ONE ELEMENT
 -- ============================================================
 
@@ -536,6 +785,15 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
     if not elem.enabled then
         local existing = frame._tdFontStrings and frame._tdFontStrings[elem.id]
         if existing then existing:Hide() end
+        local bd = frame._tdBackdrops and frame._tdBackdrops[elem.id]
+        if bd then hideBackdrop(bd) end
+        if frame._tdHoverEls then frame._tdHoverEls[elem.id] = nil end
+        return
+    end
+    if elem.contentType == "backdrop" then
+        local bd = acquireBackdrop(frame, elem)
+        paintBackdrop(frame, elem, bd, frame._tdFontStrings, enabledById)
+        applyHover(frame, elem, bd)
         return
     end
     local fs = acquireFontString(frame, elem)
@@ -566,6 +824,7 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
     local safeText = getMS().SafeText(text)
     fs:SetText(safeText)
     fs:Show()
+    applyHover(frame, elem, fs)
     -- AD mirrors: feed the coloured cover the SAME resolved appearance + text.
     if frame._tdMirrors then
         mirrorElement(frame, elem, fs, app, safeText)
@@ -603,6 +862,7 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
         if frame._tdFontStrings then
             for _, fs in pairs(frame._tdFontStrings) do fs:Hide() end
         end
+        for _, bd in pairs(frame._tdBackdrops or {}) do hideBackdrop(bd) end
         syncMirrors(frame)   -- mirrors follow their (now hidden) real FontStrings
         return
     end
@@ -616,7 +876,11 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
     for _, elem in ipairs(tdDB.elements or {}) do
         if elem.enabled then
             enabledScratch[elem.id] = true
-            acquireFontString(frame, elem)
+            if elem.contentType == "backdrop" then
+                acquireBackdrop(frame, elem)
+            else
+                acquireFontString(frame, elem)
+            end
         end
     end
     -- `hint` is either a single category string, "all", or -- from the coalescing
@@ -643,6 +907,14 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
         for id, fs in pairs(frame._tdFontStrings) do
             if not liveIdScratch[id] then
                 fs:Hide()
+            end
+        end
+        for id, bd in pairs(frame._tdBackdrops or {}) do
+            if not liveIdScratch[id] then hideBackdrop(bd) end
+        end
+        if frame._tdHoverEls then
+            for id in pairs(frame._tdHoverEls) do
+                if not liveIdScratch[id] then frame._tdHoverEls[id] = nil end
             end
         end
     end
@@ -746,7 +1018,16 @@ function Render:Teardown(frame)
         end
         frame._tdMirrors = nil
     end
+    if frame._tdBackdrops then
+        for _, bd in pairs(frame._tdBackdrops) do
+            hideBackdrop(bd)
+            bd:ClearAllPoints()
+        end
+        frame._tdBackdrops = nil
+    end
+    frame._tdHoverEls = nil
     if frame._tdOverlay then
+        frame._tdOverlay:SetScript("OnUpdate", nil)
         frame._tdOverlay:Hide()
         frame._tdOverlay:ClearAllPoints()
         frame._tdOverlay = nil

@@ -87,7 +87,7 @@ local pairs, ipairs = pairs, ipairs
 -- ============================================================
 
 local CONTENT_CATEGORIES = {
-    "group", "identity", "health", "power", "shields", "status", "threat",
+    "group", "identity", "health", "power", "shields", "status", "threat", "shapes",
 }
 
 -- These label tables read L["..."], which at file-scope returns the enUS
@@ -106,6 +106,7 @@ local function RefreshLocaleStrings()
         status   = L["Status"],
         threat   = L["Threat & Range"],
         group    = L["Group"],
+        shapes   = L["Shapes"],
     }
 
     CONTENT_TYPES = {
@@ -149,6 +150,9 @@ local function RefreshLocaleStrings()
         { key = "range_text",        label = L["In-Range / OOR Text"],        category = "threat"   },
         -- Group
         { key = "group",             label = L["Text Group"],                 category = "group"    },
+        -- Shapes: a plain backing shape other elements can anchor to (Render.lua
+        -- BACKGROUND ELEMENTS)
+        { key = "backdrop",          label = L["Background"],                 category = "shapes"   },
     }
 end
 
@@ -368,6 +372,28 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
     -- CreateEditBox is label-above style; row is taller than other widgets.
     place(labelEdit, EDIT_BOX_ROW_H)
     end  -- not isGroupItem
+
+    -- Background: size, shape, layer and colour (no text, so the Appearance
+    -- section's font controls do nothing for it).
+    if ct.key == "backdrop" then
+        local function bdCB()
+            if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+        end
+        elem.width = elem.width or 60
+        elem.height = elem.height or 18
+        elem.shape = elem.shape or "BOX"
+        elem.layer = elem.layer or "FRONT"
+        elem.color = elem.color or { r = 0, g = 0, b = 0, a = 0.6 }
+        place(GUI:CreateSlider(parent, L["Width"], 4, 300, 1, elem, "width", bdCB, bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateSlider(parent, L["Height"], 4, 120, 1, elem, "height", bdCB, bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateDropdown(parent, L["Shape"],
+            { BOX = L["Rounded Box"], PILL = L["Pill"], _order = { "BOX", "PILL" } }, elem, "shape", bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateDropdown(parent, L["Layer"],
+            { FRONT = L["In Front of the Bars"], BEHIND = L["Behind the Bars"], _order = { "FRONT", "BEHIND" } },
+            elem, "layer", bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateColorPicker(parent, L["Color"], elem, "color", true, bdCB), FIELD_ROW_HEIGHT)
+        return y - SECTION_GAP
+    end
 
     -- Numeric types: abbreviate checkbox
     if ct.key == "hp_current" or ct.key == "hp_max" or ct.key == "hp_deficit"
@@ -962,6 +988,16 @@ local function BuildAnchorTargets(tdDB, currentElem)
     MarkDescendants(currentElem.id)
 
     local opts = { FRAME = L["Frame"] }
+    -- Spots on a ring frame (Render.lua SPOT ANCHORS). Offered on a unit frame's
+    -- page (the island's target.ringAnchors); a Bars frame falls back to its edges.
+    if P.offerRingAnchors or (currentElem.anchorTo and DF.TextDesigner.Render
+            and DF.TextDesigner.Render.SPOTS and DF.TextDesigner.Render.SPOTS[currentElem.anchorTo]) then
+        opts.RING_ABOVE = L["Ring: Above"]
+        opts.RING_BELOW = L["Ring: Below"]
+        opts.RING_CENTER = L["Ring: Center"]
+        opts.RING_GAP_LEFT = L["Ring: Left Side"]
+        opts.RING_GAP_RIGHT = L["Ring: Right Side"]
+    end
     for _, other in ipairs(tdDB.elements) do
         if other.id ~= currentElem.id and not descendants[other.id] then
             local optLabel
@@ -1037,6 +1073,19 @@ local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group
     local anchorTargets = BuildAnchorTargets(tdDB, elem)
     local anchorToDrop = GUI:CreateDropdown(parent, L["Anchor To"], anchorTargets, elem, "anchorTo", metaCB)
     place(anchorToDrop, FIELD_ROW_HEIGHT)
+
+    -- Show on Hover (Render.lua SHOW ON HOVER): fades in while the mouse is over
+    -- the frame; Slide In starts it that far out and slides it home.
+    local hoverCheck = GUI:CreateCheckbox(parent, L["Show on Hover"], elem, "showOnHover", function()
+        if parent.RefreshStates then parent:RefreshStates() end
+        metaCB()
+    end)
+    hoverCheck.tooltip = L["Only show this while the mouse is over the frame, fading in and out."]
+    place(hoverCheck, FIELD_ROW_HEIGHT)
+    elem.hoverSlide = elem.hoverSlide or 0
+    local slide = GUI:CreateSlider(parent, L["Slide In"], -40, 40, 1, elem, "hoverSlide", metaCB, metaCB)
+    slide.disableOn = function() return not elem.showOnHover end
+    place(slide, FIELD_ROW_HEIGHT)
 
     return y - SECTION_GAP
 end
@@ -2817,6 +2866,8 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     -- A target (above) names its own template and its own frame size instead.
     local tdDB, _tdTargetName, _tdSizeDB = TDEditTarget(GUI, db, target)
     tdDB = tdDB or (DF.TextDesigner:EnsureDB(db))
+    -- Ring spots in every Anchor To on this page (a unit frame's target asks).
+    P.offerRingAnchors = (target and target.ringAnchors) and true or false
     DF.TextDesigner:EnsureDB({ textDesigner = tdDB })
     local state = GetState(page)
 
@@ -2920,6 +2971,8 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
         if state.groupEmptyMsg      then state.groupEmptyMsg:Hide();      state.groupEmptyMsg:ClearAllPoints()      end
         if state.disabledOverlay    then state.disabledOverlay:Hide();    state.disabledOverlay:ClearAllPoints()    end
         if state.scaleSlider        then state.scaleSlider:Hide();        state.scaleSlider:ClearAllPoints()        end
+        if state.hoverToggle        then state.hoverToggle:Hide();        state.hoverToggle:ClearAllPoints()        end
+        state.hoverToggle = nil
         if state.tabContents       then
             for _, frame in pairs(state.tabContents) do
                 frame:Hide()
@@ -3221,6 +3274,35 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
     scaleSlider:SetSize(220, 30)
     state.scaleSlider = scaleSlider
+
+    -- Over a real frame: Show Hover State (holds the frame's hover on, so Show on
+    -- Hover text and a dimmed portrait can be styled) and faint markers on the ring
+    -- spots the Anchor To list offers.
+    if sample then
+        local hoverState = { on = sample._tdForceHover and true or false }
+        local hoverToggle = GUI:CreateCheckbox(previewPanel, L["Show Hover State"], hoverState, "on", function()
+            sample._tdForceHover = hoverState.on and true or nil
+            if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(sample, hoverState.on) end
+        end)
+        hoverToggle:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", 0, -6)
+        state.hoverToggle = hoverToggle
+        if target.ringAnchors and DF.TextDesigner.Render and DF.TextDesigner.Render.SpotRegion then
+            local markers = sample._tdSpotMarkers or {}
+            sample._tdSpotMarkers = markers
+            for key in pairs(DF.TextDesigner.Render.SPOTS) do
+                local spot = DF.TextDesigner.Render.SpotRegion(sample, key)
+                local m = markers[key]
+                if not m then
+                    m = spot:CreateTexture(nil, "OVERLAY")
+                    m:SetSize(4, 4)
+                    m:SetPoint("CENTER", spot, "CENTER", 0, 0)
+                    m:SetColorTexture(1, 1, 1, 0.35)
+                    markers[key] = m
+                end
+                m:Show()
+            end
+        end
+    end
 
     -- Placeholder note so users know this panel is purely cosmetic for now.
     -- (Not over a real frame: that one is the frame's own preview.)

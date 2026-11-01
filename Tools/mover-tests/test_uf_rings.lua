@@ -449,6 +449,53 @@ do
     check(U.RingSectionRemove(rings[1], 2) and #rings[1].sections == 3, "remove a section")
 end
 
+print("-- Rings: Text Designer spots")
+do
+    local f = {}
+    eq(R.AnchorSpot(f, "RING_ABOVE"), nil, "no ring layout (Bars): no answer, the renderer uses the frame's edges")
+    f.dfUFRingGeom = R.Geometry({ ringSize = 64, rings = UF.RING_DEFAULTS })
+    local x, y = R.AnchorSpot(f, "RING_ABOVE")
+    check(x == 0 and y == 32, "above: the outer ring's top")
+    x, y = R.AnchorSpot(f, "RING_BELOW")
+    check(x == 0 and y == -32, "below")
+    x, y = R.AnchorSpot(f, "RING_CENTER")
+    check(x == 0 and y == 0, "centre")
+    x = R.AnchorSpot(f, "RING_GAP_RIGHT")
+    eq(x, 32, "a full outer ring: the side spot falls back to its edge")
+    f.dfUFRingGeom = R.Geometry({ ringSize = 64, rings = {
+        { thickness = 8, gap = 2, sections = { { bar = "HEALTH" } } },
+        { thickness = 6, gap = 2, sections = { { bar = "POWER", coverage = "HALF", position = "LEFT" } } } } })
+    x = R.AnchorSpot(f, "RING_GAP_RIGHT")
+    eq(x, (64 + 52) / 4, "right side open: the middle of the outer band there")
+    x = R.AnchorSpot(f, "RING_GAP_LEFT")
+    eq(x, -32, "left side covered: its edge")
+    check(R.Covers({ sections = { { coverage = "QUARTER", position = "BOTTOM" } } }, 0), "a bottom quarter covers the bottom (wraps through 0)")
+    check(not R.Covers({ sections = { { coverage = "QUARTER", position = "BOTTOM" } } }, 0.5), "...not the top")
+    check(not R.Covers({ sections = {} }, 0.25), "no sections: open")
+end
+
+print("-- Rings: portrait dims on hover")
+do
+    local PO = UF.Portrait
+    eq(UF:GetUnitDB("target").portraitDimHover, false, "off by default")
+    local H = Owner("target")
+    H.dfDB = UF:FrameDB("target")
+    PO:Attach(H)
+    PO:Layout(H)
+    eff.portraitAlpha = 0.8
+    UF.OnHover(H, true)
+    eq(H.dfUFPortrait._alpha, 0.8, "off: hover leaves it alone")
+    eff.portraitDimHover = true
+    UF.OnHover(H, true)
+    check(math.abs(H.dfUFPortrait._alpha - 0.8 * PO.DIM) < 1e-9, "on: dimmed while hovered")
+    UF.OnHover(H, false)
+    eq(H.dfUFPortrait._alpha, 0.8, "...and back")
+    H.dfIsHovered = true
+    PO:Layout(H)
+    check(H.dfUFPortrait._alpha < 0.8, "a layout while hovered keeps it dimmed")
+    eff.portraitDimHover, eff.portraitAlpha = nil, nil
+end
+
 print("-- Rings: a settings sample of a unit (the Text Designer's preview)")
 do
     local P = UF.Preview
