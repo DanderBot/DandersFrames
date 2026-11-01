@@ -327,6 +327,8 @@ end
 -- height, gap, border, enable or attach moves the rows at their next drive.
 -- Rows anchored to the top or a side are never pushed; nor is anything on a frame
 -- whose cast bar is off, detached (Player's default) or attached on top.
+-- A detached resource bar hung from the frame's bottom (K.PowerBarBelow) comes
+-- first: the attached cast bar goes under it, and its band counts here too.
 -- Reaches the rows through DandersFrames' per-frame row placement
 -- (frame.dfAuraRowPlacement, Features/Auras.lua; UF.AuraRowPlacement, Elements.lua).
 -- ============================================================
@@ -342,7 +344,7 @@ function CB.BottomReserve(f, db)
         border = tonumber(db.castbarBorderSize) or 1
         if border < 1 then border = 1 end
     end
-    local r = gap - y + h + border
+    local r = K.PowerBarBelow(f, db) + gap - y + h + border
     if r < 0 then r = 0 end
     return r
 end
@@ -438,7 +440,8 @@ function CB:Layout(f)
         if db.castbarSide == "TOP" then
             cb:SetPoint("BOTTOM", f, "TOP", x, gap + y)
         else
-            cb:SetPoint("TOP", f, "BOTTOM", x, -gap + y)
+            -- Under a detached resource bar hung from the frame's bottom (K.PowerBarBelow).
+            cb:SetPoint("TOP", f, "BOTTOM", x, -(K.PowerBarBelow(f, db) + gap) + y)
         end
     end
     -- Above the classification dragon (Indicators.lua IN.DRAGON_LEVEL), so a

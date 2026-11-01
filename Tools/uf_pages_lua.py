@@ -91,6 +91,15 @@ EXTRA_CARD_UNITS = {
     "display_fading": {"Health Threshold Fading": {"target", "targettarget", "focus", "focustarget", "boss"}},
 }
 
+# New cards on a DF page that the party builder draws through its card door
+# (page.dfExtraCards, UnitFrames/Pages.lua UFO.ExtraCards): page id -> card title ->
+# the section key the builder opens it with. Listed like any DF card, so the page's
+# `cards` filter reaches them per unit.
+#   Detach     bars_resource (Auras.lua), after Position: the detached resource bar.
+HOOKED_CARDS = {
+    "bars_resource": {"Detach": "resource_detached"},
+}
+
 def slug(title):
     return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
 # Section-key prefix of each DF page's cards (tools.OpenSection's collapseKey).
@@ -151,7 +160,10 @@ def main():
                 if p["origin"] == "df":
                     want = PREFIX[pid]
                     hits = sorted({k for t, k in pairs if t == c["title"] and k.startswith(want)})
-                    if c.get("new"):
+                    hooked = HOOKED_CARDS.get(pid, {}).get(c["title"])
+                    if hooked:
+                        hits = [hooked]
+                    elif c.get("new"):
                         if pid in SPLIT_CARDS:
                             split.append((c["title"], cu, c["controls"]))
                         else:

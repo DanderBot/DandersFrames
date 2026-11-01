@@ -822,6 +822,53 @@ do
     cards, keys = BuildPage("pet", "portrait")
     check(not has(keys, "portraitNpcMode") and not has(keys, "portraitDesatDead"), "pet: no NPC style, no desaturate")
 
+    print("-- Cards of ours through a party page's door: Resource Bar > Detach")
+    do
+        local rec
+        for _, r in ipairs(data.pages) do if r.kind == "resource" then rec = r end end
+        for _, u in ipairs({ "player", "target", "focus", "pet", "boss" }) do
+            check(rec.cards.resource_detached and rec.cards.resource_detached[u], u .. ": the Detach card reaches it")
+        end
+        local pg = made.pages.uf_target_resource
+        pg.RefreshStates = function() end
+        local extra = UFO.ExtraCards(pg, rec, "target")
+        check(type(extra.resource_detached) == "function", "Resource Bar: the Detach card goes through the page's door")
+        eq(next(UFO.ExtraCards(pg, { kind = "health" }, "target")), nil, "...a page with no card of ours: nothing at its door")
+        built, toggles, added = {}, {}, {}
+        page.children = {}
+        local tools = G:CreatePopoutPageTools(pg)
+        local db = UF:GetUnitDB("target")
+        local function offRow(d) return not (d or db).resourceBarEnabled end
+        extra.resource_detached({
+            OpenSection = function(label, key, col, summary, dimFn, hideFn, builder, toggle)
+                return tools.OpenSection(Add, label, key, col, summary, dimFn, hideFn, builder, toggle)
+            end,
+            CloseSection = function(band) tools.CloseSection(Add, band) end,
+            db = db, offRow = offRow, col = 1,
+        })
+        local keys, byKey = {}, {}
+        for _, w in ipairs(built) do keys[#keys + 1] = w.key; byKey[w.key] = w end
+        eq(added[1] and added[1].w.cardKey, "resource_detached", "Detach: one card, keyed as the page data lists it")
+        eq(toggles.resource_detached and toggles.resource_detached.key, "resourceBarDetached", "...its switch is the header tick")
+        eq(table.concat(keys, ","), "resourceBarDetachedMatchWidth,resourceBarDetachedWidth,resourceBarDetachedHeight,"
+            .. "resourceBarDetachedAnchor,resourceBarDetachedX,resourceBarDetachedY",
+            "...Match Frame Width, Width, Height, Anchor, Offset X, Offset Y")
+        local on = { resourceBarEnabled = true, resourceBarDetached = true }
+        eq(byKey.resourceBarDetachedHeight.disableOn(on), false, "...live while detached")
+        eq(byKey.resourceBarDetachedHeight.disableOn({ resourceBarEnabled = true }), true, "...grey while attached")
+        eq(byKey.resourceBarDetachedHeight.disableOn({ resourceBarDetached = true }), true, "...grey while the bar is off")
+        eq(byKey.resourceBarDetachedWidth.disableOn(on), true, "Width: grey while Match Frame Width is on")
+        eq(byKey.resourceBarDetachedWidth.disableOn({ resourceBarEnabled = true, resourceBarDetached = true,
+            resourceBarDetachedMatchWidth = false }), false, "...live with it off")
+        local summary = added[1].w.summary
+        eq(summary({}), "Off", "summary: Off while attached")
+        eq(summary({ resourceBarDetached = true }), "Bottom", "...the anchor while detached")
+        local src = options_file_source("GUI/Pages/Auras.lua")
+        check(src:find('rawget(self, "dfExtraCards")', 1, true) and src:find("ufCards.resource_detached", 1, true),
+            "the Resource Bar builder opens its door with rawget (a party / raid build never finds one)")
+        page.children = {}
+    end
+
     print("-- Per-unit designers (phase 2): the designer itself on the unit's page")
     do
         local heldA, heldT, heldD, heldC, heldI, heldU, heldBT, heldBA =

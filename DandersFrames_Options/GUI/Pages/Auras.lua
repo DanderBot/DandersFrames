@@ -2653,6 +2653,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         })
         CloseSection(band)
 
+        -- Unit frame pages add their Detached card here (UnitFrames/Pages.lua,
+        -- UFO.ExtraCards; Frames/Bars.lua DETACHED RESOURCE BAR). The party / raid
+        -- page never sets the table, so it never draws the card.
+        local ufCards = rawget(self, "dfExtraCards")
+        local detachedCard = type(ufCards) == "table" and ufCards.resource_detached
+        if detachedCard then
+            detachedCard({ OpenSection = OpenSection, CloseSection = CloseSection, db = db,
+                           offRow = ResourceOffRow, col = 1 })
+        end
+
         -- The category header the four Style cards sit under.
         Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
         local band = OpenSection(L["Bar Style"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,

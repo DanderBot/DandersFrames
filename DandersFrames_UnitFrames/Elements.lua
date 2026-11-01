@@ -204,6 +204,21 @@ function K.PlaceDetached(el, f, record)
     if UF.Units and UF.Units.PlaceAt then UF.Units:PlaceAt(el, record) end
 end
 
+-- The band under the frame a DETACHED resource bar takes (DandersFrames'
+-- resourceBarDetached*, Frames/Bars.lua DETACHED RESOURCE BAR): one hung from a
+-- bottom point of the frame, its height less any lift of its own Y. From the
+-- SETTINGS, like the cast bar's reserve, so it never jumps with the power type.
+-- 0 for a bar that is off, attached, or placed at the top, a side or the centre.
+function K.PowerBarBelow(f, db)
+    db = db or K.DB(f)
+    if not (db and db.resourceBarEnabled and db.resourceBarDetached) then return 0 end
+    local point = db.resourceBarDetachedAnchor or "BOTTOM"
+    if type(point) ~= "string" or not point:find("BOTTOM", 1, true) then return 0 end
+    local r = (tonumber(db.resourceBarDetachedHeight) or 8) - (tonumber(db.resourceBarDetachedY) or 0)
+    if r < 0 then r = 0 end
+    return r
+end
+
 -- ============================================================
 -- AURA ROW PLACEMENT (DandersFrames' frame.dfAuraRowPlacement, Features/Auras.lua)
 -- Set on every unit frame, live and preview (Units:Build, Preview:Build). Two parts:
@@ -245,6 +260,9 @@ function UF.AuraRowPlacement(f, db, prefix, anchor, growth)
     if type(anchor) == "string" and anchor:find("BOTTOM", 1, true) then
         local CB = UF.CastBar
         local r = CB and CB.BottomReserve and CB.BottomReserve(f, db) or 0
+        -- A detached resource bar under the frame with no attached cast bar below it.
+        local p = K.PowerBarBelow(f, db)
+        if p > r then r = p end
         if r > 0 then dy = -r end
     end
     return 0, dy, K.RowPoint(anchor, growth)

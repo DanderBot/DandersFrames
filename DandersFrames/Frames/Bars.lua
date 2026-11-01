@@ -136,6 +136,26 @@ end
 -- call this so the two can never drift. The caller does the enabled/role checks and
 -- sets the bar VALUE + fill COLOUR (live UnitPower vs test mock) — the only per-caller
 -- part. Assumes the bar should be shown.
+-- ============================================================
+-- DETACHED RESOURCE BAR (standalone frames: the unit frames companion)
+-- A frame DF:InitStandaloneFrame marked may detach its bar: it then takes its own
+-- size (resourceBarDetachedMatchWidth / Width / Height) and sits OUTSIDE the frame,
+-- its opposite point on a point of the frame's edge (resourceBarDetachedAnchor),
+-- moved by resourceBarDetachedX / Y. BOTTOM hangs it under the frame, TOPLEFT puts
+-- it above the frame flush with its left edge, LEFT beside the left edge, CENTER
+-- over the middle. Party, raid and pinned frames never detach: the keys are the
+-- unit frames' own and the branch asks for a standalone frame first.
+-- ============================================================
+DF.DETACHED_BAR_POINT = {
+    TOP = "BOTTOM", BOTTOM = "TOP", LEFT = "RIGHT", RIGHT = "LEFT", CENTER = "CENTER",
+    TOPLEFT = "BOTTOMLEFT", TOPRIGHT = "BOTTOMRIGHT",
+    BOTTOMLEFT = "TOPLEFT", BOTTOMRIGHT = "TOPRIGHT",
+}
+
+function DF:IsResourceBarDetached(frame, db)
+    return (frame and frame.dfStandalone and db and db.resourceBarDetached) and true or false
+end
+
 function DF:LayoutResourceBar(frame, db)
     local bar = frame and frame.dfPowerBar
     if not bar then return end
@@ -234,7 +254,22 @@ function DF:LayoutResourceBar(frame, db)
         edgeInset = math.max(padding, bInset)
     end
 
-    if isVertical then
+    if DF:IsResourceBarDetached(frame, db) then
+        -- ★ DETACHED (a standalone frame only -- see DF:IsResourceBarDetached): the
+        -- bar's own width and height, OUTSIDE the frame at a point of its edge. The
+        -- Size / Position settings above keep their values for when it re-attaches.
+        local w = db.resourceBarDetachedMatchWidth ~= false and frameWidth
+            or (tonumber(db.resourceBarDetachedWidth) or frameWidth)
+        local h = tonumber(db.resourceBarDetachedHeight) or 8
+        if db.pixelPerfect then w, h = DF:PixelPerfect(w), DF:PixelPerfect(h) end
+        if w < 1 then w = 1 end
+        if h < 1 then h = 1 end
+        bar:SetSize(w, h)
+        local point = db.resourceBarDetachedAnchor or "BOTTOM"
+        if not DF.DETACHED_BAR_POINT[point] then point = "BOTTOM" end
+        bar:SetPoint(DF.DETACHED_BAR_POINT[point], frame, point,
+            tonumber(db.resourceBarDetachedX) or 0, tonumber(db.resourceBarDetachedY) or 0)
+    elseif isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
         bar:SetWidth(ppThickness)
         if db.resourceBarMatchWidth and healthBarHeight > 1 then

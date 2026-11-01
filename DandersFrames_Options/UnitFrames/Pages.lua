@@ -1016,6 +1016,8 @@ function UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
     self.sectionFilter = function(key) return UFO.CardAllowed(rec, unit, key) end
     -- Unit-frame-only controls inside a DF card (Modules.lua reads it per card).
     if rec.kind == "icons" then self.dfIconCardExtras = UFO.IconCardExtras(self) end
+    -- Whole cards of ours the party builder draws through its card door (UFO.ExtraCards).
+    self.dfExtraCards = UFO.ExtraCards(self, rec, unit)
 
     local function PageAdd(widget, height, col)
         local row = type(widget) == "table" and rawget(widget, "dfCopyRow")
@@ -1128,6 +1130,54 @@ end
 local function RefreshFrames()
     local UF = DF.UnitFrames
     if UF and UF.RequestRefresh then UF:RequestRefresh() end
+end
+
+-- ---- cards of ours on a DandersFrames page ----------------------------------
+-- A party builder draws the page. Where it leaves a door (page.dfExtraCards, read
+-- with rawget, so a party / raid build never finds one) it calls ours with its OWN
+-- OpenSection / CloseSection: the card shares the page's popout tools (a second
+-- GUI:CreatePopoutPageTools would retire the first one's holders -- see NO CARD OF
+-- OUR OWN below). The page's generated `cards` list still decides which units see
+-- it (sectionFilter); Tools/uf_pages_lua.py HOOKED_CARDS names each card's key.
+--   ctx = { OpenSection, CloseSection, db, offRow (the page gate), col }
+function UFO.ExtraCards(page, rec, unit)
+    local function changed() page:RefreshStates(); RefreshFrames() end
+    local cards = {}
+    if rec.kind == "resource" then
+        cards.resource_detached = function(ctx) UFO.BuildResourceDetachedCard(page, ctx, changed) end
+    end
+    return cards
+end
+
+-- Detach (the Resource Bar page): the bar's own size, outside the frame at a
+-- point of its edge (Frames/Bars.lua, DETACHED RESOURCE BAR). Greys with the page
+-- gate (Enable Resource Bar) and, inside, with its own header tick.
+function UFO.BuildResourceDetachedCard(page, ctx, changed)
+    local db = ctx.db
+    local pageOff = UFO.Gate(L["Enable Resource Bar"], function(d) return ctx.offRow(d) end)
+    local off = UFO.Gate(L["Detach"], function(d) return not (d and d.resourceBarDetached) end, pageOff)
+    local band = ctx.OpenSection(L["Detach"], "resource_detached", ctx.col or 1, function(d)
+        if not (d and d.resourceBarDetached) then return L["Off"] end
+        return UFO.PointOptions()[d.resourceBarDetachedAnchor or "BOTTOM"] or ""
+    end, ctx.offRow, nil, nil, {
+        db = db, key = "resourceBarDetached", label = L["Detach"],
+        disableOn = ctx.offRow, onChanged = changed,
+    })
+    local w = band:AddWidget(GUI:CreateCheckbox(page.child, L["Match Frame Width"], db,
+        "resourceBarDetachedMatchWidth", changed), 30)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(page.child, L["Width"], 10, 600, 1, db, "resourceBarDetachedWidth", changed), 55)
+    w.disableOn = UFO.Gate(L["Match Frame Width"], function(d) return d and d.resourceBarDetachedMatchWidth ~= false end,
+        off, "off")
+    w = band:AddWidget(GUI:CreateSlider(page.child, L["Height"], 1, 40, 1, db, "resourceBarDetachedHeight", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateDropdown(page.child, L["Anchor"], UFO.PointOptions(), db, "resourceBarDetachedAnchor", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(page.child, L["Offset X"], -200, 200, 1, db, "resourceBarDetachedX", changed), 55)
+    w.disableOn = off
+    w = band:AddWidget(GUI:CreateSlider(page.child, L["Offset Y"], -200, 200, 1, db, "resourceBarDetachedY", changed), 55)
+    w.disableOn = off
+    ctx.CloseSection(band)
 end
 
 -- ---- Text Designer / Aura Designer (spec 2026-11-01-uf-per-unit-designers.md) ---
@@ -1367,6 +1417,7 @@ local function PointOptions()
              _order = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT",
                         "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" } }
 end
+UFO.PointOptions = PointOptions
 
 -- Edit a detached piece in the mover (its own element, `<unit>.<kind>`).
 function UFO.EditChildInMover(unit, kind)

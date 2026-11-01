@@ -169,6 +169,7 @@ DF.UnitFramePageData = {
                 resource_classfilter = { target = true, focus = true },
                 resource_size = { player = true, target = true, focus = true, pet = true, boss = true },
                 resource_position = { player = true, target = true, focus = true, pet = true, boss = true },
+                resource_detached = { player = true, target = true, focus = true, pet = true, boss = true },
                 resource_appearance = { player = true, target = true, focus = true, pet = true, boss = true },
                 resource_background = { player = true, target = true, focus = true, pet = true, boss = true },
                 resource_border = { player = true, target = true, focus = true, pet = true, boss = true },

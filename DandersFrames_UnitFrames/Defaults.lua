@@ -260,6 +260,18 @@ local ELEMENTS = {
     classBorderEnabled = false,
     classBorderSize = 2,
 
+    -- Detached resource bar (DandersFrames' Frames/Bars.lua, DETACHED RESOURCE BAR):
+    -- its own size, outside the frame at a point of its edge. Under the frame by
+    -- default, 2px clear of it; an attached cast bar and the bottom aura rows go
+    -- under it (CastBar.lua AURA ROW RESERVE, Elements.lua K.PowerBarBelow).
+    resourceBarDetached = false,
+    resourceBarDetachedMatchWidth = true,
+    resourceBarDetachedWidth = 120,
+    resourceBarDetachedHeight = 8,
+    resourceBarDetachedAnchor = "BOTTOM",
+    resourceBarDetachedX = 0,
+    resourceBarDetachedY = -2,
+
     -- A border round DandersFrames' combat icon, unit frames only.
     combatIconBorderEnabled = false,
     combatIconBorderSize = 1,

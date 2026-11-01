@@ -197,7 +197,19 @@ do
     end
     -- 162 = 157 + the classification dragon's side, x, y and tail x (reviewed: all
     -- four move with the frame's end) + its Anchor To (portrait / frame: where it sits).
-    eq(#layout, 162, "the layout set is the size it was reviewed at (162 keys); a change here wants a look")
+    -- 166 = 162 + the detached resource bar's switch, anchor, x and y (where it sits;
+    -- its size and Match Frame Width are look).
+    eq(#layout, 166, "the layout set is the size it was reviewed at (166 keys); a change here wants a look")
+    for _, k in ipairs({ "resourceBarDetached", "resourceBarDetachedAnchor", "resourceBarDetachedX",
+                         "resourceBarDetachedY" }) do
+        eq(Links.Aspect(k), "layout", "layout: " .. k)
+        eq(Links.OwnerOf(k), "resource", "Resource Bar owns " .. k)
+    end
+    for _, k in ipairs({ "resourceBarDetachedMatchWidth", "resourceBarDetachedWidth", "resourceBarDetachedHeight" }) do
+        eq(Links.Aspect(k), "look", "look: " .. k)
+    end
+    eq(Links.Mirror("resourceBarDetachedAnchor", "BOTTOMLEFT"), "BOTTOMRIGHT", "mirror: a detached bar's anchor swaps sides")
+    eq(Links.Mirror("resourceBarDetachedX", 12), -12, "mirror: ...and its x")
 
     -- The classification dragon / border: the Unit Icons element, layout = where it sits.
     for _, k in ipairs({ "classDragonEnabled", "classDragonSize", "classDragonSide", "classDragonX",

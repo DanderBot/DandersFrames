@@ -321,6 +321,46 @@ do
     eq(off(T, "TOPLEFT"), "0,0", "target: its buff row (above) is not")
 end
 
+print("-- A detached resource bar under the frame comes first")
+do
+    local K = UF.Elements.Kit
+    local tdb = UF:GetUnitDB("target")
+    local function off(f, anchor)
+        local x, y = UF.AuraRowPlacement(f, f.dfDB, "debuff", anchor, "RIGHT_DOWN")
+        return x .. "," .. y
+    end
+    eq(K.PowerBarBelow(T), 0, "attached resource bar (the default): no band under the frame")
+    tdb.resourceBarDetached = true
+    eq(K.PowerBarBelow(T), 10, "detached under the frame: 8 high + 2 clear = 10")
+    eq(CB.BottomReserve(T), 31, "the attached cast bar goes under it: 10 + 21")
+    eq(off(T, "BOTTOMLEFT"), "0,-31", "...and the bottom rows under both")
+    eq(off(T, "TOPLEFT"), "0,0", "...the top rows are not moved")
+    CB:Layout(T)
+    local p2 = cb._points[#cb._points]
+    eq(p2 and p2[5], -12, "the attached cast bar is placed 10 + its 2 gap under the frame")
+    tdb.castbarDetached = true
+    eq(off(T, "BOTTOMLEFT"), "0,-10", "cast bar detached: the rows clear the resource bar alone")
+    tdb.castbarDetached = nil
+    tdb.resourceBarDetachedY = -6
+    tdb.resourceBarDetachedHeight = 4
+    eq(K.PowerBarBelow(T), 10, "4 high, 6 clear: 10")
+    tdb.resourceBarDetachedY = 20
+    eq(K.PowerBarBelow(T), 0, "moved up over the frame: never negative")
+    tdb.resourceBarDetachedY, tdb.resourceBarDetachedHeight = nil, nil
+    for _, a in ipairs({ "TOPLEFT", "TOP", "LEFT", "RIGHT", "CENTER" }) do
+        tdb.resourceBarDetachedAnchor = a
+        eq(K.PowerBarBelow(T), 0, "placed at " .. a .. ": nothing under the frame")
+    end
+    tdb.resourceBarDetachedAnchor = "BOTTOMRIGHT"
+    eq(K.PowerBarBelow(T), 10, "placed at BOTTOMRIGHT: under the frame")
+    tdb.resourceBarDetachedAnchor = nil
+    tdb.resourceBarEnabled = false
+    eq(K.PowerBarBelow(T), 0, "resource bar off: nothing")
+    tdb.resourceBarEnabled, tdb.resourceBarDetached = nil, nil
+    CB:Layout(T)
+    eq(CB.BottomReserve(T), 21, "re-attached: back to the cast bar's own 21")
+end
+
 print("-- A secret enemy cast: the client owns the fill, the text and the colour")
 local nameS, texS, niS, spellS = Secret("name"), Secret("texture"), Secret("notInterruptible"), Secret("spellID")
 cast = { nameS, nil, texS, Secret("start"), Secret("end"), false, Secret("castID"), niS, spellS }
