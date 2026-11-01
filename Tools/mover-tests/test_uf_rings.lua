@@ -526,6 +526,74 @@ do
     eff.frameStyle = "BARS"
 end
 
+print("-- Rings: Text Designer presets")
+do
+    local lib = { ["Ring: Side Plate"] = { userEdit = true } }
+    DF.GetTextDesignerPresets = function() return lib end
+    DF.NewTextDesignerConfig = function() return { elements = { { id = 1, contentType = "name" } } } end
+    check(UF:EnsureTextPresets(), "made")
+    eq(lib["Ring: Side Plate"].userEdit, true, "an existing one is never overwritten")
+    lib["Ring: Side Plate"] = nil
+    UF:EnsureTextPresets()
+    local function byType(cfg, ct)
+        local out = {}
+        for _, e in ipairs(cfg.elements) do if e.contentType == ct then out[#out + 1] = e end end
+        return out
+    end
+    local plate = lib["Ring: Side Plate"]
+    check(plate and plate.enabled, "Side Plate: made, on")
+    local bd = byType(plate, "backdrop")[1]
+    check(bd and bd.layer == "BEHIND" and bd.anchorTo == "RING_GAP_RIGHT" and bd.offsetX < 0,
+          "Side Plate: a box tucked behind the ring's right side")
+    local lines = 0
+    for _, e in ipairs(plate.elements) do
+        if e.contentType ~= "backdrop" then
+            lines = lines + 1
+            eq(e.anchorTo, tostring(bd.id), "Side Plate: " .. e.contentType .. " sits on the plate")
+        end
+    end
+    eq(lines, 3, "Side Plate: name / health / power")
+    local grp = byType(plate, "group")[1]
+    check(grp.groupItems[1].contentType == "hp_current" and grp.groupItems[1].abbreviate
+          and grp.groupItems[2].contentType == "hp_percent", "Side Plate: health abbreviated, then percent")
+    local tag = lib["Ring: Name and Tag"]
+    eq(byType(tag, "name")[1].anchorTo, "RING_ABOVE", "Name and Tag: the name above the ring")
+    local pill = byType(tag, "backdrop")[1]
+    check(pill.shape == "PILL" and pill.anchorTo == "RING_BELOW", "Name and Tag: a pill below it")
+    local tg = byType(tag, "group")[1]
+    check(tg.anchorTo == tostring(pill.id) and tg.groupSeparator == " | ", "...with health % | power on it")
+    local hv = lib["Ring: Centre on Hover"]
+    check(hv.dimPortraitOnHover, "Centre on Hover: asks for the portrait to dim")
+    local all = true
+    for _, e in ipairs(hv.elements) do if not e.showOnHover then all = false end end
+    check(all and #hv.elements == 3, "Centre on Hover: three elements, all shown on hover")
+    local pct = byType(hv, "hp_percent")[1]
+    check(pct.anchorTo == "RING_CENTER" and pct.fontSize > 12 and pct.overrides.fontSize, "...health % large in the centre")
+    local ids = {}
+    for _, e in ipairs(hv.elements) do ids[e.id] = true end
+    eq(hv.nextElementID, #hv.elements + 1, "element ids run on from 1")
+
+    -- Picking it on a unit's page turns that unit's Dim on Hover on.
+    local src = options_file_source("UnitFrames/Pages.lua"):gsub("\r\n", "\n")
+    local s0 = src:find("function UFO.ApplyTemplateRequests(unit)", 1, true)
+    local s1 = src:find("-- The Text Designer's preview on a unit page", 1, true)
+    check(s0 and s1, "the template request can be cut out of Pages.lua")
+    local env = setmetatable({ UFO = {}, DF = { UnitFrames = UF, GetTextDesignerPresets = function() return lib end } },
+        { __index = _G })
+    local fn = (loadstring or load)(src:sub(s0, s1 - 1))
+    setfenv(fn, env)
+    fn()
+    local tdb = UF:GetUnitDB("focus")
+    tdb.textDesignerPreset = "Ring: Name and Tag"
+    env.UFO.ApplyTemplateRequests("focus")
+    eq(tdb.portraitDimHover, false, "a template that asks nothing changes nothing")
+    tdb.textDesignerPreset = "Ring: Centre on Hover"
+    env.UFO.ApplyTemplateRequests("focus")
+    eq(tdb.portraitDimHover, true, "Centre on Hover: the unit's portrait dims on hover")
+    check(src:find('if kind == "text" then UFO.ApplyTemplateRequests(unit) end', 1, true) ~= nil,
+          "...asked on every text template change on a unit page")
+end
+
 eq(#errs, 0, "no element errors")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

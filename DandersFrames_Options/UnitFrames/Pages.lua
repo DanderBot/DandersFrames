@@ -1303,6 +1303,7 @@ function UFO.DesignerTarget(unit, kind)
         sizeDB = db,
         bar = bar,
         onChange = function()
+            if kind == "text" then UFO.ApplyTemplateRequests(unit) end
             UFO.PushLinks(unit)
             DesignerChanged(kind)
             UFO.RefreshLinkMarks()
@@ -1310,6 +1311,21 @@ function UFO.DesignerTarget(unit, kind)
     }
     if kind == "text" then UFO.AddTextPreviewFrame(target, unit) end
     return target
+end
+
+-- A Text Designer template may ask something of the unit that picks it: today
+-- only dimPortraitOnHover ("Ring: Centre on Hover", DandersFrames_UnitFrames/Core.lua
+-- RING PRESETS), which turns the unit's Dim on Hover on so its hover text reads
+-- over the portrait. Only ever turned ON, never off.
+function UFO.ApplyTemplateRequests(unit)
+    local UF = DF.UnitFrames
+    local db = UF and UF:GetUnitDB(unit)
+    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+    local name = db and db.textDesignerPreset
+    local cfg = lib and name and lib[name]
+    if type(cfg) == "table" and cfg.dimPortraitOnHover and not db.portraitDimHover then
+        db.portraitDimHover = true
+    end
 end
 
 -- The Text Designer's preview on a unit page is the unit's OWN frame, built and

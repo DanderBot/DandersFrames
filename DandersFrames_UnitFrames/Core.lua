@@ -30,6 +30,8 @@ UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "focustarget",
 -- Built-in Text Designer presets (preset NAMES are db keys: never localised).
 UF.TEXT_PRESET = "Unit Frames"
 UF.TEXT_PRESET_SMALL = "Unit Frames (Small)"
+-- Built-in templates for Ring-style frames (UF:EnsureTextPresets, RING PRESETS).
+UF.RING_TEXT_PRESETS = { plate = "Ring: Side Plate", tag = "Ring: Name and Tag", hover = "Ring: Centre on Hover" }
 
 -- Spawned frames by key: the unit for most, boss1..bossN for the boss slots.
 -- ⚠ The key is not always the settings unit: read f.dfUFUnit for that.
@@ -326,7 +328,94 @@ function UF:EnsureTextPresets()
         lib[UF.TEXT_PRESET_SMALL] = cfg
         Debug("created Text Designer preset %s", UF.TEXT_PRESET_SMALL)
     end
+    for key, name in pairs(UF.RING_TEXT_PRESETS) do
+        if not lib[name] then
+            local cfg = UF.BuildRingTextPreset(key)
+            if cfg then
+                lib[name] = cfg
+                Debug("created Text Designer preset %s", name)
+            end
+        end
+    end
     return true
+end
+
+-- ============================================================
+-- RING PRESETS (Text Designer templates for a Ring-style frame, Rings.lua)
+-- Made like the two above: once, when absent, so the user's edits stand.
+--   plate  "Ring: Side Plate"       a rounded box tucked BEHIND the ring's right
+--                                   side (Background element, layer Behind), name /
+--                                   health (abbreviated . percent) / power on
+--                                   three lines inside it, clear of the ring
+--   tag    "Ring: Name and Tag"     the name above the ring; a pill under it with
+--                                   health % | power
+--   hover  "Ring: Centre on Hover"  health % large in the middle, exact health under
+--                                   it, the name above the ring, all three shown on
+--                                   hover. Carries dimPortraitOnHover: picking it on
+--                                   a unit's page turns that unit's Dim on Hover on
+--                                   (Pages.lua UFO.DesignerTarget), so the text
+--                                   reads over the portrait.
+-- Anchors are the renderer's ring spots (TextDesigner/Render.lua SPOT ANCHORS):
+-- on a Bars frame they fall back to the frame's edges.
+-- ============================================================
+local function NewRingConfig()
+    local TDm = DF.TextDesigner
+    local cfg = (TDm and TDm.EnsureDB and TDm:EnsureDB({})) or { elements = {}, nextElementID = 1, globalDefaults = {} }
+    cfg.enabled = true
+    cfg.hideLegacyText = true
+    cfg.elements = {}
+    cfg.nextElementID = 1
+    return cfg
+end
+
+-- One element: `t` over the shared defaults. fontSize sets its own override.
+local function Element(cfg, t)
+    local e = { id = cfg.nextElementID, enabled = true, label = "", anchor = "CENTER",
+                offsetX = 0, offsetY = 0, anchorTo = "FRAME", overrides = {} }
+    for k, v in pairs(t) do e[k] = v end
+    if t.fontSize then e.overrides.fontSize = true end
+    cfg.nextElementID = cfg.nextElementID + 1
+    cfg.elements[#cfg.elements + 1] = e
+    return e
+end
+
+function UF.BuildRingTextPreset(key)
+    local cfg = NewRingConfig()
+    if key == "plate" then
+        -- The plate starts 14px under the ring's right edge (tucked behind it) and
+        -- its text starts 4px past that edge.
+        local plate = Element(cfg, { contentType = "backdrop", anchorTo = "RING_GAP_RIGHT", anchor = "LEFT",
+            offsetX = -14, width = 112, height = 46, shape = "BOX", layer = "BEHIND",
+            color = { r = 0.05, g = 0.05, b = 0.05, a = 0.75 } })
+        local pid = tostring(plate.id)
+        Element(cfg, { contentType = "name", anchorTo = pid, anchor = "TOPLEFT", offsetX = 18, offsetY = -4,
+            nameLength = 12, fontSize = 11 })
+        Element(cfg, { contentType = "group", anchorTo = pid, anchor = "LEFT", offsetX = 18, offsetY = 0,
+            groupSeparator = " · ", fontSize = 10,
+            groupItems = { { contentType = "hp_current", abbreviate = true }, { contentType = "hp_percent", decimals = 0 } } })
+        Element(cfg, { contentType = "power_current", anchorTo = pid, anchor = "BOTTOMLEFT", offsetX = 18, offsetY = 4,
+            abbreviate = true, fontSize = 9 })
+    elseif key == "tag" then
+        Element(cfg, { contentType = "name", anchorTo = "RING_ABOVE", anchor = "BOTTOM", offsetY = 2,
+            nameLength = 14, fontSize = 11 })
+        local pill = Element(cfg, { contentType = "backdrop", anchorTo = "RING_BELOW", anchor = "TOP", offsetY = -2,
+            width = 78, height = 16, shape = "PILL", layer = "FRONT",
+            color = { r = 0, g = 0, b = 0, a = 0.7 } })
+        Element(cfg, { contentType = "group", anchorTo = tostring(pill.id), anchor = "CENTER",
+            groupSeparator = " | ", fontSize = 10,
+            groupItems = { { contentType = "hp_percent", decimals = 0 }, { contentType = "power_current", abbreviate = true } } })
+    elseif key == "hover" then
+        cfg.dimPortraitOnHover = true
+        Element(cfg, { contentType = "hp_percent", anchorTo = "RING_CENTER", anchor = "CENTER", offsetY = 3,
+            decimals = 0, fontSize = 16, showOnHover = true })
+        Element(cfg, { contentType = "hp_current", anchorTo = "RING_CENTER", anchor = "TOP", offsetY = -6,
+            abbreviate = true, fontSize = 9, showOnHover = true })
+        Element(cfg, { contentType = "name", anchorTo = "RING_ABOVE", anchor = "BOTTOM", offsetY = 2,
+            nameLength = 14, fontSize = 11, showOnHover = true, hoverSlide = 0 })
+    else
+        return nil
+    end
+    return cfg
 end
 
 -- ============================================================
@@ -552,7 +641,10 @@ function UF:ResetProfile()
     if UF.MigrateProfileTable then UF.MigrateProfileTable(p.unitframes) end
 
     local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
-    if lib then lib[UF.TEXT_PRESET], lib[UF.TEXT_PRESET_SMALL] = nil, nil end
+    if lib then
+        lib[UF.TEXT_PRESET], lib[UF.TEXT_PRESET_SMALL] = nil, nil
+        for _, name in pairs(UF.RING_TEXT_PRESETS) do lib[name] = nil end
+    end
 
     UF:OnProfileChanged()
     -- A detached cast bar's mover element follows its (now default) settings.
