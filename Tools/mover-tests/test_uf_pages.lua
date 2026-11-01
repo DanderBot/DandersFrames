@@ -255,13 +255,13 @@ eq(made.catOrder[1], "uf_module", "the module-wide category comes first")
 check(made.pages.uf_settings ~= nil, "the module Settings page exists")
 eq(G:ModuleForPage("uf_settings"), "units", "...on the module's sidebar")
 local WANT = {
-    player = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,classpower,text,buffs,debuffs,defensive,dispel,auradesigner,icons,unitIcons,highlights",
-    target = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
-    targettarget = "frame,tooltips,fading,health,text,highlights",
-    focustarget = "frame,tooltips,fading,health,text,highlights",
-    focus ="frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
-    pet = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
-    boss = "frame,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
+    player = "frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,classpower,text,buffs,debuffs,defensive,dispel,auradesigner,icons,unitIcons,highlights",
+    target = "frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
+    targettarget = "frame,rings,tooltips,fading,health,text,highlights",
+    focustarget = "frame,rings,tooltips,fading,health,text,highlights",
+    focus ="frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
+    pet = "frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
+    boss = "frame,rings,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
 }
 for _, unit in ipairs(UFO.UNITS) do
     local kinds = {}
@@ -1576,12 +1576,12 @@ do
     local linked, separate = UFO.LinkPageGroups("target", "player")
     local function ids(list) local t = {} for i, e in ipairs(list) do t[i] = e.id end return table.concat(t, ",") end
     eq(ids(linked), "health,resource,portrait,castbar,text,buffs,debuffs,border", "Linked by default: the default link's parts, in page order")
-    eq(ids(separate), "absorbs,healpred,icons,unitIcons,tooltips,visibility,fading,frame,highlights",
+    eq(ids(separate), "absorbs,healpred,icons,unitIcons,tooltips,visibility,fading,frame,rings,highlights",
        "Separate by default: everything else both frames have")
     local n, total = UFO.LinkedPartCount("target", "player")
-    eq(n .. "/" .. total, "8/17", "8 of 17 parts linked")
+    eq(n .. "/" .. total, "8/18", "8 of 18 parts linked")
     linked, separate = UFO.LinkPageGroups("targettarget", "focustarget")
-    eq(ids(linked) .. "|" .. ids(separate), "health,text,border|tooltips,fading,frame,highlights", "a pair with fewer parts lists only those")
+    eq(ids(linked) .. "|" .. ids(separate), "health,text,border|tooltips,fading,frame,rings,highlights", "a pair with fewer parts lists only those")
 
     -- ---- the layout decision -----------------------------------------------------
     local m = UFO.LinkDefaultMeasures()
@@ -1655,7 +1655,7 @@ do
     for _, b in ipairs(blocks) do eq(b.col, "both", "every block spans the page") end
     local card = blocks[3].w
     check(card.dfLinkCard, "the third block is the link's card")
-    eq(#card.rows, 17, "a row per part both frames have")
+    eq(#card.rows, 18, "a row per part both frames have")
     local byId = {}
     for _, r in ipairs(card.rows) do byId[r.elem.id] = r end
     local function values(seg) local t = {} for i, x in ipairs(seg.segments) do t[i] = x.value end return table.concat(t, ",") end
@@ -1673,7 +1673,7 @@ do
     eq(byId.absorbs.result:GetText(), "Not linked. Each frame has its own.", "Absorbs' result line")
     eq(byId.health.badge:GetText(), "+1", "Health: one thing kept apart")
     eq(byId.portrait.badge:GetText(), "", "Portrait: nothing kept apart")
-    eq(card.summary:GetText(), "8 of 17 parts linked", "the card's summary")
+    eq(card.summary:GetText(), "8 of 18 parts linked", "the card's summary")
     -- "+ Link Two Frames" sits on the first card's header line, not on the page head.
     check(card.addButton ~= nil, "the first link card carries + Link Two Frames")
     eq(rawget(blocks[1].w, "addButton"), nil, "...and the page head does not")

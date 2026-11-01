@@ -221,7 +221,8 @@ P.TEST_KEYS = {
 P.SELECTED_UNIT = "pet"
 
 -- A preview frame's settings table: the unit's own (UF:GetUnitDB), with the keys
--- above read from the units test settings. Writes go to the unit's table. One per
+-- above read from the units test settings, and a RING-style unit's frame answers
+-- (Rings.lua R.FrameValue). Writes go to the unit's table. One per
 -- unit, remade when the unit's table changes (a profile switch).
 local previewDBs = {}
 function P:PreviewDB(unit)
@@ -233,6 +234,12 @@ function P:PreviewDB(unit)
             if P.TEST_KEYS[key] then
                 local v = P:TestDB()[key]
                 if v ~= nil then return v end
+            end
+            -- RING style: the same answers the live frame's view gives (Rings.lua).
+            local R = UF.Rings
+            if R then
+                local handled, v = R.FrameValue(db, key)
+                if handled then return v end
             end
             return db[key]
         end,

@@ -209,6 +209,36 @@ function UF:GetUnitDB(unit)
     return eff
 end
 
+-- ============================================================
+-- THE FRAME VIEW (Rings.lua)
+-- What a unit's FRAMES read (f.dfDB). In BARS style it is the unit's own table,
+-- the very same proxy. In RING style it is a view over that table which answers
+-- a few keys for the ring (R.FrameValue: the frame is a ringSize square, the bars
+-- that rings replace are off) and passes every other read and every write to the
+-- unit's table. The settings pages always read UF:GetUnitDB, never this.
+-- ============================================================
+local viewCache = {}
+
+function UF:FrameDB(unit)
+    local eff = UF:GetUnitDB(unit)
+    local R = UF.Rings
+    if not (R and R.IsRing(eff)) then return eff end
+    local cached = viewCache[unit]
+    if cached and cached.src == eff then return cached.view end
+    local stored = getmetatable(eff) and getmetatable(eff).__realTable
+    local view = setmetatable({}, {
+        __realTable = stored,
+        __index = function(_, key)
+            local handled, v = R.FrameValue(eff, key)
+            if handled then return v end
+            return eff[key]
+        end,
+        __newindex = function(_, key, value) eff[key] = value end,
+    })
+    viewCache[unit] = { src = eff, view = view }
+    return view
+end
+
 -- The unit's position record: the stored table itself (DandersMover mutates it
 -- in place), seeded from the unit's default on first read.
 function UF:GetPositionRecord(unit)
@@ -218,8 +248,9 @@ end
 -- Drop every cached proxy (profile switch, import, reset).
 function UF:RebuildUnitDBs()
     for k in pairs(effCache) do effCache[k] = nil end
+    for k in pairs(viewCache) do viewCache[k] = nil end
     for _, f in pairs(UF.frames) do
-        f.dfDB = UF:GetUnitDB(f.dfUFUnit)
+        f.dfDB = UF:FrameDB(f.dfUFUnit)
     end
 end
 
@@ -307,6 +338,8 @@ end
 function UF:RefreshAll()
     if not UF.Units then return end
     for _, f in pairs(UF.frames) do
+        -- Bars or Ring: the frame reads its unit's table or the ring view of it.
+        f.dfDB = UF:FrameDB(f.dfUFUnit)
         UF:StampDesigners(f)
         -- The follower of a mirrored Text link draws the shared template mirrored.
         f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(f.dfUFUnit) or false
@@ -365,6 +398,8 @@ UF.LIVE_ELEMENTS = {
     -- resting glow's (Include Portrait; IN.GlowRects).
     classpower = { "ClassPower", "Indicators" },
     portrait = { "Portrait", "Indicators" }, unitIcons = { "Indicators" },
+    -- The ring list: the rings, the portrait inside them, class power in a ring.
+    rings = { "Rings", "Portrait", "ClassPower" },
 }
 -- Single keys an element of ours draws although DandersFrames' page owns them: the
 -- combat icon is DF's (the Icons element), its border is Indicators.lua's.
@@ -400,6 +435,8 @@ function UF:LiveApply(unit, key, kind)
     local Links = UF.Links
     local elem = (key and Links and Links.OwnerOf and Links.OwnerOf(key)) or kind
     if elem == "tooltips" then return end
+    -- Ring Size is the frame's size in RING style: the whole frame's layout.
+    if key == "ringSize" then elem = "frame" end
 
     if elem == "bosslayout" then
         local B = UF.Boss

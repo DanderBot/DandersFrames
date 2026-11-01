@@ -48,6 +48,16 @@ DF.UnitFramePageData = {
             },
         },
         {
+            kind = "rings", category = "general", title = "Frame Style",
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+            cards = {
+                style = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                rings = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+            },
+            hide = {
+            },
+        },
+        {
             kind = "bosslayout", category = "general", title = "Boss Layout",
             units = { boss = true },
             cards = {

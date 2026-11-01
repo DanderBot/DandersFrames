@@ -27,6 +27,8 @@ if not UI then return end
 --                    onDragStart = fn, onDragStop = fn })
 --   rows:AddDropdown({ label = "Mode", key = "mode",
 --                      options = { A = "Alpha", B = "Beta" } })
+--   rows:AddButtons({ label = "Ring 1", buttons = {
+--       { text = "Remove", onClick = fn, disabled = fn -> bool, tooltip = "..." } } })
 --   rows:Refresh()      -- re-read every value / disabled state / the accent
 --   rows:Clear()        -- drop every row (they are pooled for the next build)
 --
@@ -45,6 +47,10 @@ if not UI then return end
 --   hidden       function -> bool: the row takes no space (a variant hide)
 -- Sliders add min, max, step, format(v) -> text, onDragStart, onDragStop.
 -- Dropdowns add options (table or function) -- the kit's dropdown option shape.
+-- Button rows add buttons: a list of { text, onClick, disabled, tooltip, width },
+-- drawn right-aligned in order. A button row binds no value: a click runs its
+-- onClick, then opts.onAction(spec, button) if given, then every row re-reads.
+-- A greyed row greys every button; a button's own disabled() greys just it.
 --
 -- ☠ NOTHING HERE NAMES A CONSUMER. What a row writes and what a write sets off
 -- are the caller's; the list only draws rows and routes values.
@@ -70,6 +76,7 @@ UI.RowList = {
     sliderW    = 64, sliderH = 8,
     valueW     = 22,   -- a slider's value readout
     dropdownW  = 96, dropdownH = 18,
+    buttonW    = 54, buttonH = 18, buttonGap = 4,
     labelGap   = 8,    -- label to control
 }
 
@@ -348,7 +355,7 @@ function UI:CreateRowList(parent, opts)
     list.Scroll, list.Child = scroll, child
 
     local rows = {}        -- the current rows, in order
-    local pools = { heading = {}, switch = {}, slider = {}, dropdown = {} }
+    local pools = { heading = {}, switch = {}, slider = {}, dropdown = {}, buttons = {} }
     local contentHeight, innerWidth = 0, width
 
     local function Accent() return AccentOf(host, opts.accent) end
@@ -531,8 +538,71 @@ function UI:CreateRowList(parent, opts)
             -- edge, hiding most of its options. Parent it to the list itself.
             local menu = row.Control.menuFrame
             if menu and menu.SetParent then menu:SetParent(list) end
+        elseif kind == "buttons" then
+            row.Buttons = {}
         end
         return row
+    end
+
+    -- ---- button rows -----------------------------------------------------
+    -- A button row's buttons are its own (made on first need, kept with the row
+    -- in the pool); each click reads the row's CURRENT spec, so a pooled row
+    -- never runs a stale handler.
+    local function ButtonSpec(row, i)
+        local b = row.spec and row.spec.buttons
+        return type(b) == "table" and b[i] or nil
+    end
+
+    local function PaintButtons(row)
+        for i, btn in ipairs(row.Buttons) do
+            local b = ButtonSpec(row, i)
+            if b then
+                local off = row.off or (b.disabled and b.disabled()) or false
+                if btn.SetDisabled then btn:SetDisabled(off and true or false) end
+                btn:SetAlpha(off and DISABLED_ALPHA or 1)
+                btn.dfOff = off and true or false
+            end
+        end
+    end
+
+    local function FillButtons(row)
+        local specs = (row.spec and type(row.spec.buttons) == "table") and row.spec.buttons or {}
+        local x, total = 0, 0
+        for i = #specs, 1, -1 do
+            local b = specs[i]
+            local btn = row.Buttons[i]
+            if not btn then
+                local idx = i
+                btn = host:CreateButtonNative(row, { text = "", width = M.buttonW, height = M.buttonH,
+                    onClick = function(self)
+                        local spec = ButtonSpec(row, idx)
+                        if not spec or self.dfOff or row.off then return end
+                        if spec.onClick then spec.onClick() end
+                        if opts.onAction then opts.onAction(row.spec, spec) end
+                        list:Refresh()
+                    end })
+                btn:HookScript("OnEnter", function(self)
+                    local spec = ButtonSpec(row, idx)
+                    local t = spec and Resolve(spec.tooltip)
+                    if type(t) == "string" and t ~= "" then t = { title = t } end
+                    if type(t) == "table" then host:ShowTooltip(self, t) end
+                end)
+                btn:HookScript("OnLeave", function() host:HideTooltip() end)
+                row.Buttons[i] = btn
+            end
+            local w = b.width or M.buttonW
+            btn:SetSize(w, M.buttonH)
+            local label = Resolve(b.text) or ""
+            if btn.Text and btn.Text.SetText then btn.Text:SetText(label) elseif btn.SetText then btn:SetText(label) end
+            btn:ClearAllPoints()
+            btn:SetPoint("RIGHT", row, "RIGHT", -x, 0)
+            btn:Show()
+            x = x + w + M.buttonGap
+            total = total + w + (total > 0 and M.buttonGap or 0)
+        end
+        for i = #specs + 1, #row.Buttons do row.Buttons[i]:Hide() end
+        row.controlWidth = total
+        PaintButtons(row)
     end
 
     local function Acquire(kind)
@@ -558,6 +628,8 @@ function UI:CreateRowList(parent, opts)
         elseif kind == "dropdown" then
             local o = Resolve(spec.options) or {}
             if row.Control.RebuildOptions then row.Control:RebuildOptions(o) end
+        elseif kind == "buttons" then
+            FillButtons(row)
         end
         rows[#rows + 1] = row
         list:Layout()
@@ -568,6 +640,7 @@ function UI:CreateRowList(parent, opts)
     function list:AddSwitch(spec) return Add("switch", spec) end
     function list:AddSlider(spec) return Add("slider", spec) end
     function list:AddDropdown(spec) return Add("dropdown", spec) end
+    function list:AddButtons(spec) return Add("buttons", spec) end
 
     function list:Clear()
         for _, row in ipairs(rows) do
@@ -645,6 +718,7 @@ function UI:CreateRowList(parent, opts)
         if row.LabelHit then row.LabelHit:EnableMouse(enabled) end
         if not enabled then row.labelHover = false end
         if row.Control and row.Control.SetEnabled then row.Control:SetEnabled(enabled) end
+        if rawget(row, "Buttons") then PaintButtons(row) end
         PaintLabel(row)
     end
 

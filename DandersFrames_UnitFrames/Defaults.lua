@@ -114,7 +114,26 @@ local COMMON = {
 local BAR = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist"
 local FONT = "DF Roboto SemiBold"
 
+-- ============================================================
+-- FRAME STYLE (Rings.lua)
+--   frameStyle  "BARS" (DandersFrames' bars) | "RING" (round bars round the
+--               portrait; the frame is a ringSize square)
+--   rings       the ring list, innermost first. A table default: copied into the
+--               unit's own table on first read (Core.lua), so it is edited in place
+--               and Links / Copy / Reset carry it whole.
+-- Ring 1: health, all the way round, 8 thick. Ring 2: power, 4 thick, 2px out.
+-- ============================================================
+UF.RING_DEFAULTS = {
+    { thickness = 8, gap = 2, sections = { { bar = "HEALTH", coverage = "FULL", position = "TOP" } } },
+    { thickness = 4, gap = 2, sections = { { bar = "POWER", coverage = "FULL", position = "TOP" } } },
+}
+
 local ELEMENTS = {
+    -- Frame style (Rings.lua)
+    frameStyle = "BARS",
+    ringSize = 64,
+    rings = UF.RING_DEFAULTS,
+
     -- Cast bar (CastBar.lua)
     castbarEnabled = false,
     castbarHideIdle = true,

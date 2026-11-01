@@ -65,6 +65,7 @@ Links.KIND_PREFIXES = {
     text = { "textDesignerPreset" }, auradesigner = { "auraDesignerEnabled", "auraDesignerPreset" },
     visibility = { "vis" }, castbar = { "castbar" }, classpower = { "classPower" },
     portrait = { "portrait" },
+    rings = { "frameStyle", "ringSize", "rings" },
     unitIcons = { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" },
     bosslayout = { "boss" },
 }
@@ -91,10 +92,15 @@ end
 -- Order = the settings sidebar's.
 -- ============================================================
 local BORDER_PREFIXES = { "frameBorder", "frameShowBorder" }
+-- The Frame page's own prefix ("frame") would take frameStyle; it is Rings'.
+local FRAME_WITHOUT = { "frameBorder", "frameShowBorder", "frameStyle" }
 
 Links.ELEMENTS = {
-    { id = "frame",        kind = "frame",        title = "Frame",           layout = false, without = BORDER_PREFIXES },
+    { id = "frame",        kind = "frame",        title = "Frame",           layout = false, without = FRAME_WITHOUT },
     { id = "border",       kind = "frame",        title = "Border",          layout = false, only = BORDER_PREFIXES },
+    -- Frame Style and the ring list (Rings.lua). No layout aspect: the ring list is
+    -- one value, shared whole (a mirror does not turn its sections round -- v1).
+    { id = "rings",        kind = "rings",        title = "Frame Style",     layout = false },
     { id = "visibility",   kind = "visibility",   title = "Visibility",      layout = false },
     { id = "tooltips",     kind = "tooltips",     title = "Tooltips",        layout = true, mirror = false },
     { id = "fading",       kind = "fading",       title = "Fading",          layout = false },

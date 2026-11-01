@@ -139,6 +139,8 @@ end
 function Units:RepaintValues(f)
     if DF.UpdateHealthFast then DF:UpdateHealthFast(f) end
     if DF.UpdatePower then DF:UpdatePower(f) end
+    -- A ring's power fills (Rings.lua; nothing to do in BARS style).
+    if UF.Rings and UF.Rings.FeedPower then UF.Rings:FeedPower(f) end
     if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(f) end
     if DF.UpdateHealPrediction then DF:UpdateHealPrediction(f) end
     if DF.UpdateAbsorb then DF:UpdateAbsorb(f) end
@@ -493,7 +495,8 @@ end
 -- (the table it reads), `token` the unit it shows, `slot` its boss slot (nil for
 -- every other unit). Layout, position and visibility are the caller's.
 function Units:Build(key, unit, token, name, parent, slot)
-    local db = UF:GetUnitDB(unit)
+    -- The frame view: the unit's table, or its ring view in RING style (Core.lua).
+    local db = UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit)
     local f = CreateFrame("Button", name, parent,
         "DandersUnitButtonTemplate,SecureUnitButtonTemplate")
     DF:InitStandaloneFrame(f, db)

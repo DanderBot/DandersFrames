@@ -184,17 +184,37 @@ function PO.Size(f, db)
     return size, border
 end
 
+-- RING style (Rings.lua): the portrait sits in the middle of the rings, round (the
+-- frame view answers portraitShape), as big as the hole inside the innermost ring
+-- with its border inside that too. Side, size and offsets do not apply.
+function PO.RingSize(db)
+    local R = UF.Rings
+    if not (R and R.IsRing(db)) then return nil end
+    local border = 0
+    if db.portraitBorderEnabled ~= false then
+        border = tonumber(db.portraitBorderSize) or 1
+        if border < 1 then border = 1 end
+    end
+    local size = R.Geometry(db).hole - 2 * border
+    if size < 4 then size = 4 end
+    return size, border
+end
+
 function PO:Layout(f)
     local p = f and f.dfUFPortrait
     if not p then return end
     local db = K.DB(f)
     if not Enabled(db) then p:Hide(); return end
-    local size = PO.Size(f, db)
+    local ringSize = PO.RingSize(db)
+    local size = ringSize or PO.Size(f, db)
     p:SetSize(size, size)
     p:ClearAllPoints()
     local x, y = tonumber(db.portraitX) or 0, tonumber(db.portraitY) or 0
     local side = db.portraitSide or "LEFT"
-    if side == "RIGHT" then
+    if ringSize then
+        p:SetPoint("CENTER", f, "CENTER", 0, 0)
+        side = "INSIDE_LEFT"   -- for the frame level below: over the bars, under the text
+    elseif side == "RIGHT" then
         p:SetPoint("LEFT", f, "RIGHT", 2 + x, y)
     elseif side == "INSIDE_LEFT" then
         p:SetPoint("LEFT", f, "LEFT", x, y)
@@ -217,7 +237,7 @@ end
 -- numbers Layout places it by -- read by the frame's outer rect (Mover.lua).
 function PO.OutsideExtent(f, db)
     db = db or K.DB(f)
-    if not Enabled(db) then return 0, 0 end
+    if not Enabled(db) or PO.RingSize(db) then return 0, 0 end
     local side = db.portraitSide or "LEFT"
     if side ~= "LEFT" and side ~= "RIGHT" then return 0, 0 end
     local size, border = PO.Size(f, db)

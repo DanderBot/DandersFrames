@@ -70,7 +70,8 @@ end
 
 -- The settings the layout reads, defaulted and clamped.
 function B:Params(db)
-    db = db or UF:GetUnitDB("boss")
+    -- The frame view: a RING-style boss is a ringSize square (Rings.lua).
+    db = db or UF:FrameDB("boss")
     local growth = B.GROWTH[db.bossGrowth] and db.bossGrowth or "DOWN"
     return {
         growth  = growth,
@@ -169,7 +170,7 @@ end
 -- Size, scale and slot positions. Secure: out of combat only (callers queue).
 function B:LayoutContainer(c, slots, db)
     if not c then return end
-    db = db or UF:GetUnitDB("boss")
+    db = db or UF:FrameDB("boss")
     local p = B:Params(db)
     c:SetScale(tonumber(db.frameScale) or 1)
     c:SetSize(B:BoxSize(UF.BOSS_COUNT, p))

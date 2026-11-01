@@ -272,6 +272,7 @@ function UFO.Prefixes(kind)
     if kind == "castbar" then return { "castbar" } end
     if kind == "classpower" then return { "classPower" } end
     if kind == "portrait" then return { "portrait" } end
+    if kind == "rings" then return { "frameStyle", "ringSize", "rings" } end
     if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
     if kind == "bosslayout" then return { "boss" } end
     return {}
@@ -1817,6 +1818,205 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
     Close(band)
 end
 
+-- ============================================================
+-- FRAME STYLE (DandersFrames_UnitFrames/Rings.lua)
+-- Style: Bars or Ring, and the ring's size. Rings: the ring list, innermost
+-- first -- one block per ring (move in / out, remove, thickness, gap) with its
+-- sections editable in place (bar, coverage, position, reverse, feather; add /
+-- remove). Built from the kit's row list (DandersUI RowList), which gained button
+-- rows for this. Everything greys unless Frame Style is Ring.
+-- The ring list is ONE value (`rings`, a table copied into the unit's own table
+-- on first read): edited in place, then the unit's link is pushed (an in-place
+-- edit no write hook sees) and the frames repaint. A change to the list's shape
+-- rebuilds the rows; a slider or switch only repaints.
+-- ============================================================
+function UFO.FrameStyleOptions()
+    return { BARS = L["Bars"], RING = L["Ring"], _order = { "BARS", "RING" } }
+end
+
+function UFO.RingBarOptions()
+    return { HEALTH = L["Health"], POWER = L["Power"], CLASSPOWER = L["Class Power"],
+             _order = { "HEALTH", "POWER", "CLASSPOWER" } }
+end
+
+function UFO.RingCoverageOptions()
+    return { FULL = L["Full"], HALF = L["Half"], QUARTER = L["Quarter"], _order = { "FULL", "HALF", "QUARTER" } }
+end
+
+-- A half sits on a side; a quarter also on a corner.
+function UFO.RingPositionOptions(coverage)
+    local o = { TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
+                _order = { "TOP", "BOTTOM", "LEFT", "RIGHT" } }
+    if coverage == "QUARTER" then
+        o.TOPLEFT, o.TOPRIGHT, o.BOTTOMLEFT, o.BOTTOMRIGHT = L["Top Left"], L["Top Right"], L["Bottom Left"], L["Bottom Right"]
+        o._order = { "TOP", "BOTTOM", "LEFT", "RIGHT", "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
+    end
+    return o
+end
+
+-- The unit's ring list, as stored (the read copies the default in on first use).
+function UFO.RingList(db)
+    local t = db and db.rings
+    if type(t) ~= "table" then
+        t = {}
+        if db then db.rings = t end
+    end
+    return t
+end
+
+UFO.RING_MAX = 4
+UFO.RING_SECTION_MAX = 4
+
+-- Pure list edits (tested): each returns true when it changed the list.
+function UFO.RingMove(list, i, dir)
+    local j = i + dir
+    if not (list[i] and list[j]) then return false end
+    list[i], list[j] = list[j], list[i]
+    return true
+end
+
+function UFO.RingAdd(list)
+    if #list >= UFO.RING_MAX then return false end
+    list[#list + 1] = { thickness = 4, gap = 2, sections = { { bar = "POWER", coverage = "FULL", position = "TOP" } } }
+    return true
+end
+
+function UFO.RingRemove(list, i)
+    if #list <= 1 or not list[i] then return false end
+    table.remove(list, i)
+    return true
+end
+
+function UFO.RingSectionAdd(ring)
+    if type(ring.sections) ~= "table" then ring.sections = {} end
+    if #ring.sections >= UFO.RING_SECTION_MAX then return false end
+    ring.sections[#ring.sections + 1] = { bar = "HEALTH", coverage = "HALF", position = "LEFT" }
+    return true
+end
+
+function UFO.RingSectionRemove(ring, j)
+    if type(ring.sections) ~= "table" or not ring.sections[j] then return false end
+    table.remove(ring.sections, j)
+    return true
+end
+
+function UFO.BuildRingsPage(self, db, Add, rec, unit)
+    UFO.AddPageHead(self, rec, unit, Add)
+    local Open, Close = Tools(self, Add)
+    local function isRing(d) return d and d.frameStyle == "RING" end
+    local off = UFO.Explain(function(d) return not isRing(d) end,
+        function() return L["Set Frame Style to Ring to change this."] end)
+    local list
+    local function changed()
+        self:RefreshStates()
+        UFO.PushLinks(unit)
+        RefreshFrames()
+        if list then list:Refresh() end
+    end
+    local w
+
+    local band = Open(L["Style"], "uf_rings_style", 1, function(d)
+        return UFO.FrameStyleOptions()[(d and d.frameStyle) or "BARS"] or ""
+    end, "framemodes")
+    band:AddWidget(GUI:CreateDropdown(self.child, L["Frame Style"], UFO.FrameStyleOptions(), db, "frameStyle", changed), 55)
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Ring Size"], 24, 256, 1, db, "ringSize", changed), 55)
+    w.disableOn = off
+    band:AddWidget(GUI:CreateLabel(self.child,
+        L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar; absorbs and heal prediction are not drawn on rings."], 250), 70)
+    Close(band)
+
+    band = Open(L["Rings"], "uf_rings_list", 2, function(d)
+        return format(L["Rings: %d"], #UFO.RingList(d))
+    end, "layout")
+    local function rowOff()
+        if isRing(db) then return false end
+        return true, L["Frame Style"], { L["Set Frame Style to Ring to change this."] }
+    end
+    local Build
+    local function wrote(rebuild)
+        UFO.PushLinks(unit)
+        RefreshFrames()
+        self:RefreshStates()
+        if rebuild then Build() end
+    end
+    list = GUI:CreateRowList(self.child, { width = 250, store = function() return {} end })
+    Build = function()
+        list:Clear()
+        local rings = UFO.RingList(db)
+        for i, ring in ipairs(rings) do
+            if type(ring.sections) ~= "table" then ring.sections = {} end
+            list:AddHeading({ label = (i == 1) and format(L["Ring %d (innermost)"], i) or format(L["Ring %d"], i) })
+            list:AddButtons({ label = "", disabled = rowOff, buttons = {
+                { text = L["Up"], tooltip = L["Move this ring one step in."],
+                  disabled = function() return i == 1 end,
+                  onClick = function() if UFO.RingMove(rings, i, -1) then wrote(true) end end },
+                { text = L["Down"], tooltip = L["Move this ring one step out."],
+                  disabled = function() return i == #rings end,
+                  onClick = function() if UFO.RingMove(rings, i, 1) then wrote(true) end end },
+                { text = L["Remove"], tooltip = L["Remove this ring."],
+                  disabled = function() return #rings <= 1 end,
+                  onClick = function() if UFO.RingRemove(rings, i) then wrote(true) end end },
+            } })
+            list:AddSlider({ label = L["Thickness"], min = 1, max = 40, step = 1, disabled = rowOff,
+                get = function() return ring.thickness or 6 end,
+                set = function(v) ring.thickness = v end, onChanged = function() wrote(false) end })
+            list:AddSlider({ label = L["Gap"], min = 0, max = 20, step = 1, disabled = rowOff,
+                tooltip = L["Space inside this ring, between it and the ring or portrait within."],
+                get = function() return ring.gap or 2 end,
+                set = function(v) ring.gap = v end, onChanged = function() wrote(false) end })
+            for j, sec in ipairs(ring.sections) do
+                list:AddButtons({ label = format(L["Section %d"], j), disabled = rowOff, buttons = {
+                    { text = L["Remove"], tooltip = L["Remove this section."],
+                      onClick = function() if UFO.RingSectionRemove(ring, j) then wrote(true) end end },
+                } })
+                list:AddDropdown({ label = L["Bar"], options = UFO.RingBarOptions(), disabled = rowOff,
+                    get = function() return sec.bar or "HEALTH" end,
+                    set = function(v) sec.bar = v end, onChanged = function() wrote(false) end })
+                list:AddDropdown({ label = L["Coverage"], options = UFO.RingCoverageOptions(), disabled = rowOff,
+                    get = function() return sec.coverage or "FULL" end,
+                    set = function(v)
+                        sec.coverage = v
+                        -- A corner is a quarter's only: a half on one moves to the top.
+                        if not UFO.RingPositionOptions(v)[sec.position or "TOP"] then sec.position = "TOP" end
+                    end, onChanged = function() wrote(true) end })
+                list:AddDropdown({ label = L["Position"], options = UFO.RingPositionOptions(sec.coverage),
+                    disabled = rowOff,
+                    hidden = function() return (sec.coverage or "FULL") == "FULL" end,
+                    get = function() return sec.position or "TOP" end,
+                    set = function(v) sec.position = v end, onChanged = function() wrote(false) end })
+                list:AddSwitch({ label = L["Reverse Fill"], disabled = rowOff,
+                    tooltip = L["Fill counter-clockwise."],
+                    get = function() return sec.reverse and true or false end,
+                    set = function(v) sec.reverse = v and true or nil end, onChanged = function() wrote(false) end })
+                list:AddSlider({ label = L["Feather"], min = 0, max = 1, step = 0.05, disabled = rowOff,
+                    tooltip = L["Softens the end of the fill."],
+                    format = function(v) return format("%.2f", v) end,
+                    get = function() return sec.feather or 0 end,
+                    set = function(v) sec.feather = (v > 0) and v or nil end, onChanged = function() wrote(false) end })
+            end
+            list:AddButtons({ label = "", disabled = rowOff, buttons = {
+                { text = L["Add Section"], width = 96,
+                  disabled = function() return #ring.sections >= UFO.RING_SECTION_MAX end,
+                  onClick = function() if UFO.RingSectionAdd(ring) then wrote(true) end end },
+            } })
+        end
+        list:AddButtons({ label = "", disabled = rowOff, buttons = {
+            { text = L["Add Ring"], width = 96,
+              disabled = function() return #rings >= UFO.RING_MAX end,
+              onClick = function() if UFO.RingAdd(rings) then wrote(true) end end },
+        } })
+        list:Refresh()
+        if GUI.RelayoutHost and rawget(list, "settingsGroup") then
+            GUI:RelayoutHost(list, list:GetHeight() + 4)
+        end
+    end
+    Build()
+    band:AddWidget(list, list:GetHeight() + 4)
+    -- Frame Style greys / un-greys the rows: the page's state pass reaches them here.
+    list.refreshContent = function() list:Refresh() end
+    Close(band)
+end
+
 -- Resting / PvP / Elite & Rare: one card each, for the units that have it.
 UFO.UNIT_ICON_CARDS = {
     { card = "resting_icon", prefix = "restingIcon", key = "uf_icon_resting", label = function() return L["Resting Icon"] end },
@@ -2123,6 +2323,8 @@ function UFO.BuildPageBody(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
         UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     elseif rec.kind == "portrait" then
         UFO.BuildPortraitPage(self, db, Add, rec, unit)
+    elseif rec.kind == "rings" then
+        UFO.BuildRingsPage(self, db, Add, rec, unit)
     elseif rec.kind == "unitIcons" then
         UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     elseif rec.kind == "bosslayout" then

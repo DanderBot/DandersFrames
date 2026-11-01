@@ -58,11 +58,11 @@ KIND = {
     "indicators_highlights": "highlights",
     # New to unit frames; their runtime arrives in later stages.
     "uf_bosslayout": "bosslayout", "uf_visibility": "visibility", "uf_portrait": "portrait",
-    "uf_castbar": "castbar", "uf_classpower": "classpower",
+    "uf_castbar": "castbar", "uf_classpower": "classpower", "uf_rings": "rings",
 }
 # New pages whose runtime is built: emitted without `later`, with the units their
 # cards reach and the per-unit `hide` list; Pages.lua draws their controls.
-BUILT_NEW = {"uf_visibility", "uf_castbar", "uf_classpower", "uf_portrait", "uf_bosslayout"}
+BUILT_NEW = {"uf_visibility", "uf_castbar", "uf_classpower", "uf_portrait", "uf_bosslayout", "uf_rings"}
 # Controls hidden for a unit on top of what the inventory says, because the runtime
 # cannot honour them there: page id -> db key -> units.
 #   castbarDetached on Boss: five boss cast bars share one settings table, so one

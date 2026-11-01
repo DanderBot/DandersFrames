@@ -162,6 +162,7 @@ function CP:Attach(f)
     cp.bg:SetTexture(K.WHITE)
     cp.single = NewPip(cp)
     cp.single:Hide()
+    cp.active, cp.activeSingle = cp.pips, cp.single
     f.dfUFClassPower = cp
     if not f.dfUFPreview then
         local listener = CreateFrame("Frame")
@@ -208,6 +209,17 @@ function CP:Layout(f, res)
     end
     res = res or (not f.dfUFPreview and CP:Resolve(nil, nil, nil, db)) or cp.previewRes
     cp.res = res
+    -- RING style with a class power section: the pips go into the ring.
+    local R = UF.Rings
+    local ring, sec, multi = nil, nil, nil
+    if R then ring, sec, multi = R.ClassPowerArc(db) end
+    if ring then
+        CP:LayoutRing(f, cp, db, res, ring, sec, multi)
+        if UF.Mover and UF.Mover.SyncChild then UF.Mover:SyncChild(f.dfUFUnit, "classpower") end
+        if not f.dfUFPreview then CP:Update(f) end
+        return
+    end
+    CP.HideRing(cp)
     local showBorder = db.classPowerBorderEnabled ~= false
     local w
     if db.classPowerMatchWidth ~= false then
@@ -272,6 +284,8 @@ function CP:Layout(f, res)
         s:Hide()
     end
     cp.isSingle = single and true or false
+    -- What Update / Preview write to: the linear pips (a ring has its own, below).
+    cp.active, cp.activeSingle = cp.pips, s
 
     -- Position.
     cp:ClearAllPoints()
@@ -292,6 +306,81 @@ function CP:Layout(f, res)
     cp:SetFrameLevel(f:GetFrameLevel() + 8)
     if UF.Mover and UF.Mover.SyncChild then UF.Mover:SyncChild(f.dfUFUnit, "classpower") end
     if not f.dfUFPreview then CP:Update(f) end
+end
+
+-- ============================================================
+-- IN A RING (Rings.lua; frameStyle RING with a CLASSPOWER section)
+-- The same pips, drawn as slices of the section's arc (R.PipArcs): each a radial
+-- bar with its own track, ranged and fed exactly as the linear pips are, so
+-- Update / runes / charged points / the preview run unchanged on cp.active.
+-- Stagger and Bar mode: one slice, the whole arc. Reversed: pip 1 at the arc's
+-- far end and every slice fills the other way. The bar's own size, position,
+-- border and texture do not apply; the empty colour is the section's track colour
+-- (else Empty Color).
+-- ============================================================
+function CP.HideRing(cp)
+    if not cp.inRing then return end
+    cp.inRing = false
+    for _, p in ipairs(cp.ringPips or {}) do
+        p.fill:Hide()
+        p.track:Hide()
+    end
+end
+
+function CP:LayoutRing(f, cp, db, res, ring, sec, multi)
+    local R = UF.Rings
+    for _, pip in ipairs(cp.pips) do pip:Hide() end
+    cp.single:Hide()
+    cp.bg:Hide()
+    cp.inRing = true
+    local r, g, b = CP:Color(db, res)
+    local er, eg, eb, ea = R.TrackColor(db, sec)
+    local single = res and (res.kind == "stagger" or db.classPowerMode == "BAR")
+    local n = (res and not single) and CP:MaxPips(res) or 0
+    cp.count = n
+    local a, len = R.Arc(sec, multi)
+    local arcs = (n > 0) and R.PipArcs(a, len, n) or { { start = a, len = len } }
+    if not res then arcs = {} end
+
+    cp:SetParent(f)
+    cp:SetScale(1)
+    cp:ClearAllPoints()
+    cp:SetPoint("CENTER", f, "CENTER", 0, 0)
+    cp:SetSize(ring.outer, ring.outer)
+    -- Over the rings' container (+2), under the text.
+    cp:SetFrameLevel(f:GetFrameLevel() + 3)
+
+    cp.ringPips = cp.ringPips or {}
+    cp.active = {}
+    for i = 1, #arcs do
+        local p = cp.ringPips[i]
+        if not p then
+            p = { track = R.NewArcBar(cp), fill = R.NewArcBar(cp) }
+            cp.ringPips[i] = p
+        end
+        local arc = sec.reverse and arcs[#arcs - i + 1] or arcs[i]
+        R.ShapeArcBar(p.track, cp, ring.outer, ring.inner, arc.start, arc.len, false, 0)
+        R.ShapeArcBar(p.fill, cp, ring.outer, ring.inner, arc.start, arc.len, sec.reverse, sec.feather)
+        p.fill:SetFrameLevel(p.track:GetFrameLevel() + 1)
+        p.track:SetMinMaxValues(0, 1)
+        p.track:SetValue(1)
+        p.track:SetStatusBarColor(er, eg, eb, ea)
+        p.fill:SetStatusBarColor(r, g, b)
+        if res and res.fragments and not single then
+            p.fill:SetMinMaxValues((i - 1) * 10, i * 10)
+        elseif res and res.kind == "pips" and not single then
+            p.fill:SetMinMaxValues(i - 1, i)
+        end
+        p.track:Show()
+        p.fill:Show()
+        cp.active[i] = p.fill
+    end
+    for i = #arcs + 1, #cp.ringPips do
+        cp.ringPips[i].track:Hide()
+        cp.ringPips[i].fill:Hide()
+    end
+    cp.isSingle = single and true or false
+    cp.activeSingle = (single and cp.ringPips[1]) and cp.ringPips[1].fill or cp.single
 end
 
 -- ============================================================
@@ -324,10 +413,10 @@ function CP:Update(f)
         -- ★ The same raw value into every pip; never read here.
         if cp.isSingle then
             local maxV = CP:MaxPips(res) * (res.fragments and 10 or 1)
-            cp.single:SetMinMaxValues(0, maxV)
-            cp.single:SetValue(v)
+            cp.activeSingle:SetMinMaxValues(0, maxV)
+            cp.activeSingle:SetValue(v)
         else
-            for i = 1, cp.count do cp.pips[i]:SetValue(v) end
+            for i = 1, cp.count do cp.active[i]:SetValue(v) end
             CP:PaintCharged(cp, db)
         end
         if db.classPowerHideEmpty and not IsSecret(v) and v == 0 then
@@ -352,15 +441,15 @@ function CP:PaintCharged(cp, db)
         end
     end
     for i = 1, cp.count do
-        if charged[i] then cp.pips[i]:SetStatusBarColor(cr, cg, cb)
-        else cp.pips[i]:SetStatusBarColor(r, g, b) end
+        if charged[i] then cp.active[i]:SetStatusBarColor(cr, cg, cb)
+        else cp.active[i]:SetStatusBarColor(r, g, b) end
     end
 end
 
 function CP:UpdateRunes(cp, db)
     if not GetRuneCooldown then return end
     for i = 1, cp.count do
-        local pip = cp.pips[i]
+        local pip = cp.active[i]
         local start, duration, ready = GetRuneCooldown(i)
         if IsSecret(ready) then
             pip:SetMinMaxValues(0, 1)
@@ -402,7 +491,7 @@ function CP:UpdateStagger(cp, db)
     if IsSecret(st) or IsSecret(mx) or type(st) ~= "number" or type(mx) ~= "number" or mx <= 0 then
         return false
     end
-    local s = cp.single
+    local s = cp.activeSingle
     s:SetMinMaxValues(0, mx)
     s:SetValue(st)
     local ratio = st / mx
@@ -432,7 +521,7 @@ function CP:OnUpdate(cp, elapsed)
     elseif cp.res.kind == "runes" then
         local now = GetTime()
         for i = 1, cp.count or 0 do
-            local pip = cp.pips[i]
+            local pip = cp.active[i]
             if pip.dfRune then pip:SetValue(now) end
         end
     end
@@ -508,11 +597,11 @@ function CP:Preview(f)
     local n = res.max or 5
     local v = math_ceil(n / 2)
     if cp.isSingle then
-        cp.single:SetMinMaxValues(0, n)
-        cp.single:SetValue(v)
+        cp.activeSingle:SetMinMaxValues(0, n)
+        cp.activeSingle:SetValue(v)
     else
         for i = 1, cp.count do
-            local pip = cp.pips[i]
+            local pip = cp.active[i]
             pip:SetMinMaxValues(i - 1, i)
             pip:SetValue(v)
         end

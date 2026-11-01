@@ -252,7 +252,8 @@ function M:WantsChild(unit, kind)
     if not spec or not (M.registered and M.registered[unit]) then return false end
     -- Boss cast bars never detach (CastBar.lua IsDetached): no child element.
     if unit == "boss" then return false end
-    local db = UF:GetUnitDB(unit)
+    -- The frame view: class power drawn in a ring is never detached (Rings.lua).
+    local db = UF:FrameDB(unit)
     return (db[spec.enabled] and db[spec.detached]) and true or false
 end
 

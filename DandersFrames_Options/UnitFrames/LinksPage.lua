@@ -198,6 +198,8 @@ function UFO.LinkPartText(id)
         return nil, L["Out of range and out of combat fading."]
     elseif id == "frame" then
         return nil, L["Width, height, scale and frame fading."]
+    elseif id == "rings" then
+        return nil, L["Bars or Ring, ring size and the rings."]
     elseif id == "highlights" then
         return nil, L["Selection, hover, aggro and threat highlights."]
     elseif id == "auradesigner" then
@@ -471,7 +473,7 @@ end
 UFO.LINK_PAGE_ORDER = {
     "health", "resource", "portrait", "castbar", "text", "buffs", "debuffs", "border",
     "absorbs", "healpred", "icons", "unitIcons", "tooltips", "visibility", "fading",
-    "frame", "highlights", "auradesigner", "classpower", "defensive", "dispel", "bosslayout",
+    "frame", "rings", "highlights", "auradesigner", "classpower", "defensive", "dispel", "bosslayout",
 }
 
 -- The parts both frames have, split into the two groups, in page order.
