@@ -16,6 +16,7 @@ local NS = ...
 local G, G_NAMES = {}, { "DandersFrames", "UnitExists", "UnitCanAttack", "issecretvalue", "LibStub" }
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 
+local NL = string.char(10)
 local auras = df_file_source("Features/Auras.lua"):gsub("\r\n", "\n")
 local src = df_file_source("Frames/AuraContainer.lua"):gsub("\r\n", "\n")
 
@@ -35,6 +36,7 @@ do
     local split = assert(loadstring("local AuraFilters, DF = ...\n" .. block .. "\nreturn SplitBuffRowForPurge",
         "@SplitBuffRowForPurge"))({}, DFx)
     eq(DFx.SplitBuffRowForPurge, split, "exported for the drive and the tests")
+    DF_SPLIT = split
     local db = {}
 
     local out = split({ "HELPFUL" }, true, db)
@@ -77,6 +79,92 @@ do
           "BuildAuraRowConfig splits the buff row when the frame's hook answered")
     local _, n = auras:gsub("purge = purge,", "")
     eq(n, 2, "the buff drive passes the answer (create and rebuild)")
+end
+
+-- ---- keep the row's Max ------------------------------------------------------
+print("-- The split keeps the row at Max in all")
+do
+    local split = DF_SPLIT
+    local DFx = { DebugWarn = function() end }
+    local block = lift(auras, "local function countRet(ok, _token, ...)", NL .. "    return caps" .. NL .. "end" .. NL)
+    assert(loadstring("local DF, C_UnitAuras = ..." .. NL .. block, "@BuffPurgeCaps"))(DFx, nil)
+    local function counts(map) return function(_, f) return map[f] end end
+    local recs = split({ "HELPFUL" }, true, {})
+    local caps = DFx:BuffPurgeCaps(recs, "target", 8, counts({ ["HELPFUL|RAID_PLAYER_DISPELLABLE"] = 3 }))
+    eq(caps and (caps.row1_purge .. "/" .. caps.row1_rest), "8/5", "3 purgeable of Max 8: purgeable keeps 8, the rest gets 5")
+    caps = DFx:BuffPurgeCaps(recs, "target", 8, counts({ ["HELPFUL|RAID_PLAYER_DISPELLABLE"] = 0 }))
+    eq(caps.row1_rest, 8, "none purgeable: the rest gets all 8")
+    caps = DFx:BuffPurgeCaps(recs, "target", 8, counts({ ["HELPFUL|RAID_PLAYER_DISPELLABLE"] = 12 }))
+    eq(caps.row1_purge .. "/" .. caps.row1_rest, "8/0", "more purgeable than Max: 8 of them, nothing else")
+    eq(DFx:BuffPurgeCaps(recs, "target", 8, counts({})), nil, "no count: no caps (every group back to Max, the old row)")
+    eq(DFx:BuffPurgeCaps(nil, "target", 8, counts({})), nil, "no records: no caps")
+    eq(DFx:BuffPurgeCaps(recs, "target", nil, counts({})), nil, "no Max: no caps")
+    local own = split({
+        { filter = "HELPFUL|PLAYER", key = "mine" },
+        { filter = "HELPFUL|!PLAYER", key = "others" },
+    }, true, {})
+    caps = DFx:BuffPurgeCaps(own, "target", 8, counts({
+        ["HELPFUL|PLAYER|RAID_PLAYER_DISPELLABLE"] = 2,
+        ["HELPFUL|!PLAYER|RAID_PLAYER_DISPELLABLE"] = 7,
+        ["HELPFUL|PLAYER|!RAID_PLAYER_DISPELLABLE"] = 1 }))
+    eq(caps.mine_purge .. "," .. caps.others_purge .. "," .. caps.mine_rest .. "," .. caps.others_rest, "8,6,0,0",
+       "own-cast split: one budget, purgeable groups first (2 + 6 = 8), the rest gets nothing")
+    caps = DFx:BuffPurgeCaps(own, "target", 8, counts({
+        ["HELPFUL|PLAYER|RAID_PLAYER_DISPELLABLE"] = 1,
+        ["HELPFUL|!PLAYER|RAID_PLAYER_DISPELLABLE"] = 1,
+        ["HELPFUL|PLAYER|!RAID_PLAYER_DISPELLABLE"] = 2 }))
+    eq(caps.mine_purge .. "," .. caps.others_purge .. "," .. caps.mine_rest .. "," .. caps.others_rest, "8,7,6,4",
+       "...1 + 1 purgeable, 2 of yours: the others' plain buffs get the last 4")
+
+    -- The count: the number of slots, never a slot's contents.
+    local secret = setmetatable({}, { __eq = function() error("compared a slot") end })
+    local api = { GetAuraSlots = function(unit, filter, cap) return nil, secret, secret, secret end }
+    assert(loadstring("local DF, C_UnitAuras = ..." .. NL .. block, "@BuffPurgeCaps"))(DFx, api)
+    eq(DFx:CountAuraSlots("target", "HELPFUL|RAID_PLAYER_DISPELLABLE", 8), 3, "three slots back: 3 (only counted)")
+    eq(DFx:CountAuraSlots("target", "HELPFUL", 2), 2, "...never above the cap asked for")
+    api.GetAuraSlots = function() error("no access") end
+    eq(DFx:CountAuraSlots("target", "HELPFUL", 8), nil, "an error: no count")
+    assert(loadstring("local DF, C_UnitAuras = ..." .. NL .. block, "@BuffPurgeCaps"))(DFx, {})
+    eq(DFx:CountAuraSlots("target", "HELPFUL", 8), nil, "no API: no count")
+    eq(DFx:CountAuraSlots(nil, "HELPFUL", 8), nil, "no unit: no count")
+
+    check(auras:find("caps = DF:BuffPurgeCaps(h.config and h.config.filter, frame.unit, h.config and h.config.max)", 1, true) ~= nil,
+          "the buff drive counts a hostile split...")
+    check(auras:find("if purge == true and not DF:FrameInTestScope(frame, \"any\") then", 1, true) ~= nil,
+          "...only a live hostile one (friendly, off and previews: no caps)")
+    check(auras:find("h:SetGroupMaxOverrides(caps)", 1, true) ~= nil, "...and hands the caps to the row")
+end
+
+print("-- The row's per-group caps (AuraContainer)")
+do
+    local block = lift(src, "function groupMaxFor(handle, key, maxCount)", NL .. "function Handle:ApplyTuning(tuning)")
+    block = block:gsub(NL .. "function Handle:ApplyTuning%(tuning%)$", "")
+    local Handle, testShape, bounced = {}, false, 0
+    local env = assert(loadstring("local testShapeFor, bounceContainer, Handle = ..." .. NL .. "local groupMaxFor" .. NL .. block
+        .. NL .. "return groupMaxFor", "@groupMaxFor"))
+    local groupMaxFor = env(function() return testShape end, function() bounced = bounced + 1 end, Handle)
+    eq(groupMaxFor({}, "a", 8), 8, "no override: the row's Max")
+    eq(groupMaxFor({ _groupMax = { a = 3 } }, "a", 8), 3, "an override")
+    eq(groupMaxFor({ _groupMax = { a = 30 } }, "a", 8), 8, "...never above the row's Max")
+    eq(groupMaxFor({ _groupMax = { a = -2 } }, "a", 8), 0, "...never below 0")
+    local pushed = {}
+    local c = { SetAuraGroupMaxFrameCount = function(_, key, n) pushed[#pushed + 1] = key .. "=" .. n end }
+    local h = setmetatable({ backend = { container = c, groupKeys = { "row1_purge", "row1_rest" } } }, { __index = Handle })
+    function h:_slotCount() return 8 end
+    eq(h:SetGroupMaxOverrides({ row1_purge = 8, row1_rest = 5 }), true, "caps applied")
+    eq(table.concat(pushed, ","), "row1_purge=8,row1_rest=5", "...pushed in place, every group")
+    eq(bounced, 1, "...and the container bounced so it lands now")
+    pushed = {}
+    eq(h:SetGroupMaxOverrides({ row1_purge = 8, row1_rest = 5 }), false, "the same caps again: nothing pushed")
+    eq(#pushed, 0, "...nothing")
+    h:SetGroupMaxOverrides(nil)
+    eq(table.concat(pushed, ","), "row1_purge=8,row1_rest=8", "no caps: every group back to Max")
+    testShape, pushed = true, {}
+    h:SetGroupMaxOverrides({ row1_rest = 1 })
+    eq(#pushed, 0, "a preview's test-shaped row is left alone")
+    check(src:find("maxFrameCount = groupMaxFor(handle, key, maxCount)", 1, true) ~= nil, "a rebuild declares the caps")
+    check(src:find("SetAuraGroupMaxFrameCount, c, key, groupMaxFor(self.handle, key, maxCount)", 1, true) ~= nil,
+          "...and a tuning pass keeps them")
 end
 
 -- ---- rowPurge ----------------------------------------------------------------
@@ -225,4 +313,5 @@ do
     check(uf_file_source("Preview.lua"):find("f.dfBuffPurgeable = UF.BuffPurgeable", 1, true) ~= nil, "...and preview frames")
 end
 
+DF_SPLIT = nil
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

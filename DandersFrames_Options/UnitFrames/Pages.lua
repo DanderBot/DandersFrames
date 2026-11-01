@@ -1173,7 +1173,7 @@ function UFO.BuildPurgeableCard(page, ctx)
     local off = UFO.Gate(L["Purgeable"], function(d) return not (d and d.buffPurgeableEnabled) end,
         UFO.Gate(L["Show Buffs"], function(d) return ctx.offRow(d) end))
     local w = band:AddWidget(GUI:CreateLabel(page.child,
-        L["Rings the buffs you can purge or steal from an enemy and shows them first. They count toward Max Buffs on their own."], 250), 44)
+        L["Rings the buffs you can purge or steal from an enemy and shows them first."], 250), 44)
     w.disableOn = off
     GUI:CreateBorderControls(band, db, "buffPurgeable", {
         parent = page.child,

@@ -3242,8 +3242,8 @@ end
 -- hostile to friendly is a TUNING change, which applies in place and in combat; only
 -- switching the feature itself rebuilds the row.
 --
--- ⚠ Blizzard caps each GROUP at the row's Max (GetDebuffRowGroupCount), so a split row
--- can show Max purgeable buffs AND Max others.
+-- ⚠ Blizzard caps each GROUP at the row's Max (GetDebuffRowGroupCount), so the drive
+-- shares Max between the groups (DF:BuffPurgeCaps) to keep the row at Max in all.
 --
 -- `hostile`: true = split by the token; false = split held dark (friendly / unknown).
 -- Accepts the plain string list (BuildDirectBuffFilters) or the record list of
@@ -3951,6 +3951,65 @@ local function rowPurge(frame, db)
     return v and true or false
 end
 
+-- ============================================================
+-- PURGEABLE SPLIT: KEEP THE ROW'S MAX (Max buffs in all, not Max per group)
+-- Blizzard caps each group, not the row (Handle:SetGroupMaxOverrides), so the split
+-- row shares Max between its groups in display order: each group may use what the
+-- groups before it left, and each but the last uses up as many as the unit has for
+-- its filter. The single split: purgeable = Max, rest = Max - purgeable count. The
+-- own-cast split (mine / others): the purgeable groups first, then the rest groups,
+-- in that order, out of one budget.
+--
+-- THE COUNT, without reading an aura: C_UnitAuras.GetAuraSlots(unit, filter, cap)
+-- returns a continuation token and then one slot per matching aura, so the NUMBER of
+-- returns is a plain count however secret the slots are. Nothing it returns is read.
+-- ⚠ It knows the filter STRING only, not a group's candidate filters (spell-ID maps,
+-- Hide Long Buffs): a group with those can count high, and the row then shows FEWER
+-- than Max -- never more.
+-- No answer (no API, an error, no unit access): nil -> every group back to Max, the
+-- uncapped row, and one warning per session. Never an error.
+-- ============================================================
+local function countRet(ok, _token, ...)
+    if not ok then return nil end
+    return select("#", ...)
+end
+
+function DF:CountAuraSlots(unit, filter, cap)
+    local api = C_UnitAuras and C_UnitAuras.GetAuraSlots
+    if type(api) ~= "function" or not unit or type(filter) ~= "string" then return nil end
+    local n = countRet(pcall(api, unit, filter, cap))
+    if type(n) ~= "number" then return nil end
+    if cap and n > cap then n = cap end
+    return n
+end
+
+local warnedPurgeCount = false
+function DF:BuffPurgeCaps(records, unit, max, countFn)
+    countFn = countFn or function(u, f, c) return DF:CountAuraSlots(u, f, c) end
+    max = tonumber(max)
+    if type(records) ~= "table" or #records == 0 or not max then return nil end
+    local remaining, caps = max, {}
+    for i, r in ipairs(records) do
+        if type(r) ~= "table" or r.key == nil or type(r.filter) ~= "string" then return nil end
+        caps[r.key] = remaining
+        if i < #records and remaining > 0 then
+            local n = countFn(unit, r.filter, remaining)
+            if type(n) ~= "number" then
+                if not warnedPurgeCount then
+                    warnedPurgeCount = true
+                    DF:DebugWarn("AURAROW", "purgeable split: no aura count for %s (%s); the row is uncapped",
+                        tostring(unit), tostring(r.filter))
+                end
+                return nil
+            end
+            if n > remaining then n = remaining end
+            if n < 0 then n = 0 end
+            remaining = remaining - n
+        end
+    end
+    return caps
+end
+
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
 -- icons (no double row), keeps it on the frame's unit, and applies setting changes. The
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
@@ -4068,6 +4127,17 @@ function DF:DriveBuffFactory(frame, db)
             end
             h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
         end
+    end
+
+    -- The purgeable split keeps the row at Max in all (DF:BuffPurgeCaps), re-counted on
+    -- every drive (UNIT_AURA, a target change). Friendly, off, or a preview (no real
+    -- unit to count): no caps, every group at Max.
+    if frame.dfBuffPurgeable ~= nil and h.SetGroupMaxOverrides then
+        local caps
+        if purge == true and not DF:FrameInTestScope(frame, "any") then
+            caps = DF:BuffPurgeCaps(h.config and h.config.filter, frame.unit, h.config and h.config.max)
+        end
+        h:SetGroupMaxOverrides(caps)
     end
 end
 

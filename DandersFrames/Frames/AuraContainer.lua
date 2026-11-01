@@ -111,6 +111,10 @@ local function testShapeFor(h)
 end
 AuraContainer._testShapeFor = testShapeFor
 
+-- A group's cap: the row's Max, or a consumer's per-group override (PER-GROUP CAPS,
+-- Handle:SetGroupMaxOverrides). Forward-declared: build() reads it.
+local groupMaxFor
+
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder = false, false
@@ -4284,7 +4288,7 @@ function NativeBackend:build()
                     recLayout = recordGroupLayout(groupLayout, rec.style)
                 end
                 local okGroup, err = pcall(c.AddAuraGroup, c, key, f,
-                    { maxFrameCount = maxCount, initializeFrame = groupInit,
+                    { maxFrameCount = groupMaxFor(handle, key, maxCount), initializeFrame = groupInit,
                       layout = recLayout, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
                 if okGroup then
@@ -4637,7 +4641,7 @@ function NativeBackend:applyGroupTuning()
                     fsMissing = fsMissing or key
                 end
             end
-            pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
+            pcall(c.SetAuraGroupMaxFrameCount, c, key, groupMaxFor(self.handle, key, maxCount))
             -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
             -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
             pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
@@ -6591,6 +6595,51 @@ end
 -- Rebuild/SetFilter.
 -- Applies at once, in combat too: the native tuning setters are live mutators with no
 -- combat gate.
+-- ============================================================
+-- PER-GROUP CAPS (Handle:SetGroupMaxOverrides)
+-- Blizzard caps each aura GROUP at its maxFrameCount and has no container-wide cap,
+-- so a row split into several groups can show up to N x Max. A consumer that knows
+-- how to share the row's Max between its groups hands the caps here: key -> count.
+-- Build and every tuning pass honour them (never above the row's Max), and a change
+-- is pushed in place with SetAuraGroupMaxFrameCount -- a live mutator with its own
+-- equality guard, legal in combat (no combat check in Blizzard_AuraContainer) --
+-- then the container is bounced so it lands on this pass, not the next aura event.
+-- nil drops every override (every group back to the row's Max). Test-shaped
+-- (preview) handles keep their own one-per-slot groups and are left alone.
+-- ============================================================
+function groupMaxFor(handle, key, maxCount)
+    local o = handle and handle._groupMax
+    local n = o and o[key]
+    if type(n) ~= "number" then return maxCount end
+    if n < 0 then n = 0 end
+    if type(maxCount) == "number" and n > maxCount then n = maxCount end
+    return math.floor(n)
+end
+
+local function sameCaps(a, b)
+    if a == b then return true end
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    for k, v in pairs(a) do if b[k] ~= v then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+
+function Handle:SetGroupMaxOverrides(caps)
+    if type(caps) ~= "table" then caps = nil end
+    if sameCaps(self._groupMax, caps) then return false end
+    self._groupMax = caps
+    if testShapeFor(self) then return true end
+    local be = self.backend
+    local c = be and be.container
+    if not (c and be.groupKeys and c.SetAuraGroupMaxFrameCount) then return true end
+    local maxCount = self:_slotCount()
+    for _, key in ipairs(be.groupKeys) do
+        pcall(c.SetAuraGroupMaxFrameCount, c, key, groupMaxFor(self, key, maxCount))
+    end
+    pcall(bounceContainer, c)
+    return true
+end
+
 function Handle:ApplyTuning(tuning)
     if type(tuning) == "table" then
         self.config.max = tuning.max

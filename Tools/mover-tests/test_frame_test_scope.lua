@@ -141,7 +141,7 @@ local sites = {
     { "Features/Range.lua", 1, { "DF%.testMode or DF%.raidTestMode" } },
     { "Features/Dispel.lua", 2, { "and not %(DF%.testMode or DF%.raidTestMode%)",
                                   "isRaidFrame and DF%.raidTestMode%) or" } },
-    { "Features/Auras.lua", 4, { "and not %(DF%.testMode or DF%.raidTestMode%)" } },
+    { "Features/Auras.lua", 5, { "and not %(DF%.testMode or DF%.raidTestMode%)" } },  -- +1: the purgeable caps skip previews
     { "Features/UnhealableFade.lua", 1, { "DF%.testMode or DF%.raidTestMode" } },
     { "AuraDesigner/Factory.lua", 2, { "not %(DF%.testMode or DF%.raidTestMode%)" } },
     { "Features/PingMirror.lua", 1, { "DF%.testMode or DF%.raidTestMode" } },
@@ -157,7 +157,7 @@ for _, s in ipairs(sites) do
         eq(count(text, pat), 0, s[1] .. ": no raw `" .. pat .. "` left")
     end
 end
-eq(total, 52, "52 per-frame decisions ask the predicate")
+eq(total, 53, "53 per-frame decisions ask the predicate")
 
 print("-- the one site that must not read the predicate keeps standalone frames out")
 local dsrc = norm(df_file_source("Features/Dispel.lua"))
