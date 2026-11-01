@@ -555,8 +555,22 @@ do
     local P = UF.Preview
     eff.frameStyle = "RING"
     local panel = Make("Frame", UIParent)
+    -- Every unit API the sample's build and paint touch, by token.
+    local touched = {}
+    local held = {}
+    for _, name in ipairs({ "UnitExists", "UnitPower", "UnitPowerMax", "UnitClass", "UnitIsPlayer",
+                            "UnitIsVisible", "UnitIsDeadOrGhost", "UnitHealth", "UnitHealthMax",
+                            "UnitHealthPercent", "UnitCanAttack", "UnitPowerType", "UnitReaction" }) do
+        held[name] = _G[name]
+        local orig = _G[name]
+        _G[name] = function(u, ...)
+            touched[#touched + 1] = name .. "(" .. tostring(u) .. ")"
+            if orig then return orig(u, ...) end
+        end
+    end
     local smp = P:BuildSample("target", panel)
     check(smp.dfUFSample and smp.dfUFPreview and smp.dfIsTestFrame, "built as a preview frame, marked a sample")
+    eq(smp.unit, "none", "a sample answers to no unit: a live read on it can never be secret")
     check(P.frames.target ~= smp, "never one of the preview's own frames")
     eq(UF.Elements.Kit.DetachedParent(smp), smp.dfUFSampleHold, "its detached pieces go to its hidden holder")
     check(not smp.dfUFSampleHold._shown, "...which never shows")
@@ -567,6 +581,12 @@ do
     eq(smp._scale, 0.6, "its owner's scale is kept")
     eq(#smp._points, 0, "never placed on the screen")
     check(smp.dfUFRings._shown, "drawn as the unit really looks: rings")
+    local leaked = {}
+    for _, t in ipairs(touched) do
+        if t:find("(target)", 1, true) then leaked[#leaked + 1] = t end
+    end
+    eq(table.concat(leaked, ", "), "", "building and painting a target sample never asks the live target")
+    for name, fn in pairs(held) do _G[name] = fn end
     eq(smp.dfDB.frameWidth, 72, "...at the ring's size")
     smp._painted = 0
     local paint = P.Paint
