@@ -12,6 +12,15 @@ local addonName, UF = ...
 -- ☠ SECRET VALUES. A unit's class token can be secret: it is checked with
 -- issecretvalue and an unreadable class shows the NPC style instead. The dead
 -- check (Desaturate When Dead) only desaturates when the answer is readable.
+--
+-- SHAPES (portraitShape): Square, Circle or Rounded Corners. The two shaped ones
+-- mask the background and the picture with one of Blizzard's own mask textures
+-- (PO.MASKS) and draw the border as a disc of the same mask, one border wider,
+-- behind them, so it follows the shape. ⚠ A 3D model cannot be masked (only
+-- textures take a mask), so a shaped 3D portrait fits the model INSIDE the shape
+-- instead (PO.MODEL_INSET: the square inscribed in the circle; a little in from
+-- rounded corners) over the shaped background. ⚠ The border disc sits behind the
+-- background, so a see-through background shows a little of the border colour.
 -- ============================================================
 
 local DF = DandersFrames
@@ -32,6 +41,18 @@ PO.EVENTS = { "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED" }
 PO.MODES = { ["3D"] = true, ["2D"] = true, CLASS = true, SPEC = true }
 PO.QUESTION_MODEL = "interface/buttons/talktomequestionmark.m2"
 PO.QUESTION_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+-- portraitShape -> the mask texture (Square: none). Both are Blizzard's own art:
+-- the round mask every Blizzard unit-frame portrait uses, and the rounded-square
+-- mask of its item buttons.
+PO.MASKS = {
+    CIRCLE = "Interface\\CharacterFrame\\TempPortraitAlphaMask",
+    ROUNDED = "Interface\\Common\\common-iconmask",
+}
+-- How far in the 3D model sits on each side, as a share of the portrait's size:
+-- the square inscribed in the circle ((1 - 1/sqrt 2) / 2), and clear of the
+-- rounded corners.
+PO.MODEL_INSET = { CIRCLE = (1 - 1 / math.sqrt(2)) / 2, ROUNDED = 0.06 }
 
 -- Class icon fallback when there is no class atlas (texcoords into the old sheet).
 PO.CLASS_SHEET = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
@@ -70,9 +91,82 @@ end
 function PO:Model(p)
     if p.model then return p.model end
     local m = CreateFrame("PlayerModel", nil, p)
-    m:SetAllPoints(p)
     p.model = m
+    PO:PlaceModel(p)
     return m
+end
+
+-- The model over the whole portrait, or inside its shape (p.dfModelInset, px).
+function PO:PlaceModel(p)
+    local m = p and p.model
+    if not m then return end
+    local inset = p.dfModelInset or 0
+    m:ClearAllPoints()
+    if inset > 0 then
+        m:SetPoint("TOPLEFT", p, "TOPLEFT", inset, -inset)
+        m:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -inset, inset)
+    else
+        m:SetAllPoints(p)
+    end
+end
+
+-- The stored shape, or SQUARE.
+function PO.Shape(db)
+    local s = db and db.portraitShape
+    if s and PO.MASKS[s] then return s end
+    return "SQUARE"
+end
+
+-- Shape the portrait: mask the background and the picture, draw the border as a
+-- disc of the same mask (Square: the plain border), fit the model inside.
+function PO:ApplyShape(p, db, size)
+    local path = PO.MASKS[PO.Shape(db)]
+    local borderOn = db.portraitBorderEnabled ~= false
+    if path and not p.mask and p.CreateMaskTexture then
+        p.mask = p:CreateMaskTexture()
+        if p.mask then p.mask:SetAllPoints(p) end
+    end
+    if not (path and p.mask) then
+        -- Square (or a client without masks): unmasked, the plain border.
+        if p.masked then
+            p.bg:RemoveMaskTexture(p.mask)
+            p.tex:RemoveMaskTexture(p.mask)
+            p.masked = false
+        end
+        if p.ring then p.ring:Hide() end
+        K.Border(p, borderOn, db.portraitBorderSize, db.portraitBorderColor)
+        p.dfModelInset = 0
+        PO:PlaceModel(p)
+        return
+    end
+    p.mask:SetTexture(path, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    if not p.masked then
+        p.bg:AddMaskTexture(p.mask)
+        p.tex:AddMaskTexture(p.mask)
+        p.masked = true
+    end
+    K.Border(p, false, db.portraitBorderSize, db.portraitBorderColor)
+    if borderOn then
+        if not p.ring then
+            p.ring = p:CreateTexture(nil, "BACKGROUND", nil, -8)
+            p.ring:SetTexture(K.WHITE)
+            p.ringMask = p:CreateMaskTexture()
+            p.ringMask:SetAllPoints(p.ring)
+            p.ring:AddMaskTexture(p.ringMask)
+        end
+        local b = tonumber(db.portraitBorderSize) or 1
+        if b < 1 then b = 1 end    -- as K.Border: at least 1px
+        p.ring:ClearAllPoints()
+        p.ring:SetPoint("TOPLEFT", p, "TOPLEFT", -b, b)
+        p.ring:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", b, -b)
+        p.ringMask:SetTexture(path, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        p.ring:SetVertexColor(K.RGBA(db.portraitBorderColor, 0, 0, 0, 1))
+        p.ring:Show()
+    elseif p.ring then
+        p.ring:Hide()
+    end
+    p.dfModelInset = math.floor((tonumber(size) or 0) * (PO.MODEL_INSET[PO.Shape(db)] or 0) + 0.5)
+    PO:PlaceModel(p)
 end
 
 -- The portrait's own size (border excluded) and its border width. Size is set
@@ -113,7 +207,7 @@ function PO:Layout(f)
     p:SetFrameLevel(f:GetFrameLevel() + ((side == "INSIDE_LEFT" or side == "INSIDE_RIGHT") and 4 or 1))
     p:SetAlpha(tonumber(db.portraitAlpha) or 1)
     p.bg:SetVertexColor(K.RGBA(db.portraitBgColor, 0, 0, 0, 0.8))
-    K.Border(p, db.portraitBorderEnabled ~= false, db.portraitBorderSize, db.portraitBorderColor)
+    PO:ApplyShape(p, db, size)
     if not f.dfUFPreview then PO:Update(f) end
 end
 

@@ -1401,7 +1401,7 @@ end
 --                 Length, Spell Target's own font size and separator
 --   Class Power   Vengeance Soul Fragments, Maelstrom Weapon Stacks, Show Rune
 --                 Cooldown Text, Inside Top, Background
---   Portrait      Push Bars Aside, Shape, 2D Zoom
+--   Portrait      Push Bars Aside, 2D Zoom
 --   Unit Icons    PvP Show / Style / Players Only, Show in Instances
 -- ============================================================
 function UFO.CardShown(rec, unit, key)
@@ -1707,6 +1707,12 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     Close(band)
 end
 
+-- Portrait.lua SHAPES: the stored value is the key, never the label.
+function UFO.PortraitShapes()
+    return { SQUARE = L["Square"], CIRCLE = L["Circle"], ROUNDED = L["Rounded Corners"],
+             _order = { "SQUARE", "CIRCLE", "ROUNDED" } }
+end
+
 function UFO.PortraitModes()
     return { ["3D"] = L["3D Model"], ["2D"] = L["2D Portrait"], CLASS = L["Class Icon"], SPEC = L["Spec Icon"],
              _order = { "3D", "2D", "CLASS", "SPEC" } }
@@ -1753,6 +1759,8 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
 
     band = Open(L["Look"], "uf_po_look", 2, nil, "appearance")
     local function not3D(d) return not (d and (d.portraitMode or "3D") == "3D") end
+    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Shape"], UFO.PortraitShapes(), db, "portraitShape", changed), 55)
+    w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0, 1, 0.05, db, "portraitAlpha", changed), 55)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["3D Zoom"], 0.5, 1.5, 0.05, db, "portrait3DZoom", changed), 55)

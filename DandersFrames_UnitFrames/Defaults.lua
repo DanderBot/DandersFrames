@@ -208,6 +208,7 @@ local ELEMENTS = {
     portrait3DRotation = 0,
     portraitBgColor = { r = 0, g = 0, b = 0, a = 0.8 },
     portraitMirror = false,
+    portraitShape = "SQUARE",       -- SQUARE | CIRCLE | ROUNDED (Portrait.lua SHAPES)
     portraitBorderEnabled = true,
     portraitBorderSize = 1,
     portraitBorderColor = { r = 0, g = 0, b = 0, a = 1 },

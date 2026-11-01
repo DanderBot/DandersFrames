@@ -1899,6 +1899,7 @@ L["Right to Left"] = true
 L["Rogue"] = true
 L["Role Icon"] = true
 L["Role Priority"] = true
+L["Rounded Corners"] = true
 L["Rows"] = true
 L["Rows Grow From"] = true
 L["Run Script"] = true

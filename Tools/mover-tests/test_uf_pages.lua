@@ -817,6 +817,10 @@ do
     eq(cards, "uf_po_settings,uf_po_position,uf_po_look,uf_po_border", "Portrait: Settings, Size & Position, Look, Border")
     eq(toggles.uf_po_settings and toggles.uf_po_settings.key, "portraitEnabled", "Portrait: Show Portrait is the header tick")
     check(has(keys, "portraitMirror"), "player: Mirror")
+    check(has(keys, "portraitShape"), "Portrait: Shape")
+    eq(table.concat(byKey.portraitShape.args[2]._order, ","), "SQUARE,CIRCLE,ROUNDED", "...Square, Circle, Rounded Corners")
+    check(byKey.portraitShape.disableOn({ portraitEnabled = false }) and not byKey.portraitShape.disableOn({ portraitEnabled = true }),
+          "...greys while the portrait is off")
     cards, keys = BuildPage("target", "portrait")
     check(not has(keys, "portraitMirror"), "target: no Mirror (player / pet only)")
     cards, keys = BuildPage("pet", "portrait")

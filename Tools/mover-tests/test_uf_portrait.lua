@@ -36,6 +36,9 @@ local function Make(kind, parent)
     function f:RegisterEvent(ev) self._events[ev] = { "*" } end
     function f:UnregisterEvent(ev) self._events[ev] = nil end
     function f:CreateTexture() return Make("Texture", self) end
+    function f:CreateMaskTexture() return Make("MaskTexture", self) end
+    function f:AddMaskTexture(m) self._masks = self._masks or {}; self._masks[m] = true end
+    function f:RemoveMaskTexture(m) if self._masks then self._masks[m] = nil end end
     function f:CreateFontString() return Make("FontString", self) end
     function f:SetAtlas(a) self._atlas = a end
     function f:SetDesaturated(v) self._desat = v end
@@ -270,6 +273,69 @@ eq(PV.dfUFPortrait.listener, nil, "no listener on a preview")
 PO:Preview(PV)
 eq(PV.dfUFPortrait.tex._texture, PO.QUESTION_ICON, "a sample target: a question mark")
 check(PV.dfUFPortrait:IsShown(), "...shown")
+print("-- Shapes: Square, Circle, Rounded Corners")
+do
+    local SQ = Owner("player")
+    PO:Attach(SQ)
+    local sp = SQ.dfUFPortrait
+    local sdb = UF:GetUnitDB("player")
+    sdb.portraitMode, sdb.frameHeight = "3D", 40
+    eq(sdb.portraitShape, "SQUARE", "default: square")
+    PO:Layout(SQ)
+    PO:Update(SQ)
+    check(not sp.masked and not sp.ring, "square: no mask, no border disc")
+    check(sp.dfUFBorder.top:IsShown(), "...the plain border")
+    eq(sp.model._allPoints, sp, "...the model over the whole portrait")
+
+    sdb.portraitShape = "CIRCLE"
+    PO:Layout(SQ)
+    check(PO.MASKS.CIRCLE:find("TempPortraitAlphaMask", 1, true), "circle: Blizzard's round portrait mask")
+    eq(sp.mask and sp.mask._texture, PO.MASKS.CIRCLE, "...on the portrait")
+    check(sp.bg._masks and sp.bg._masks[sp.mask] and sp.tex._masks and sp.tex._masks[sp.mask],
+          "...on the background and the picture (2D, class and spec icons)")
+    check(not sp.dfUFBorder.top:IsShown(), "...the square border hidden")
+    check(sp.ring and sp.ring:IsShown(), "...a border disc instead")
+    eq(sp.ringMask and sp.ringMask._texture, sp.mask._texture, "...cut by the same mask")
+    local tl = sp.ring._points[1]
+    eq(tl and (tl[1] .. " " .. tl[4] .. "," .. tl[5]), "TOPLEFT -1,1", "...one border (1px) wider all round")
+    eq(sp.dfModelInset, 6, "...the 3D model fits inside the circle (38px portrait: 6px in)")
+    local mp = sp.model._points[1]
+    eq(mp and (mp[1] .. " " .. mp[4] .. "," .. mp[5]), "TOPLEFT 6,-6", "...placed there")
+
+    sdb.portraitShape = "ROUNDED"
+    PO:Layout(SQ)
+    check(PO.MASKS.ROUNDED:find("common-iconmask", 1, true), "rounded corners: Blizzard's rounded icon mask")
+    eq(sp.mask._texture, PO.MASKS.ROUNDED, "...on the portrait")
+    for _, path in pairs(PO.MASKS) do
+        check(path:find("^Interface\\") ~= nil and not path:find("\\\\", 1, true), "mask path well formed: " .. path)
+    end
+    eq(sp.ringMask._texture, sp.mask._texture, "...the border disc follows")
+    eq(sp.dfModelInset, 2, "...the model a little in from the corners")
+
+    sdb.portraitBorderEnabled = false
+    PO:Layout(SQ)
+    check(not sp.ring:IsShown() and not sp.dfUFBorder.top:IsShown(), "border off: neither border drawn")
+    sdb.portraitBorderEnabled = nil
+
+    sdb.portraitShape = "SQUARE"
+    PO:Layout(SQ)
+    check(not sp.masked and not (sp.bg._masks and sp.bg._masks[sp.mask]) and not (sp.tex._masks and sp.tex._masks[sp.mask]),
+          "back to square: the masks come off")
+    check(not sp.ring:IsShown() and sp.dfUFBorder.top:IsShown(), "...the plain border is back")
+    eq(sp.model._allPoints, sp, "...the model fills the portrait again")
+    sdb.portraitShape = "TRIANGLE"
+    eq(PO.Shape(sdb), "SQUARE", "an unknown stored shape: square")
+
+    local PVS = Owner("target")
+    PVS.dfUFPreview = true
+    local tdb = UF:GetUnitDB("target")
+    tdb.portraitShape = "CIRCLE"
+    PO:Attach(PVS)
+    PO:Preview(PVS)
+    check(PVS.dfUFPortrait.masked, "preview: shaped too")
+    sdb.portraitShape, sdb.portraitMode, tdb.portraitShape = nil, nil, nil
+end
+
 eq(#errs, 0, "no element errored (" .. tostring(errs[1]) .. ")")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end
