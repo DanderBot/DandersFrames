@@ -268,7 +268,7 @@ end
 print("-- Preview AD: shared code stays neutral and party-identical")
 do
     local fac = df_file_source("AuraDesigner/Factory.lua")
-    check(fac:find("if enabled and owns and frame.unit and not frame.dfPreview then", 1, true),
+    check(fac:find("if enabled and owns and frame.unit and not frame.dfIsTestFrame and not frame.dfPreview then", 1, true),
           "the sound reconcile never arms alerts from a preview frame")
     local eng = df_file_source("AuraDesigner/Engine.lua")
     check(eng:find("if not f.dfPreview and (f.dfADFactory or DF:IsAuraDesignerEnabled(f)) then TryUpdate(f) end", 1, true),
