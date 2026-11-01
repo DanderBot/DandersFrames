@@ -69,6 +69,16 @@ jobs:
             echo "NOTES_EOF"
           } >> $GITHUB_OUTPUT
 
+          # The packager's release body (GitHub release + CurseForge file notes) is
+          # this build's section only, not the whole CHANGELOG.md: the full file
+          # passed GitHub's 125k body limit at v5.6.1 and failed the release step
+          # AFTER the CurseForge upload. The in-game changelog still reads
+          # CHANGELOG.md (generate_changelog.sh above). .pkgmeta points
+          # manual-changelog here and ignores the file; staged so the packager
+          # treats it like any tracked file (CI-only, never committed).
+          echo "$NOTES" > RELEASE_NOTES.md
+          git add -f RELEASE_NOTES.md
+
       - name: Create local tag for clean zip naming
         if: steps.guard.outputs.skip != 'true'
         run: |
