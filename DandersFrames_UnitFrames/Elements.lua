@@ -190,10 +190,6 @@ end
 -- Where a DETACHED element lives: the unit's holder for a live frame (so the
 -- unit's Visibility rule hides it too), the preview parent for a preview frame.
 function K.DetachedParent(f)
-    -- A settings sample (Preview.lua P:BuildSample): its detached pieces are kept
-    -- out of sight (their records are places on the screen, not on the sample).
-    local hold = rawget(f, "dfUFSampleHold")
-    if hold then return hold end
     if f.dfUFPreview then
         return (UF.Preview and UF.Preview.GetParent and UF.Preview:GetParent()) or f:GetParent()
     end

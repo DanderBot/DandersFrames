@@ -332,38 +332,40 @@ do
           "td: the bar's rebuild keeps the target")
     check(code:find("PV:Bind(state.mockFrame, tdDB)", 1, true) ~= nil,
           "td: a page coming back into view takes the shared preview back")
-    -- A target may preview on a REAL frame (a unit frame's own sample): it is bound
-    -- in place of the mock, sources its own text, and is repainted, never resized.
-    check(code:find("local sample = target and target.previewFrame and target.previewFrame(previewPanel) or nil", 1, true) ~= nil,
-          "td: a target's own preview frame replaces the mock")
-    check(code:find("mockFrame.dfTDSelfSource = true", 1, true) ~= nil,
-          "td: ...and draws its text itself")
-    check(code:find("if not sample then", 1, true) ~= nil, "td: the mock chrome only without one")
-    check(code:find("if target and target.refreshPreviewFrame then target.refreshPreviewFrame(m) end", 1, true) ~= nil,
-          "td: the geometry pass repaints a real frame instead of sizing it")
+    -- A unit frame's page previews on the SAME static mock: no real frame, no
+    -- self-sourced text. Its target only dresses the mock (decorateMock).
+    check(not code:find("previewFrame", 1, true) and not code:find("dfTDSelfSource", 1, true),
+          "td: no real frame is ever bound as the preview")
+    check(code:find("if target and target.decorateMock then", 1, true) ~= nil,
+          "td: a target dresses the static mock on every geometry pass")
+    check(code:find("chrome.textures[#chrome.textures + 1] = healthFill", 1, true) ~= nil,
+          "td: ...and is handed the mock's own bar art to hide or restore")
 end
 
-print("-- Designer edit target: a self-sourcing preview frame")
+print("-- Designer edit target: the preview is always the mock, painted with mock data")
 do
     local PVsrc = df_file_source("TextDesigner/Preview.lua")
+    check(not PVsrc:find("dfTDSelfSource", 1, true) and not PVsrc:find("RenderTextDesignerNow", 1, true),
+          "preview: no frame paints its own (live or test) text into the designer")
     local DF = { TextDesigner = {} }
-    local rendered, updated = {}, {}
-    DF.TextDesigner.Render = { UpdateFrame = function(_, f) updated[#updated + 1] = f end, Teardown = function() end }
-    DF.TextDesigner.DataSource = { Mock = function() return {} end }
-    function DF:RenderTextDesignerNow(f, hint) rendered[#rendered + 1] = { f, hint } end
+    local updated = {}
+    DF.TextDesigner.Render = { UpdateFrame = function(_, f, _, src) updated[#updated + 1] = { f, src } end,
+                               Teardown = function() end }
+    local MOCK = {}
+    DF.TextDesigner.DataSource = { Mock = function() return MOCK end }
     function DF:Debug() end
     local chunk = loadstring(PVsrc, "@TD:Preview")
     setfenv(chunk, setmetatable({ }, { __index = _G }))
     chunk("DandersFrames", DF)
     local PV = DF.TextDesigner.Preview
-    local mock, real = {}, { dfTDSelfSource = true }
     PV.RefreshLiveFrames = function() end
+    local mock = {}
     PV:Init(mock, { elements = {} })
-    eq(#updated, 1, "a static mock: painted with the mock data")
-    PV:Init(real, { elements = {} })
-    eq(#rendered, 1, "a real frame: its own Text Designer pass")
-    check(rendered[1][1] == real and rendered[1][2] == "all", "...in full")
-    eq(#updated, 1, "...never the mock data")
+    check(#updated == 1 and updated[1][2] == MOCK, "the mock is painted with the mock data")
+    eq(mock._tdHoverT, 1, "a plain mock draws Show on Hover elements shown")
+    local unitMock = { dfTDHoverToggle = true, _tdHoverT = 0 }
+    PV:Init(unitMock, { elements = {} })
+    eq(unitMock._tdHoverT, 0, "a unit page's mock follows its Show Hover State switch")
 end
 
 -- ============================================================

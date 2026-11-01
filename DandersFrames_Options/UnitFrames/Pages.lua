@@ -1328,27 +1328,25 @@ function UFO.ApplyTemplateRequests(unit)
     end
 end
 
--- The Text Designer's preview on a unit page is the unit's OWN frame, built and
--- painted by the unit frames' preview code exactly as test mode draws it
--- (DandersFrames_UnitFrames/Preview.lua P:BuildSample): rings, the round
--- portrait, a detached resource bar, auras -- the real look, not the party mock.
--- One per unit page, made on first need and handed back to every rebuild of the
--- designer's island. Its size is the frame view's (a Ring frame's ringSize).
+-- The Text Designer's preview on a unit page is the designer's own STATIC mock, as
+-- on the party / raid page (no unit, no events, nothing live), sized from the unit's
+-- frame view (a Ring frame's ringSize). A Ring-style unit's mock is dressed with its
+-- rings drawn from fixed sample values and a round portrait placeholder
+-- (DandersFrames_UnitFrames/Rings.lua R.DecorateMock). A real unit-frame preview is
+-- NOT used: anything live or animated inside the settings page's scroll content
+-- made its scroll range secret (the 2026-11-01 SetEnabled spam).
 function UFO.AddTextPreviewFrame(target, unit)
     local UF = DF.UnitFrames
-    local P = UF and UF.Preview
-    if not (P and P.BuildSample) then return end
-    local sample
-    -- The ring spots in its Anchor To lists, markers for them on the preview, and a
+    if not UF then return end
+    -- The ring spots in its Anchor To lists, markers for them on the mock, and a
     -- Show Hover State switch (TextDesigner/UI/Options.lua).
     target.ringAnchors = true
     target.getSizeDB = function() return UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit) end
-    target.previewFrame = function(parent)
-        if not sample then sample = P:BuildSample(unit, parent) end
-        return sample
-    end
-    target.refreshPreviewFrame = function(f)
-        if f and P.PaintSample then P:PaintSample(f) end
+    target.decorateMock = function(mock, chrome)
+        local R = UF.Rings
+        if R and R.DecorateMock then
+            R.DecorateMock(mock, UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit), chrome)
+        end
     end
 end
 

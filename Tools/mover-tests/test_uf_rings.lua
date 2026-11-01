@@ -589,54 +589,57 @@ do
     eff.portraitDimHover, eff.portraitAlpha = nil, nil
 end
 
-print("-- Rings: a settings sample of a unit (the Text Designer's preview)")
+print("-- Rings: the Text Designer's static mock")
 do
-    local P = UF.Preview
-    eff.frameStyle = "RING"
-    local panel = Make("Frame", UIParent)
-    -- Every unit API the sample's build and paint touch, by token.
-    local touched = {}
+    check(UF.Preview.BuildSample == nil and UF.Preview.PaintSample == nil, "no real unit frame sample any more")
     local held = {}
-    for _, name in ipairs({ "UnitExists", "UnitPower", "UnitPowerMax", "UnitClass", "UnitIsPlayer",
-                            "UnitIsVisible", "UnitIsDeadOrGhost", "UnitHealth", "UnitHealthMax",
-                            "UnitHealthPercent", "UnitCanAttack", "UnitPowerType", "UnitReaction" }) do
+    local touched = {}
+    for _, name in ipairs({ "UnitExists", "UnitPower", "UnitPowerMax", "UnitClass", "UnitHealth",
+                            "UnitHealthMax", "UnitHealthPercent", "UnitPowerType" }) do
         held[name] = _G[name]
-        local orig = _G[name]
-        _G[name] = function(u, ...)
-            touched[#touched + 1] = name .. "(" .. tostring(u) .. ")"
-            if orig then return orig(u, ...) end
-        end
+        _G[name] = function(u) touched[#touched + 1] = name .. "(" .. tostring(u) .. ")" end
     end
-    local smp = P:BuildSample("target", panel)
-    check(smp.dfUFSample and smp.dfUFPreview and smp.dfIsTestFrame, "built as a preview frame, marked a sample")
-    eq(smp.unit, "none", "a sample answers to no unit: a live read on it can never be secret")
-    check(P.frames.target ~= smp, "never one of the preview's own frames")
-    eq(UF.Elements.Kit.DetachedParent(smp), smp.dfUFSampleHold, "its detached pieces go to its hidden holder")
-    check(not smp.dfUFSampleHold._shown, "...which never shows")
-    smp:SetScale(0.6)
-    smp._points = {}
-    P:PaintSample(smp)
-    check(smp._shown, "painted and shown")
-    eq(smp._scale, 0.6, "its owner's scale is kept")
-    eq(#smp._points, 0, "never placed on the screen")
-    check(smp.dfUFRings._shown, "drawn as the unit really looks: rings")
-    local leaked = {}
-    for _, t in ipairs(touched) do
-        if t:find("(target)", 1, true) then leaked[#leaked + 1] = t end
-    end
-    eq(table.concat(leaked, ", "), "", "building and painting a target sample never asks the live target")
+    local mock = Make("Frame", UIParent)
+    mock._level = 10
+    local bd = {}
+    function mock:SetBackdropColor(r, g, b, a) bd.bg = { r, g, b, a } end
+    function mock:SetBackdropBorderColor(r, g, b, a) bd.border = { r, g, b, a } end
+    local art = { Make("Texture", mock), Make("Texture", mock) }
+    local chrome = { textures = art, backdrop = { { r = 0.07, g = 0.07, b = 0.07, a = 1 }, { r = 0.27, g = 0.27, b = 0.27, a = 1 } } }
+    local mdb = { frameStyle = "RING", ringSize = 64, portraitEnabled = true, portraitBorderSize = 1,
+                  rings = { { thickness = 8, gap = 2, sections = { { bar = "HEALTH" } } },
+                            { thickness = 4, gap = 2, sections = { { bar = "POWER", coverage = "HALF", position = "LEFT" },
+                                                                   { bar = "CLASSPOWER", coverage = "HALF", position = "RIGHT" } } } } }
+    R.DecorateMock(mock, mdb, chrome)
+    local c = mock.dfUFMockRings
+    check(c and c._shown and c._w == 64, "Ring: rings drawn on the mock, at ring size")
+    check(not art[1]._shown and not art[2]._shown, "...the mock's bar art hidden")
+    eq(bd.bg[4], 0, "...and its square backdrop")
+    eq(c._level, 11, "over the mock (under the designer's text)")
+    local fills = {}
+    for i, a in ipairs(c.arcs) do if a.fill._shown then fills[#fills + 1] = a.fill end end
+    eq(#fills, 2 + R.MOCK_PIPS, "health, power and five class power pips")
+    eq(fills[1]._value, R.MOCK_FILL.HEALTH, "health: a fixed sample fill")
+    eq(fills[2]._value, R.MOCK_FILL.POWER, "power: a fixed sample fill")
+    local lit = 0
+    for i = 3, #fills do lit = lit + fills[i]._value end
+    eq(lit, R.MOCK_PIPS_ON, "three pips lit")
+    local pc = c.portrait
+    check(pc._shown and pc._w == UF.Portrait.RingSize(mdb) and pc._masks[1] == c.portraitMask,
+          "a round portrait placeholder (a masked flat texture)")
+    eq(mock.dfTDAnchorSpot, R.AnchorSpot, "the ring spots answer from the static layout")
+    eq(select(2, R.AnchorSpot(mock, "RING_ABOVE")), 32, "...above the ring")
+    mdb.portraitDimHover = true
+    mock.dfHoverHook(mock, true)
+    eq(pc._alpha, UF.Portrait.DIM, "Show Hover State dims the placeholder when the unit's portrait dims")
+    mock.dfHoverHook(mock, false)
+    eq(pc._alpha, 1, "...and back")
+    eq(#touched, 0, "nothing on the mock asks a unit anything")
+    mdb.frameStyle = "BARS"
+    R.DecorateMock(mock, mdb, chrome)
+    check(not c._shown and art[1]._shown and bd.bg[4] == 1, "Bars: the plain mock again")
+    check(mock.dfTDAnchorSpot == nil and mock.dfUFRingGeom == nil, "...with the frame-edge spots")
     for name, fn in pairs(held) do _G[name] = fn end
-    eq(smp.dfDB.frameWidth, 72, "...at the ring's size")
-    smp._painted = 0
-    local paint = P.Paint
-    P.Paint = function(self, f) f._painted = (f._painted or 0) + 1 end
-    P:RefreshSamples()
-    eq(smp._painted, 1, "RefreshSamples repaints a visible sample")
-    smp:Hide()
-    P:RefreshSamples()
-    eq(smp._painted, 1, "...and leaves a hidden one")
-    P.Paint = paint
-    eff.frameStyle = "BARS"
 end
 
 print("-- Rings: Text Designer presets")

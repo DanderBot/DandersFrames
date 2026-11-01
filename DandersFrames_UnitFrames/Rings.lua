@@ -274,6 +274,138 @@ end
 R.LEVEL_PORTRAIT, R.LEVEL_RINGS, R.LEVEL_CLASSPOWER = 2, 5, 6
 
 -- ============================================================
+-- THE TEXT DESIGNER'S MOCK (R.DecorateMock; DandersFrames_Options/UnitFrames/Pages.lua
+-- UFO.AddTextPreviewFrame -> the designer's target.decorateMock)
+-- A unit's Text Designer previews on the SAME static mock as the party / raid
+-- designer, sized from the unit's frame view. A Ring-style unit's mock is dressed
+-- with its rings drawn STATICALLY from this file's own geometry and arc maths:
+-- fixed sample fills (MOCK_FILL), class power as MOCK_PIPS pips with MOCK_PIPS_ON
+-- lit, and a plain round portrait placeholder (a masked flat texture, never a
+-- model). No unit, no events, no OnUpdate: nothing on it can ever be secret. The
+-- mock's own bar art and square backdrop are hidden while it is a ring and come
+-- back for Bars. It also answers the ring spots (dfTDAnchorSpot) and, for Show
+-- Hover State, dims the placeholder when the unit's portrait dims on hover.
+-- ============================================================
+R.MOCK_FILL = { HEALTH = 0.75, POWER = 0.6 }
+R.MOCK_COLOR = { HEALTH = { 0.18, 0.80, 0.44 }, POWER = { 0.27, 0.53, 1 }, CLASSPOWER = { 1, 0.82, 0 } }
+R.MOCK_TRACK = { 0, 0, 0, 0.5 }
+R.MOCK_PIPS, R.MOCK_PIPS_ON = 5, 3
+R.MOCK_PORTRAIT = { 0.22, 0.22, 0.26, 1 }
+
+local function MockArc(c, i)
+    local a = c.arcs[i]
+    if a then return a end
+    a = { track = R.NewArcBar(c), fill = R.NewArcBar(c) }
+    c.arcs[i] = a
+    return a
+end
+
+-- One arc of the mock: a track and a fill at a FIXED value (0..1).
+local function PaintMockArc(c, i, ring, start, len, sec, value, color)
+    local a = MockArc(c, i)
+    R.ShapeArcBar(a.track, c, ring.outer, ring.inner, start, len, false, 0)
+    R.ShapeArcBar(a.fill, c, ring.outer, ring.inner, start, len, sec.reverse, sec.feather)
+    a.fill:SetFrameLevel(a.track:GetFrameLevel() + 1)
+    a.track:SetMinMaxValues(0, 1)
+    a.track:SetValue(1)
+    a.track:SetStatusBarColor(R.MOCK_TRACK[1], R.MOCK_TRACK[2], R.MOCK_TRACK[3], R.MOCK_TRACK[4])
+    a.fill:SetMinMaxValues(0, 1)
+    a.fill:SetValue(value)
+    a.fill:SetStatusBarColor(color[1], color[2], color[3], 1)
+    a.track:Show()
+    a.fill:Show()
+end
+
+function R.DecorateMock(mock, db, chrome)
+    if not mock then return end
+    local ring = R.IsRing(db)
+    for _, t in ipairs(chrome and chrome.textures or {}) do
+        if ring then t:Hide() else t:Show() end
+    end
+    if mock.SetBackdropColor and chrome and chrome.backdrop then
+        local bg, border = chrome.backdrop[1], chrome.backdrop[2]
+        if ring then
+            mock:SetBackdropColor(0, 0, 0, 0)
+            if mock.SetBackdropBorderColor then mock:SetBackdropBorderColor(0, 0, 0, 0) end
+        else
+            mock:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+            if mock.SetBackdropBorderColor then mock:SetBackdropBorderColor(border.r, border.g, border.b, border.a) end
+        end
+    end
+    local c = mock.dfUFMockRings
+    if not ring then
+        if c then c:Hide() end
+        mock.dfUFRingGeom, mock.dfTDAnchorSpot, mock.dfHoverHook = nil, nil, nil
+        return
+    end
+    if not c then
+        c = CreateFrame("Frame", nil, mock)
+        c.arcs = {}
+        c.portrait = c:CreateTexture(nil, "BACKGROUND")
+        c.portrait:SetTexture(K.WHITE)
+        c.portraitMask = c:CreateMaskTexture()
+        c.portraitMask:SetTexture(R.DISC, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        c.portraitMask:SetAllPoints(c.portrait)
+        c.portrait:AddMaskTexture(c.portraitMask)
+        mock.dfUFMockRings = c
+    end
+    local geo = R.Geometry(db)
+    c:ClearAllPoints()
+    c:SetPoint("CENTER", mock, "CENTER", 0, 0)
+    c:SetSize(geo.size, geo.size)
+    -- Over the mock, under the designer's text overlay.
+    c:SetFrameLevel(mock:GetFrameLevel() + 1)
+
+    local used = 0
+    for _, rg in ipairs(geo.rings) do
+        local multi = #rg.sections > 1
+        for _, sec in ipairs(rg.sections) do
+            local a, len = R.Arc(sec, multi)
+            if sec.bar == "CLASSPOWER" then
+                local arcs = R.PipArcs(a, len, R.MOCK_PIPS)
+                for i = 1, #arcs do
+                    local arc = sec.reverse and arcs[#arcs - i + 1] or arcs[i]
+                    used = used + 1
+                    PaintMockArc(c, used, rg, arc.start, arc.len, sec, (i <= R.MOCK_PIPS_ON) and 1 or 0,
+                        R.MOCK_COLOR.CLASSPOWER)
+                end
+            else
+                used = used + 1
+                PaintMockArc(c, used, rg, a, len, sec, R.MOCK_FILL[sec.bar] or 1,
+                    R.MOCK_COLOR[sec.bar] or R.MOCK_COLOR.HEALTH)
+            end
+        end
+    end
+    for i = used + 1, #c.arcs do
+        c.arcs[i].track:Hide()
+        c.arcs[i].fill:Hide()
+    end
+
+    -- The portrait's room, as the frame lays it out (Portrait.lua PO.RingSize).
+    local PO = UF.Portrait
+    local size = PO and PO.RingSize and PO.RingSize(db) or geo.hole
+    local pc = R.MOCK_PORTRAIT
+    if db.portraitEnabled and size and size > 0 then
+        c.portrait:ClearAllPoints()
+        c.portrait:SetPoint("CENTER", c, "CENTER", 0, 0)
+        c.portrait:SetSize(size, size)
+        c.portrait:SetVertexColor(pc[1], pc[2], pc[3], pc[4])
+        c.portrait:Show()
+    else
+        c.portrait:Hide()
+    end
+    c:Show()
+
+    mock.dfUFRingGeom = geo
+    mock.dfTDAnchorSpot = R.AnchorSpot
+    -- Show Hover State: dim the placeholder as the frame's portrait would.
+    mock.dfHoverHook = function(_, on)
+        local dim = on and db.portraitDimHover and (PO and PO.DIM) or 1
+        c.portrait:SetAlpha(dim)
+    end
+end
+
+-- ============================================================
 -- THE ROUND OUTLINE (DandersFrames' circle shape spec, Frames/Create.lua CIRCLE
 -- BANDS): what the resting glow and the selection / hover / aggro highlights trace
 -- on a Ring frame instead of its square -- a circle on the frame's centre, the

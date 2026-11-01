@@ -46,18 +46,13 @@ end
 -- release.
 function Preview:RefreshPreview()
     if not activeMockFrame or not activeTdDB then return end
-    -- A REAL frame bound as the preview (a unit frame's own sample, Options.lua
-    -- target.previewFrame) draws the template it carries with its own sample data,
-    -- through its own Text Designer pass. Party / raid bind the static mock.
-    if activeMockFrame.dfTDSelfSource and DF.RenderTextDesignerNow then
-        DF:RenderTextDesignerNow(activeMockFrame, "all")
-        return
-    end
     local Render = DF.TextDesigner.Render
     local DataSource = DF.TextDesigner.DataSource
     if not Render or not DataSource then return end
-    -- The mock is never hovered: Show on Hover elements are drawn shown on it.
-    activeMockFrame._tdHoverT = 1
+    -- The mock is never hovered: Show on Hover elements are drawn shown on it --
+    -- unless the page has a Show Hover State switch (a unit frame's), which drives
+    -- the mock's hover itself (Render:SetHover).
+    if not activeMockFrame.dfTDHoverToggle then activeMockFrame._tdHoverT = 1 end
     Render:UpdateFrame(activeMockFrame, activeTdDB, DataSource.Mock(), "all", true)
 end
 

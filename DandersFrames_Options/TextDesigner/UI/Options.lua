@@ -2833,12 +2833,13 @@ end
 --                      getLabel / leadItems / tailItems / listUsers / registryKey)
 --   target.onChange()  after the template choice changed
 --   target.getSizeDB()  optional: the size table, asked each time (wins over sizeDB)
---   target.previewFrame(parent)    optional: a REAL frame to preview on instead of
---                      the static mock (a unit frame's own test-mode preview, built
---                      by its owner). It sources its own text: the binding repaints
---                      it through the frame's own Text Designer pass, with its own
---                      sample data (frame.dfTDSelfSource, TextDesigner/Preview.lua).
---   target.refreshPreviewFrame(f)  optional: repaint that frame (geometry refresh)
+--   target.decorateMock(mock, chrome)  optional: dress the static mock for the
+--                      target (a Ring-style unit frame draws its rings on it, from
+--                      fixed sample values). `chrome` is the mock's own bar art
+--                      ({ textures = {...}, backdrop = {bg, border} }) to hide or
+--                      restore. Called at build and on every geometry refresh.
+--   target.ringAnchors  the Anchor To lists offer the ring spots, the mock shows
+--                      faint markers on them and a Show Hover State switch
 -- Returns the template's config, its name, and the size table.
 -- ============================================================
 local function TDEditTarget(GUI, db, target)
@@ -3110,25 +3111,13 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     previewLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Mock unit frame (centred in panel) — visual clone of AD's mockFrame.
-    -- A target may hand a real frame instead (target.previewFrame): its owner's
-    -- own preview of the frame, drawn as it really looks.
+    -- STATIC: fixed fills, no unit, no events, nothing animated but the designer's
+    -- own hover fade. A target may dress it (target.decorateMock: a Ring frame's
+    -- rings) -- still static.
     local mockFrame
-    local sample = target and target.previewFrame and target.previewFrame(previewPanel) or nil
-    if sample then
-        mockFrame = sample
-        mockFrame:SetParent(previewPanel)
-        mockFrame:ClearAllPoints()
-        mockFrame:SetPoint("CENTER", previewPanel, "CENTER", 0, -4)
-        mockFrame.dfTDSelfSource = true
-        previewPanel.mockFrame = mockFrame
-        previewPanel.sampleFrame = mockFrame
-        state.mockFrame = mockFrame
-        if target.refreshPreviewFrame then target.refreshPreviewFrame(mockFrame) end
-        if DF.TextDesigner.Preview then
-            DF.TextDesigner.Preview:Init(state.mockFrame, tdDB)
-        end
-    end
-    if not sample then
+    local chrome = { textures = {}, backdrop = { {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1} } }
+    previewPanel.mockChrome = chrome
+    do
         local frameDB = _tdSizeDB or DF.PartyDefaults or {}
         local FRAME_W = frameDB.frameWidth or 125
         local FRAME_H = frameDB.frameHeight or 64
@@ -3136,6 +3125,9 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
         local showPower = frameDB.showPowerBar
 
         mockFrame = CreateFrame("Frame", nil, previewPanel, "BackdropTemplate")
+        -- A target that offers Show Hover State drives the hover itself; the plain
+        -- mock always draws Show on Hover elements shown (TextDesigner/Preview.lua).
+        mockFrame.dfTDHoverToggle = (target and target.ringAnchors) and true or nil
         mockFrame:SetSize(FRAME_W, FRAME_H)
         mockFrame:SetPoint("CENTER", previewPanel, "CENTER", 0, -4)
         mockFrame:SetScale((tdDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1))
@@ -3158,6 +3150,7 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
             healthBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 1)
         end
         healthBg:SetColorTexture(0, 0, 0, 0.4)
+        chrome.textures[#chrome.textures + 1] = healthBg
 
         -- Health bar fill (72% health, placeholder)
         local healthFill = mockFrame:CreateTexture(nil, "ARTWORK")
@@ -3174,6 +3167,7 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
         -- frame width read at build, so a live resize has to re-derive them or the bar
         -- keeps the old frame's proportions inside the new outline.
         previewPanel.healthFill = healthFill
+        chrome.textures[#chrome.textures + 1] = healthFill
 
         -- Missing health region
         local missingHealth = mockFrame:CreateTexture(nil, "ARTWORK")
@@ -3186,6 +3180,7 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
         missingHealth:SetWidth(FRAME_W * 0.28)
         missingHealth:SetColorTexture(0, 0, 0, 0.4)
         previewPanel.missingHealth = missingHealth
+        chrome.textures[#chrome.textures + 1] = missingHealth
 
         -- Power bar (only if enabled in current frame settings)
         if showPower then
@@ -3206,6 +3201,9 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
             powerBorder:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H)
             powerBorder:SetHeight(1)
             powerBorder:SetColorTexture(0.2, 0.2, 0.2, 1)
+            chrome.textures[#chrome.textures + 1] = powerBg
+            chrome.textures[#chrome.textures + 1] = powerFill
+            chrome.textures[#chrome.textures + 1] = powerBorder
         end
 
         -- Anchor dots disabled until drag-to-place is implemented (Phase 2).
@@ -3228,16 +3226,14 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
         fdb = fdb or DF.PartyDefaults or {}
         local w = fdb.frameWidth or 125
         local h = fdb.frameHeight or 64
-        if previewPanel.sampleFrame == m then
-            -- A real frame sizes itself (its owner's layout); repaint it, then put
-            -- the binding's text back on it.
-            if target and target.refreshPreviewFrame then target.refreshPreviewFrame(m) end
+        m:SetSize(w, h)
+        if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
+        if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
+        if target and target.decorateMock then
+            target.decorateMock(m, previewPanel.mockChrome)
+            -- Ring spots may have moved: put the text back on them.
             local PV = DF.TextDesigner.Preview
             if PV and PV.RefreshPreview then PV:RefreshPreview() end
-        else
-            m:SetSize(w, h)
-            if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
-            if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
         end
 
         -- Preview Scale is relative to the LIVE frame, so the window's own scale is
@@ -3275,22 +3271,22 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     scaleSlider:SetSize(220, 30)
     state.scaleSlider = scaleSlider
 
-    -- Over a real frame: Show Hover State (holds the frame's hover on, so Show on
-    -- Hover text and a dimmed portrait can be styled) and faint markers on the ring
-    -- spots the Anchor To list offers.
-    if sample then
-        local hoverState = { on = sample._tdForceHover and true or false }
+    -- A unit frame's page (target.ringAnchors): Show Hover State (holds the mock's
+    -- hover on, so Show on Hover text and a dimmed portrait can be styled) and faint
+    -- markers on the ring spots the Anchor To list offers.
+    if target and target.ringAnchors then
+        local hoverState = { on = mockFrame._tdForceHover and true or false }
         local hoverToggle = GUI:CreateCheckbox(previewPanel, L["Show Hover State"], hoverState, "on", function()
-            sample._tdForceHover = hoverState.on and true or nil
-            if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(sample, hoverState.on) end
+            mockFrame._tdForceHover = hoverState.on and true or nil
+            if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(mockFrame, hoverState.on) end
         end)
         hoverToggle:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", 0, -6)
         state.hoverToggle = hoverToggle
-        if target.ringAnchors and DF.TextDesigner.Render and DF.TextDesigner.Render.SpotRegion then
-            local markers = sample._tdSpotMarkers or {}
-            sample._tdSpotMarkers = markers
+        if DF.TextDesigner.Render and DF.TextDesigner.Render.SpotRegion then
+            local markers = mockFrame._tdSpotMarkers or {}
+            mockFrame._tdSpotMarkers = markers
             for key in pairs(DF.TextDesigner.Render.SPOTS) do
-                local spot = DF.TextDesigner.Render.SpotRegion(sample, key)
+                local spot = DF.TextDesigner.Render.SpotRegion(mockFrame, key)
                 local m = markers[key]
                 if not m then
                     m = spot:CreateTexture(nil, "OVERLAY")
@@ -3305,13 +3301,10 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     end
 
     -- Placeholder note so users know this panel is purely cosmetic for now.
-    -- (Not over a real frame: that one is the frame's own preview.)
-    if not sample then
-        local previewNote = previewPanel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
-        previewNote:SetText(L["Preview placeholder (visual mockup)"])
-        previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-    end
+    local previewNote = previewPanel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
+    previewNote:SetText(L["Preview placeholder (visual mockup)"])
+    previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
 
     -- The Aura Designer's preview width, so the two designers share one layout.
     tdPreviewNeed = math.max(TD_LEFT_FLOOR,

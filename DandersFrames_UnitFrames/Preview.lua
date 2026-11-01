@@ -446,7 +446,7 @@ end
 
 -- One preview frame on `unit`'s settings, named `name`, under `parent`. `slot`:
 -- the boss slot it stands for (Boss.lua builds those), nil otherwise.
-function P:Build(unit, name, parent, slot, token)
+function P:Build(unit, name, parent, slot)
     local db = P:PreviewDB(unit)
     local f = CreateFrame("Button", name, parent)
     -- Marked BEFORE the elements are built, so everything they read resolves to the
@@ -460,8 +460,7 @@ function P:Build(unit, name, parent, slot, token)
     f.dfUFSlot = slot
     f.dfUFPreview = true
     f.isRaidFrame = false
-    -- `token`: a sample's "none" (P:BuildSample), set before anything is built on it.
-    f.unit = token or (slot and (unit .. slot) or unit)
+    f.unit = slot and (unit .. slot) or unit
     f.dfTestData = P:TestData(unit, slot)
     f.dfTestAuraSeed = P.AURA_SEEDS[unit]
     -- Where its aura rows sit, as on the live frame (Elements.lua).
@@ -513,9 +512,7 @@ function P:Paint(f)
     f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(f.dfUFUnit) or false
     f.dfTestData = P:TestData(f.dfUFUnit, f.dfUFSlot)
     if DF.ApplyFrameLayout then DF:ApplyFrameLayout(f) end
-    if f.dfUFSample then
-        -- A settings sample (P:BuildSample): its owner places and scales it.
-    elseif f.dfUFSlot then
+    if f.dfUFSlot then
         -- A boss slot: scaled and placed by its container (Boss.lua).
         f:SetScale(1)
     else
@@ -529,59 +526,6 @@ function P:Paint(f)
     end
     -- A cast mid-way, class power half full, the portrait and icons (spec §1.8).
     if UF.Elements then UF.Elements:Call("Preview", f) end
-end
-
--- ============================================================
--- SAMPLES (a settings page's own preview of a unit: the Text Designer's on a unit
--- page, DandersFrames_Options/UnitFrames/Pages.lua UFO.DesignerTarget)
--- One frame built and painted EXACTLY as a test-mode preview is (P:Build, P:Paint:
--- the unit's real look -- rings, portrait shape, a detached resource bar, the cast
--- bar, auras), but owned by the page that asked: never placed on the screen,
--- never in P.frames (the preview's show / hide / refresh never touch it), drawn
--- whether or not the preview is up, and deaf to the mouse. Its DETACHED cast bar
--- and class power (mover records: screen places) go to a hidden holder of its own.
--- UF:RefreshAll repaints the visible ones (P:RefreshSamples), so a setting changed
--- on another page is there when the sample's page shows again.
--- ============================================================
-P.samples = setmetatable({}, { __mode = "k" })
-
--- ☠ NO UNIT TOKEN. A preview frame keeps its unit's real token (player, target,
--- boss1) and is painted from sample data -- but every DandersFrames painter has a
--- LIVE fallback that reads the frame's token (UnitHealthPercent, UnitHealthMissing,
--- UnitHealth, the class / reaction colours...), and a live answer is SECRET in
--- restricted content. A secret fed to a StatusBar makes its fill's size secret, and
--- a sample lives INSIDE the settings page's scroll content: the page's scroll range
--- went secret with it, and the page's scroll bar then compared and SetEnabled-ed a
--- secret ("Button:SetEnabled(): Cannot be called with secrets", the Text Designer
--- page, 2026-11-01). So a sample answers to "none", a token that never exists: any
--- live read on it is empty and plain. What the sample draws comes from its sample
--- data (dfTestData) and from the literal "player" where a preview asks for the
--- player's own look (portrait, class power, power colour).
-P.SAMPLE_TOKEN = "none"
-
-function P:BuildSample(unit, parent)
-    local f = P:Build(unit, nil, parent, unit == "boss" and 1 or nil, P.SAMPLE_TOKEN)
-    f.dfUFSample = true
-    f.dfUFSampleHold = CreateFrame("Frame", nil, f)
-    f.dfUFSampleHold:Hide()
-    f:EnableMouse(false)
-    f:SetScript("OnEnter", nil)
-    f:SetScript("OnLeave", nil)
-    f:SetScript("OnClick", nil)
-    P.samples[f] = true
-    return f
-end
-
-function P:PaintSample(f)
-    if not (f and f.dfUFSample) then return end
-    f:Show()
-    P:Paint(f)
-end
-
-function P:RefreshSamples()
-    for f in pairs(P.samples) do
-        if f:IsVisible() then P:Paint(f) end
-    end
 end
 
 -- The units that get a preview: those this build draws itself. Boss has its own
