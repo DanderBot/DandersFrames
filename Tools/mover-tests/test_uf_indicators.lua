@@ -336,7 +336,7 @@ eq(UF:GetUnitDB("pet").classDragonEnabled, false, "pet: off")
 eq(UF:GetUnitDB("target").classDragonSize, 80, "target: size 80% (sized for its 46px portrait)")
 eq(UF:GetUnitDB("focus").classDragonSize, 65, "focus: 65% (the same reach on its 36px portrait)")
 eq(UF:GetUnitDB("boss").classDragonSize, 80, "boss: 80% (clear of the boss above's cast bar)")
-eq(UF:GetUnitDB("boss").classDragonShowTail, false, "boss: no tail (its cast bar sits under the frame)")
+eq(UF:GetUnitDB("boss").classDragonShowTail, true, "boss: the tail shows (its cast bar draws over it)")
 eq(UF:GetUnitDB("target").classDragonShowTail, true, "target: the tail shows")
 eq(UF:GetUnitDB("target").classDragonSide, "OUTER", "side: outer")
 eq(UF:GetUnitDB("target").classDragonAnchor, "PORTRAIT", "anchored to the portrait")
@@ -401,13 +401,14 @@ do
     eq(bd.castbarMatchWidth, true, "...as wide as the frame, so no side clears a tail")
     local free = bd.bossSpacing - band
     local list = IN.DragonLayout(bd)
-    eq(#list, 1, "boss: the top piece alone")
-    check(list[1].h < free - 4, "boss: the top piece clears the boss above's cast bar by over 4px")
-    check(list[1].w < bd.frameWidth / 3, "...and takes under a third of the frame's width")
-    local full = IN.DragonLayout({ classDragonSize = 100 })
-    local tail
-    for _, e in ipairs(full) do if e.piece == "BOTTOM" then tail = e end end
-    check(tail.h < band, "(a tail would sit wholly inside the cast bar band: why it is off)")
+    eq(#list, 2, "boss: the top piece and the tail")
+    local top, tail
+    for _, e in ipairs(list) do
+        if e.piece == "BOTTOM" then tail = e else top = e end
+    end
+    check(top.h < free - 4, "boss: the top piece clears the boss above's cast bar by over 4px")
+    check(top.w < bd.frameWidth / 3, "...and takes under a third of the frame's width")
+    check(tail.h < band, "boss: the tail sits wholly inside its own cast bar band (the bar draws over it)")
 end
 
 print("-- Dragon: LEFT mirrors")
