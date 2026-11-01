@@ -354,8 +354,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ NEVER reassign buffFilterSelection or its inner tables: the aura
         -- pipeline holds references to them and a fresh table strands every
         -- holder. Create-if-missing, then mutate in place.
+        -- ⚠ THE TABLE THIS PAGE IS BUILT FOR, resolved live: a page built against a
+        -- settings table of its own (GUI.PageBuildDb -- a unit frame's page) must tick
+        -- ITS selection, not the frame mode's. Every other control here writes `db`;
+        -- a mode-only lookup left these ticks editing Party while the unit's own
+        -- selection never moved. Without one, the frame mode's table, as before.
         local function BuffSelection()
-            local mdb = DF.db and DF.db[GUI.SelectedMode or "party"]
+            local mdb = (GUI.PageBuildDb and GUI.PageBuildDb(self))
+                or (DF.db and DF.db[GUI.SelectedMode or "party"])
             if not mdb then return nil end
             mdb.buffFilterSelection = mdb.buffFilterSelection or {}
             local sel = mdb.buffFilterSelection
