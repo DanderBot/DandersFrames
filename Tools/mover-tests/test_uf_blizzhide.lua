@@ -65,6 +65,8 @@ hooksecurefunc = function(obj, method, fn)
     if method == "SetParent" then obj._setParentHook = fn end
 end
 EditModeManagerFrame = { _shown = false, IsShown = function(self) return self._shown end }
+local editModeExit = {}
+EventRegistry = { RegisterCallback = function(_, event, fn) editModeExit[#editModeExit + 1] = event == "EditMode.Exit" and fn or nil end }
 CreateFrame = nil
 
 local function freshWorld()
@@ -153,8 +155,10 @@ EditModeManagerFrame._shown = true
 PlayerFrame:SetParent(UIParent)
 runTimers()
 eq(reparented[PlayerFrame], 2, "Edit Mode open: waits")
-eq(timers[1] and timers[1].d, 0.25, "...and checks again")
+eq(#timers, 0, "...without polling")
+eq(#editModeExit, 1, "one EditMode.Exit callback")
 EditModeManagerFrame._shown = false
+editModeExit[1]()
 runTimers()
 eq(reparented[PlayerFrame], 3, "Edit Mode closed: re-hidden")
 

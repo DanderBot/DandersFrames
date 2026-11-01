@@ -410,7 +410,7 @@ function CB:Layout(f)
     cb.spark:SetHeight(h * 2)
     cb.showSpark = db.castbarSpark ~= false
     K.Border(cb, db.castbarBorderEnabled ~= false, db.castbarBorderSize, db.castbarBorderColor)
-    K.Border(cb.glow, true, 2, db.castbarImportantGlowColor)
+    K.Border(cb.glow, true, 2, db.castbarPriorityHighlightColor)
     cb.kickTick:SetHeight(h)
 
     -- Text.
@@ -673,7 +673,7 @@ function CB:PaintName(cb, name, db)
 end
 
 function CB:PaintImportant(cb, db)
-    if not (db.castbarImportantGlow and not IsNil(cb.spellID) and C_Spell and C_Spell.IsSpellImportant) then
+    if not (db.castbarPriorityHighlight and not IsNil(cb.spellID) and C_Spell and C_Spell.IsSpellImportant) then
         cb.glow:SetAlpha(0)
         return
     end

@@ -726,7 +726,7 @@ do
     check(w and w.hideOn and w.hideOn({ castbarDetached = true }) and not w.hideOn({ castbarDetached = false }),
           "Cast Bar: the attached-only controls hide while detached")
     cards, keys = BuildPage("target", "castbar")
-    check(has(keys, "castbarKickTick") and has(keys, "castbarImportantGlow"), "target: kick-ready mark, important glow")
+    check(has(keys, "castbarKickTick") and has(keys, "castbarPriorityHighlight"), "target: kick-ready mark, important glow")
     check(not has(keys, "castbarLatency") and not has(keys, "castbarEmpower"), "target: no latency / empower (player only)")
     check(has(keys, "castbarKickNotReadyColor"), "target: the Kick Not Ready colour")
     check(has(keys, "castbarShowTarget"), "target: Show Spell Target")

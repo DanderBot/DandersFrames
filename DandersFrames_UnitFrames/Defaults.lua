@@ -121,7 +121,7 @@ local ELEMENTS = {
     castbarLatency = false,
     castbarEmpower = true,
     castbarKickTick = true,
-    castbarImportantGlow = false,
+    castbarPriorityHighlight = false,
     castbarMatchWidth = true,
     castbarWidth = 220,
     castbarHeight = 18,
@@ -141,7 +141,7 @@ local ELEMENTS = {
     castbarFailedColor = { r = 0.9, g = 0.2, b = 0.2 },
     castbarKickNotReadyColor = { r = 0.9, g = 0.4, b = 0.1 },
     castbarClassColor = false,
-    castbarImportantGlowColor = { r = 1, g = 0.2, b = 0.2 },
+    castbarPriorityHighlightColor = { r = 1, g = 0.55, b = 0.1 },
     castbarShowIcon = true,
     castbarIconSide = "LEFT",
     castbarIconSize = 0,
@@ -592,6 +592,17 @@ function UF.MigrateProfileTable(tbl)
             end
         end
         tbl.global.portraitSizeRelative = true
+    end
+    -- The important-spell cast bar glow was renamed; carry a stored choice over.
+    for _, unit in ipairs(UF.UNITS) do
+        local u = tbl.units[unit]
+        for _, pair in ipairs({ { "castbarImportantGlow", "castbarPriorityHighlight" },
+                                { "castbarImportantGlowColor", "castbarPriorityHighlightColor" } }) do
+            if u[pair[1]] ~= nil then
+                if u[pair[2]] == nil then u[pair[2]] = u[pair[1]] end
+                u[pair[1]] = nil
+            end
+        end
     end
     -- Linked frames: the old per-page sync becomes unit links, and a profile that
     -- never had links gets the default one (Links.lua ENSURE). Idempotent.

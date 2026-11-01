@@ -1440,7 +1440,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
         { "castbarLatency", L["Show Latency"] },
         { "castbarEmpower", L["Show Empower Stages"] },
         { "castbarKickTick", L["Show Kick-Ready Mark"] },
-        { "castbarImportantGlow", L["Glow Important Spells"] },
+        { "castbarPriorityHighlight", L["Glow Important Spells"] },
     }) do
         if shown(c[1]) then
             w = band:AddWidget(GUI:CreateCheckbox(self.child, c[2], db, c[1], changed), 30)
@@ -1501,7 +1501,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
         { "castbarChannelColor", L["Channel"] },
         { "castbarFailedColor", L["Interrupted / Failed"] },
         { "castbarKickNotReadyColor", L["Kick Not Ready"] },
-        { "castbarImportantGlowColor", L["Important Glow"] },
+        { "castbarPriorityHighlightColor", L["Important Glow"] },
     }) do
         if shown(c[1]) then
             w = band:AddWidget(GUI:CreateColorPicker(self.child, c[2], db, c[1], false, changed), 30)

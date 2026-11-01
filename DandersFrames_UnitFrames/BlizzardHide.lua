@@ -17,7 +17,7 @@ local addonName, UF = ...
 --   * Edit Mode re-parents its system frames on every enter/exit, so a SetParent
 --     hook re-hides the frame ONE FRAME LATER (C_Timer.After(0)). Doing it inside
 --     the hook would run inside Blizzard's secure Edit Mode pass and taint secret
---     reads. While Edit Mode is open the re-hide waits for it to close;
+--     reads. While Edit Mode is open the re-hide waits for its EditMode.Exit callback;
 --   * the class alt-power bars (stagger, Ebon Might, soul fragments, alternate
 --     power) sit under PlayerFrame: their events are unregistered and they are
 --     NEVER reparented themselves (Edit-Mode managed; reparenting them taints).
@@ -77,7 +77,14 @@ function BH:BossFrameNames()
     return list
 end
 
-BH.ALT_POWER_BARS = { "AlternatePowerBar", "MonkStaggerBar", "EvokerEbonMightBar", "DemonHunterSoulFragmentsBar" }
+-- Class bars Blizzard parents under PlayerFrame, keyed by the class that gets
+-- them ("ANY" = encounter alternate power). A missing global is skipped.
+BH.PLAYER_CLASS_BARS = {
+    DemonHunterSoulFragmentsBar = "DEMONHUNTER",
+    EvokerEbonMightBar = "EVOKER",
+    MonkStaggerBar = "MONK",
+    AlternatePowerBar = "ANY",
+}
 
 -- Blizzard's player cast bar (spec §1.6, Q7). global.hideBlizzardCastbar:
 --   true / false   the user's own choice
@@ -91,8 +98,8 @@ BH.CASTBAR = "PlayerCastingBarFrame"
 local CHILD_KEYS = { "healthbar", "manabar", "spellbar", "powerBarAlt", "totFrame" }
 
 BH.hidden = {}      -- frame -> the hidden parent it was given
-BH.hooked = {}      -- frame -> true once its SetParent hook is in
-BH.pending = {}     -- frame -> true while a deferred re-hide is scheduled
+BH.watched = {}     -- frame -> true once its SetParent hook is in
+BH.strays = {}      -- frames moved off their hidden parent, put back on the next sweep
 
 -- Our own hidden parent, used only when DF's helpers are missing.
 local fallbackParent
@@ -133,26 +140,46 @@ local function Reparent(frame)
     BH.hidden[frame] = frame:GetParent()
 end
 
--- The deferred re-hide after something else re-parented the frame.
-function BH:Rehide(frame)
-    BH.pending[frame] = nil
-    if frame:GetParent() == BH.hidden[frame] then return end
-    if EditModeManagerFrame and EditModeManagerFrame:IsShown() then
-        BH.pending[frame] = true
-        C_Timer.After(0.25, function() BH:Rehide(frame) end)
-        return
-    end
-    UF:RunOutOfCombat("rehide:" .. tostring(frame:GetName()), function() Reparent(frame) end)
+local sweepQueued, editModeWatched = false, false
+
+local function EditModeOpen()
+    return EditModeManagerFrame and EditModeManagerFrame:IsShown() and true or false
 end
 
-local function HookParent(frame)
-    if BH.hooked[frame] then return end
-    BH.hooked[frame] = true
+-- Put every stray back on its hidden parent. While Edit Mode is open nothing
+-- moves: its "EditMode.Exit" callback (and the re-parent pass Edit Mode does on
+-- close, which trips the hook again) runs the sweep once it shuts.
+function BH:SweepStrays()
+    sweepQueued = false
+    if EditModeOpen() then return end
+    for frame in pairs(BH.strays) do
+        BH.strays[frame] = nil
+        if frame:GetParent() ~= BH.hidden[frame] then
+            UF:RunOutOfCombat("rehide:" .. tostring(frame:GetName()), function() Reparent(frame) end)
+        end
+    end
+end
+
+-- Next frame, never inside the hook: that runs in Blizzard's secure Edit Mode
+-- pass, and reparenting there taints secret reads.
+local function QueueSweep()
+    if sweepQueued then return end
+    sweepQueued = true
+    C_Timer.After(0, function() BH:SweepStrays() end)
+end
+
+local function Watch(frame)
+    if BH.watched[frame] then return end
+    BH.watched[frame] = true
     hooksecurefunc(frame, "SetParent", function(self, parent)
-        if parent == BH.hidden[self] or BH.pending[self] then return end
-        BH.pending[self] = true
-        C_Timer.After(0, function() BH:Rehide(self) end)
+        if parent == BH.hidden[self] then return end
+        BH.strays[self] = true
+        QueueSweep()
     end)
+    if not editModeWatched and EventRegistry and EventRegistry.RegisterCallback then
+        editModeWatched = true
+        EventRegistry:RegisterCallback("EditMode.Exit", QueueSweep, BH)
+    end
 end
 
 -- Hide one Blizzard frame now. Out of combat only (the caller queues).
@@ -162,7 +189,7 @@ function BH:HideFrame(name)
     if InCombatLockdown() then return false end
     BH:StripFrame(frame)
     Reparent(frame)
-    HookParent(frame)
+    Watch(frame)
     UF.Debug("hid Blizzard %s", name)
     return true
 end
@@ -181,15 +208,15 @@ function BH:HideBoss()
     local c = _G[BH.BOSS_CONTAINER]
     if type(c) == "table" then
         Reparent(c)
-        HookParent(c)
+        Watch(c)
     end
     UF.Debug("hid Blizzard boss frames")
     return true
 end
 
 -- Events only, combat-legal; never reparented.
-function BH:DisableAltPowerBars()
-    for _, name in ipairs(BH.ALT_POWER_BARS) do
+function BH:SilencePlayerClassBars()
+    for name in pairs(BH.PLAYER_CLASS_BARS) do
         Unregister(_G[name])
     end
 end
@@ -210,7 +237,7 @@ function BH:HideUnit(unit)
         if DF.ClaimBlizzardFrame then DF:ClaimBlizzardFrame(name, BH.OWNER) end
         UF:RunOutOfCombat("hide:" .. name, function() BH:HideFrame(name) end)
     end
-    if unit == "player" then BH:DisableAltPowerBars() end
+    if unit == "player" then BH:SilencePlayerClassBars() end
 end
 
 -- Our own player cast bar is drawn (the default the setting follows).
