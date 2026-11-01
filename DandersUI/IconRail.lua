@@ -40,7 +40,9 @@ if not UI then return end
 --
 -- ☠ NOTHING HERE NAMES A CONSUMER. Which items exist, what a click does and
 -- what is locked are the caller's business; the rail only draws them.
--- Part of the load-on-demand options manifest.
+-- Part of the BASE manifest (DandersUI.xml), not the load-on-demand options
+-- half: a standalone host with no options companion uses it for its own
+-- settings window (moved there at MINOR 44).
 -- ============================================================
 
 local CreateFrame = CreateFrame

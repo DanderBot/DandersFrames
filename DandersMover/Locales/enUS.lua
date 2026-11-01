@@ -10,6 +10,7 @@ NS.L = L
 -- Strings are added here as tasks introduce them (alphabetical).
 L["%d mover positions reset."] = true
 L["0 on Mirror Position is the centre of the screen."] = true
+L["Addons"] = true
 L["Align"] = true
 L["Anchor"] = true
 L["Anchor %s"] = true
@@ -56,6 +57,7 @@ L["Edge"] = true
 L["Editor"] = true
 L["End"] = true
 L["Free"] = true
+L["General"] = true
 L["Grid"] = true
 L["Grid line thickness"] = true
 L["Grid Size"] = true

@@ -212,8 +212,14 @@ do
     local src = ui_file_source("IconRail.lua")
     check(not src:find("DF[%.:]") and not src:find("DandersFrames") and not src:find("DandersMover"),
           "kit: no DF / DandersFrames / DandersMover reference")
-    local xml = ui_file_source("DandersUI_Options.xml")
-    check(xml:find('<Script file="IconRail.lua"/>', 1, true) ~= nil, "manifest: listed in the options manifest")
+    -- Base manifest, not the options half: DandersMover's settings window uses
+    -- the rail and the mover never loads the options companion.
+    local xml = ui_file_source("DandersUI.xml")
+    check(xml:find('<Script file="IconRail.lua"/>', 1, true) ~= nil, "manifest: listed in the base manifest")
+    local opts = ui_file_source("DandersUI_Options.xml")
+    check(opts:find('<Script file="IconRail.lua"/>', 1, true) == nil, "manifest: ...and not loaded twice from the options half")
+    local w = xml:find('<Script file="Widgets.lua"/>', 1, true)
+    check(w ~= nil and w < xml:find('<Script file="IconRail.lua"/>', 1, true), "manifest: after Widgets.lua (CreateSelectionMarker)")
     local core = ui_file_source("Core.lua")
     local opt = ui_file_source("OptionsCore.lua")
     local m = core:match('MINOR = "DandersUI%-1%.0", (%d+)')

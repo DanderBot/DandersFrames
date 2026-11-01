@@ -10,12 +10,17 @@ if not NS.Lib then return end
 -- (snapping, grid size) lands here, which is where a set-once preference
 -- belongs.
 --
--- Laid out as titled group boxes in the DandersFrames settings style: Scale on
--- its own row under the title, then Snapping, Grid, Editor and Registered
--- addons. Rows inside a box stack on the theme's slot heights (UI.RowHeight),
--- so the rhythm matches the options pages. Two columns when the screen has the
--- room -- settings left, Registered addons right -- one column when it does
--- not (see LAYOUT).
+-- Laid out like DandersFrames' own settings window and test popup: the title
+-- bar across the top, an icon rail down the left (UI:CreateIconRail at the
+-- test popup's compact size) and ONE slim column of content beside it. The
+-- rail picks a section -- General, Snapping, Grid, Editor, Addons -- and only
+-- that section's rows are shown. The pick is remembered in
+-- DandersMoverDB.settingsSection. Rows inside a section stack on the theme's
+-- slot heights (UI.RowHeight), so the rhythm matches the options pages.
+--
+-- The window is one fixed size: as tall as the tallest settings section (or the
+-- rail, if that is taller), so flipping sections never resizes it under the
+-- cursor. The Addons list fills that whole height and scrolls.
 -- ============================================================
 local St = {}
 NS.Settings = St
@@ -24,19 +29,32 @@ local Registry, Sess, Proxy, Grid, UI, L = NS.Registry, NS.Session, NS.Proxy, NS
 local CreateFrame, UIParent, C_Timer = CreateFrame, UIParent, C_Timer
 local ipairs, pairs, tinsert, wipe, tsort, max = ipairs, pairs, table.insert, wipe, table.sort, math.max
 
-local W = 420
 local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
-local INNER = W - PAD * 2                 -- group box width
-local CONTENT = INNER - PAD * 2           -- width inside a group box
+local CONTENT = 280                       -- the content column's width
+local RAIL_W = 60                         -- the icon rail (fits "Snapping" under its icon)
+local PANE_X = RAIL_W + 1 + PAD           -- the content column's left edge
+local W = PANE_X + CONTENT + PAD          -- the window
 local TITLE_ICON, TITLE_H = 20, 24        -- window title bar
-local LIST_H = 200                        -- the scrollable addon list
+local HEADING_H = 18                      -- the section name over the column
 local SCROLLBAR_W = 16                    -- room for the styled scrollbar
 local LIST_ROW = 26                       -- one toggle row in the addon list
 local LIST_HEADING = 16                   -- a group subheading between element rows
 local CHECK_CONTENT_TOP, CHECK_CONTENT_H = 3, 18   -- where the check sits inside its 35px slot
 local SEG_GAP = 2                         -- between segmented buttons
-local COL_GAP = PAD                       -- between the two columns
-local W2 = INNER * 2 + PAD * 2 + COL_GAP  -- the two-column window
+
+-- The rail's sections, in rail order. Icons resolve at build time (UI.MEDIA is
+-- the winning kit copy's folder); "mover" icons ship in DandersMover/Media, "kit"
+-- icons in DandersUI/Media/Icons -- both always present without DandersFrames.
+local MOVER_MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
+local SECTIONS = {
+    { id = "general",  kit = "settings", label = "General" },
+    { id = "snapping", mover = "link",   label = "Snapping" },
+    { id = "grid",     mover = "grip",   label = "Grid" },
+    { id = "editor",   kit = "pin",      label = "Editor" },
+    { id = "addons",   kit = "check",    label = "Addons", heading = "Registered addons" },
+}
+St.SECTIONS = SECTIONS
+local DEFAULT_SECTION = "general"
 
 local function rebuildProxies()
     Sess:RebuildProxies()
@@ -53,32 +71,34 @@ local function addonDB(name)
     return NS.db.addons[name]
 end
 
+local function knownSection(id)
+    for _, s in ipairs(SECTIONS) do if s.id == id then return true end end
+    return false
+end
+
 -- ============================================================
 -- ROW STACKING
--- Stacks widgets down a group box's content frame on their factory slot
--- heights. A run of the same compact kind closes up to RowGapTight (the rule
--- in UI.RowCompact); the last row drops its trailing gap because the box's own
--- padding follows it. Returns the content height.
+-- Stacks widgets down a section page on their factory slot heights. Tight
+-- metrics throughout: this window is a compact tool palette, not an options
+-- page, so EVERY row closes up to RowGapTight; the last row drops its trailing
+-- gap. Sets and returns the page height.
 -- ============================================================
-local function stack(box, widgets)
+local function stack(page, widgets)
     local y = 0
     for i, w in ipairs(widgets) do
         local h = w.preferredHeight or UI.RowHeight.checkbox
         if widgets[i + 1] then
-            -- Tight metrics throughout: this window is a compact tool palette,
-            -- not an options page, so EVERY row closes up to RowGapTight, not
-            -- just runs of the same compact kind.
             h = h - (GAP - TIGHT)
         else
             h = h - GAP
         end
-        w:SetParent(box.content)
+        w:SetParent(page)
         w:ClearAllPoints()
-        w:SetPoint("TOPLEFT", box.content, "TOPLEFT", 0, -y)
+        w:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -y)
         w:SetWidth(CONTENT)
         y = y + h
     end
-    box:SetContentHeight(y)
+    page:SetHeight(y)
     return y
 end
 
@@ -126,66 +146,23 @@ local function segmentedRow(parent, label, options, get, set)
 end
 
 -- ============================================================
--- LAYOUT
--- Two columns when the screen is wide enough for them at the current chrome
--- scale: the settings boxes stacked on the left, Registered addons on the
--- right, its list stretched to the height of the left column so the two
--- bottoms line up (the list is the one thing in the window that wants the
--- room). Otherwise one column, the list under the settings at LIST_H, as it
--- always was. Tester request (alpha.12), after DandersFrames' own options.
---
--- Re-run on every show and every scale change: the window is scaled, so how
--- much screen it has is the screen's width in ITS units. Only positions and
--- two sizes move -- the addon list's rows are cached by identity and keep
--- their width (the column is the same width either way), so a relayout
--- creates nothing.
+-- SECTIONS
+-- Shows one page, hides the rest, paints the rail and remembers the pick.
+-- Called on a rail click, on build (the remembered section) and by tests.
+-- rawget: the lifecycle suite (test_settings_window.lua) stands the window in
+-- with a bare stub frame whose unknown fields answer a truthy no-op.
 -- ============================================================
-local function wantsTwoColumns()
-    local sw = UIParent:GetWidth()
-    if type(sw) ~= "number" then return false end
-    return sw / chromeScale() >= W2 + PAD * 2
-end
-
-local function layout(f)
-    local two = wantsTwoColumns()
-    f.twoColumns = two
-    local width = two and W2 or W
-    f:SetWidth(width)
-    local y = f.columnsTop
-    f.scaleSlider:ClearAllPoints()
-    f.scaleSlider:SetPoint("TOPLEFT", f, "TOPLEFT", PAD * 2, f.scaleTop)
-    f.scaleSlider:SetWidth(width - PAD * 4)
-    -- Left column.
-    for _, box in ipairs(f.leftBoxes) do
-        box:ClearAllPoints()
-        box:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-        y = y - box:GetHeight() - UI.Space.section
+function St:SelectSection(id)
+    local f = self.frame
+    if not (f and rawget(f, "pages")) then return end
+    if not knownSection(id) then id = DEFAULT_SECTION end
+    for sid, page in pairs(f.pages) do page:SetShown(sid == id) end
+    f.section = id
+    for _, s in ipairs(SECTIONS) do
+        if s.id == id then f.heading:SetText(L[s.heading or s.label]) end
     end
-    local leftBottom = y + UI.Space.section          -- the last box's bottom edge
-    local addons = f.addonsBox
-    -- The box's own chrome (title strip, padding) around its content.
-    addons:SetContentHeight(LIST_H)
-    local chrome = addons:GetHeight() - LIST_H
-    local listH = LIST_H
-    addons:ClearAllPoints()
-    if two then
-        listH = max(LIST_H, (f.columnsTop - leftBottom) - chrome)
-        addons:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + INNER + COL_GAP, f.columnsTop)
-    else
-        addons:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-    end
-    f.scroll:SetSize(CONTENT - SCROLLBAR_W, listH)
-    addons:SetContentHeight(listH)
-    local bottom = two and (f.columnsTop - addons:GetHeight()) or (y - addons:GetHeight())
-    if two and leftBottom < bottom then bottom = leftBottom end
-    f:SetHeight(-bottom + PAD)
-end
-
--- A window build() made. rawget, because the lifecycle suite
--- (test_settings_window.lua) stands the window in with a bare stub frame whose
--- unknown fields answer a truthy no-op.
-local function relayout(f)
-    if rawget(f, "addonsBox") then layout(f) end
+    f.rail:Select(id, true)
+    NS.db.settingsSection = id
 end
 
 -- ============================================================
@@ -194,8 +171,6 @@ end
 local function build()
     local f = CreateFrame("Frame", "DandersMoverSettings", UIParent, "BackdropTemplate")
     f:SetWidth(W)
-    -- Centre-right by default: the window is a side palette, and dead centre
-    -- is exactly where the frames being moved usually live.
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetFrameStrata("DIALOG")
     f:SetScale(chromeScale())
@@ -218,16 +193,81 @@ local function build()
     f.title:SetPoint("RIGHT", f.close, "LEFT", -TIGHT, 0)
     f.title:SetWordWrap(false)
 
-    local y = -(PAD + TITLE_H + GAP)
-    -- The settings boxes, top to bottom; layout() places them (and the list).
-    f.leftBoxes = {}
-    local function place(box) tinsert(f.leftBoxes, box) end
+    -- Everything under the title bar: the rail on the left, the column beside it.
+    local bodyTop = -(PAD + TITLE_H + TIGHT)
+    local pageTop = bodyTop - TIGHT - HEADING_H - TIGHT
 
-    -- ---- Scale: its own row, first thing under the title ---------------
-    -- It sizes this very window (and the strip, the panel, the toast and the text on the
-    -- slabs -- see NS:ChromeScale), so it is the one control that has to be findable at a
-    -- glance.
-    f.scaleSlider = UI:CreateSlider(f, {
+    -- ---- the rail ----------------------------------------------------
+    -- The test popup's compact metrics, a touch wider so "Snapping" fits.
+    local rail = UI:CreateIconRail(f, {
+        width = RAIL_W, itemHeight = 40, iconSize = 16, iconTop = 6,
+        labelGap = 3, labelInset = 1, spacing = 1, paddingTop = 6, paddingBottom = 6,
+        onSelect = function(id) St:SelectSection(id) end,
+    })
+    rail:SetPoint("TOPLEFT", f, "TOPLEFT", 1, bodyTop)
+    rail:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 1, 1)
+    local C_PANEL, C_BORDER = UI.Colors.panel, UI.Colors.border
+    if C_PANEL then
+        local bg = rail:CreateTexture(nil, "BACKGROUND", nil, -1)
+        bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        bg:SetAllPoints(rail)
+        bg:SetVertexColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.35)
+    end
+    if C_BORDER then
+        local edge = rail:CreateTexture(nil, "BORDER")
+        edge:SetTexture("Interface\\Buttons\\WHITE8x8")
+        edge:SetPoint("TOPRIGHT", rail, "TOPRIGHT", 0, 0)
+        edge:SetPoint("BOTTOMRIGHT", rail, "BOTTOMRIGHT", 0, 0)
+        edge:SetWidth(1)
+        edge:SetVertexColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
+    end
+    -- The rail's gaps move the window, like the title bar.
+    rail:EnableMouse(true)
+    rail:RegisterForDrag("LeftButton")
+    rail:SetScript("OnDragStart", function() f:StartMoving() end)
+    rail:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+    local items = {}
+    for i, s in ipairs(SECTIONS) do
+        items[i] = {
+            id = s.id, label = L[s.label], tooltip = L[s.heading or s.label],
+            icon = s.mover and (MOVER_MEDIA .. s.mover) or (UI.MEDIA .. "Icons\\" .. s.kit .. ".png"),
+        }
+    end
+    rail:SetItems(items)
+    f.rail = rail
+
+    -- ---- the column: section name, then one page per section ----------
+    f.heading = UI:CreateLabel(f, { text = "", font = "DFFontNormal" })
+    f.heading:SetPoint("TOPLEFT", f, "TOPLEFT", PANE_X, bodyTop - TIGHT)
+    f.heading:SetWidth(CONTENT)
+    f.heading:SetWordWrap(false)
+    f.pages = {}
+    for _, s in ipairs(SECTIONS) do
+        local page = CreateFrame("Frame", nil, f)
+        page:SetWidth(CONTENT)
+        page:SetPoint("TOPLEFT", f, "TOPLEFT", PANE_X, pageTop)
+        page:Hide()
+        f.pages[s.id] = page
+    end
+    local pages = f.pages
+
+    f.cb = {}
+    local function toggle(parent, label, key, after, tooltip)
+        local cb = UI:CreateCheckbox(parent, {
+            label = label, tooltip = tooltip,
+            get = function() return NS.db[key] end,
+            set = function(v) NS.db[key] = v; if after then after() end end,
+        })
+        cb.dbKey = key
+        tinsert(f.cb, cb)
+        return cb
+    end
+
+    -- ---- General ----------------------------------------------------
+    -- Scale sizes this very window (and the strip, the panel, the toast and the
+    -- text on the slabs -- see NS:ChromeScale), so it is the first thing in the
+    -- first section.
+    f.scaleSlider = UI:CreateSlider(pages.general, {
         label = L["Scale"], min = 0.5, max = 1.5, step = 0.05,
         tooltip = { title = L["Scale"],
                     lines = { L["Size of the top strip, the element panel, this window and the text on the movers. Movers themselves always match their frames."] } },
@@ -258,25 +298,27 @@ local function build()
             if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end
         end,
     })
-    f.scaleTop = y
-    f.columnsTop = y - (f.scaleSlider.preferredHeight or UI.RowHeight.slider or 50) - TIGHT
-
-    f.cb = {}
-    local function toggle(parent, label, key, after, tooltip)
-        local cb = UI:CreateCheckbox(parent, {
-            label = label, tooltip = tooltip,
-            get = function() return NS.db[key] end,
-            set = function(v) NS.db[key] = v; if after then after() end end,
-        })
-        tinsert(f.cb, cb)
-        return cb
-    end
+    f.sideRow = segmentedRow(pages.general, L["Panel side"],
+        { { value = "auto", text = L["Auto"] }, { value = "left", text = L["Left"] }, { value = "right", text = L["Right"] } },
+        function() return NS.db.panelSide end,
+        function(v) NS.db.panelSide = v; if NS.Panel then NS.Panel:Refresh() end end)
+    -- The slabs' fill only; applied live (the mover host has no drag hooks, so
+    -- onChanged runs on every step of the drag).
+    f.opacitySlider = UI:CreateSlider(pages.general, {
+        label = L["Mover Opacity"], min = 0.1, max = 1, step = 0.05,
+        tooltip = { title = L["Mover Opacity"],
+                    lines = { L["How solid the movers are. Lower it to see the frames underneath; outlines, colours and names stay at full strength."] } },
+        get = function() return NS.db.moverOpacity end,
+        set = function(v) NS.db.moverOpacity = v end,
+        onChanged = function() if Proxy and Proxy.ApplyOpacity then Proxy:ApplyOpacity() end end,
+    })
+    local tallest = stack(pages.general, { f.scaleSlider, f.sideRow, f.opacitySlider })
 
     -- ---- Snapping ---------------------------------------------------
-    local snap = UI:CreateGroupBox(f, { title = L["Snapping"], width = INNER })
     -- Fixed distance, so the pull is the same for a raid container and a lone icon.
     -- 0 still snaps on a genuine overlap (gap 0), it just kills the reach.
-    f.snapDistSlider = UI:CreateSlider(snap.content, {
+    local sp = pages.snapping
+    f.snapDistSlider = UI:CreateSlider(sp, {
         label = L["Snap distance"], min = 0, max = 400, step = 10,
         get = function() return NS.db.snapDistance end,
         set = function(v) NS.db.snapDistance = v end,
@@ -284,47 +326,46 @@ local function build()
     -- Zones light up before they grab: this radius is how far out they appear.
     -- Clamped to at least the snap distance so a zone that will take the drop is
     -- always visible.
-    f.zoneShowSlider = UI:CreateSlider(snap.content, {
+    f.zoneShowSlider = UI:CreateSlider(sp, {
         label = L["Show snap zones within"], min = 0, max = 600, step = 10,
         get = function() return NS.db.zoneShowDistance end,
         set = function(v) NS.db.zoneShowDistance = v end,
     })
-    stack(snap, {
-        pairRow(snap.content,
-            toggle(snap.content, L["Snap to grid"], "snapToGrid"),
-            toggle(snap.content, L["Snap to frames"], "snapToFrames")),
-        pairRow(snap.content,
-            toggle(snap.content, L["Snap to screen"], "snapToScreen"),
-            toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end)),
+    tallest = max(tallest, stack(sp, {
+        pairRow(sp,
+            toggle(sp, L["Snap to grid"], "snapToGrid"),
+            toggle(sp, L["Snap to frames"], "snapToFrames")),
+        pairRow(sp,
+            toggle(sp, L["Snap to screen"], "snapToScreen"),
+            toggle(sp, L["Show grid"], "showGrid", function() Grid:Refresh() end)),
         -- One per row, not paired: these two labels are half again as long as
         -- the four above, and a translation of either would run into a
         -- neighbour at half width. The `after` hooks clear whatever is on
         -- screen the moment the toggle goes off, so it takes effect live
         -- rather than at the next drag.
-        toggle(snap.content, L["Show distance measures"], "showMeasures", function() Grid:HideMeasure() end),
-        toggle(snap.content, L["Show grid snap lines"], "showSnapPreview", function() Grid:HidePreview() end),
+        toggle(sp, L["Show distance measures"], "showMeasures", function() Grid:HideMeasure() end),
+        toggle(sp, L["Show grid snap lines"], "showSnapPreview", function() Grid:HidePreview() end),
         f.snapDistSlider,
         f.zoneShowSlider,
-    })
-    place(snap)
+    }))
 
     -- ---- Grid -------------------------------------------------------
     -- How the grid LOOKS, and the dim behind it. Every change redraws live.
-    local gridBox = UI:CreateGroupBox(f, { title = L["Grid"], width = INNER })
-    f.gridSlider = UI:CreateSlider(gridBox.content, {
+    local gp = pages.grid
+    f.gridSlider = UI:CreateSlider(gp, {
         label = L["Grid Size"], min = 10, max = 100, step = 5,
         get = function() return NS.db.gridSize end,
         set = function(v) NS.db.gridSize = v end,
         onChanged = function() Grid:Refresh() end,
     })
     -- Device pixels; Grid.lua snaps each line to whole pixels.
-    f.thickSlider = UI:CreateSlider(gridBox.content, {
+    f.thickSlider = UI:CreateSlider(gp, {
         label = L["Grid line thickness"], min = 1, max = 5, step = 1,
         get = function() return NS.db.gridThickness end,
         set = function(v) NS.db.gridThickness = v end,
         onChanged = function() Grid:Refresh() end,
     })
-    f.dimSlider = UI:CreateSlider(gridBox.content, {
+    f.dimSlider = UI:CreateSlider(gp, {
         label = L["Dim amount"], min = 0.1, max = 0.9, step = 0.05,
         get = function() return NS.db.dimAlpha end,
         set = function(v) NS.db.dimAlpha = v end,
@@ -333,63 +374,53 @@ local function build()
     -- Grey-when-disabled: the amount means nothing with the dim off.
     local function gateDim() f.dimSlider:SetEnabled(NS.db.dimBackground and true or false) end
     f.gateDim = gateDim
-    stack(gridBox, {
+    tallest = max(tallest, stack(gp, {
         f.gridSlider,
         f.thickSlider,
-        toggle(gridBox.content, L["Dim background"], "dimBackground", function() Grid:Refresh(); gateDim() end,
+        toggle(gp, L["Dim background"], "dimBackground", function() Grid:Refresh(); gateDim() end,
             { title = L["Dim background"], lines = { L["Darkens the game world behind the grid while the movers are open, so the grid and your frames stand out."] } }),
         f.dimSlider,
-    })
+    }))
     gateDim()
-    place(gridBox)
 
     -- ---- Editor -----------------------------------------------------
-    local editor = UI:CreateGroupBox(f, { title = L["Editor"], width = INNER })
-    f.sideRow = segmentedRow(editor.content, L["Panel side"],
-        { { value = "auto", text = L["Auto"] }, { value = "left", text = L["Left"] }, { value = "right", text = L["Right"] } },
-        function() return NS.db.panelSide end,
-        function(v) NS.db.panelSide = v; if NS.Panel then NS.Panel:Refresh() end end)
-    -- The slabs' fill only; applied live (the mover host has no drag hooks, so
-    -- onChanged runs on every step of the drag).
-    f.opacitySlider = UI:CreateSlider(editor.content, {
-        label = L["Mover Opacity"], min = 0.1, max = 1, step = 0.05,
-        tooltip = { title = L["Mover Opacity"],
-                    lines = { L["How solid the movers are. Lower it to see the frames underneath; outlines, colours and names stay at full strength."] } },
-        get = function() return NS.db.moverOpacity end,
-        set = function(v) NS.db.moverOpacity = v end,
-        onChanged = function() if Proxy and Proxy.ApplyOpacity then Proxy:ApplyOpacity() end end,
-    })
-    stack(editor, {
-        toggle(editor.content, L["Keyboard nudge"], "keyboardNudge", nil,
+    local ep = pages.editor
+    tallest = max(tallest, stack(ep, {
+        toggle(ep, L["Keyboard nudge"], "keyboardNudge", nil,
             { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] } }),
-        toggle(editor.content, L["Auto-pin panels when editing"], "autoPinPanels", nil,
+        toggle(ep, L["Auto-pin panels when editing"], "autoPinPanels", nil,
             { title = L["Auto-pin panels when editing"], lines = { L["Typing in or clicking a mover's panel pins it in place. Off: only the pin button pins."] } }),
-        toggle(editor.content, L["Show movers for hidden frames"], "showHiddenMovers", rebuildProxies),
+        toggle(ep, L["Show movers for hidden frames"], "showHiddenMovers", rebuildProxies),
         -- In a session another addon opened (e.g. /df unlock), other addons' movers are
         -- anchor targets but not draggable unless this is on. Mirrored on the legend.
-        toggle(editor.content, L["Show other addons' movers"], "showOtherAddons", rebuildProxies),
-        f.sideRow,
-        f.opacitySlider,
-    })
-    place(editor)
+        toggle(ep, L["Show other addons' movers"], "showOtherAddons", rebuildProxies),
+    }))
 
-    -- ---- Registered addons ------------------------------------------
-    local addons = UI:CreateGroupBox(f, { title = L["Registered addons"], width = INNER })
-    local scroll = CreateFrame("ScrollFrame", nil, addons.content, "ScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 0, 0)
-    scroll:SetSize(CONTENT - SCROLLBAR_W, LIST_H)
+    -- ---- size: the tallest settings page, or the rail if that is taller ----
+    -- The rail runs from bodyTop to a pixel off the bottom edge; the page area
+    -- starts (bodyTop - pageTop) lower and ends PAD above that edge.
+    local railNeed = rail:GetContentHeight() - (bodyTop - pageTop) - PAD + 1
+    local paneH = max(tallest, railNeed)
+    f.paneHeight = paneH
+    f:SetHeight(-pageTop + paneH + PAD)
+
+    -- ---- Addons: the registered-addons list, filling the column ----------
+    local ap = pages.addons
+    ap:SetHeight(paneH)
+    local scroll = CreateFrame("ScrollFrame", nil, ap, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", ap, "TOPLEFT", 0, 0)
+    scroll:SetSize(CONTENT - SCROLLBAR_W, paneH)
     UI.StyleScrollBar(scroll)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(CONTENT - SCROLLBAR_W, 10)
     scroll:SetScrollChild(content)
-    f.addonsBox, f.scroll = addons, scroll
+    f.scroll = scroll
     f.content = content
     f.listWidth = CONTENT - SCROLLBAR_W
     f.rows = {}
     f.rowCache = {}               -- identity key -> row frame; see ROWS ARE CACHED
     f.expanded = {}
 
-    layout(f)
     -- Every slider, for Refresh to re-read.
     f.sliders = { f.snapDistSlider, f.zoneShowSlider, f.gridSlider, f.thickSlider, f.dimSlider,
                   f.opacitySlider, f.scaleSlider }
@@ -572,7 +603,11 @@ NS.Lib.RegisterCallback(St, "Locked", function()
 end)
 
 function St:Show()
-    if not self.frame then self.frame = build() else relayout(self.frame) end
+    if not self.frame then
+        self.frame = build()
+        -- The section last picked (DandersMoverDB.settingsSection), else General.
+        self:SelectSection(NS.db.settingsSection)
+    end
     self.sessionOwned = (Sess and Sess.IsActive and Sess:IsActive()) and true or false
     self.frame:Show()
     self:Refresh()
@@ -589,6 +624,4 @@ function St:Toggle() if self.frame and self.frame:IsShown() then self:Hide() els
 function St:ApplyChromeScale()
     if not self.frame then return end
     self.frame:SetScale(chromeScale())
-    -- The screen is a different width in the window's units now.
-    relayout(self.frame)
 end

@@ -9,5 +9,6 @@
 	<Script file="Popout.lua"/>
 	<Script file="Fonts.lua"/>
 	<Script file="Widgets.lua"/>
+	<Script file="IconRail.lua"/>
 	<Script file="Popup.lua"/>
 </Ui>

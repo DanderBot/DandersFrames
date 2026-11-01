@@ -58,12 +58,24 @@ NS.UI = {
         made.sliders[#made.sliders + 1] = s
         return s
     end,
-    CreateCheckbox = function(_, _, opts)
+    CreateCheckbox = function(_, parent, opts)
         local c = FakeUIFrame(260, 35)
         c._opts = opts
+        c._parentArg = parent
         c.preferredHeight = 35
         made.checks[#made.checks + 1] = c
         return c
+    end,
+    -- The icon rail: records its items, its pick and its options (onSelect).
+    CreateIconRail = function(_, _, opts)
+        local r = FakeUIFrame(opts and opts.width or 60, 0)
+        r._opts, r._items = opts, {}
+        function r:SetItems(items) self._items = items; return self end
+        function r:Select(id) self._selected = id; return self end
+        function r:GetSelected() return self._selected end
+        function r:GetContentHeight() local n = #self._items return 6 + n * 40 + math.max(n - 1, 0) + 6 end
+        made.rail = r
+        return r
     end,
     -- A group box: title strip + padding round a content frame, sized by
     -- SetContentHeight the way the real one is.
@@ -161,32 +173,131 @@ do
 end
 
 -- ============================================================
--- SCALE: FIRST THING IN THE WINDOW
--- It used to be the last row of the Editor box, at the bottom of the window.
+-- THE RAIL: FIVE SECTIONS, IN ORDER
+-- One slim column with an icon rail on its left (like DandersFrames' settings
+-- window and test popup), replacing the old group boxes / two-column layout.
 -- ============================================================
-print("-- Settings build: the Scale control sits at the top, in its own row")
+print("-- Settings build: the rail lists five sections in order")
+local ORDER = { "general", "snapping", "grid", "editor", "addons" }
+local LABELS = { "General", "Snapping", "Grid", "Editor", "Addons" }
+do
+    local rail = made.rail
+    check(rail ~= nil and f.rail == rail, "rail: the window has an icon rail")
+    eq(#rail._items, 5, "rail: five sections")
+    for i, id in ipairs(ORDER) do
+        local it = rail._items[i] or {}
+        eq(it.id, ORDER[i], "rail: item " .. i .. " is " .. id)
+        eq(it.label, LABELS[i], "rail: ...labelled " .. LABELS[i])
+        check(type(it.icon) == "string" and it.icon ~= "", "rail: ...with an icon")
+        -- Standalone: every icon ships with DandersMover or the kit it embeds,
+        -- never DandersFrames' own media.
+        check(type(it.icon) == "string" and not it.icon:find("DandersFrames", 1, true),
+              "rail: ...that does not need DandersFrames")
+    end
+    eq(#made.boxes, 0, "rail: no group boxes are built any more")
+    check(rawget(f, "twoColumns") == nil and rawget(f, "addonsBox") == nil, "rail: the two-column layout is gone")
+    check(f:GetWidth() < 420, "rail: the window is narrower than the old one-column window")
+end
+
+-- ============================================================
+-- PICKING A SECTION SHOWS ONLY ITS ROWS
+-- ============================================================
+print("-- Settings build: picking a section shows only its page")
+do
+    eq(f.section, "general", "pick: a fresh window opens on General")
+    for _, id in ipairs(ORDER) do
+        made.rail._opts.onSelect(id)        -- a user click on the rail
+        eq(f.section, id, "pick: " .. id .. " is current")
+        eq(made.rail:GetSelected(), id, "pick: ...and painted on the rail")
+        for _, other in ipairs(ORDER) do
+            eq(f.pages[other]:IsShown(), other == id,
+               "pick: with " .. id .. " picked, the " .. other .. " page is " .. (other == id and "shown" or "hidden"))
+        end
+    end
+    made.rail._opts.onSelect("general")
+end
+
+-- ============================================================
+-- EVERY SETTING, UNDER ITS SECTION, ON ITS OLD KEY
+-- ============================================================
+print("-- Settings build: every setting sits under the right section, same key")
+do
+    local CHECKS = {
+        { "Snap to grid", "snapToGrid", "snapping" },
+        { "Snap to frames", "snapToFrames", "snapping" },
+        { "Snap to screen", "snapToScreen", "snapping" },
+        { "Show grid", "showGrid", "snapping" },
+        { "Show distance measures", "showMeasures", "snapping" },
+        { "Show grid snap lines", "showSnapPreview", "snapping" },
+        { "Dim background", "dimBackground", "grid" },
+        { "Keyboard nudge", "keyboardNudge", "editor" },
+        { "Auto-pin panels when editing", "autoPinPanels", "editor" },
+        { "Show movers for hidden frames", "showHiddenMovers", "editor" },
+        { "Show other addons' movers", "showOtherAddons", "editor" },
+    }
+    eq(#made.checks, #CHECKS, "keys: exactly the old checkboxes, no more, no fewer")
+    for _, c in ipairs(CHECKS) do
+        local label, key, sec = c[1], c[2], c[3]
+        local w = byLabel(made.checks, label)
+        check(w ~= nil, "keys: '" .. label .. "' is still in the window")
+        if w then
+            eq(w._parentArg, f.pages[sec], "keys: '" .. label .. "' sits under " .. sec)
+            local was = NS.db[key]
+            w._opts.set(not was)
+            eq(NS.db[key], not was, "keys: '" .. label .. "' writes " .. key)
+            eq(w._opts.get(), not was, "keys: ...and reads it back")
+            w._opts.set(was)
+        end
+    end
+    for _, label in ipairs({ "Dim background", "Keyboard nudge", "Auto-pin panels when editing" }) do
+        local w = byLabel(made.checks, label)
+        check(w and w._opts.tooltip and w._opts.tooltip.title == label, "keys: '" .. label .. "' keeps its tooltip")
+    end
+    local SLIDERS = {
+        { "Scale", "scale", "general" },
+        { "Mover Opacity", "moverOpacity", "general" },
+        { "Snap distance", "snapDistance", "snapping" },
+        { "Show snap zones within", "zoneShowDistance", "snapping" },
+        { "Grid Size", "gridSize", "grid" },
+        { "Grid line thickness", "gridThickness", "grid" },
+        { "Dim amount", "dimAlpha", "grid" },
+    }
+    eq(#made.sliders, #SLIDERS, "keys: exactly the old sliders, no more, no fewer")
+    for _, c in ipairs(SLIDERS) do
+        local label, key, sec = c[1], c[2], c[3]
+        local w = byLabel(made.sliders, label)
+        check(w ~= nil, "keys: the '" .. label .. "' slider is still in the window")
+        if w then
+            eq(w._parentArg, f.pages[sec], "keys: '" .. label .. "' sits under " .. sec)
+            local was = NS.db[key]
+            w._opts.set(0.5)
+            eq(NS.db[key], 0.5, "keys: '" .. label .. "' writes " .. key)
+            eq(w._opts.get(), 0.5, "keys: ...and reads it back")
+            NS.db[key] = was
+        end
+    end
+    -- Panel side: the segmented row, stacked into General.
+    local p = f.sideRow._points[1]
+    eq(p and p[2], f.pages.general, "keys: Panel side sits under general")
+    for _, b in ipairs(f.sideRow.buttons) do
+        if b.value == "left" then b._opts.onClick() end
+    end
+    eq(NS.db.panelSide, "left", "keys: Panel side writes panelSide")
+    NS.db.panelSide = "auto"
+    -- Scale is the first row of General: the control that sizes this window.
+    local sp = f.scaleSlider._points[1]
+    eq(sp and sp[2], f.pages.general, "keys: Scale is stacked in General")
+    eq(sp and sp[5], 0, "keys: ...as its first row")
+end
+
+-- ============================================================
+-- SCALE: STILL WRITTEN AND APPLIED
+-- ============================================================
+print("-- Settings build: the Scale control")
 do
     local sc = byLabel(made.sliders, "Scale")
     check(sc ~= nil, "scale: the window has a Scale slider")
     if sc then
-        eq(sc._parentArg, f, "scale: it hangs off the window itself, not inside a settings box")
-        local p = sc._points[1]
-        eq(p and p[1], "TOPLEFT", "scale: anchored by its top-left")
-        eq(p and p[2], f, "scale: ...to the window")
-        local topY = p and p[5] or -math.huge
-        local firstBoxY = math.huge
-        for _, box in ipairs(made.boxes) do
-            local bp = box._points[1]
-            local by = bp and (bp[5] or bp[3])
-            if type(by) == "number" and by > -math.huge then
-                check(topY > by, "scale: above the '" .. tostring(box._title) .. "' box")
-            end
-        end
-        local editor
-        for _, box in ipairs(made.boxes) do if box._title == "Editor" then editor = box end end
-        check(editor ~= nil, "scale: the Editor box still exists")
-        eq(sc:GetWidth() > 0 and true, true, "scale: sized to the window's width")
-        -- The tooltip says what it now covers.
         local line = sc._opts.tooltip and sc._opts.tooltip.lines and sc._opts.tooltip.lines[1] or ""
         check(line:find("text on the movers", 1, true) ~= nil, "scale: its tooltip says it sizes the text on the movers")
         sc._opts.set(1.2)
@@ -194,39 +305,32 @@ do
         applied.ApplyChromeScale = nil
         sc._opts.onChanged()
         eq(applied.ApplyChromeScale, 1, "scale: ...and applied live")
+        St:ApplyChromeScale()
+        eq(f:GetScale(), 1.2, "scale: the window takes it")
+        NS.db.scale = 1
+        St:ApplyChromeScale()
     end
 end
 
 -- ============================================================
--- TWO COLUMNS WHEN THERE IS ROOM
--- Tester request (alpha.12): Registered addons to the right of the settings,
--- in two columns like DandersFrames' own options; one column when narrow.
+-- THE ADDONS LIST FILLS THE COLUMN
+-- No fixed 200px list any more: it is as tall as the tallest settings page.
 -- ============================================================
-print("-- Settings build: two columns when wide, one when narrow")
+print("-- Settings build: the Addons list fills the height")
 do
-    local function box(title) for _, b in ipairs(made.boxes) do if b._title == title then return b end end end
-    local snap, grid, editor, addons = box("Snapping"), box("Grid"), box("Editor"), box("Registered addons")
-    check(snap and grid and editor and addons, "columns: all four boxes are built")
-    local function at(b) local p = b._points[1] return p[4], p[5] end   -- 5-arg TOPLEFT: x, y
-    local function left(b) local x = at(b) return x end
-    local function top(b) local _, y = at(b) return y end
+    local tallest = 0
+    for _, id in ipairs({ "general", "snapping", "grid", "editor" }) do
+        tallest = math.max(tallest, f.pages[id]:GetHeight())
+    end
+    check(tallest > 0, "fill: the settings pages have heights")
+    check(f.paneHeight >= tallest, "fill: the column is at least the tallest page")
+    eq(f.pages.addons:GetHeight(), f.paneHeight, "fill: the Addons page takes the whole column")
+    eq(f.scroll:GetHeight(), f.paneHeight, "fill: ...and its scrolling list too")
+    check(f.scroll:GetHeight() ~= 200, "fill: not the old fixed 200px list")
+    check(f:GetHeight() > f.paneHeight, "fill: the window wraps the column")
+    check(f:GetHeight() >= made.rail:GetContentHeight(), "fill: the window is tall enough for the rail")
 
-    -- The shim's UIParent is 1920 wide: plenty at scale 1.
-    NS.db.scale = 1
-    St:ApplyChromeScale()
-    check(f.twoColumns == true, "columns: a wide screen gets two columns")
-    check(f:GetWidth() > 2 * addons:GetWidth(), "columns: the window is wide enough for both")
-    eq(left(snap), left(grid), "columns: the settings boxes share the left column")
-    eq(left(snap), left(editor), "columns: ...all of them")
-    check(left(addons) >= left(snap) + snap:GetWidth(), "columns: Registered addons sits to the RIGHT of the settings")
-    eq(top(addons), top(snap), "columns: ...top-aligned with the first settings box")
-    local leftBottom = top(editor) - editor:GetHeight()
-    eq(top(addons) - addons:GetHeight(), leftBottom, "columns: its list stretches so both columns end level")
-    check(top(snap) < f.scaleSlider._points[1][5], "columns: Scale still sits above both columns")
-    check(f.scaleSlider:GetWidth() > addons:GetWidth(), "columns: ...spanning the full window width")
-    eq(f:GetHeight(), -leftBottom + 10, "columns: the window ends a pad under the columns")
-
-    -- Registry content, so the row cache has rows to (not) rebuild.
+    -- Registry content: switching sections redraws nothing.
     local wasReady = NS.Registry.ready
     NS.Registry.ready = true
     NS.Registry:RegisterAddon("TC", { title = "TC" })
@@ -234,34 +338,38 @@ do
         getPos = function() return { point = "CENTER", x = 0, y = 0 } end, onChanged = function() end })
     f.expanded.TC = true
     St:Refresh()
-    local before = framesMade
-    local rowsBefore = #f.rows
-
-    -- Narrow: the same window in one column.
-    local prevW = UIParent._w
-    UIParent._w = 700
-    St:Show()
-    check(f.twoColumns == false, "columns: a narrow screen gets one column")
-    eq(left(addons), left(snap), "columns: ...Registered addons back under the settings")
-    check(top(addons) < top(editor) - editor:GetHeight(), "columns: ...below the Editor box")
-    check(f:GetWidth() < 2 * addons:GetWidth(), "columns: ...in the one-column window width")
-    St:Refresh()
-
-    -- The chrome scale shrinks the screen in the window's units.
-    UIParent._w = prevW
-    St:Show()
-    check(f.twoColumns == true, "columns: back to two on the wide screen")
-    NS.db.scale = 3
-    St:ApplyChromeScale()
-    check(f.twoColumns == false, "columns: a big chrome scale on the same screen drops to one column")
-    NS.db.scale = 1
-    St:ApplyChromeScale()
-    St:Refresh()
-
-    eq(framesMade, before, "columns: switching layouts builds no frames -- the row cache holds")
-    eq(#f.rows, rowsBefore, "columns: ...and the list shows the same rows")
+    local before, rowsBefore = framesMade, #f.rows
+    check(rowsBefore > 0, "fill: the list has rows")
+    for _, id in ipairs(ORDER) do St:SelectSection(id); St:Refresh() end
+    eq(framesMade, before, "fill: switching sections builds no frames -- the row cache holds")
+    eq(#f.rows, rowsBefore, "fill: ...and the list shows the same rows")
     NS.Registry:UnregisterAddon("TC")
     NS.Registry.ready = wasReady
+end
+
+-- ============================================================
+-- THE LAST SECTION IS REMEMBERED
+-- In DandersMoverDB.settingsSection, so it survives a reload.
+-- ============================================================
+print("-- Settings build: the last picked section is remembered")
+do
+    eq(DEFAULTS.settingsSection, "general", "remember: defaults to General")
+    made.rail._opts.onSelect("grid")
+    eq(NS.db.settingsSection, "grid", "remember: a pick is written to DandersMoverDB")
+    -- A fresh window (a reload) opens on it.
+    St:Hide()
+    St.frame = nil
+    St:Show()
+    local g = St.frame
+    check(g ~= f, "remember: a new window was built")
+    eq(g.section, "grid", "remember: the new window opens on the remembered section")
+    check(g.pages.grid:IsShown() and not g.pages.general:IsShown(), "remember: ...showing its page")
+    eq(made.rail:GetSelected(), "grid", "remember: ...painted on the rail")
+    -- A stale or unknown value falls back to General.
+    NS.db.settingsSection = "nonsense"
+    St:Hide(); St.frame = nil; St:Show()
+    eq(St.frame.section, "general", "remember: an unknown section opens General")
+    eq(NS.db.settingsSection, "general", "remember: ...and the stale value is replaced")
 end
 
 St:Hide()
@@ -274,7 +382,7 @@ NS.ChromeScale = prevChrome
 -- under the held slider and flickered in a loop (tester report, alpha.12).
 do
     local SET = mover_file_source("Settings.lua"):gsub("\r\n", "\n")
-    local s = SET:find("f.scaleSlider = UI:CreateSlider(f, {", 1, true)
+    local s = SET:find("f.scaleSlider = UI:CreateSlider(pages.general, {", 1, true)
     local e = s and SET:find("\n    })", s, true)
     local body = (s and e) and SET:sub(s, e) or ""
     check(body:find('IsMouseButtonDown("LeftButton")', 1, true) ~= nil,
