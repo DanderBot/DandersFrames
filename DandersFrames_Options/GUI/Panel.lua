@@ -1213,8 +1213,8 @@ function DF:CreateGUI()
     GUI.ParseChangelog = ParseChangelog
 
     -- ★ DEEP LINKS. A feature card whose category names a settings page is a
-    -- button: click closes the changelog and lands on that page (EUI's rule —
-    -- no target, no click, mouse off so nothing invites a dead click). Keys are
+    -- button: click closes the changelog and lands on that page (no target,
+    -- no click, mouse off so nothing invites a dead click). Keys are
     -- the changelog's own "(Category)" tags, normalised to lowercase alnum, so
     -- "Click-Casting" / "Click Casting" / "click casting" all resolve. Targets
     -- are either a sub-tab id (party/raid mode) or the "clicks" mode.
