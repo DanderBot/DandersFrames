@@ -169,6 +169,9 @@ local function UnitRects(f, db, withPortrait)
 end
 
 function IN.GlowRects(f, db)
+    -- A Ring frame is round: the glow hugs its outer ring (Rings.lua R.CircleShape).
+    local R = UF.Rings
+    if R and R.IsRing(db) then return R.CircleShape(f, db) end
     return UnitRects(f, db, db and db.restingIconGlowPortrait ~= false)
 end
 
@@ -180,6 +183,8 @@ end
 function IN.HighlightShape(f)
     local db = K.DB(f)
     if not db then return nil end
+    local R = UF.Rings
+    if R and R.IsRing(db) then return R.CircleShape(f, db) end
     return UnitRects(f, db, true)
 end
 

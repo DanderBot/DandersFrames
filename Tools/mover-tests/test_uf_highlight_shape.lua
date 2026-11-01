@@ -63,6 +63,7 @@ load_uf_file_into("Core.lua", UF)
 load_uf_file_into("Defaults.lua", UF)
 DF.db = { unitframes = deepcopy(DF.registered.unitframes.defaults) }
 load_uf_file_into("Elements.lua", UF)
+load_uf_file_into("Rings.lua", UF)
 load_uf_file_into("Indicators.lua", UF)
 local IN = UF.Indicators
 
@@ -161,5 +162,26 @@ local function inBody(file, from, to)
 end
 check(inBody("Units.lua", "function Units:Build", "function Units:Spawn"), "Units:Build (live, boss slots too)")
 check(inBody("Preview.lua", "function P:Build", "function P:Acquire"), "P:Build (the previews, boss previews too)")
+
+print("-- A Ring frame: the outline and the rested glow are a circle")
+do
+    local eff = UF:GetUnitDB("focus")
+    eff.frameStyle = "RING"
+    eff.ringSize = 80
+    local F = Owner("focus")
+    F.dfDB = UF:FrameDB("focus")
+    local spec = F:dfHighlightShape()
+    check(spec and spec.circle and #spec == 0, "the highlight shape is a circle spec, no rects")
+    check(spec.circle.x == 40 and spec.circle.y == 40 and spec.circle.d == 80, "centred, the outer ring's diameter")
+    eq(spec.hole, UF.Rings.HOLE, "cut hollow with the ring hole mask")
+    local glow = IN.GlowRects(F, F.dfDB)
+    check(glow and glow.circle and glow.circle.d == 80, "the rested glow follows the same circle")
+    eff.rings = { { thickness = 6, gap = 2, sections = { { bar = "HEALTH" } } } }
+    eq(F:dfHighlightShape().circle.d, 80, "one ring: still the frame's edge")
+    eff.frameStyle = "BARS"
+    F.dfDB = UF:FrameDB("focus")
+    check(F:dfHighlightShape().circle == nil and #F:dfHighlightShape() >= 1, "Bars: rects again")
+    eff.ringSize, eff.rings = nil, nil
+end
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

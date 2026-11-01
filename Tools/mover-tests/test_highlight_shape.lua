@@ -543,4 +543,99 @@ do
     end
 end
 
+print("-- A round frame: the highlight is a band of the circle (CIRCLE BANDS)")
+do
+    local function Maskable(f)
+        local makeTex = f.CreateTexture
+        function f:CreateTexture(...)
+            local t = makeTex(self, ...)
+            t._masks = {}
+            function t:SetTexture(path) self._tex = path end
+            function t:AddMaskTexture(m) self._masks[#self._masks + 1] = m end
+            function t:RemoveMaskTexture(m)
+                for i, x in ipairs(self._masks) do if x == m then table.remove(self._masks, i) break end end
+            end
+            function t:SetVertexColor(r, g, b, a) self._vc = { r, g, b, a } end
+            function t:SetBlendMode(m) self._blend = m end
+            return t
+        end
+        function f:CreateMaskTexture()
+            local m = FakeTex()
+            function m:SetTexture(path, wh) self._tex, self._wrap = path, wh end
+            return m
+        end
+        return f
+    end
+    local makeFrame = CreateFrame
+    CreateFrame = function(...) return Maskable(makeFrame(...)) end
+    local spec = { circle = { x = 32, y = 32, d = 64 }, hole = "HOLE" }
+    local f = NewOwner(64, 64, spec)
+    db.selectionHighlightMode, db.selectionHighlightThickness, db.selectionHighlightInset = "SOLID", 2, 0
+    DF:UpdateHighlights(f)
+    local ch = Sel(f)
+    local band = ch.dfShapeCircles and ch.dfShapeCircles[1]
+    check(band and band.tex._shown, "SOLID: one band of the circle")
+    eq(band.tex._w, 64, "...the outer ring's diameter")
+    eq(band.inner._w, 60, "...2 deep (its thickness), inside")
+    check(band.outer._tex:find("TempPortraitAlphaMask", 1, true) and band.outer._wrap == "CLAMPTOBLACKADDITIVE",
+          "...cut round outside by Blizzard's disc")
+    check(band.inner._tex == "HOLE" and band.inner._wrap == "CLAMPTOWHITE", "...and hollow by the frame's hole mask")
+    eq(#band.tex._masks, 2, "two masks on it")
+    local p = band.tex._points[1]
+    check(p[1] == "CENTER" and p[3] == "TOPLEFT" and p[4] == 32 and p[5] == -32, "centred on the frame")
+    local rectShown = false
+    for _, t in ipairs(ch.dfShapeTex or {}) do if t._shown then rectShown = true end end
+    check(not rectShown and not ch.topLine._shown, "no square drawn")
+    db.selectionHighlightInset = 3
+    DF:UpdateHighlights(f)
+    eq(band.tex._w, 58, "inset moves it in")
+    db.selectionHighlightMode, db.selectionHighlightInset = "GLOW", 0
+    DF:UpdateHighlights(f)
+    local shown = 0
+    for _, e in ipairs(ch.dfShapeCircles) do if e.tex._shown then shown = shown + 1 end end
+    eq(shown, 4, "GLOW: four bands")
+    check(ch.dfShapeCircles[4].tex._w > ch.dfShapeCircles[1].tex._w
+          and ch.dfShapeCircles[4].tex._vc[4] < ch.dfShapeCircles[1].tex._vc[4], "...growing outward, fading")
+    db.selectionHighlightMode = "DASHED"
+    DF:UpdateHighlights(f)
+    eq(ch.dfShapeCircles[1].tex._w, 64, "DASHED: drawn as a solid band (no dash round a circle)")
+    f.rects = { { 0, 0, 64, 64 } }
+    db.selectionHighlightMode = "SOLID"
+    DF:UpdateHighlights(f)
+    check(not ch.dfShapeCircles[1].tex._shown, "back to rects: the circle hides")
+    db.selectionHighlightInset = 0
+    CreateFrame = makeFrame
+end
+
+print("-- A round frame: the rested glow follows the circle")
+do
+    local glow = FakeFrameBase({})
+    glow.pieces = { FakeTex(), FakeTex() }
+    glow.spread = 10
+    local makeTex = glow.CreateTexture
+    function glow:CreateTexture(...)
+        local t = makeTex(self, ...)
+        t._masks = {}
+        function t:SetTexture() end
+        function t:AddMaskTexture(m) self._masks[#self._masks + 1] = m end
+        function t:SetVertexColor(r, g, b, a) self._vc = { r, g, b, a } end
+        function t:SetBlendMode(m) self._blend = m end
+        return t
+    end
+    function glow:CreateMaskTexture() local m = FakeTex(); function m:SetTexture() end; return m end
+    local host = FakeFrameBase({})
+    local ind = { glow = glow, glowHost = host, glowStyleName = "OUTER", glowStyle = { outset = 0 } }
+    ind.SetGlowRects = DF._RestedSetGlowRects
+    check(ind.SetGlowRects ~= nil, "the rested glow's SetGlowRects is reachable")
+    if ind.SetGlowRects then
+        ind:SetGlowRects({ circle = { x = 32, y = 32, d = 64 }, hole = "HOLE" })
+        local pool = glow.circlePool
+        check(pool and #pool == 5, "five soft bands outside the circle")
+        eq(pool[1].inner._w, 64, "the first starts at the ring's edge")
+        eq(pool[5].tex._w, 84, "...the last ends 10 out (its spread)")
+        check(pool[1].tex._vc[4] > pool[5].tex._vc[4] and pool[1].tex._blend == "ADD", "fading out, added like the glow art")
+        check(not glow.pieces[1]._shown, "the square glow's pieces hide")
+    end
+end
+
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

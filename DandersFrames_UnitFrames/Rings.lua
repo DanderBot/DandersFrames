@@ -244,6 +244,19 @@ function R.ClassPowerArc(db)
 end
 
 -- ============================================================
+-- THE ROUND OUTLINE (DandersFrames' circle shape spec, Frames/Create.lua CIRCLE
+-- BANDS): what the resting glow and the selection / hover / aggro highlights trace
+-- on a Ring frame instead of its square -- a circle on the frame's centre, the
+-- outer ring's diameter, cut with our hole mask.
+-- ============================================================
+function R.CircleShape(f, db)
+    local geo = R.Geometry(db)
+    local outer = geo.rings[#geo.rings]
+    local d = outer and outer.outer or geo.size
+    return { circle = { x = geo.size / 2, y = geo.size / 2, d = d }, hole = R.HOLE }
+end
+
+-- ============================================================
 -- TEXT DESIGNER SPOTS (frame.dfTDAnchorSpot; DandersFrames' TextDesigner/Render.lua
 -- SPOT ANCHORS). Where each ring anchor sits, as x, y from the frame's centre, from
 -- the last ring layout (f.dfUFRingGeom). nil on a Bars frame: the renderer then

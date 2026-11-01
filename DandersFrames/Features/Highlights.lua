@@ -502,9 +502,15 @@ end
 -- as on a plain frame. nil = draw the plain rectangle.
 local function ReadShape(frame, ch, scale)
     local rects = frame:dfHighlightShape()
-    if type(rects) ~= "table" or #rects == 0 then return nil end
+    if type(rects) ~= "table" then return nil end
     local fs = frame.GetEffectiveScale and frame:GetEffectiveScale()
     local k = (fs and fs > 0 and scale and scale > 0) and (fs / scale) or 1
+    -- A round frame (Frames/Create.lua CIRCLE BANDS: { circle = { x, y, d }, hole }).
+    local c = rects.circle
+    if type(c) == "table" then
+        return "c" .. k .. ":" .. c.x .. "," .. c.y .. "," .. c.d .. ":" .. tostring(rects.hole), rects, k
+    end
+    if #rects == 0 then return nil end
     local parts = { k }
     for n, r in ipairs(rects) do
         parts[n + 1] = r[1] .. "," .. r[2] .. "," .. r[3] .. "," .. r[4]
@@ -619,6 +625,32 @@ local function HideShapePieces(ch)
     if pool then
         for i = 1, #pool do pool[i]:Hide() end
     end
+    if ch.dfShapeCircles and DF.HideCircleBands then DF:HideCircleBands(ch.dfShapeCircles) end
+end
+
+-- A ROUND outline (a circle shape spec): the same thickness, inset and colour as
+-- the rect outline, as a band of the circle -- SOLID `thickness` deep inside the
+-- circle moved `inset` in; GLOW the four layers grown outward with the plain
+-- glow's step and alpha ramp. A dash cannot run round a masked band, so ANIMATED
+-- and DASHED draw it SOLID.
+local function ApplyCircleStyle(ch, mode, spec, k, thickness, inset, r, g, b, alpha)
+    if not DF.PaintCircleBands then return false end
+    local c = spec.circle
+    local cx, cy, d = c.x * k, c.y * k, c.d * k
+    local bands = {}
+    if mode == "GLOW" then
+        local step = math.min(thickness, 2)
+        for i = 1, 4 do
+            local outer = d + 2 * ((i - 1) * step + inset)
+            bands[i] = { outer, outer - 2 * thickness, r, g, b, math.max(0, alpha * (1.1 - (i * 0.25))) }
+        end
+    else
+        local outer = d - 2 * inset
+        bands[1] = { outer, outer - 2 * thickness, r, g, b, alpha }
+    end
+    ch.dfShapeCircles = ch.dfShapeCircles or {}
+    DF:PaintCircleBands(ch, ch.dfShapeCircles, cx, cy, bands, spec.hole)
+    return true
 end
 
 -- Paint strips as solid textures from the highlight's pool, from index `used` + 1.
@@ -662,6 +694,13 @@ end
 -- Draw SOLID / ANIMATED / DASHED / GLOW along the shape. Thickness and inset are
 -- already snapped. false = nothing to trace (the caller draws the rectangle).
 local function ApplyShapedStyle(ch, mode, rects, k, thickness, inset, r, g, b, alpha, scale)
+    if type(rects.circle) == "table" then
+        if not ch.dfShapeSizeHooked then
+            ch:SetScript("OnSizeChanged", ShapedOnSizeChanged)
+            ch.dfShapeSizeHooked = true
+        end
+        return ApplyCircleStyle(ch, mode, rects, k, thickness, inset, r, g, b, alpha)
+    end
     local ppu = HighlightPixelsPerUnit(scale)
     local base = ShapeBase(rects, k, ppu)
     if not base then return false end

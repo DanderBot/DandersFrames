@@ -1216,12 +1216,123 @@ local function RestedIndicator_SetGlowExtents(self, left, right, top, bottom)
     glow:ClearAllPoints()
     glow:SetPoint("TOPLEFT", host, "TOPLEFT", -(o + (left or 0)), o + (top or 0))
     glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", o + (right or 0), -(o + (bottom or 0)))
+    if glow.circlePool then DF:HideCircleBands(glow.circlePool) end
     -- back from an outline (SetGlowRects): the nine-slice's own pieces again
     if glow.outlinePool then
         for _, t in ipairs(glow.outlinePool) do t:Hide() end
         for _, t in ipairs(glow.pieces) do t:Show() end
         glow.outlineCount = nil
     end
+end
+
+-- ============================================================
+-- CIRCLE BANDS (a round frame's outline: DandersFrames_UnitFrames' Ring style)
+-- A coloured ring drawn as a WHITE texture cut by two masks: Blizzard's disc at
+-- the band's OUTER diameter (black outside it) and a HOLE mask -- white outside a
+-- disc, black inside, handed in by the frame that asked (`hole`, a texture path) --
+-- at its INNER diameter with CLAMPTOWHITE, so only the band shows and the middle
+-- stays clear. The same technique the ring frames' own bars use.
+--   owner  the frame the textures live on
+--   pool   a table kept by the caller (entries are reused; spares hidden)
+--   cx, cy the centre, in owner units from its TOPLEFT (y DOWN)
+--   bands  { { outer, inner, r, g, b, a }, ... } diameters; inner <= 0 = a disc
+--   opts   layer ("OVERLAY"), sublevel, blend
+-- A frame describes a round outline with a SHAPE SPEC instead of rects:
+--   { circle = { x = cx, y = cy, d = diameter }, hole = path }
+-- read by the rested glow (SetGlowRects) and the highlights (Features/Highlights.lua).
+-- ============================================================
+local CIRCLE_DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
+local CIRCLE_FILL = "Interface\\Buttons\\WHITE8X8"
+
+function DF:PaintCircleBands(owner, pool, cx, cy, bands, hole, opts)
+    local layer = (opts and opts.layer) or "OVERLAY"
+    local n = 0
+    for _, bnd in ipairs(bands or {}) do
+        local outer, inner = bnd[1], bnd[2]
+        if outer and outer > 0 then
+            n = n + 1
+            local e = pool[n]
+            if not e then
+                e = { tex = owner:CreateTexture(nil, layer, nil, opts and opts.sublevel or nil) }
+                e.tex:SetTexture(CIRCLE_FILL)
+                e.outer = owner:CreateMaskTexture()
+                e.outer:SetTexture(CIRCLE_DISC, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                e.tex:AddMaskTexture(e.outer)
+                e.inner = owner:CreateMaskTexture()
+                pool[n] = e
+            end
+            local t = e.tex
+            t:ClearAllPoints()
+            t:SetPoint("CENTER", owner, "TOPLEFT", cx, -cy)
+            t:SetSize(outer, outer)
+            e.outer:ClearAllPoints()
+            e.outer:SetPoint("CENTER", t, "CENTER", 0, 0)
+            e.outer:SetSize(outer, outer)
+            local cut = hole and inner and inner > 0
+            if cut then
+                if e.holePath ~= hole then
+                    e.inner:SetTexture(hole, "CLAMPTOWHITE", "CLAMPTOWHITE")
+                    e.holePath = hole
+                end
+                if not e.holeOn then
+                    t:AddMaskTexture(e.inner)
+                    e.holeOn = true
+                end
+                e.inner:ClearAllPoints()
+                e.inner:SetPoint("CENTER", t, "CENTER", 0, 0)
+                e.inner:SetSize(inner, inner)
+            elseif e.holeOn then
+                t:RemoveMaskTexture(e.inner)
+                e.holeOn = false
+            end
+            t:SetVertexColor(bnd[3] or 1, bnd[4] or 1, bnd[5] or 1, bnd[6] or 1)
+            if opts and opts.blend then t:SetBlendMode(opts.blend) end
+            t:Show()
+        end
+    end
+    for i = n + 1, #pool do pool[i].tex:Hide() end
+    return n
+end
+
+function DF:HideCircleBands(pool)
+    if not pool then return end
+    for i = 1, #pool do pool[i].tex:Hide() end
+end
+
+-- The rested glow round a CIRCLE (a shape spec, see CIRCLE BANDS): the OUTER
+-- style's soft falloff as GLOW_CIRCLE_STEPS thin bands outside the circle, from
+-- full at its edge to nothing `spread` out. FILL washes the disc itself.
+local GLOW_CIRCLE_STEPS = 5
+local function ApplyGlowCircle(self, spec)
+    local glow, host = self.glow, self.glowHost
+    local c = spec.circle
+    local o = self.glowStyle.outset
+    if self.glowStyleName ~= "OUTER" then
+        -- FILL is one texture: a square wash just past the circle (no masks on it).
+        local d = c.d + 2 * o
+        glow:ClearAllPoints()
+        glow:SetPoint("CENTER", host, "TOPLEFT", c.x, -c.y)
+        glow:SetSize(d, d)
+        return
+    end
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+    for _, t in ipairs(glow.pieces) do t:Hide() end
+    if glow.outlinePool then
+        for _, t in ipairs(glow.outlinePool) do t:Hide() end
+    end
+    glow.outlineCount = nil
+    local spread = glow.spread or OUTER_GLOW_SPREAD
+    local base = c.d + 2 * o
+    local step = spread / GLOW_CIRCLE_STEPS
+    local bands = {}
+    for j = 1, GLOW_CIRCLE_STEPS do
+        local inner = base + 2 * step * (j - 1)
+        bands[j] = { inner + 2 * step, inner, 1, 0.82, 0, 1 - (j - 0.5) / GLOW_CIRCLE_STEPS }
+    end
+    glow.circlePool = glow.circlePool or {}
+    DF:PaintCircleBands(glow, glow.circlePool, c.x, c.y, bands, spec.hole, { layer = "ARTWORK", blend = "ADD" })
 end
 
 -- Glow along the outline of several rects' union instead of one box: each
@@ -1232,6 +1343,11 @@ end
 local function RestedIndicator_SetGlowRects(self, rects)
     local glow, host = self.glow, self.glowHost
     if not (glow and host) then return end
+    -- A round frame (a circle shape spec): the glow follows the circle.
+    if type(rects) == "table" and type(rects.circle) == "table" then
+        return ApplyGlowCircle(self, rects)
+    end
+    if glow.circlePool then DF:HideCircleBands(glow.circlePool) end
     if not rects or #rects == 0 then return self:SetGlowExtents(0, 0, 0, 0) end
     local o = self.glowStyle.outset
     if self.glowStyleName ~= "OUTER" then
@@ -1251,6 +1367,10 @@ local function RestedIndicator_SetGlowRects(self, rects)
     for n, rc in ipairs(rects) do grown[n] = { rc[1] - o, rc[2] - o, rc[3] + o, rc[4] + o } end
     ApplyOutlinePieces(glow, host, GlowOutlinePieces(grown, glow.spread))
 end
+
+-- The glow's outline setter on its own (headless tests drive it without a whole
+-- indicator).
+DF._RestedSetGlowRects = RestedIndicator_SetGlowRects
 
 -- parent:   frame the Zs live on (frame level parent + 5)
 -- glowHost: optional frame; when given, a glow is built around it and stored
