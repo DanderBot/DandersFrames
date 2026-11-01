@@ -110,6 +110,12 @@ end
 
 local function BuildGeneral(rows)
     rows:AddSwitch({ label = L["Animate Health"], key = "testAnimateHealth", default = false, onChanged = Repaint })
+    -- Marks the element under the cursor on a preview; a click opens its page on
+    -- that unit (UnitFrames/TestLabels.lua). Its own key, as Party / Raid each have.
+    rows:AddSwitch({ label = L["Indicator Info"], key = "testShowLabels", default = true, onChanged = function()
+        Repaint()
+        if DF.UpdateTestLabels then DF:UpdateTestLabels() end
+    end })
     rows:AddSwitch({ label = L["Fixed Health"], key = "fixedHealth", default = false, onChanged = Repaint })
     rows:AddSlider({
         label = L["Health"], key = "healthPercent", min = 1, max = 100, step = 1, default = 75,

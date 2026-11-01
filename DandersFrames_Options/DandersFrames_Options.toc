@@ -137,6 +137,8 @@ TestMode\TestFramePool.lua
 TestMode\TestMode.lua
 # After TestMode.lua: it reads the frame pools that file owns.
 TestMode\Labels.lua
+# After Labels.lua: registers the Unit Frames previews with its extension seam.
+UnitFrames\TestLabels.lua
 
 # Debug tools (DebugConsole and Profiler stay resident in the main addon)
 Debug\AuraExplorer.lua

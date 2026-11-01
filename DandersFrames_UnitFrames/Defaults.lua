@@ -64,6 +64,8 @@ UF.TestDefaults = {
     showRaidTarget = true,
     showLeader = true,
     showCombat = true,
+    -- Indicator Info: name the element under the cursor; a click opens its page.
+    testShowLabels = true,
     -- Highlights (Preview.lua picks which frames show them)
     testShowSelection = false,
     testShowAggro = false,

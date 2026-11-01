@@ -198,7 +198,8 @@ end
 -- page while the test toggle beside it is singular; the page wins here.)
 -- test_testmode_labels_click.lua pins every crumb against the real tab and category
 -- labels.
-local function labelFor(key)
+local frameSource   -- frame -> its source (FRAME SOURCES, below)
+local function baseLabel(key)
     -- ☠ PLAIN ">" — the game's fonts have no glyph for "▸" (U+25B8) and rendered it as
     -- a filled diamond in game. Nothing else in the addon uses that character; the
     -- breadcrumbs elsewhere are plain ASCII for exactly this reason.
@@ -211,6 +212,19 @@ local function labelFor(key)
     local t = targetByKey[key]
     if t and t.label then return resolve(t.label) or key, resolve(t.crumb) or "" end
     return key, ""
+end
+
+-- `frame` (optional): the test frame the element is on. A source can name the page
+-- its own way (its `crumb`, see the EXTENSION SEAM) when its frames open different
+-- pages from the group ones.
+local function labelFor(key, frame)
+    local name, page = baseLabel(key)
+    local src = frame and frameSource and frameSource[frame]
+    if src and src.crumb then
+        local ok, c = pcall(src.crumb, frame, targetByKey[key] or { key = key })
+        if ok and type(c) == "string" then page = c end
+    end
+    return name, page
 end
 
 -- ============================================================
@@ -255,8 +269,8 @@ local SOURCES = {
     },
 }
 -- frame -> the source that scanned it, filled by TL:Update. Weak: a frame is never
--- freed, but a source's frames may stop being ours.
-local frameSource = setmetatable({}, { __mode = "k" })
+-- freed, but a source's frames may stop being ours. (Declared above labelFor.)
+frameSource = setmetatable({}, { __mode = "k" })
 
 local function anySourceWants()
     for _, src in ipairs(SOURCES) do
@@ -677,6 +691,7 @@ end
 -- nothing is blocked, and an element that shows no tooltip of its own simply gets none
 -- (the outline and tag already identify it).
 local regionOf = setmetatable({}, { __mode = "k" })   -- targetFrame -> element key
+local regionFrameOf = setmetatable({}, { __mode = "k" })   -- targetFrame -> its test frame
 
 -- Walk up from the tooltip's owner looking for a registered region. The owner is an
 -- aura BUTTON, whose parent chain runs button -> container -> the row's window frame,
@@ -686,7 +701,7 @@ local function regionForOwner(owner)
     local node, depth = owner, 0
     while node and depth < 10 do
         local key = regionOf[node]
-        if key then return key end
+        if key then return key, regionFrameOf[node] end
         local ok, parent = pcall(node.GetParent, node)
         if not ok then return nil end
         node = parent
@@ -717,9 +732,9 @@ local function ensureTooltipHook()
         if not labelsWanted() then return end
         local ok, owner = pcall(tt.GetOwner, tt)
         if not ok or not owner then return end
-        local key = regionForOwner(owner)
+        local key, testFrame = regionForOwner(owner)
         if not key then return end
-        local name, page = labelFor(key)
+        local name, page = labelFor(key, testFrame)
         -- A blank spacer keeps DF's two lines visibly separate from the spell's own
         -- text rather than reading as part of it.
         tt:AddLine(" ")
@@ -911,7 +926,7 @@ local hoverRegions = {}   -- { frame, key, color, l, r, t, b, host, scale }
 -- left whole elements unhoverable with nothing to say why.
 local function addRegion(frame, target, reg)
     for _, hf in ipairs(reg.hosts or {}) do
-        if hf ~= frame then regionOf[hf] = target.key end
+        if hf ~= frame then regionOf[hf] = target.key; regionFrameOf[hf] = frame end
     end
     local okScale, scale = pcall(reg.host.GetEffectiveScale, reg.host)
     hoverRegions[#hoverRegions + 1] = {
@@ -1012,38 +1027,46 @@ end
 
 -- Returns whether anything on this frame is RENDERING BUT NOT YET MEASURABLE, which is
 -- what the settle retry needs to know. See TL:Update.
-local function scanFrame(frame)
+-- `src` (optional): the frame's source. Its `accepts` drops targets it has no page for.
+local function scanFrame(frame, src)
     if not frame or not frame.GetLeft or not frame:GetLeft() or not frame:IsShown() then
         return false
     end
     local pending = false
     for _, target in ipairs(TARGETS) do
-        local before = #hoverRegions
-        if target.find then
-            local regs, unmeasured = findRegions(frame, target)
-            for _, reg in ipairs(regs) do addRegion(frame, target, reg) end
-            if unmeasured then pending = true end
-        elseif target.key == "ad" then
-            -- Many regions, one per placement. Gathered into a scratch list rather
-            -- than appended directly so the "did this element produce anything"
-            -- test below reads the same for every key.
-            if elementShown(frame, target.key) then
-                local regs = {}
-                adRegions(frame, regs)
-                for _, reg in ipairs(regs) do addRegion(frame, target, reg) end
-            end
-        else
-            local l, r, t, b, host, hosts = targetOf(frame, target.key)
-            if l and host then
-                addRegion(frame, target, { l = l, r = r, t = t, b = b, host = host, hosts = hosts })
-            end
+        local wanted = true
+        if src and src.accepts then
+            local ok, yes = pcall(src.accepts, frame, target)
+            wanted = (ok and yes) and true or false
         end
-        -- ★ THE ELEMENT SAYS IT IS ON SCREEN AND YET MEASURED TO NOTHING. That is the
-        -- signal a container has been rebuilt this tick and has no rect yet — the
-        -- creation-tick rule — and it is the ONLY thing that distinguishes "not ready"
-        -- from "legitimately switched off".
-        if not target.find and #hoverRegions == before and elementShown(frame, target.key) then
-            pending = true
+        if wanted then
+            local before = #hoverRegions
+            if target.find then
+                local regs, unmeasured = findRegions(frame, target)
+                for _, reg in ipairs(regs) do addRegion(frame, target, reg) end
+                if unmeasured then pending = true end
+            elseif target.key == "ad" then
+                -- Many regions, one per placement. Gathered into a scratch list rather
+                -- than appended directly so the "did this element produce anything"
+                -- test below reads the same for every key.
+                if elementShown(frame, target.key) then
+                    local regs = {}
+                    adRegions(frame, regs)
+                    for _, reg in ipairs(regs) do addRegion(frame, target, reg) end
+                end
+            else
+                local l, r, t, b, host, hosts = targetOf(frame, target.key)
+                if l and host then
+                    addRegion(frame, target, { l = l, r = r, t = t, b = b, host = host, hosts = hosts })
+                end
+            end
+            -- ★ THE ELEMENT SAYS IT IS ON SCREEN AND YET MEASURED TO NOTHING. That is the
+            -- signal a container has been rebuilt this tick and has no rect yet — the
+            -- creation-tick rule — and it is the ONLY thing that distinguishes "not ready"
+            -- from "legitimately switched off".
+            if not target.find and #hoverRegions == before and elementShown(frame, target.key) then
+                pending = true
+            end
         end
     end
     return pending
@@ -1097,7 +1120,7 @@ local function showOwnTip(reg)
         local ok, owner = pcall(GameTooltip.GetOwner, GameTooltip)
         if ok and owner and regionForOwner(owner) then tt:Hide(); return end
     end
-    local name, page = labelFor(reg.key)
+    local name, page = labelFor(reg.key, reg.frame)
     tt:SetOwner(reg.host, "ANCHOR_RIGHT")
     tt:ClearLines()
     tt:AddLine(name, 1, 1, 1)
@@ -1361,6 +1384,7 @@ function TL:Update(settling)
     stopHover()
     for i = #hoverRegions, 1, -1 do hoverRegions[i] = nil end
     for k in pairs(regionOf) do regionOf[k] = nil end
+    for k in pairs(regionFrameOf) do regionFrameOf[k] = nil end
 
     for k in pairs(frameSource) do frameSource[k] = nil end
 
@@ -1369,7 +1393,7 @@ function TL:Update(settling)
         if src.wants() then
             src.each(function(f)
                 frameSource[f] = src
-                if scanFrame(f) then pending = true end
+                if scanFrame(f, src) then pending = true end
             end)
         end
     end
@@ -1413,6 +1437,7 @@ function TL:Clear()
     for i = #hoverRegions, 1, -1 do hoverRegions[i] = nil end
     eachTestFrame(hideWidgets)
     for k in pairs(regionOf) do regionOf[k] = nil end
+    for k in pairs(regionFrameOf) do regionFrameOf[k] = nil end
     for k in pairs(frameSource) do frameSource[k] = nil end
 end
 
@@ -1543,6 +1568,12 @@ end
 --   open     optional function(frame, target, section): replaces the default
 --            navigation (group settings, in `mode`)
 --   mode     optional "party" | "raid", for the default navigation
+--   accepts  optional function(frame, target): false skips that target on this
+--            source's frames (no page for it there); the region under it answers
+--            instead
+--   crumb    optional function(frame, target): the "Category > Page" text the
+--            tooltip shows for an element on this source's frames, when its pages
+--            are not the group ones; nil keeps the target's own
 --   The source's frames must call DandersFrames.TestLabels:HandleClick(frame, button)
 --   from their own OnClick; nothing here hooks a frame it does not own.
 function TL:RegisterTarget(def)

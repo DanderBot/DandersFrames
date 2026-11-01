@@ -210,6 +210,7 @@ P.TEST_KEYS = {
     testShowAbsorbs = true, testShowHealPrediction = true,
     testShowStatusIcons = true, testAnimateHealth = true,
     testShowSelection = true, testShowAggro = true,
+    testShowLabels = true,
 }
 
 -- Which preview shows the Selection highlight (DF:UpdateHighlights reads
@@ -418,6 +419,16 @@ local function OnLeave(self)
     if DF.UpdateHighlights then DF:UpdateHighlights(self) end
 end
 
+-- Indicator Info's click-to-open-settings (DandersFrames_Options/TestMode/Labels.lua,
+-- the "units" frame source in DandersFrames_Options/UnitFrames/TestLabels.lua). A
+-- no-op unless that option is on and an element is marked under the cursor; it
+-- refuses in combat and during a mover session itself. Looked up per click: the
+-- options addon loads on demand.
+local function OnClick(self, button)
+    local TL = DF.TestLabels
+    if TL and TL.HandleClick then TL:HandleClick(self, button) end
+end
+
 -- One preview frame on `unit`'s settings, named `name`, under `parent`. `slot`:
 -- the boss slot it stands for (Boss.lua builds those), nil otherwise.
 function P:Build(unit, name, parent, slot)
@@ -450,6 +461,7 @@ function P:Build(unit, name, parent, slot)
     if UF.Elements then UF.Elements:Call("Attach", f) end
     f:SetScript("OnEnter", OnEnter)
     f:SetScript("OnLeave", OnLeave)
+    f:SetScript("OnClick", OnClick)
     f:Hide()
     return f
 end
