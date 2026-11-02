@@ -121,22 +121,39 @@ local FONT = "DF Roboto SemiBold"
 --   rings       the ring list, innermost first. A table default: copied into the
 --               unit's own table on first read (Core.lua), so it is edited in place
 --               and Links / Copy / Reset carry it whole.
--- Ring 1: health, all the way round, 8 thick. Ring 2: power, 4 thick, 2px out.
+-- Ring 1: health down the left half and power down the right, filling the other way,
+-- flush with the portrait. Ring 2: class power all the way round.
+-- ⚠ CLASS POWER IS THE PLAYER'S ALONE (ClassPower.lua CP.UNITS): on any other unit a
+-- class power ring draws nothing at all, only a see-through band that eats the frame.
+-- So only Player's default has it. A small frame takes the same ring at half the
+-- thickness, or the portrait would have no room (RingDefaults).
 -- ============================================================
+local function HealthPowerRing(thickness)
+    return { thickness = thickness, gap = 0, sections = {
+        { bar = "HEALTH", coverage = "HALF", position = "LEFT" },
+        { bar = "POWER", coverage = "HALF", position = "RIGHT", reverse = true },
+    } }
+end
 UF.RING_DEFAULTS = {
-    { thickness = 8, gap = 2, sections = { { bar = "HEALTH", coverage = "FULL", position = "TOP" } } },
-    { thickness = 4, gap = 2, sections = { { bar = "POWER", coverage = "FULL", position = "TOP" } } },
+    HealthPowerRing(16),
+    { thickness = 5, gap = 0, sections = { { bar = "CLASSPOWER", coverage = "FULL", position = "TOP" } } },
+}
+local RING_SIZE_LARGE = 130
+local RING_BY_UNIT = {
+    player = { ringSize = RING_SIZE_LARGE, rings = UF.RING_DEFAULTS },
+    target = { ringSize = RING_SIZE_LARGE, rings = { HealthPowerRing(16) } },
+    focus  = { ringSize = RING_SIZE_LARGE, rings = { HealthPowerRing(16) } },
 }
 
 local ELEMENTS = {
     -- Frame style (Rings.lua)
     frameStyle = "BARS",
     ringSize = 64,
-    rings = UF.RING_DEFAULTS,
+    rings = { HealthPowerRing(8) },     -- the small frames; RING_BY_UNIT has the rest
     -- A 3D portrait in RING style (Portrait.lua RING 3D): FIT | COVER | 2D.
-    ringPortrait3D = "FIT",
+    ringPortrait3D = "COVER",
     -- The Text Designer template in RING style; textDesignerPreset is Bars' (Core.lua).
-    ringTextDesignerPreset = UF.TEXT_PRESET,
+    ringTextDesignerPreset = UF.RING_TEXT_PRESET,
 
     -- Cast bar (CastBar.lua)
     castbarEnabled = false,
@@ -589,6 +606,7 @@ for _, unit in ipairs(UF.UNITS) do
         for k, v in pairs(OUTSIDE_FRAME_AURAS) do t[k] = v end
     end
     for k, v in pairs(PER_UNIT[unit] or {}) do t[k] = v end
+    for k, v in pairs(RING_BY_UNIT[unit] or {}) do t[k] = v end
     UF.UnitDefaults[unit] = t
 end
 

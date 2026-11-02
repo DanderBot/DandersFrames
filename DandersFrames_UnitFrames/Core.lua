@@ -31,7 +31,9 @@ UF.SPAWNED_UNITS = { "player", "target", "targettarget", "focus", "focustarget",
 UF.TEXT_PRESET = "Unit Frames"
 UF.TEXT_PRESET_SMALL = "Unit Frames (Small)"
 -- Built-in templates for Ring-style frames (UF:EnsureTextPresets, RING PRESETS).
-UF.RING_TEXT_PRESETS = { plate = "Ring: Side Plate", tag = "Ring: Name and Tag", hover = "Ring: Centre on Hover" }
+UF.RING_TEXT_PRESET = "Unit Frames Ring"   -- every unit's default in RING style
+UF.RING_TEXT_PRESETS = { default = UF.RING_TEXT_PRESET, plate = "Ring: Side Plate",
+                         tag = "Ring: Name and Tag", hover = "Ring: Centre on Hover" }
 
 -- Spawned frames by key: the unit for most, boss1..bossN for the boss slots.
 -- ⚠ The key is not always the settings unit: read f.dfUFUnit for that.
@@ -343,6 +345,9 @@ end
 -- ============================================================
 -- RING PRESETS (Text Designer templates for a Ring-style frame, Rings.lua)
 -- Made like the two above: once, when absent, so the user's edits stand.
+--   default "Unit Frames Ring"      the default: name over the top of the frame, a
+--                                   dark box along the bottom with current || max
+--                                   health on it, status in the middle
 --   plate  "Ring: Side Plate"       a rounded box tucked BEHIND the ring's right
 --                                   side (Background element, layer Behind), name /
 --                                   health (abbreviated . percent) / power on
@@ -379,9 +384,42 @@ local function Element(cfg, t)
     return e
 end
 
+-- "Unit Frames Ring": literal, element by element, ids and all.
+local function BuildDefaultRingText(cfg)
+    local FONT = "DF Roboto SemiBold"
+    local function Text(t)
+        t.enabled, t.anchorTo, t.offsetX = true, "FRAME", 0
+        t.offsetY = t.offsetY or 0
+        t.font, t.outline, t.useClassColor, t.hoverSlide = FONT, "SHADOW", false, t.hoverSlide or 0
+        t.label = t.label or ""
+        t.color = t.color or { r = 1, g = 1, b = 1, a = 1 }
+        t.overrides = t.overrides or { outline = true, font = true, useClassColor = true, fontSize = true, color = true }
+        return t
+    end
+    cfg.elements = {
+        Text({ id = 1, contentType = "name", anchor = "TOP", offsetY = 12, fontSize = 13,
+               nameLength = 10, truncateMode = "ELLIPSIS" }),
+        Text({ id = 2, contentType = "group", label = "Health", anchor = "BOTTOM", offsetY = -4, fontSize = 12,
+               groupSeparator = " || ",
+               groupItems = { { contentType = "hp_current", abbreviate = true, hideWhenZero = false },
+                              { contentType = "hp_max", abbreviate = true } } }),
+        Text({ id = 3, contentType = "status_text", anchor = "CENTER", fontSize = 12 }),
+        Text({ id = 6, contentType = "backdrop", anchor = "BOTTOM", offsetY = -8, width = 84, height = 21,
+               shape = "BOX", layer = "FRONT", color = { r = 0, g = 0, b = 0, a = 0.6 }, fontSize = 16,
+               hoverSlide = -3, overrides = { fontSize = true } }),
+    }
+    cfg.nextElementID = 7
+    cfg.previewScale = 1
+    cfg.globalDefaults = { font = FONT, fontSize = 10, color = { r = 1, g = 1, b = 1, a = 1 },
+                           outline = "SHADOW;NONE", useClassColor = false }
+    return cfg
+end
+
 function UF.BuildRingTextPreset(key)
     local cfg = NewRingConfig()
-    if key == "plate" then
+    if key == "default" then
+        BuildDefaultRingText(cfg)
+    elseif key == "plate" then
         -- The plate starts 14px under the ring's right edge (tucked behind it) and
         -- its text starts 4px past that edge.
         local plate = Element(cfg, { contentType = "backdrop", anchorTo = "RING_GAP_RIGHT", anchor = "LEFT",

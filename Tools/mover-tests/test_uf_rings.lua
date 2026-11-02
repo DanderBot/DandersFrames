@@ -146,18 +146,53 @@ for _, unit in ipairs(UF.UNITS) do
     eq(db.frameStyle, "BARS", unit .. ": Bars by default (nothing changes)")
 end
 local pdb = UF:GetUnitDB("player")
-eq(pdb.ringSize, 64, "ring size 64")
+eq(pdb.ringSize, 130, "Player: ring size 130")
+eq(pdb.ringPortrait3D, "COVER", "a 3D portrait fills the circle, corners covered")
+eq(pdb.ringTextDesignerPreset, "Unit Frames Ring", "the ring text template")
 local list = pdb.rings
 eq(#list, 2, "two rings")
-eq(list[1].sections[1].bar, "HEALTH", "ring 1 (inner): health")
-eq(list[1].thickness, 8, "...8 thick")
-eq(list[2].sections[1].bar, "POWER", "ring 2: power")
-check(list[2].thickness == 4 and list[2].gap == 2, "...4 thick, 2 out")
+eq(list[1].thickness, 16, "ring 1 (inner): 16 thick")
+eq(list[1].gap, 0, "...flush with the portrait")
+local hs, ps = list[1].sections[1], list[1].sections[2]
+check(hs.bar == "HEALTH" and hs.coverage == "HALF" and hs.position == "LEFT", "...health down the left half")
+check(ps.bar == "POWER" and ps.coverage == "HALF" and ps.position == "RIGHT" and ps.reverse == true,
+      "...power down the right, filling the other way")
+check(list[2].thickness == 5 and list[2].gap == 0 and list[2].sections[1].bar == "CLASSPOWER"
+      and list[2].sections[1].coverage == "FULL", "ring 2: class power, 5 thick")
 check(list ~= UF.RING_DEFAULTS and list ~= UF:GetUnitDB("target").rings,
       "the default list is copied per unit, never shared")
 list[1].thickness = 9
-eq(UF.RING_DEFAULTS[1].thickness, 8, "an in-place edit never reaches the defaults")
-list[1].thickness = 8
+eq(UF.RING_DEFAULTS[1].thickness, 16, "an in-place edit never reaches the defaults")
+list[1].thickness = 16
+for _, unit in ipairs({ "target", "focus" }) do
+    local d = UF:GetUnitDB(unit)
+    eq(d.ringSize, 130, unit .. ": ring size 130")
+    check(#d.rings == 1 and d.rings[1].thickness == 16 and d.rings[1].sections[2].reverse == true,
+          unit .. ": the same health and power ring, and no class power ring (it would draw nothing)")
+end
+for _, unit in ipairs({ "pet", "targettarget", "focustarget", "boss" }) do
+    local d = UF:GetUnitDB(unit)
+    eq(d.ringSize, 64, unit .. ": ring size 64")
+    check(#d.rings == 1 and d.rings[1].thickness == 8 and d.rings[1].gap == 0 and d.rings[1].sections[1].coverage == "HALF",
+          unit .. ": the same ring at half the thickness")
+    eq(d.ringPortrait3D, "COVER", unit .. ": COVER")
+    eq(d.ringTextDesignerPreset, "Unit Frames Ring", unit .. ": the same text template")
+end
+for _, unit in ipairs(UF.UNITS) do
+    check(R.CoverAllowed(UF:GetUnitDB(unit)), unit .. ": its default layout allows COVER")
+    check(not R.RingOverlaps(UF:GetUnitDB(unit).rings[1]), unit .. ": its halves do not overlap")
+end
+do
+    local stored = { units = { player = { rings = { { thickness = 3, gap = 1, sections = {} } }, ringSize = 50 } }, global = { unitLinks = {} } }
+    UF.MigrateProfileTable(stored)
+    check(stored.units.player.ringSize == 50 and stored.units.player.rings[1].thickness == 3, "stored rings are left as they are")
+end
+
+-- The rest of this file checks the maths against a fixed list, not the defaults.
+local TWO_RINGS = {
+    { thickness = 8, gap = 2, sections = { { bar = "HEALTH", coverage = "FULL", position = "TOP" } } },
+    { thickness = 4, gap = 2, sections = { { bar = "POWER", coverage = "FULL", position = "TOP" } } },
+}
 
 print("-- Rings: the list, cleaned")
 local clean = R.List({ rings = { { thickness = 99, gap = -3, sections = { { bar = "NOPE", coverage = "X", position = "Y",
@@ -172,7 +207,7 @@ eq(#clean[2].sections, 0, "a ring with no sections keeps its place")
 eq(#R.List({}), 2, "no list: the default")
 
 print("-- Rings: geometry")
-local geo = R.Geometry({ ringSize = 64, rings = UF.RING_DEFAULTS })
+local geo = R.Geometry({ ringSize = 64, rings = TWO_RINGS })
 eq(geo.size, 64, "size")
 check(geo.rings[2].outer == 64 and geo.rings[2].inner == 56, "outer ring at the frame's edge: 64 / 56")
 check(geo.rings[1].outer == 52 and geo.rings[1].inner == 36, "inner ring 2px in: 52 / 36")
@@ -252,7 +287,7 @@ eq(#R.PipArcs(0, 1, 0), 0, "no pips: no arcs")
 
 print("-- Rings: the frame view's answers")
 check(not R.FrameValue({ frameStyle = "BARS" }, "frameWidth"), "Bars: nothing answered")
-local rdb = { frameStyle = "RING", ringSize = 80, rings = UF.RING_DEFAULTS }
+local rdb = { frameStyle = "RING", ringSize = 80, rings = TWO_RINGS }
 local h, v = R.FrameValue(rdb, "frameWidth")
 check(h and v == 80, "Ring: the frame is ringSize wide...")
 h, v = R.FrameValue(rdb, "frameHeight")
@@ -275,6 +310,8 @@ local eff = UF:GetUnitDB("target")
 check(UF:FrameDB("target") == eff, "Bars: the frames read the unit's table itself")
 eff.frameStyle = "RING"
 eff.ringSize = 72
+eff.rings = deepcopy(TWO_RINGS)
+eff.ringPortrait3D = "FIT"
 local view = UF:FrameDB("target")
 check(view ~= eff, "Ring: a view")
 eq(view.frameWidth, 72, "the view: width = ring size")
@@ -395,7 +432,7 @@ eq(B.healthBar._alpha, 0.7, "Bars: the health bar's alpha is left as it was")
 
 print("-- Rings: the preview")
 eff.frameStyle = "RING"
-eff.rings = deepcopy(UF.RING_DEFAULTS)
+eff.rings = deepcopy(TWO_RINGS)
 local PF = Owner("target")
 PF.dfUFPreview, PF.dfPreview = true, true
 PF.dfDB = UF.Preview:PreviewDB("target")
@@ -425,7 +462,6 @@ eq(p._level, PP._level + R.LEVEL_PORTRAIT, "under the rings")
 check(R.LEVEL_PORTRAIT < R.LEVEL_RINGS and R.LEVEL_RINGS < R.LEVEL_CLASSPOWER, "portrait < rings < class power")
 
 print("-- Rings: a 3D portrait in the middle")
-eq(UF:GetUnitDB("target").ringPortrait3D, "FIT", "Fit by default")
 eq(PO:StyleFor(PP.dfDB, "target", nil), "3D", "FIT: the model stays")
 local fitInset = math.floor(p._w * PO.MODEL_INSET.CIRCLE + 0.5)
 eq(p.dfModelInset, fitInset, "FIT: the square inside the circle")
@@ -441,7 +477,7 @@ eq(p.dfModelInset, fitInset, "...fitted inside")
 PO:Paint(p, PP.dfDB, "3D", "target", nil)
 check(not (p.cover and p.cover._shown), "...with no cover")
 -- COVER with ring 1 flush against the portrait
-eff.rings = deepcopy(UF.RING_DEFAULTS)
+eff.rings = deepcopy(TWO_RINGS)
 eff.rings[1].gap = 0
 check(R.CoverAllowed(PP.dfDB), "COVER: allowed with the innermost Gap at 0")
 PO:Layout(PP)
@@ -527,7 +563,7 @@ do
     setfenv(fn, env)
     fn()
     local U = env.UFO
-    local rings = deepcopy(UF.RING_DEFAULTS)
+    local rings = deepcopy(TWO_RINGS)
     check(U.RingMove(rings, 2, -1) and rings[1].sections[1].bar == "POWER", "move a ring in")
     check(not U.RingMove(rings, 1, -1), "the innermost cannot move further in")
     check(U.RingAdd(rings) and #rings == 3, "add a ring")
@@ -546,7 +582,7 @@ print("-- Rings: Text Designer spots")
 do
     local f = {}
     eq(R.AnchorSpot(f, "RING_ABOVE"), nil, "no ring layout (Bars): no answer, the renderer uses the frame's edges")
-    f.dfUFRingGeom = R.Geometry({ ringSize = 64, rings = UF.RING_DEFAULTS })
+    f.dfUFRingGeom = R.Geometry({ ringSize = 64, rings = TWO_RINGS })
     local x, y = R.AnchorSpot(f, "RING_ABOVE")
     check(x == 0 and y == 32, "above: the outer ring's top")
     x, y = R.AnchorSpot(f, "RING_BELOW")
@@ -640,6 +676,51 @@ do
     check(not c._shown and art[1]._shown and bd.bg[4] == 1, "Bars: the plain mock again")
     check(mock.dfTDAnchorSpot == nil and mock.dfUFRingGeom == nil, "...with the frame-edge spots")
     for name, fn in pairs(held) do _G[name] = fn end
+end
+
+print("-- Rings: the shipped ring template")
+do
+    local E = function(t, id) for _, x in ipairs(t.elements) do if x.id == id then return x end end end
+    local cfg = UF.BuildRingTextPreset("default")
+    eq(UF.RING_TEXT_PRESET, "Unit Frames Ring", "its library name")
+    eq(UF.RING_TEXT_PRESETS.default, "Unit Frames Ring", "...made with the other ring templates")
+    check(cfg.enabled and cfg.hideLegacyText, "on, with the legacy text hidden")
+    eq(cfg.nextElementID, 7, "next id 7")
+    eq(cfg.previewScale, 1, "preview scale 1")
+    eq(#cfg.elements, 4, "four elements")
+    local order = {}
+    for i, x in ipairs(cfg.elements) do order[i] = x.id .. x.contentType end
+    eq(table.concat(order, ","), "1name,2group,3status_text,6backdrop", "in the saved order, ids and all")
+    local g = cfg.globalDefaults
+    check(g.font == "DF Roboto SemiBold" and g.fontSize == 10 and g.outline == "SHADOW;NONE" and g.useClassColor == false
+          and g.color.r == 1 and g.color.a == 1, "global defaults")
+    local full = "color,font,fontSize,outline,useClassColor"
+    local function ov(x)
+        local k = {}
+        for key, v in pairs(x.overrides) do if v == true then k[#k + 1] = key end end
+        table.sort(k)
+        return table.concat(k, ",")
+    end
+    local n = E(cfg, 1)
+    check(n.anchorTo == "FRAME" and n.anchor == "TOP" and n.offsetX == 0 and n.offsetY == 12 and n.fontSize == 13
+          and n.outline == "SHADOW" and n.nameLength == 10 and n.truncateMode == "ELLIPSIS" and n.hoverSlide == 0
+          and n.label == "" and n.useClassColor == false and n.color.a == 1, "the name")
+    eq(ov(n), full, "...its overrides")
+    local h = E(cfg, 2)
+    check(h.label == "Health" and h.anchor == "BOTTOM" and h.offsetY == -4 and h.fontSize == 12, "the health group")
+    eq(h.groupSeparator, " " .. "|" .. "|" .. " ", "...two literal pipes")
+    check(h.groupItems[1].contentType == "hp_current" and h.groupItems[1].abbreviate and h.groupItems[1].hideWhenZero == false
+          and h.groupItems[2].contentType == "hp_max" and h.groupItems[2].abbreviate, "...current and max")
+    eq(ov(h), full, "...its overrides")
+    local st = E(cfg, 3)
+    check(st.anchor == "CENTER" and st.offsetY == 0 and st.fontSize == 12 and st.label == "", "the status")
+    eq(ov(st), full, "...its overrides")
+    local b = E(cfg, 6)
+    check(b.anchor == "BOTTOM" and b.offsetY == -8 and b.width == 84 and b.height == 21 and b.shape == "BOX"
+          and b.layer == "FRONT" and b.color.a == 0.6 and b.color.r == 0 and b.fontSize == 16 and b.hoverSlide == -3, "the backdrop")
+    eq(ov(b), "fontSize", "...its overrides")
+    eq(rawget(n, "_skipOverrideIndicators"), nil, "no editor bookkeeping")
+    eq(cfg.migratedFromLegacy, nil, "...nor the migration's")
 end
 
 print("-- Rings: Text Designer presets")

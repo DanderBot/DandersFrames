@@ -234,8 +234,14 @@ local chunk = assert((loadstring or load)(
 chunk(DF, GUI, UFO, DF.L, string.format, table.concat, Tools, function() refreshes = refreshes + 1 end,
       function() return Frame() end)
 
+-- A fixed list: this file checks the card, not the shipped defaults.
+local TWO_RINGS = {
+    { thickness = 8, gap = 2, sections = { { bar = "HEALTH", coverage = "FULL", position = "TOP" } } },
+    { thickness = 4, gap = 2, sections = { { bar = "POWER", coverage = "FULL", position = "TOP" } } },
+}
+
 local db = { frameStyle = "RING", portraitEnabled = true, portraitMode = "3D",
-             rings = deepcopy(UF.RING_DEFAULTS) }
+             rings = deepcopy(TWO_RINGS) }
 local page = { child = Frame() }
 function page:RefreshStates()
     for _, b in pairs(bands) do b:Sweep(db) end
@@ -537,7 +543,7 @@ end
 print("-- Rings page: a list swapped behind the page")
 do
     local n = #deferred
-    db.rings = deepcopy(UF.RING_DEFAULTS)
+    db.rings = deepcopy(TWO_RINGS)
     page:RefreshStates()
     eq(#deferred, n + 1, "the state pass notices and defers a rebuild")
     deferred[#deferred]()
