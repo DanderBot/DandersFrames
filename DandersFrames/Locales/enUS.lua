@@ -242,6 +242,7 @@ L["Pips"] = true
 L["PLAYER"] = true
 L["Player and Target show different icons (resting, combat, leader)."] = true
 L["Portrait: on the portrait's top and bottom edges, clear of auras and cast bars. Uses the frame when the portrait is off or sits inside the frame."] = true
+L["Portrait Alpha"] = true
 L["Portrait"] = true
 L["Position & Direction"] = true
 L["position mirrored"] = true

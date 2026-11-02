@@ -1394,6 +1394,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local oorPower = group:AddWidget(GUI:CreateSlider(parent, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "oorPowerBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorPower.disableOn = HideOOROptions
 
+            -- Unit frame pages add their portrait's alpha here; party / raid never set it.
+            local ufOOR = rawget(self, "dfOORExtras")
+            if type(ufOOR) == "function" then ufOOR(group, parent, db, HideOOROptions) end
+
             local oorMissingBuff = group:AddWidget(GUI:CreateSlider(parent, L["Missing Buff Alpha"], 0.0, 1.0, 0.05, db, "oorMissingBuffAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorMissingBuff.disableOn = HideOOROptions
 

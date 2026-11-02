@@ -2068,7 +2068,14 @@ local ELEMENT_APPEARANCE_STEPS = {
     -- their range/dead fade never fired on a range change -- see
     -- DF:UpdateStatusIconsAppearance for the full reasoning.
     "UpdateStatusIconsAppearance",
+    -- Parts a frame owns that this file doesn't know about.
+    "UpdateFrameOwnedAppearance",
 }
+
+function DF:UpdateFrameOwnedAppearance(frame)
+    local fn = rawget(frame, "dfOnElementAppearance")
+    if type(fn) == "function" then fn(frame) end
+end
 
 function DF:UpdateAllElementAppearances(frame)
     if not IsDandersFrame(frame) then return end

@@ -230,6 +230,7 @@ local ELEMENTS = {
     portraitBgColor = { r = 0, g = 0, b = 0, a = 0.8 },
     portraitMirror = false,
     portraitShape = "SQUARE",       -- SQUARE | CIRCLE | ROUNDED (Portrait.lua SHAPES)
+    oorPortraitAlpha = 0.2,         -- element range fade (Portrait.lua PO:ApplyAlpha)
     portraitDimHover = false,       -- fade while the frame is hovered (Portrait.lua DIM ON HOVER)
     portraitBorderEnabled = true,
     portraitBorderSize = 1,

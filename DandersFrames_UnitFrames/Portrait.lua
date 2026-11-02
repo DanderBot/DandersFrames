@@ -71,6 +71,10 @@ function PO:Attach(f)
     local p = CreateFrame("Frame", nil, f)
     p:Hide()
     p.owner = f
+    -- Element range fade pins the frame at full alpha, so the portrait fades itself.
+    f.dfOnElementAppearance = function(owner)
+        PO:ApplyAlpha(owner, owner.dfIsHovered or rawget(owner, "_tdForceHover"))
+    end
     p.bg = p:CreateTexture(nil, "BACKGROUND")
     p.bg:SetAllPoints(p)
     p.bg:SetTexture(K.WHITE)
@@ -230,9 +234,8 @@ function PO:Layout(f)
     else
         p:SetFrameLevel(f:GetFrameLevel() + ((side == "INSIDE_LEFT" or side == "INSIDE_RIGHT") and 4 or 1))
     end
-    p:SetAlpha(tonumber(db.portraitAlpha) or 1)
     -- Hovered right now (or the designer's Show Hover State): dimmed.
-    if f.dfIsHovered or rawget(f, "_tdForceHover") then PO:SetHover(f, true) end
+    PO:ApplyAlpha(f, f.dfIsHovered or rawget(f, "_tdForceHover"))
     p.bg:SetVertexColor(K.RGBA(db.portraitBgColor, 0, 0, 0, 0.8))
     PO:ApplyShape(p, db, size)
     -- RING 3D: COVER fills the circle's square (no inset) and covers the corners
@@ -484,13 +487,32 @@ function PO:OnUnitChanged(f) PO:Update(f) end
 -- ============================================================
 PO.DIM = 0.35
 
-function PO:SetHover(f, on)
+-- The portrait's one alpha write: its own alpha, the hover dim, then the element
+-- range fade (oorEnabled; in frame mode the frame's alpha cascades over it instead).
+-- dfInRange can be secret: it is never compared, only handed to the engine.
+function PO:ApplyAlpha(f, hovered)
     local p = f and f.dfUFPortrait
     if not p then return end
     local db = K.DB(f)
     local base = tonumber(db and db.portraitAlpha) or 1
-    if on and db and db.portraitDimHover then base = base * PO.DIM end
-    p:SetAlpha(base)
+    if hovered and db and db.portraitDimHover then base = base * PO.DIM end
+    if not (db and db.oorEnabled) then
+        p:SetAlpha(base)
+        return
+    end
+    local oor = base * (tonumber(db.oorPortraitAlpha) or 0.2)
+    local inRange = f.dfInRange
+    if issecretvalue and issecretvalue(inRange) then
+        if p.SetAlphaFromBoolean then p:SetAlphaFromBoolean(inRange, base, oor) else p:SetAlpha(base) end
+    elseif inRange == false then
+        p:SetAlpha(oor)
+    else
+        p:SetAlpha(base)
+    end
+end
+
+function PO:SetHover(f, on)
+    PO:ApplyAlpha(f, on)
 end
 
 -- Dead / alive changes the desaturation only (a model repaint per health tick

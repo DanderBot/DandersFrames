@@ -1017,6 +1017,7 @@ function UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
     self.sectionFilter = function(key) return UFO.CardAllowed(rec, unit, key) end
     -- Unit-frame-only controls inside a DF card (Modules.lua reads it per card).
     if rec.kind == "icons" then self.dfIconCardExtras = UFO.IconCardExtras(self) end
+    if rec.kind == "fading" then self.dfOORExtras = UFO.OORExtras(unit) end
     -- Whole cards of ours the party builder draws through its card door (UFO.ExtraCards).
     self.dfExtraCards = UFO.ExtraCards(self, rec, unit)
 
@@ -1134,6 +1135,18 @@ local function RefreshFrames()
 end
 
 -- ---- cards of ours on a DandersFrames page ----------------------------------
+-- The Fading page's element alphas: the portrait's, on units that have one.
+function UFO.OORExtras(unit)
+    local UF = DF.UnitFrames
+    local PO = UF and UF.Portrait
+    if not (PO and PO.UNITS and PO.UNITS[unit]) then return nil end
+    return function(group, parent, db, off)
+        local w = group:AddWidget(GUI:CreateSlider(parent, L["Portrait Alpha"], 0.0, 1.0, 0.05, db, "oorPortraitAlpha",
+            nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        w.disableOn = off
+    end
+end
+
 -- A party builder draws the page. Where it leaves a door (page.dfExtraCards, read
 -- with rawget, so a party / raid build never finds one) it calls ours with its OWN
 -- OpenSection / CloseSection: the card shares the page's popout tools (a second
