@@ -1863,15 +1863,18 @@ end
 
 -- ============================================================
 -- FRAME STYLE (DandersFrames_UnitFrames/Rings.lua)
--- Style: Bars or Ring, and the ring's size. Rings: the ring list, innermost
--- first -- one block per ring (move in / out, remove, thickness, gap) with its
--- sections editable in place (bar, coverage, position, reverse, feather; add /
--- remove). Built from the kit's row list (DandersUI RowList), which gained button
--- rows for this. Everything greys unless Frame Style is Ring.
--- The ring list is ONE value (`rings`, a table copied into the unit's own table
--- on first read): edited in place, then the unit's link is pushed (an in-place
--- edit no write hook sees) and the frames repaint. A change to the list's shape
--- rebuilds the rows; a slider or switch only repaints.
+-- Style: Bars or Ring, and the ring's size. Rings: the ring list, innermost first,
+-- as a list of bars in the Text Designer's item-bar pattern (up / down arrows, a live
+-- summary, Customise / Done, a red X). Customise opens that ring in place, one at a
+-- time; inside it are ordinary settings widgets, so they take the band's two tracks,
+-- quiet captions and grey sweep like any other card.
+-- The ring list is ONE value (`rings`, a table copied into the unit's own table on
+-- first read): edited in place, then the unit's link is pushed (an in-place edit no
+-- write hook sees) and the frames repaint.
+-- ☠ NOTHING IS BUILT PER CLICK. WoW never frees a frame, so the bars and the one
+-- editor are a fixed pool, made on first need and bound through getters to whatever
+-- ring is open. A change of shape (add, remove, move, open, a position that appears)
+-- only re-orders the band's children: see Rebuild in UFO.BuildRingsPage.
 -- ============================================================
 function UFO.FrameStyleOptions()
     return { BARS = L["Bars"], RING = L["Ring"], _order = { "BARS", "RING" } }
@@ -1948,22 +1951,204 @@ function UFO.RingSectionRemove(ring, j)
     return true
 end
 
+-- Open a ring, or shut it if it is the open one: one open at a time.
+function UFO.RingToggleOpen(open, ring)
+    if open == ring then return nil end
+    return ring
+end
+
+-- A section's shape. A corner is a quarter's only: anything else on one moves to Top.
+function UFO.RingSetCoverage(sec, coverage)
+    sec.coverage = coverage
+    if not UFO.RingPositionOptions(coverage)[sec.position or "TOP"] then sec.position = "TOP" end
+end
+
+-- One section in words: "Health - Top half".
+function UFO.RingSectionText(sec)
+    local name = UFO.RingBarOptions()[sec.bar or "HEALTH"] or L["Health"]
+    local coverage = sec.coverage or "FULL"
+    if coverage == "FULL" then return format(L["%s - Full ring"], name) end
+    local where = UFO.RingPositionOptions("QUARTER")[sec.position or "TOP"] or L["Top"]
+    return format(coverage == "HALF" and L["%s - %s half"] or L["%s - %s quarter"], name, where)
+end
+
+-- A whole ring: "Health - Top half + Power - Bottom half".
+function UFO.RingSummary(ring)
+    local parts = {}
+    for _, sec in ipairs(type(ring.sections) == "table" and ring.sections or {}) do
+        parts[#parts + 1] = UFO.RingSectionText(sec)
+    end
+    if #parts == 0 then return L["No bars"] end
+    return concat(parts, " + ")
+end
+
+-- What the open ring's rows depend on: when this moves behind the page's back (a
+-- list replaced underneath it), the rows are rebuilt.
+function UFO.RingShapeKey(list)
+    local parts = { tostring(list) }
+    for i, ring in ipairs(list) do
+        parts[#parts + 1] = tostring(ring) .. ":" .. (type(ring.sections) == "table" and #ring.sections or 0)
+    end
+    return concat(parts, "|")
+end
+
+-- ---- an item bar ------------------------------------------------------------
+-- The Text Designer's group item bar (TextDesigner/UI/Options.lua
+-- BuildGroupItemsSection), from the same kit helpers, for rows that are REUSED: that
+-- one is made per card build, these live for the page. opts:
+--   height      the bar's height
+--   onUp / onDown / onCustomise / onRemove   (bar): absent = no such button
+--   removeTip   the X's tooltip; moveTips { up, down }
+-- bar:Paint{ text, canUp, canDown, canRemove, open } draws a state; the grey sweep's
+-- SetEnabled is combined with it, so an X greyed at one ring stays grey.
+function UFO.CreateItemBar(parent, opts)
+    local icons = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+    local bar = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    bar:SetHeight(opts.height or 28)
+    bar.fullRow = true
+    local ce, cb = GUI.Colors.element, GUI.Colors.border
+    GUI:CreateElementBackdrop(bar, { bgColor = { ce.r, ce.g, ce.b, 1 }, borderColor = { cb.r, cb.g, cb.b, 0.3 } })
+    bar.dfOn = true
+
+    if opts.onUp then
+        bar.upBtn = GUI:CreateGlyphButton(bar, {
+            width = 20, height = 13, iconSize = 12, texture = icons .. "expand_more.png", rotation = math.pi,
+            tooltip = opts.moveTips and opts.moveTips.up, onClick = function() opts.onUp(bar) end,
+        })
+        bar.upBtn:SetPoint("TOPLEFT", 2, -1)
+    end
+    if opts.onDown then
+        bar.downBtn = GUI:CreateGlyphButton(bar, {
+            width = 20, height = 13, iconSize = 12, texture = icons .. "expand_more.png",
+            tooltip = opts.moveTips and opts.moveTips.down, onClick = function() opts.onDown(bar) end,
+        })
+        bar.downBtn:SetPoint("BOTTOMLEFT", 2, 1)
+    end
+    bar.removeBtn = GUI:CreateCloseButton(bar, {
+        size = 16, tone = "danger", tooltip = opts.removeTip, onClick = function() opts.onRemove(bar) end,
+    })
+    bar.removeBtn:SetPoint("RIGHT", bar, "RIGHT", -6, 0)
+    local rightOf = bar.removeBtn
+    if opts.onCustomise then
+        bar.custBtn = CreateFrame("Button", nil, bar, "BackdropTemplate")
+        bar.custBtn:SetPoint("RIGHT", bar.removeBtn, "LEFT", -6, 0)
+        GUI:StyleButton(bar.custBtn, { width = 70, height = 18, text = L["Customise"], tinted = true })
+        GUI:SetSettingsFont(bar.custBtn.Text, 9, "")
+        bar.custBtn:SetScript("OnClick", function() opts.onCustomise(bar) end)
+        rightOf = bar.custBtn
+    end
+    bar.text = bar:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(bar.text, 10, "")
+    bar.text:SetPoint("LEFT", bar, "LEFT", opts.onUp and 26 or 8, 0)
+    bar.text:SetPoint("RIGHT", rightOf, "LEFT", -6, 0)
+    bar.text:SetJustifyH("LEFT")
+    bar.text:SetWordWrap(false)
+    local ct = GUI.Colors.text
+    bar.text:SetTextColor(ct.r, ct.g, ct.b)
+
+    local function Apply()
+        local st, on = bar.dfState or {}, bar.dfOn
+        bar.text:SetAlpha(on and 1 or 0.4)
+        if bar.upBtn then
+            bar.upBtn:SetShown(st.canUp and true or false)
+            bar.upBtn:SetGlyphEnabled(on)
+        end
+        if bar.downBtn then
+            bar.downBtn:SetShown(st.canDown and true or false)
+            bar.downBtn:SetGlyphEnabled(on)
+        end
+        if bar.custBtn then bar.custBtn:SetEnabled(on) end
+        bar.removeBtn:SetEnabled((on and st.canRemove ~= false) and true or false)
+    end
+
+    function bar:Paint(st)
+        self.dfState = st
+        self.text:SetText(st.text or "")
+        if self.custBtn and self.custBtn.Text then
+            self.custBtn.Text:SetText(st.open and L["Done"] or L["Customise"])
+        end
+        Apply()
+    end
+
+    -- The grey sweep (RefreshChildStates).
+    function bar:SetEnabled(on)
+        self.dfOn = on and true or false
+        Apply()
+    end
+
+    -- The whole line, which a narrow card truncates, and why it is grey.
+    bar:EnableMouse(true)
+    bar:SetScript("OnEnter", function(self)
+        local st = self.dfState or {}
+        local lines
+        local reason = GUI.ResolveDisableReason and GUI.ResolveDisableReason(GUI, self)
+        if reason then lines = { reason } end
+        if st.plain then GUI:ShowTooltip(self, { title = st.plain, lines = lines }) end
+    end)
+    bar:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    return bar
+end
+
+-- A primary "+ Add" button in a row of its own: left-aligned at its own width, where
+-- a group would otherwise stretch it across a full-width card. The grey sweep reaches
+-- the button through the row.
+function UFO.CreateAddRow(parent, text, onClick)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(24)
+    row.fullRow = true
+    local btn = CreateFrame("Button", nil, row, "BackdropTemplate")
+    GUI:StyleButton(btn, { width = 110, height = 22, primary = true, text = text,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 } })
+    btn:SetPoint("LEFT", row, "LEFT", 0, 0)
+    btn:SetScript("OnClick", function()
+        if PlaySound and SOUNDKIT then PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
+        onClick()
+    end)
+    row.button = btn
+    function row:SetEnabled(on) btn:SetEnabled(on and true or false) end
+    return row
+end
+
+-- A captioned Full / Half / Quarter toggle (the toggle itself has no caption).
+function UFO.CreateShapeRow(parent, get, set)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(44)
+    local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    cap:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    cap:SetText(L["Shape"])
+    local ct = GUI.Colors.text
+    cap:SetTextColor(ct.r, ct.g, ct.b)
+    row.label = cap
+    local toggle = GUI:CreateSegmentToggle(row, {
+        { value = "FULL", label = L["Full"] },
+        { value = "HALF", label = L["Half"] },
+        { value = "QUARTER", label = L["Quarter"] },
+    }, nil, nil, nil, { segmentWidth = 56, height = 18, rounded = true, customGet = get, customSet = set })
+    toggle:SetPoint("TOPLEFT", cap, "BOTTOMLEFT", 0, -4)
+    row.toggle = toggle
+    row.refreshValue = function() toggle:Refresh() end
+    function row:SetEnabled(on)
+        toggle:SetEnabled(on)
+        cap:SetAlpha(on and 1 or 0.4)
+    end
+    return row
+end
+
 function UFO.BuildRingsPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
     local Open, Close = Tools(self, Add)
     local function isRing(d) return d and d.frameStyle == "RING" end
     local off = UFO.Explain(function(d) return not isRing(d) end,
         function() return L["Set Frame Style to Ring to change this."] end)
-    local list
     local function changed()
         self:RefreshStates()
         UFO.PushLinks(unit)
         RefreshFrames()
-        if list then list:Refresh() end
     end
     local w
 
-    local band = Open(L["Style"], "uf_rings_style", 1, function(d)
+    -- Full width, both cards: a ring's summary line needs the room.
+    local band = Open(L["Style"], "uf_rings_style", "both", function(d)
         return UFO.FrameStyleOptions()[(d and d.frameStyle) or "BARS"] or ""
     end, "framemodes")
     band:AddWidget(GUI:CreateDropdown(self.child, L["Frame Style"], UFO.FrameStyleOptions(), db, "frameStyle", changed), 55)
@@ -1988,96 +2173,301 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
         L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar; absorbs and heal prediction are not drawn on rings."], 250), 70)
     Close(band)
 
-    band = Open(L["Rings"], "uf_rings_list", 2, function(d)
+    band = Open(L["Rings"], "uf_rings_list", "both", function(d)
         return format(L["Rings: %d"], #UFO.RingList(d))
     end, "layout")
-    local function rowOff()
-        if isRing(db) then return false end
-        return true, L["Frame Style"], { L["Set Frame Style to Ring to change this."] }
+    UFO.BuildRingList(self, band, db, unit, off)
+    Close(band)
+end
+
+-- The Rings card's rows. See FRAME STYLE above for why nothing here is per click.
+-- `openRing` is the ring being edited, per page and never saved: the TABLE, so it
+-- stays open as it moves. Returns the page's handle on the list (tests drive it).
+function UFO.BuildRingList(self, band, db, unit, off)
+    local R = DF.UnitFrames and DF.UnitFrames.Rings
+    local openRing
+    local entries = {}      -- pooled widget -> its entry in the band
+    local bars = {}         -- ring index -> its bar
+    local editor            -- the one editor (made on first Customise)
+    local head, addRing     -- the note on top, the Add Ring row
+    local lastKey
+    local Rebuild
+
+    local function Rings() return UFO.RingList(db) end
+
+    -- The open ring, if it is still in the list.
+    local function Open()
+        for i, ring in ipairs(Rings()) do
+            if ring == openRing then return ring, i end
+        end
+        return nil
     end
-    local Build
-    local function wrote(rebuild)
+    local function Sections(ring)
+        if type(ring.sections) ~= "table" then ring.sections = {} end
+        return ring.sections
+    end
+    local function Sec(j)
+        local ring = Open()
+        return ring and Sections(ring)[j] or nil
+    end
+
+    -- A widget joins the pool once: in the band through the kit's own AddWidget (which
+    -- works out its slot height), and remembered, because Rebuild re-orders the band.
+    local function Track(w, height)
+        w.disableOn = w.disableOn or off
+        w.disableReason = UFO.gateReasons[w.disableOn]
+        band:AddWidget(w, height)
+        entries[w] = band.groupChildren[#band.groupChildren]
+        return w
+    end
+
+    -- A value changed: the frames follow, the summaries repaint; nothing moves.
+    local PaintBars
+    local function wrote()
         UFO.PushLinks(unit)
         RefreshFrames()
+        PaintBars()
         self:RefreshStates()
-        if rebuild then Build() end
     end
-    list = GUI:CreateRowList(self.child, { width = 250, store = function() return {} end })
-    Build = function()
-        list:Clear()
-        local rings = UFO.RingList(db)
-        for i, ring in ipairs(rings) do
-            if type(ring.sections) ~= "table" then ring.sections = {} end
-            list:AddHeading({ label = (i == 1) and format(L["Ring %d (innermost)"], i) or format(L["Ring %d"], i) })
-            list:AddButtons({ label = "", disabled = rowOff, buttons = {
-                { text = L["Up"], tooltip = L["Move this ring one step in."],
-                  disabled = function() return i == 1 end,
-                  onClick = function() if UFO.RingMove(rings, i, -1) then wrote(true) end end },
-                { text = L["Down"], tooltip = L["Move this ring one step out."],
-                  disabled = function() return i == #rings end,
-                  onClick = function() if UFO.RingMove(rings, i, 1) then wrote(true) end end },
-                { text = L["Remove"], tooltip = L["Remove this ring."],
-                  disabled = function() return #rings <= 1 end,
-                  onClick = function() if UFO.RingRemove(rings, i) then wrote(true) end end },
-            } })
-            list:AddSlider({ label = L["Thickness"], min = 1, max = 40, step = 1, disabled = rowOff,
-                get = function() return ring.thickness or 6 end,
-                set = function(v) ring.thickness = v end, onChanged = function() wrote(false) end })
-            list:AddSlider({ label = L["Gap"], min = 0, max = 20, step = 1, disabled = rowOff,
-                tooltip = L["Space inside this ring, between it and the ring or portrait within."],
-                get = function() return ring.gap or 2 end,
-                set = function(v) ring.gap = v end, onChanged = function() wrote(false) end })
-            for j, sec in ipairs(ring.sections) do
-                list:AddButtons({ label = format(L["Section %d"], j), disabled = rowOff, buttons = {
-                    { text = L["Remove"], tooltip = L["Remove this section."],
-                      onClick = function() if UFO.RingSectionRemove(ring, j) then wrote(true) end end },
-                } })
-                list:AddDropdown({ label = L["Bar"], options = UFO.RingBarOptions(), disabled = rowOff,
-                    get = function() return sec.bar or "HEALTH" end,
-                    set = function(v) sec.bar = v end, onChanged = function() wrote(false) end })
-                list:AddDropdown({ label = L["Coverage"], options = UFO.RingCoverageOptions(), disabled = rowOff,
-                    get = function() return sec.coverage or "FULL" end,
-                    set = function(v)
-                        sec.coverage = v
-                        -- A corner is a quarter's only: a half on one moves to the top.
-                        if not UFO.RingPositionOptions(v)[sec.position or "TOP"] then sec.position = "TOP" end
-                    end, onChanged = function() wrote(true) end })
-                list:AddDropdown({ label = L["Position"], options = UFO.RingPositionOptions(sec.coverage),
-                    disabled = rowOff,
-                    hidden = function() return (sec.coverage or "FULL") == "FULL" end,
-                    get = function() return sec.position or "TOP" end,
-                    set = function(v) sec.position = v end, onChanged = function() wrote(false) end })
-                list:AddSwitch({ label = L["Reverse Fill"], disabled = rowOff,
-                    tooltip = L["Fill counter-clockwise."],
-                    get = function() return sec.reverse and true or false end,
-                    set = function(v) sec.reverse = v and true or nil end, onChanged = function() wrote(false) end })
-                list:AddSlider({ label = L["Feather"], min = 0, max = 1, step = 0.05, disabled = rowOff,
-                    tooltip = L["Softens the end of the fill."],
-                    format = function(v) return format("%.2f", v) end,
-                    get = function() return sec.feather or 0 end,
-                    set = function(v) sec.feather = (v > 0) and v or nil end, onChanged = function() wrote(false) end })
+    -- The list's shape changed.
+    local function reshaped()
+        UFO.PushLinks(unit)
+        RefreshFrames()
+        Rebuild()
+    end
+
+    -- ---- the ring bars -------------------------------------------------------
+    local function RingAt(bar) return Rings()[bar.dfIndex] end
+    local function Bar(i)
+        local bar = bars[i]
+        if bar then return bar end
+        bar = Track(UFO.CreateItemBar(self.child, {
+            height = 28,
+            moveTips = { up = L["Move this ring one step in."], down = L["Move this ring one step out."] },
+            removeTip = L["Remove this ring."],
+            onUp = function(b) if UFO.RingMove(Rings(), b.dfIndex, -1) then reshaped() end end,
+            onDown = function(b) if UFO.RingMove(Rings(), b.dfIndex, 1) then reshaped() end end,
+            onCustomise = function(b)
+                openRing = UFO.RingToggleOpen(openRing, RingAt(b))
+                Rebuild()
+            end,
+            onRemove = function(b)
+                local ring = RingAt(b)
+                if UFO.RingRemove(Rings(), b.dfIndex) then
+                    if openRing == ring then openRing = nil end
+                    reshaped()
+                end
+            end,
+        }), 32)
+        bars[i] = bar
+        return bar
+    end
+
+    PaintBars = function()
+        local rings = Rings()
+        for i, bar in pairs(bars) do
+            local ring = rings[i]
+            if ring then
+                bar.dfIndex = i
+                local plain = UFO.RingSummary(ring)
+                local text = format("%d  %s", i, plain)
+                if R and R.RingOverlaps(ring) then
+                    text = format("%s  |c%s(%s)|r", text, GUI:ToneHex("warning"), L["overlap"])
+                end
+                bar:Paint({ text = text, plain = plain, canUp = i > 1, canDown = i < #rings,
+                            canRemove = #rings > 1, open = ring == openRing })
             end
-            list:AddButtons({ label = "", disabled = rowOff, buttons = {
-                { text = L["Add Section"], width = 96,
-                  disabled = function() return #ring.sections >= UFO.RING_SECTION_MAX end,
-                  onClick = function() if UFO.RingSectionAdd(ring) then wrote(true) end end },
-            } })
         end
-        list:AddButtons({ label = "", disabled = rowOff, buttons = {
-            { text = L["Add Ring"], width = 96,
-              disabled = function() return #rings >= UFO.RING_MAX end,
-              onClick = function() if UFO.RingAdd(rings) then wrote(true) end end },
-        } })
-        list:Refresh()
-        if GUI.RelayoutHost and rawget(list, "settingsGroup") then
-            GUI:RelayoutHost(list, list:GetHeight() + 4)
+        local open = Open()
+        if editor and open then
+            for j, b in ipairs(editor.sections) do
+                local sec = Sections(open)[j]
+                if sec then
+                    b.bar.dfIndex = j
+                    local plain = UFO.RingSectionText(sec)
+                    b.bar:Paint({ text = format("%d  %s", j, plain), plain = plain })
+                end
+            end
         end
     end
-    Build()
-    band:AddWidget(list, list:GetHeight() + 4)
-    -- Frame Style greys / un-greys the rows: the page's state pass reaches them here.
-    list.refreshContent = function() list:Refresh() end
-    Close(band)
+
+    -- ---- the editor: one set of widgets, bound to the open ring ---------------
+    local function SectionWidgets(j)
+        local e = {}
+        e.bar = Track(UFO.CreateItemBar(self.child, {
+            height = 24, removeTip = L["Remove this bar."],
+            onRemove = function(b)
+                local ring = Open()
+                if ring and UFO.RingSectionRemove(ring, b.dfIndex) then reshaped() end
+            end,
+        }), 28)
+        e.drop = Track(GUI:CreateDropdown(self.child, L["Bar"], UFO.RingBarOptions(), nil, nil, wrote,
+            function() local s = Sec(j); return s and s.bar or "HEALTH" end,
+            function(v) local s = Sec(j); if s then s.bar = v end end), 55)
+        e.shape = Track(UFO.CreateShapeRow(self.child,
+            function() local s = Sec(j); return s and s.coverage or "FULL" end,
+            function(v)
+                local s = Sec(j)
+                if s then UFO.RingSetCoverage(s, v) end
+                reshaped()   -- Position comes and goes, and its choices change
+            end), 55)
+        e.pos = Track(GUI:CreateDropdown(self.child, L["Position"], UFO.RingPositionOptions("QUARTER"), nil, nil, reshaped,
+            function() local s = Sec(j); return s and s.position or "TOP" end,
+            function(v) local s = Sec(j); if s then s.position = v end end), 55)
+        e.rev = Track(GUI:CreateCheckbox(self.child, L["Reverse Fill"], nil, nil, wrote,
+            function() local s = Sec(j); return (s and s.reverse) and true or false end,
+            function(v) local s = Sec(j); if s then s.reverse = v and true or nil end end), 30)
+        e.rev.tooltip = L["Fill counter-clockwise."]
+        e.soft = Track(GUI:CreateSlider(self.child, L["Soft Edge"], 0, 1, 0.05, nil, nil, wrote,
+            UFO.LiveSlider(unit, "rings", "rings"), nil,
+            function() local s = Sec(j); return s and s.feather or 0 end,
+            function(v) local s = Sec(j); if s then s.feather = (v > 0) and v or nil end end), 55)
+        e.soft.tooltip = L["Softens the end of the fill."]
+        return e
+    end
+
+    local function Editor()
+        if editor then return editor end
+        local ed = { sections = {} }
+        local live = UFO.LiveSlider(unit, "rings", "rings")
+        ed.thickness = Track(GUI:CreateSlider(self.child, L["Thickness"], 1, 40, 1, nil, nil, wrote, live, nil,
+            function() local r = Open(); return r and r.thickness or 6 end,
+            function(v) local r = Open(); if r then r.thickness = v end end), 55)
+        ed.gap = Track(GUI:CreateSlider(self.child, L["Gap"], 0, 20, 1, nil, nil, wrote, live, nil,
+            function() local r = Open(); return r and r.gap or 2 end,
+            function(v) local r = Open(); if r then r.gap = v end end), 55)
+        ed.gap.tooltip = L["Space inside this ring, between it and the ring or portrait within."]
+        ed.heading = Track(GUI:CreateHeader(self.child, L["Bars in this ring"]))
+        ed.heading.fullRow = true
+        ed.overlap = Track(GUI:CreateNote(self.child, L["Some bars in this ring overlap and draw over each other."],
+            { tone = "warning", width = 250 }))
+        ed.overlap.fullRow = true
+        ed.addBar = Track(UFO.CreateAddRow(self.child, L["Add Bar"], function()
+            local ring = Open()
+            if ring and UFO.RingSectionAdd(ring) then reshaped() end
+        end), 28)
+        -- Greyed by Frame Style, or at the limit.
+        ed.addBar.disableOn = UFO.Explain(function(d)
+            local ring = Open()
+            return off(d) or (ring ~= nil and #Sections(ring) >= UFO.RING_SECTION_MAX)
+        end, function(d)
+            if off(d) then return L["Set Frame Style to Ring to change this."] end
+            return format(L["A ring holds at most %d bars."], UFO.RING_SECTION_MAX)
+        end)
+        ed.addBar.disableReason = UFO.gateReasons[ed.addBar.disableOn]
+        editor = ed
+        return ed
+    end
+
+    -- ---- the rows -------------------------------------------------------------
+    -- Which pooled widgets show, in order (making any it names for the first time).
+    local function Rows()
+        local rows = { head }
+        local rings = Rings()
+        local _, openIndex = Open()
+        for i in ipairs(rings) do
+            rows[#rows + 1] = Bar(i)
+            if i == openIndex then
+                local ed = Editor()
+                local secs = Sections(rings[i])
+                rows[#rows + 1] = ed.thickness
+                rows[#rows + 1] = ed.gap
+                rows[#rows + 1] = ed.heading
+                if R and R.RingOverlaps(rings[i]) then rows[#rows + 1] = ed.overlap end
+                for j, sec in ipairs(secs) do
+                    local e = ed.sections[j]
+                    if not e then
+                        e = SectionWidgets(j)
+                        ed.sections[j] = e
+                    end
+                    rows[#rows + 1] = e.bar
+                    rows[#rows + 1] = e.drop
+                    rows[#rows + 1] = e.shape
+                    if (sec.coverage or "FULL") ~= "FULL" then
+                        -- Corners are a quarter's only. Only when it changes: this runs
+                        -- on every shape change, the dropdown's own pick included.
+                        if e.posFor ~= sec.coverage then
+                            e.posFor = sec.coverage
+                            if e.pos.RebuildOptions then e.pos:RebuildOptions(UFO.RingPositionOptions(sec.coverage)) end
+                        end
+                        rows[#rows + 1] = e.pos
+                    end
+                    rows[#rows + 1] = e.rev
+                    rows[#rows + 1] = e.soft
+                end
+                rows[#rows + 1] = ed.addBar
+            end
+        end
+        rows[#rows + 1] = addRing
+        return rows
+    end
+
+    -- Put the rows in the band in order; what is not a row hides. The widgets now bound
+    -- to another ring repaint their values, the page takes the new height.
+    local function Order()
+        local rows = Rows()
+        local on = {}
+        local kids = band.groupChildren
+        for i = #kids, 1, -1 do kids[i] = nil end
+        for i, w in ipairs(rows) do
+            on[w] = true
+            kids[i] = entries[w]
+        end
+        for w in pairs(entries) do
+            if not on[w] then w:Hide() end
+        end
+        for _, w in ipairs(rows) do
+            local rv = rawget(w, "refreshValue")
+            if rv then rv(w) end
+        end
+        lastKey = UFO.RingShapeKey(Rings())
+        PaintBars()
+    end
+
+    Rebuild = function()
+        Order()
+        -- Anything made just now takes the card's rules, as CloseSection gave the rest.
+        if band.dfTwoTrack and GUI.StampFullRows then GUI.StampFullRows(band) end
+        if band.dfQuietLabels and GUI.QuietLabels then GUI.QuietLabels(band) end
+        -- The page state pass lays the band out, greys it and re-seats what follows.
+        self:RefreshStates()
+    end
+
+    head = Track(GUI:CreateNote(self.child, L["The innermost ring is at the top."], { width = 250 }))
+    head.fullRow = true
+    addRing = Track(UFO.CreateAddRow(self.child, L["Add Ring"], function()
+        if UFO.RingAdd(Rings()) then reshaped() end
+    end), 28)
+    addRing.disableOn = UFO.Explain(function(d)
+        return off(d) or #Rings() >= UFO.RING_MAX
+    end, function(d)
+        if off(d) then return L["Set Frame Style to Ring to change this."] end
+        return format(L["At most %d rings."], UFO.RING_MAX)
+    end)
+    addRing.disableReason = UFO.gateReasons[addRing.disableOn]
+    -- The ring list swapped behind the page (a link, an undo): follow it next frame,
+    -- never from inside the state pass running this.
+    addRing.refreshContent = function()
+        if lastKey ~= UFO.RingShapeKey(Rings()) then
+            lastKey = UFO.RingShapeKey(Rings())
+            if C_Timer and C_Timer.After then C_Timer.After(0, Rebuild) end
+        else
+            PaintBars()
+        end
+    end
+    Order()
+
+    return {
+        Rebuild = Rebuild,
+        Bars = bars,
+        Editor = function() return editor end,
+        OpenRing = function() return (Open()) end,
+        Rows = function()
+            local out = {}
+            for i, e in ipairs(band.groupChildren) do out[i] = e.widget end
+            return out
+        end,
+    }
 end
 
 -- Resting / PvP / Elite & Rare: one card each, for the units that have it.

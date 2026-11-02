@@ -230,6 +230,29 @@ function R.PipArcs(a, len, n, gap)
     return out
 end
 
+-- Do two arcs (start, length) share any of the circle? Touching ends do not.
+function R.ArcsOverlap(a1, l1, a2, l2)
+    local EPS = 1e-6
+    if l1 >= 1 - EPS or l2 >= 1 - EPS then return true end
+    return ((a2 - a1) % 1) < l1 - EPS or ((a1 - a2) % 1) < l2 - EPS
+end
+
+-- Do any two sections of a ring (a stored one: cleaned here) cover the same part of
+-- it? Worked out from the arcs the ring is drawn with (R.Arc), pulled-in ends and all.
+function R.RingOverlaps(ring)
+    local secs = type(ring) == "table" and ring.sections
+    if type(secs) ~= "table" then return false end
+    local multi = #secs > 1
+    for i = 1, #secs do
+        local a1, l1 = R.Arc(R.NormalizeSection(secs[i]), multi)
+        for j = i + 1, #secs do
+            local a2, l2 = R.Arc(R.NormalizeSection(secs[j]), multi)
+            if R.ArcsOverlap(a1, l1, a2, l2) then return true end
+        end
+    end
+    return false
+end
+
 -- Where the CLASSPOWER section is: ring geometry, the section, and whether the
 -- ring has others (nil when no ring has one).
 function R.ClassPowerArc(db)
