@@ -1135,15 +1135,21 @@ local function RefreshFrames()
 end
 
 -- ---- cards of ours on a DandersFrames page ----------------------------------
--- The Fading page's element alphas: the portrait's, on units that have one.
+-- The Fading page's element alphas: the portrait's and cast bar's, on units that have one.
 function UFO.OORExtras(unit)
     local UF = DF.UnitFrames
-    local PO = UF and UF.Portrait
-    if not (PO and PO.UNITS and PO.UNITS[unit]) then return nil end
+    local PO, CB = UF and UF.Portrait, UF and UF.CastBar
+    local hasPortrait = PO and PO.UNITS and PO.UNITS[unit]
+    local hasCast = CB and CB.UNITS and CB.UNITS[unit]
+    if not (hasPortrait or hasCast) then return nil end
     return function(group, parent, db, off)
-        local w = group:AddWidget(GUI:CreateSlider(parent, L["Portrait Alpha"], 0.0, 1.0, 0.05, db, "oorPortraitAlpha",
-            nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        w.disableOn = off
+        local function Slider(label, key)
+            local w = group:AddWidget(GUI:CreateSlider(parent, label, 0.0, 1.0, 0.05, db, key,
+                nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            w.disableOn = off
+        end
+        if hasPortrait then Slider(L["Portrait Alpha"], "oorPortraitAlpha") end
+        if hasCast then Slider(L["Cast Bar Alpha"], "oorCastBarAlpha") end
     end
 end
 

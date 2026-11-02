@@ -465,6 +465,8 @@ function P:Build(unit, name, parent, slot)
     f.dfTestAuraSeed = P.AURA_SEEDS[unit]
     -- Where its aura rows sit, as on the live frame (Elements.lua).
     f.dfAuraRowPlacement = UF.AuraRowPlacement
+    -- Its own parts in DF's appearance pass (range fade; Elements.lua).
+    f.dfOnElementAppearance = UF.OnElementAppearance
     -- Purgeable enemy buffs lead its buff row, ringed (Elements.lua UF.BuffPurgeable).
     f.dfBuffPurgeable = UF.BuffPurgeable
     -- Its highlights' outline, as on the live frame (Indicators.lua).

@@ -71,10 +71,6 @@ function PO:Attach(f)
     local p = CreateFrame("Frame", nil, f)
     p:Hide()
     p.owner = f
-    -- Element range fade pins the frame at full alpha, so the portrait fades itself.
-    f.dfOnElementAppearance = function(owner)
-        PO:ApplyAlpha(owner, owner.dfIsHovered or rawget(owner, "_tdForceHover"))
-    end
     p.bg = p:CreateTexture(nil, "BACKGROUND")
     p.bg:SetAllPoints(p)
     p.bg:SetTexture(K.WHITE)
@@ -487,28 +483,18 @@ function PO:OnUnitChanged(f) PO:Update(f) end
 -- ============================================================
 PO.DIM = 0.35
 
--- The portrait's one alpha write: its own alpha, the hover dim, then the element
--- range fade (oorEnabled; in frame mode the frame's alpha cascades over it instead).
--- dfInRange can be secret: it is never compared, only handed to the engine.
+-- The portrait's one alpha write: its own alpha, the hover dim, then the range fade.
 function PO:ApplyAlpha(f, hovered)
     local p = f and f.dfUFPortrait
     if not p then return end
     local db = K.DB(f)
     local base = tonumber(db and db.portraitAlpha) or 1
     if hovered and db and db.portraitDimHover then base = base * PO.DIM end
-    if not (db and db.oorEnabled) then
-        p:SetAlpha(base)
-        return
-    end
-    local oor = base * (tonumber(db.oorPortraitAlpha) or 0.2)
-    local inRange = f.dfInRange
-    if issecretvalue and issecretvalue(inRange) then
-        if p.SetAlphaFromBoolean then p:SetAlphaFromBoolean(inRange, base, oor) else p:SetAlpha(base) end
-    elseif inRange == false then
-        p:SetAlpha(oor)
-    else
-        p:SetAlpha(base)
-    end
+    K.RangeAlpha(f, p, base, base * (tonumber(db and db.oorPortraitAlpha) or 0.2))
+end
+
+function PO:ApplyRange(f)
+    PO:ApplyAlpha(f, f.dfIsHovered or rawget(f, "_tdForceHover"))
 end
 
 function PO:SetHover(f, on)

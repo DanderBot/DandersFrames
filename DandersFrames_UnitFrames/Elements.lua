@@ -171,6 +171,36 @@ function K.DB(f)
     return f and f.dfUFUnit and UF:GetUnitDB(f.dfUFUnit) or nil
 end
 
+-- Element range fade (db.oorEnabled) pins the frame at full alpha and each part fades
+-- itself. A part DF doesn't know about writes its alpha here. dfInRange can be
+-- secret: it is never compared, only handed to the engine. Frame mode: inAlpha, the
+-- frame's own alpha does the fading.
+function K.RangeAlpha(f, element, inAlpha, oorAlpha)
+    if not element then return end
+    local db = K.DB(f)
+    if not (db and db.oorEnabled) then
+        element:SetAlpha(inAlpha)
+        return
+    end
+    local inRange = f.dfInRange
+    if issecretvalue and issecretvalue(inRange) then
+        if element.SetAlphaFromBoolean then
+            element:SetAlphaFromBoolean(inRange, inAlpha, oorAlpha)
+        else
+            element:SetAlpha(inAlpha)
+        end
+    elseif inRange == false then
+        element:SetAlpha(oorAlpha)
+    else
+        element:SetAlpha(inAlpha)
+    end
+end
+
+-- DF's appearance pass, for the parts it doesn't know about (frame.dfOnElementAppearance).
+function UF.OnElementAppearance(f)
+    E:Call("ApplyRange", f)
+end
+
 -- Width of the frame from its settings (never measured: a measured width can be
 -- 0 before the first layout pass).
 function K.FrameWidth(f, db)

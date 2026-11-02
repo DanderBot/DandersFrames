@@ -95,6 +95,7 @@ L["Both frames match. Change either one and the other follows."] = true
 L["Both frames put it in the same place. Moving it on either frame moves it on both."] = true
 L["Both frames share its size and style. Change it on either frame and both change."] = true
 L["Brewmaster Stagger"] = true
+L["Cast Bar Alpha"] = true
 L["Cast Bar"] = true
 L["Changes stay on the frame you edit. Use it when one part should differ, like buffs in a different spot on Target."] = true
 L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"] = true

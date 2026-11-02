@@ -659,8 +659,13 @@ function CB:Start(cb, isUpdate)
 
     cb.spark:SetShown(cb.showSpark and true or false)
     CB.ShowFill(cb, true)
-    cb:SetAlpha(1)
+    CB:ApplyRange(f)
     cb:Show()
+end
+
+function CB:ApplyRange(f)
+    local db = K.DB(f)
+    K.RangeAlpha(f, f and f.dfUFCastBar, 1, tonumber(db and db.oorCastBarAlpha) or 0.5)
 end
 
 function CB:PaintName(cb, name, db)

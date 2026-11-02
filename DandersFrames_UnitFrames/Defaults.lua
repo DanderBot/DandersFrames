@@ -231,6 +231,7 @@ local ELEMENTS = {
     portraitMirror = false,
     portraitShape = "SQUARE",       -- SQUARE | CIRCLE | ROUNDED (Portrait.lua SHAPES)
     oorPortraitAlpha = 0.2,         -- element range fade (Portrait.lua PO:ApplyAlpha)
+    oorCastBarAlpha = 0.5,          -- ...(CastBar.lua CB:ApplyRange); higher: an out-of-range cast still matters
     portraitDimHover = false,       -- fade while the frame is hovered (Portrait.lua DIM ON HOVER)
     portraitBorderEnabled = true,
     portraitBorderSize = 1,

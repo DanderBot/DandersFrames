@@ -111,6 +111,18 @@ function IN:Attach(f)
     return icons
 end
 
+-- Range fade: the icons and dragon with Icons Alpha, the classification border with
+-- Border Alpha.
+function IN:ApplyRange(f)
+    local icons = f and f.dfUFIcons
+    if not icons then return end
+    local db = K.DB(f)
+    local iconsA = tonumber(db and db.oorIconsAlpha) or 0.5
+    K.RangeAlpha(f, icons.host, 1, iconsA)
+    K.RangeAlpha(f, icons.dragon, 1, iconsA)
+    K.RangeAlpha(f, icons.classBorder, 1, tonumber(db and db.oorBorderAlpha) or 0.2)
+end
+
 function IN:Enabled(db, key)
     return db and db[IN.PREFIX[key] .. "Enabled"] and true or false
 end

@@ -732,6 +732,27 @@ function R:Layout(f)
     c:Show()
     R.SyncHealth(f)
     if not f.dfUFPreview then R:FeedPower(f) end
+    R:ApplyRange(f)
+end
+
+-- Range fade: tracks with Background Alpha, power fills with Power Bar Alpha. A health
+-- fill's alpha is the health bar's, copied onto its texture, so its frame stays at 1.
+function R:ApplyRange(f)
+    local c = f and f.dfUFRings
+    if not (c and c.arcs and f.dfUFRingPower) then return end
+    local db = K.DB(f)
+    local trackA = tonumber(db and db.oorBackgroundAlpha) or 0.1
+    local powerA = tonumber(db and db.oorPowerBarAlpha) or 0.2
+    local isPower = {}
+    for _, bar in ipairs(f.dfUFRingPower) do isPower[bar] = true end
+    for _, arc in ipairs(c.arcs) do
+        K.RangeAlpha(f, arc.track, 1, trackA)
+        if isPower[arc.fill] then
+            K.RangeAlpha(f, arc.fill, 1, powerA)
+        else
+            arc.fill:SetAlpha(1)
+        end
+    end
 end
 
 -- The power fills: the unit's power, in the resource bar's colour.
