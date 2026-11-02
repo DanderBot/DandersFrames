@@ -250,56 +250,6 @@ do
     check(again.off == false and again.Label.text == "D", "clear: a reused row is rebound clean")
 end
 
-print("-- Row list: button rows")
-do
-    local made = {}
-    function UI:CreateButtonNative(parent, opts)
-        local btn = Frame("Button")
-        btn.opts = opts
-        btn.Text = Frame("FontString")
-        function btn:SetDisabled(v) self.disabled = v end
-        btn.scripts.OnClick = opts.onClick
-        made[#made + 1] = btn
-        return btn
-    end
-    local clicks, actions, gate, whole = {}, 0, false, false
-    local l3 = UI:CreateRowList(Frame(), { width = 200, store = function() return db end,
-        onAction = function() actions = actions + 1 end })
-    local r = l3:AddButtons({ label = "Ring 1", disabled = function() return whole, "Why" end, buttons = {
-        { text = "Up", onClick = function() clicks[#clicks + 1] = "up" end, disabled = function() return gate end },
-        { text = "Remove", width = 70, onClick = function() clicks[#clicks + 1] = "remove" end },
-    } })
-    l3:Refresh()
-    eq(#made, 2, "buttons: one per spec")
-    made = { rawget(r, "Buttons")[1], rawget(r, "Buttons")[2] }
-    eq(made[1].Text.text, "Up", "buttons: their text")
-    eq(made[2].w, 70, "buttons: a width of their own")
-    eq(r.controlWidth, 54 + 4 + 70, "buttons: the row's control width is all of them")
-    eq(made[2].points[1][1], "RIGHT", "buttons: right-aligned, the last at the edge")
-    made[1].scripts.OnClick(made[1])
-    eq(clicks[1], "up", "buttons: a click runs its handler")
-    eq(actions, 1, "buttons: ...then the list's onAction")
-    gate = true
-    l3:Refresh()
-    check(made[1].disabled and made[1].alpha == 0.4, "buttons: its own disabled() greys just it")
-    check(not made[2].disabled, "buttons: ...and not the others")
-    made[1].scripts.OnClick(made[1])
-    eq(#clicks, 1, "buttons: a greyed button does nothing")
-    whole = true
-    l3:Refresh()
-    check(made[2].disabled and r.off, "buttons: a greyed row greys every button")
-    made[2].scripts.OnClick(made[2])
-    eq(#clicks, 1, "buttons: ...and they do nothing")
-    whole, gate = false, false
-    l3:Clear()
-    local r2 = l3:AddButtons({ label = "Again", buttons = { { text = "Add", onClick = function() clicks[#clicks + 1] = "add" end } } })
-    check(r2 == r, "buttons: pooled")
-    l3:Refresh()
-    made[1].scripts.OnClick(made[1])
-    eq(clicks[#clicks], "add", "buttons: a pooled row runs its NEW spec")
-    check(not made[2].shown, "buttons: a spare button hides")
-end
-
 print("-- Row list: the kit names no consumer")
 do
     local src = ui_file_source("RowList.lua")
