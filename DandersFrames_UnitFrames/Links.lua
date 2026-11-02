@@ -514,6 +514,25 @@ end
 -- them. NEVER keys and the link's `except` keys never move.
 -- Returns how many of the partner's keys changed, and the partner.
 -- ============================================================
+-- Write `from`'s value for `key` onto `to`'s table `dst`: dropped where it equals `to`'s
+-- default, so the tables stay sparse. True when that changed anything.
+function Links.WriteKey(root, from, to, dst, key, mode)
+    local v = Effective(root, from, key)
+    if mode == "mirror" then v = Links.Mirror(key, v) end
+    if key == "rings" then v = Links.RingsFor(v, to, Effective(root, to, key)) end
+    local cur = rawget(dst, key)
+    if v == nil or DeepEqual(v, Default(to, key)) then
+        if cur ~= nil then
+            dst[key] = nil
+            return true
+        end
+        return false
+    end
+    if DeepEqual(v, cur) then return false end
+    dst[key] = Copy(v)
+    return true
+end
+
 function Links:ApplyFrom(root, from)
     if type(root) ~= "table" then return 0 end
     local link, follower, leader = self:LinkOf(root, from)
@@ -550,24 +569,29 @@ function Links:ApplyFrom(root, from)
         if not (Links.NEVER[key] or (except and except[key])) then
             local m = modes[id]
             local mode = (Links.Aspect(key) == "layout") and m.layout or m.look
-            if mode ~= "own" then
-                local v = Effective(root, from, key)
-                if mode == "mirror" then v = Links.Mirror(key, v) end
-                if key == "rings" then v = Links.RingsFor(v, to, Effective(root, to, key)) end
-                local cur = rawget(dst, key)
-                if v == nil or DeepEqual(v, Default(to, key)) then
-                    if cur ~= nil then
-                        dst[key] = nil
-                        changed = changed + 1
-                    end
-                elseif not DeepEqual(v, cur) then
-                    dst[key] = Copy(v)
-                    changed = changed + 1
-                end
+            if mode ~= "own" and Links.WriteKey(root, from, to, dst, key, mode) then
+                changed = changed + 1
             end
         end
     end
     return changed, to
+end
+
+-- One key across, as ApplyFrom moves it. A settings drag (UF:LiveApply): returns the
+-- partner when its value changed.
+function Links:PushKey(root, from, key)
+    if type(root) ~= "table" or Links.NEVER[key] then return nil end
+    local link, follower, leader = self:LinkOf(root, from)
+    if not link then return nil end
+    if type(link.except) == "table" and link.except[key] then return nil end
+    local id = Links.OwnerOf(key)
+    if not (id and type(link.elements) == "table") then return nil end
+    local layout, look = Links.Normalise(id, link.elements[id])
+    local mode = (Links.Aspect(key) == "layout") and layout or look
+    if mode == "own" then return nil end
+    local to = (follower == from) and leader or follower
+    if Links.WriteKey(root, from, to, Stored(root, to), key, mode) then return to end
+    return nil
 end
 
 -- ============================================================

@@ -993,6 +993,21 @@ do
     Links:Ensure(same)
     eq(rawget(same.units.target, "rings"), nil, "a Target that lands on its default stores nothing")
 
+    -- One key across, mid-drag.
+    local pk = newProfile()
+    Links:Ensure(pk)
+    pk.units.player.rings = { ring(HEALTH_L, POWER_R), CP_RING }
+    pk.units.player.rings[1].thickness = 11
+    eq(Links:PushKey(pk, "player", "rings"), "target", "PushKey: a linked key moves, and names the partner")
+    eq(pk.units.target.rings[1].thickness, 11, "...its value")
+    eq(pk.units.target.rings[1].sections[1].position, "RIGHT", "...mirrored")
+    eq(Links:PushKey(pk, "player", "rings"), nil, "...and nothing to do the second time")
+    eq(Links:PushKey(pk, "focus", "rings"), nil, "a unit with no link: nothing")
+    eq(Links:PushKey(pk, "player", "unknownKey"), nil, "a key no part owns: nothing")
+    pk.global.unitLinks.target.except = { rings = true }
+    pk.units.player.rings[1].thickness = 12
+    eq(Links:PushKey(pk, "player", "rings"), nil, "a kept key stays apart")
+
     -- Unlinked, or another pair: left alone.
     local other = newProfile()
     other.global.unitLinks = { focus = { to = "target", elements = {} } }

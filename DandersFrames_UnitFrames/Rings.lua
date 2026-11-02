@@ -684,6 +684,7 @@ function R:Layout(f)
     R.HideBars(f, on)
     if not on then
         c:Hide()
+        c.used = nil
         f.dfUFRingHealth, f.dfUFRingPower, f.dfUFRingGeom = nil, nil, nil
         return
     end
@@ -707,7 +708,7 @@ function R:Layout(f)
                 R.ShapeArcBar(arc.track, c, ring.outer, ring.inner, a, len, false, 0)
                 R.ShapeArcBar(arc.fill, c, ring.outer, ring.inner, a, len, sec.reverse, sec.feather)
                 arc.fill:SetFrameLevel(arc.track:GetFrameLevel() + 1)
-                arc.track:SetStatusBarColor(R.TrackColor(db, sec))
+                arc.sec = sec
                 arc.track:Show()
                 arc.fill:Show()
                 if sec.bar == "POWER" then power[#power + 1] = arc.fill else health[#health + 1] = arc.fill end
@@ -719,10 +720,23 @@ function R:Layout(f)
         c.arcs[i].fill:Hide()
     end
     f.dfUFRingHealth, f.dfUFRingPower = health, power
+    c.used = used
+    R:PaintTracks(f)
     c:Show()
     R.SyncHealth(f)
     if not f.dfUFPreview then R:FeedPower(f) end
     R:ApplyRange(f)
+end
+
+-- The tracks' colours, without laying the rings out.
+function R:PaintTracks(f)
+    local c = f and f.dfUFRings
+    if not (c and c.arcs and c.used and f.dfUFRingPower) then return end
+    local db = K.DB(f)
+    for i = 1, c.used do
+        local arc = c.arcs[i]
+        arc.track:SetStatusBarColor(R.TrackColor(db, arc.sec))
+    end
 end
 
 -- Range fade: tracks with Background Alpha, power fills with Power Bar Alpha. A health

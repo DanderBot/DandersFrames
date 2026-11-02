@@ -5096,6 +5096,8 @@ local function driveFactoryRowsNow(frame)
         DF.AuraDesigner.Factory:SyncFrame(frame)
     end
 end
+-- One frame's rows, for a frame the walk below doesn't reach.
+DF.DriveFactoryRowsNow = driveFactoryRowsNow
 
 -- DEBOUNCED to one pass per frame-render: GUI callbacks often bump the version
 -- several times in one click (Invalidate + UpdateAllFrames chains), and slider

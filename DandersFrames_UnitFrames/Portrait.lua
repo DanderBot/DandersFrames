@@ -201,7 +201,9 @@ function PO.RingSize(db)
     return size, border
 end
 
-function PO:Layout(f)
+-- keepModel: a drag frame. The unit's model isn't reloaded (PO:Update clears it first,
+-- which would flicker every frame).
+function PO:Layout(f, keepModel)
     local p = f and f.dfUFPortrait
     if not p then return end
     local db = K.DB(f)
@@ -241,7 +243,21 @@ function PO:Layout(f)
         p.dfModelInset = 0
         PO:PlaceModel(p)
     end
-    if not f.dfUFPreview then PO:Update(f) end
+    if not f.dfUFPreview and not keepModel then PO:Update(f) end
+end
+
+-- A settings drag (UF:LiveApply): the layout, and the zoom and turn on the model that's
+-- already loaded.
+function PO:LiveLayout(f)
+    PO:Layout(f, true)
+    local p = f and f.dfUFPortrait
+    local m = p and p.model
+    if not (m and m:IsShown()) then return end
+    local db = K.DB(f)
+    pcall(m.SetPortraitZoom, m, tonumber(db.portrait3DZoom) or 1)
+    local rot = math.rad(tonumber(db.portrait3DRotation) or 0)
+    if db.portraitMirror then rot = -rot end
+    pcall(m.SetFacing, m, rot)
 end
 
 -- How far a portrait OUTSIDE the frame (side Left / Right) reaches past the frame's

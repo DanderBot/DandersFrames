@@ -726,6 +726,19 @@ do
         eq(#calls, sliders, "...each one's drag reaches UF:LiveApply")
         eq(calls[1], "player:castbarWidth:castbar", "...with the unit, its key and the page's element")
         eq(G.CreateSlider, sliderStub, "the build's stand-in is gone again")
+        -- ...and every colour: its wheel reaches the live path, its own callback the close.
+        calls = {}
+        local colours = 0
+        for _, sw in ipairs(built) do
+            if sw.kind == "color" then
+                colours = colours + 1
+                check(sw.args[7] == true and type(sw.args[6]) == "function",
+                    "Cast Bar colour " .. tostring(sw.key) .. ": a lightweight in use")
+                if type(sw.args[6]) == "function" then sw.args[6]() end
+            end
+        end
+        check(colours > 3, "Cast Bar: colours found (" .. colours .. ")")
+        eq(#calls, colours, "...each one's wheel reaches UF:LiveApply")
         UF.LiveApply = heldLive
     end
     local w = byKey.castbarLatency

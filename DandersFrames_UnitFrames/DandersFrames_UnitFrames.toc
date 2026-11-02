@@ -33,6 +33,7 @@ Portrait.lua
 CastBar.lua
 ClassPower.lua
 Indicators.lua
+LivePaint.lua
 Preview.lua
 Boss.lua
 BlizzardHide.lua

@@ -500,24 +500,25 @@ function UF:RequestRefresh()
 end
 
 -- ============================================================
--- LIVE (a settings slider mid-drag)
+-- LIVE (a settings slider or colour picker mid-drag)
 -- One rendered frame's worth of repaint for ONE setting of ONE unit, called by
--- the unit frame pages' sliders while they are dragged (the kit's lightweight
--- callback, DandersFrames_Options/UnitFrames/Pages.lua UFO.LiveSlider). Only the
--- element the key belongs to (Links.OwnerOf, or the page's kind) is re-applied,
--- on that unit's frames: the live one(s), and the preview while it is up. The
--- full UF:RefreshAll still runs once, on release (the slider's own callback).
+-- the unit frame pages' sliders and pickers while they are dragged (the kit's
+-- lightweight callback, DandersFrames_Options/UnitFrames/Pages.lua UFO.LiveSlider).
+-- Only the part the key belongs to is re-applied, on that unit's frames: the live
+-- one(s), and the preview while it is up. The full UF:RefreshAll still runs once, on
+-- release (the control's own callback).
+--   * A key with a painter (LivePaint.lua): that painter. Plain paint: combat-safe.
 --   * A unit-frame element (cast bar, class power, portrait, unit icons): its
 --     own Layout (+ Preview on a preview frame). Plain frames: combat-safe.
 --   * DandersFrames' pieces: DF:ApplyFrameLayout on the one frame (the Frame
 --     page: the frame's whole layout, scale and size included). It sizes the
 --     unit button, which is SECURE: a live frame is skipped in combat.
---   * Auras: DandersFrames' aura layout version (re-drives every row).
+--   * Auras: DandersFrames' aura layout version, then the frame's own rows.
 --   * Highlights / Fading: their own per-frame updaters.
 --   * Boss Layout: the container (secure: skipped in combat) / the preview's.
 -- A preview frame is never secure: it is repainted in full (P:Paint, one frame).
--- ⚠ Linked followers catch up on release: links are pushed on the apply drain
--- (UFO.OnApplyDrain), which a drag never reaches.
+-- A linked partner follows: the one key is pushed across (Links:PushKey) and it
+-- repaints the same way.
 -- ============================================================
 UF.LIVE_ELEMENTS = {
     castbar = { "CastBar" },
@@ -530,8 +531,13 @@ UF.LIVE_ELEMENTS = {
 }
 -- Single keys an element of ours draws although DandersFrames' page owns them: the
 -- combat icon is DF's (the Icons element), its border is Indicators.lua's.
-UF.LIVE_KEYS = { combatIconBorderSize = { "Indicators" } }
+UF.LIVE_KEYS = { combatIconBorderSize = { "Indicators" }, combatIconBorderColor = { "Indicators" } }
 UF.LIVE_AURAS = { buffs = true, debuffs = true, defensive = true, dispel = true }
+
+-- What the frame reads its settings through.
+local function FrameSettings(f)
+    return rawget(f, "dfDB") or UF:FrameDB(f.dfUFUnit)
+end
 
 local function InCombat()
     local f = _G.InCombatLockdown
@@ -559,11 +565,60 @@ end
 -- element, answers then.
 function UF:LiveApply(unit, key, kind)
     if not (unit and UF.Units) then return end
+    UF:LiveApplyUnit(unit, key, kind)
+    local Links = UF.Links
+    local root = key and Links and Links.PushKey and Links.LiveRoot()
+    local partner = root and Links:PushKey(root, unit, key)
+    if partner then UF:LiveApplyUnit(partner, key, kind) end
+end
+
+-- A preview frame: its element's own Layout + Preview, else repainted in full.
+local function LivePreview(f, mods)
+    if mods then
+        for _, name in ipairs(mods) do
+            local m = UF[name]
+            if m and m.Layout then m:Layout(f) end
+            if m and m.Preview then m:Preview(f) end
+        end
+    elseif UF.Preview.Paint then
+        UF.Preview:Paint(f)
+    end
+end
+
+-- The frame's size or scale on Boss is the container's too.
+UF.LIVE_BOSS_CONTAINER = { frameWidth = true, frameHeight = true, frameScale = true, ringSize = true }
+
+function UF:LiveApplyUnit(unit, key, kind)
     local Links = UF.Links
     local elem = (key and Links and Links.OwnerOf and Links.OwnerOf(key)) or kind
     if elem == "tooltips" then return end
     -- Ring Size is the frame's size in RING style: the whole frame's layout.
     if key == "ringSize" then elem = "frame" end
+
+    local LP = UF.LivePaint
+    local painter, shared
+    if LP then painter, shared = LP.For(key, kind) end
+    if painter then
+        local mods = elem and UF.LIVE_ELEMENTS[elem]
+        local function paint(f, preview)
+            if preview then
+                LivePreview(f, mods)
+            else
+                painter(f, FrameSettings(f))
+            end
+        end
+        if shared then
+            for _, u in ipairs(UF.UNITS or {}) do UF:EachFrameOf(u, paint) end
+        else
+            UF:EachFrameOf(unit, paint)
+        end
+        return
+    end
+
+    if key and unit == "boss" and UF.LIVE_BOSS_CONTAINER[key] and not InCombat() then
+        local B = UF.Boss
+        if B and B.container and B.LayoutContainer then B:LayoutContainer(B.container, B.frames) end
+    end
 
     if elem == "bosslayout" then
         local B = UF.Boss
@@ -576,10 +631,14 @@ function UF:LiveApply(unit, key, kind)
     local mods = (key and UF.LIVE_KEYS[key]) or (elem and UF.LIVE_ELEMENTS[elem])
     if mods then
         UF:EachFrameOf(unit, function(f, preview)
+            if preview then
+                LivePreview(f, mods)
+                return
+            end
             for _, name in ipairs(mods) do
                 local m = UF[name]
-                if m and m.Layout then m:Layout(f) end
-                if preview and m and m.Preview then m:Preview(f) end
+                -- LiveLayout: the same, without what must not run per drag frame.
+                if m and m.LiveLayout then m:LiveLayout(f) elseif m and m.Layout then m:Layout(f) end
             end
         end)
         return
@@ -591,7 +650,7 @@ function UF:LiveApply(unit, key, kind)
     local combat = InCombat()
     UF:EachFrameOf(unit, function(f, preview)
         if preview then
-            if UF.Preview.Paint then UF.Preview:Paint(f) end
+            LivePreview(f)
             return
         end
         if elem == "highlights" then
@@ -601,7 +660,10 @@ function UF:LiveApply(unit, key, kind)
             if DF.UpdateRange then DF:UpdateRange(f) end
             if DF.UpdateHealthFade then DF:UpdateHealthFade(f) end
             return
-        elseif UF.LIVE_AURAS[elem] or combat then
+        elseif UF.LIVE_AURAS[elem] then
+            if DF.DriveFactoryRowsNow then DF.DriveFactoryRowsNow(f) end
+            return
+        elseif combat then
             return
         elseif elem == "frame" then
             UF.Units:ApplyLayout(f)

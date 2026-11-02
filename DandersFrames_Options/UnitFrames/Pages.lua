@@ -2795,15 +2795,16 @@ end
 -- holders, taking the party cards' pins with it. Moving frames lives on the
 -- module Settings page instead (Position card), one row per unit.
 -- ============================================================
--- LIVE SLIDERS (drag previews)
+-- LIVE SLIDERS AND COLOURS (drag previews)
 -- The settings kit runs a slider's `lightweight` callback once per rendered
 -- frame while it is dragged, and its own callback only on release; a slider
--- with no lightweight previews nothing until then. Every slider built for a
--- unit page -- ours and the party builders' alike -- gets the unit's own live
--- path (UF:LiveApply: the one element, on that unit's frames) in place of
--- whatever it brought: a party builder's lightweight re-lays out PARTY frames,
--- never these. Done by standing in for GUI:CreateSlider for the length of the
--- build, so no builder needs to know about it.
+-- with no lightweight previews nothing until then. A colour picker runs its
+-- lightweight per wheel tick and its own callback when it closes. Every one built
+-- for a unit page -- ours and the party builders' alike -- gets the unit's own live
+-- path (UF:LiveApply: the one part, on that unit's frames) in place of whatever
+-- it brought: a party builder's lightweight paints PARTY frames, never these. Done
+-- by standing in for the two factories for the length of the build, so no builder
+-- needs to know about it.
 -- ============================================================
 function UFO.LiveSlider(unit, key, kind)
     return function()
@@ -2813,14 +2814,19 @@ function UFO.LiveSlider(unit, key, kind)
 end
 
 function UFO.WithLiveSliders(rec, unit, build, ...)
-    local orig = GUI.CreateSlider
+    local orig, origColor = GUI.CreateSlider, GUI.CreateColorPicker
     GUI.CreateSlider = function(g, parent, label, lo, hi, step, dbTable, dbKey, callback, _, ...)
         local key = (type(dbKey) == "string") and dbKey or nil
         return orig(g, parent, label, lo, hi, step, dbTable, dbKey, callback,
             UFO.LiveSlider(unit, key, rec.kind), ...)
     end
+    GUI.CreateColorPicker = function(g, parent, label, dbTable, dbKey, hasAlpha, callback)
+        local key = (type(dbKey) == "string") and dbKey or nil
+        return origColor(g, parent, label, dbTable, dbKey, hasAlpha, callback,
+            UFO.LiveSlider(unit, key, rec.kind), true)
+    end
     local ok, err = pcall(build, ...)
-    GUI.CreateSlider = orig
+    GUI.CreateSlider, GUI.CreateColorPicker = orig, origColor
     if not ok then error(err, 0) end
 end
 
