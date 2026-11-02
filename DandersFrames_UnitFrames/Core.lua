@@ -654,8 +654,12 @@ end
 
 -- ============================================================
 -- PER-UNIT DESIGNER TEMPLATES (spec 2026-11-01-uf-per-unit-designers.md, phase 1)
--- Every unit names its own Text Designer template (textDesignerPreset, defaults
--- "Unit Frames" / "Unit Frames (Small)") and Aura Designer template
+-- Every unit names its own Text Designer template, ONE PER FRAME STYLE:
+-- textDesignerPreset for Bars (defaults "Unit Frames" / "Unit Frames (Small)") and
+-- ringTextDesignerPreset for Ring. The Ring frame view answers textDesignerPreset
+-- with the ring key (Rings.lua R.FrameValue), so whatever reads a frame's table
+-- follows the style; what reads the UNIT's table asks UF.TextTemplateKey. And an
+-- Aura Designer template
 -- (auraDesignerPreset). An AURA template left unset follows the Party frames'
 -- CURRENT one -- what the page always said -- rather than the template literally
 -- named "Party", DandersFrames' fallback for a standalone frame with no name.
@@ -665,6 +669,14 @@ end
 -- before the stamp).
 -- ============================================================
 UF.DESIGNER_KINDS = { text = "textDesignerPreset", aura = "auraDesignerPreset" }
+UF.RING_TEXT_KEY = "ringTextDesignerPreset"
+
+-- The key holding the template of a unit's ACTIVE style.
+function UF.TextTemplateKey(db)
+    if db and db.frameStyle == "RING" then return UF.RING_TEXT_KEY end
+    return UF.DESIGNER_KINDS.text
+end
+
 -- Template names are library KEYS and travel in exports: never localised.
 UF.UNIT_TEMPLATE_NAMES = {
     player = "Player", target = "Target", targettarget = "Target of Target",
@@ -690,7 +702,7 @@ end
 function UF:UnitTemplate(unit, kind)
     local db = UF:GetUnitDB(unit)
     if kind == "aura" then return UF:AuraTemplateFor(db) end
-    return db and db.textDesignerPreset
+    return db and db[UF.TextTemplateKey(db)]
 end
 
 -- Stamp a frame with its unit's templates (build, refresh, preview paint).
@@ -705,6 +717,7 @@ end
 function UF:MakeOwnTemplate(unit, kind)
     local key = UF.DESIGNER_KINDS[kind]
     if not (key and DF.DuplicateDesignerPreset and DF.CreateDesignerPreset) then return nil end
+    if kind == "text" then key = UF.TextTemplateKey(UF:GetUnitDB(unit)) end
     local from = UF:UnitTemplate(unit, kind)
     local base = UF.UNIT_TEMPLATE_NAMES[unit] or tostring(unit)
     local name = from and DF:DuplicateDesignerPreset(kind, from, base) or nil
@@ -720,6 +733,19 @@ end
 -- user of it and a rename stores the new name; one following Party's Aura template
 -- is listed as a user of it (`uses`) but keeps following through a rename or a
 -- delete. Any other profile (an import payload) is walked raw.
+-- ★ THE RING TEMPLATE IS WALKED AS A SECOND CARRIER: DandersFrames' walks only know
+-- the one ref key per kind, so RingTextCarrier shows them ringTextDesignerPreset
+-- under the name textDesignerPreset. Rename, delete, pruning and import then repoint
+-- it like any other ref. It carries no label: the "also used by" list names a unit
+-- once, for the template of its ACTIVE style (`uses` above).
+local function RingTextCarrier(tbl)
+    local textKey = UF.DESIGNER_KINDS.text
+    return setmetatable({}, {
+        __index = function(_, k) if k == textKey then return tbl[UF.RING_TEXT_KEY] end end,
+        __newindex = function(_, k, v) if k == textKey then tbl[UF.RING_TEXT_KEY] = v end end,
+    })
+end
+
 function UF.DesignerRefWalker(profile, fn)
     local root = type(profile) == "table" and profile.unitframes
     if type(root) ~= "table" or type(root.units) ~= "table" then return end
@@ -734,11 +760,14 @@ function UF.DesignerRefWalker(profile, fn)
                 -- What it draws with: an unset Aura template follows Party's.
                 local function uses(refKey)
                     if refKey == UF.DESIGNER_KINDS.aura then return UF:AuraTemplateFor(eff) end
+                    if refKey == UF.DESIGNER_KINDS.text then return eff[UF.TextTemplateKey(eff)] end
                     return eff[refKey]
                 end
                 fn(eff, "unit", label, uses)
+                fn(RingTextCarrier(eff), "unit")
             else
                 fn(stored, "unit", label)
+                fn(RingTextCarrier(stored), "unit")
             end
         end
     end

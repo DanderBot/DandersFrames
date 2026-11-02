@@ -691,7 +691,7 @@ do
 
     -- Picking it on a unit's page turns that unit's Dim on Hover on.
     local src = options_file_source("UnitFrames/Pages.lua"):gsub("\r\n", "\n")
-    local s0 = src:find("function UFO.ApplyTemplateRequests(unit)", 1, true)
+    local s0 = src:find("function UFO.ApplyTemplateRequests(unit, name)", 1, true)
     local s1 = src:find("-- The Text Designer's preview on a unit page", 1, true)
     check(s0 and s1, "the template request can be cut out of Pages.lua")
     local env = setmetatable({ UFO = {}, DF = { UnitFrames = UF, GetTextDesignerPresets = function() return lib end } },

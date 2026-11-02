@@ -159,4 +159,103 @@ local preview = uf_file_source("Preview.lua")
 check(units:find("UF:StampDesigners(f, db)", 1, true) and preview:find("UF:StampDesigners(f, db)", 1, true),
       "the live frames and the preview stamp both templates")
 
+print("-- One text template per frame style")
+do
+    load_uf_file_into("Elements.lua", UF)
+    load_uf_file_into("Rings.lua", UF)
+    local lib = DF.db.textDesignerPresets
+    lib.BarsT, lib.RingT = { tag = "b" }, { tag = "r" }
+    local eff = UF:GetUnitDB("focus")
+    local stored = UF:GetStoredUnit("focus")
+    eff.textDesignerPreset, eff.ringTextDesignerPreset = "BarsT", "RingT"
+
+    eq(UF:UnitTemplate("focus", "text"), "BarsT", "Bars: the unit draws its Bars template")
+    local f = { dfDB = UF:FrameDB("focus") }
+    UF:StampDesigners(f)
+    eq(f.dfTextPresetOverride, "BarsT", "...and the frame is stamped with it")
+    eff.frameStyle = "RING"
+    eq(UF:UnitTemplate("focus", "text"), "RingT", "Ring: its Ring template")
+    f.dfDB = UF:FrameDB("focus")
+    eq(f.dfDB.textDesignerPreset, "RingT", "the Ring frame view answers with the ring key")
+    UF:StampDesigners(f)
+    eq(f.dfTextPresetOverride, "RingT", "...so the stamp follows the style")
+    eq(eff.textDesignerPreset, "BarsT", "the unit's own table keeps both")
+
+    print("-- Make Own Template, by style")
+    eq(UF:MakeOwnTemplate("focus", "text"), "Focus", "copies the active template")
+    eq(stored.ringTextDesignerPreset, "Focus", "Ring: points the ring key at it")
+    eq(stored.textDesignerPreset, "BarsT", "...and leaves the Bars key")
+    eq(lib.Focus.tag, "r", "...a copy of the Ring template")
+    eff.ringTextDesignerPreset = "RingT"
+    DF:DeleteDesignerPreset("text", "Focus")
+
+    print("-- Rename, delete and the users list reach both keys")
+    eq(DF:RenameDesignerPreset("text", "RingT", "RingT2"), "RingT2", "rename the Ring template")
+    eq(stored.ringTextDesignerPreset, "RingT2", "...the ring key follows")
+    eq(stored.textDesignerPreset, "BarsT", "...the Bars key does not")
+    eq(DF:RenameDesignerPreset("text", "BarsT", "BarsT2"), "BarsT2", "rename the Bars template")
+    eq(stored.textDesignerPreset, "BarsT2", "...the Bars key follows while the unit is on Ring")
+    eq(stored.ringTextDesignerPreset, "RingT2", "...the ring key does not")
+    local function usedBy(name)
+        local n = 0
+        for _, u in ipairs(DF:ListDesignerPresetUsers("text", name, "party")) do
+            if u == "Focus (Unit Frames)" then n = n + 1 end
+        end
+        return n
+    end
+    eq(usedBy("RingT2"), 1, "users: on Ring, the unit uses its Ring template, named once")
+    eq(usedBy("BarsT2"), 0, "...not the Bars one")
+    eff.frameStyle = "BARS"
+    check(usedBy("BarsT2") == 1 and usedBy("RingT2") == 0, "on Bars, the other way round")
+    check(DF:DeleteDesignerPreset("text", "RingT2"), "delete the Ring template")
+    eq(stored.ringTextDesignerPreset, nil, "...the ring key is cleared, back to its default")
+    eq(stored.textDesignerPreset, "BarsT2", "...the Bars key stays")
+    eff.ringTextDesignerPreset = "BarsT2"
+    check(DF:DeleteDesignerPreset("text", "BarsT2"), "delete a template both use")
+    check(stored.ringTextDesignerPreset == nil and stored.textDesignerPreset == nil, "...both are cleared")
+
+    print("-- Import repoints the ring key in the payload")
+    lib.Clash = { tag = "local" }
+    local pl = {
+        textDesignerPresets = { Clash = { tag = "imported" } },
+        unitframes = { units = { target = { ringTextDesignerPreset = "Clash", textDesignerPreset = "Clash" } } },
+    }
+    local ren = DF:UniquifyImportedDesignerPresets(pl, nil)
+    eq(ren and ren.text and ren.text.Clash, "Clash 2", "a clashing template is renamed")
+    eq(pl.unitframes.units.target.ringTextDesignerPreset, "Clash 2", "...the payload's ring key follows")
+    eq(pl.unitframes.units.target.textDesignerPreset, "Clash 2", "...and its Bars key")
+    lib.Clash = nil
+
+    print("-- The one-shot split of a stored template")
+    local T = { units = { player = { frameStyle = "RING", textDesignerPreset = "Unit Frames Ring" },
+                          target = { frameStyle = "RING", textDesignerPreset = "Mine", ringTextDesignerPreset = "Kept" },
+                          focus = { textDesignerPreset = "BarsOnly" },
+                          pet = { frameStyle = "RING" } }, global = { unitLinks = {} } }
+    UF.MigrateProfileTable(T)
+    eq(T.units.player.ringTextDesignerPreset, "Unit Frames Ring", "a Ring unit's choice moves to the ring key")
+    eq(T.units.player.textDesignerPreset, nil, "...and its Bars key goes back to the default")
+    eq(T.units.target.ringTextDesignerPreset, "Kept", "a unit that has a ring key keeps it")
+    eq(T.units.target.textDesignerPreset, "Mine", "...and its Bars key")
+    eq(T.units.focus.textDesignerPreset, "BarsOnly", "a Bars unit is untouched")
+    eq(T.units.focus.ringTextDesignerPreset, nil, "...with no ring key")
+    eq(T.units.pet.ringTextDesignerPreset, nil, "a Ring unit with nothing stored stays sparse")
+    eq(T.global.ringTextPresetSplit, true, "the flag is set")
+    T.units.focus.frameStyle = "RING"
+    UF.MigrateProfileTable(T)
+    eq(T.units.focus.textDesignerPreset, "BarsOnly", "it runs once: a later switch to Ring moves nothing")
+
+    print("-- Links, Copy and Reset carry both keys")
+    local Lk = UF.Links
+    Lk.ResetCaches()
+    eq(Lk.OwnerOf("ringTextDesignerPreset"), "text", "a link's Text element owns the ring key")
+    eq(Lk.OwnerOf("textDesignerPreset"), "text", "...and the Bars key")
+    eq(Lk.Aspect("ringTextDesignerPreset"), "look", "...shared as a look")
+    local psrc = options_file_source("UnitFrames/Pages.lua")
+    check(psrc:find('if kind == "text" then return { "textDesignerPreset", "ringTextDesignerPreset" } end', 1, true),
+          "the Text page's Copy / Reset cover both")
+    check(psrc:find('"ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }', 1, true),
+          "...and the Frame Style page's, which shows them")
+    eff.frameStyle = nil
+end
+
 DandersFrames, CreateFrame = saved.DandersFrames, saved.CreateFrame

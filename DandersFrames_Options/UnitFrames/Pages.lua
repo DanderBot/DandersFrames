@@ -266,13 +266,16 @@ function UFO.Prefixes(kind)
         return (DF.SECTION_PREFIXES and DF.SECTION_PREFIXES[src])
             or (DF.SectionRegistry and DF.SectionRegistry[src]) or {}
     end
-    if kind == "text" then return { "textDesignerPreset" } end
+    if kind == "text" then return { "textDesignerPreset", "ringTextDesignerPreset" } end
     if kind == "auradesigner" then return { "auraDesignerEnabled", "auraDesignerPreset" } end
     if kind == "visibility" then return { "vis" } end
     if kind == "castbar" then return { "castbar" } end
     if kind == "classpower" then return { "classPower" } end
     if kind == "portrait" then return { "portrait" } end
-    if kind == "rings" then return { "frameStyle", "ringSize", "rings", "ringPortrait3D" } end
+    -- With the two text templates its Style card shows (a link's Text element owns those).
+    if kind == "rings" then
+        return { "frameStyle", "ringSize", "rings", "ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }
+    end
     if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
     if kind == "bosslayout" then return { "boss" } end
     return {}
@@ -1238,9 +1241,10 @@ function UFO.BuildResourceDetachedCard(page, ctx, changed)
 end
 
 -- ---- Text Designer / Aura Designer (spec 2026-11-01-uf-per-unit-designers.md) ---
--- Each unit names its own template of each designer (textDesignerPreset /
--- auraDesignerPreset in its own table: Copy, Reset and Links cover them like any
--- key of the page). Phase 2: the designer itself sits on the unit's page and edits
+-- Each unit names its own template of each designer (auraDesignerPreset, and one
+-- text template per frame style: textDesignerPreset / ringTextDesignerPreset, the
+-- active one by UF.TextTemplateKey; in its own table: Copy, Reset and Links cover
+-- them like any key of the page). Phase 2: the designer itself sits on the unit's page and edits
 -- the template the unit draws -- DandersFrames' own designer island, given the
 -- unit as its EDIT TARGET (DF.BuildTextDesignerPage / DF.BuildAuraDesignerPage
 -- opts.target): its template bar points the UNIT at a template, its preview takes
@@ -1258,7 +1262,7 @@ end
 
 function UFO.GetTemplate(db, kind)
     if kind == "aura" then return (db and db.auraDesignerPreset) or UFO.FOLLOW_PARTY end
-    return db and db.textDesignerPreset
+    return db and db[DF.UnitFrames.TextTemplateKey(db)]
 end
 
 function UFO.SetTemplate(db, kind, name)
@@ -1266,7 +1270,7 @@ function UFO.SetTemplate(db, kind, name)
     if kind == "aura" then
         db.auraDesignerPreset = (name ~= UFO.FOLLOW_PARTY) and name or nil
     else
-        db.textDesignerPreset = name
+        db[DF.UnitFrames.TextTemplateKey(db)] = name
     end
 end
 
@@ -1326,6 +1330,7 @@ function UFO.DesignerTarget(unit, kind)
             UFO.PushLinks(unit)
             DesignerChanged(kind)
             UFO.RefreshLinkMarks()
+            if kind == "text" then UFO.RefreshTextStyleNote(unit) end
         end,
     }
     if kind == "text" then UFO.AddTextPreviewFrame(target, unit) end
@@ -1335,12 +1340,13 @@ end
 -- A Text Designer template may ask something of the unit that picks it: today
 -- only dimPortraitOnHover ("Ring: Centre on Hover", DandersFrames_UnitFrames/Core.lua
 -- RING PRESETS), which turns the unit's Dim on Hover on so its hover text reads
--- over the portrait. Only ever turned ON, never off.
-function UFO.ApplyTemplateRequests(unit)
+-- over the portrait. Only ever turned ON, never off. `name`: the template just picked
+-- (absent: the one the unit's active style draws).
+function UFO.ApplyTemplateRequests(unit, name)
     local UF = DF.UnitFrames
     local db = UF and UF:GetUnitDB(unit)
     local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
-    local name = db and db.textDesignerPreset
+    name = name or (db and UF:UnitTemplate(unit, "text"))
     local cfg = lib and name and lib[name]
     if type(cfg) == "table" and cfg.dimPortraitOnHover and not db.portraitDimHover then
         db.portraitDimHover = true
@@ -1386,14 +1392,20 @@ function UFO.AddDesignerSlot(self, db, Add, unit, kind)
     slot.layoutFill = true
     slot.dfDesignerSlot = kind
     local built = false
+    local opts
     local function Show()
         if not slot:IsVisible() then return end
         if built then
+            -- The Frame Style page may have changed the style or its template since:
+            -- the island's build rebuilds only when what it was built for has moved.
+            if kind == "text" and DF.BuildTextDesignerPage then
+                DF.BuildTextDesignerPage(GUI, slot, db, nil, nil, opts)
+            end
             if slot.RefreshStates then slot:RefreshStates() end
             return
         end
         built = true
-        local opts = { target = UFO.DesignerTarget(unit, kind) }
+        opts = { target = UFO.DesignerTarget(unit, kind) }
         if kind == "aura" then
             if DF.BuildAuraDesignerPage then DF.BuildAuraDesignerPage(GUI, slot, db, nil, nil, opts) end
         elseif DF.BuildTextDesignerPage then
@@ -1410,8 +1422,26 @@ function UFO.AddDesignerSlot(self, db, Add, unit, kind)
     return slot
 end
 
+-- Which style's template the page is editing: "Ring style: Unit Frames Ring".
+function UFO.TextStyleLine(unit)
+    local UF = DF.UnitFrames
+    local db = UF and UF:GetUnitDB(unit)
+    local style = (db and db.frameStyle == "RING") and L["Ring"] or L["Bars"]
+    return format(L["%s style: %s"], style, (UF and UF:UnitTemplate(unit, "text")) or DF.DEFAULT_PRESET or "")
+end
+
+UFO.textStyleNotes = {}
+function UFO.RefreshTextStyleNote(unit)
+    local note = UFO.textStyleNotes[unit]
+    if note and note.SetText then note:SetText(UFO.TextStyleLine(unit)) end
+end
+
 function UFO.BuildTextPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
+    local note = GUI:CreateLabel(self.child, UFO.TextStyleLine(unit), 400)
+    UFO.textStyleNotes[unit] = note
+    note:SetScript("OnShow", function() UFO.RefreshTextStyleNote(unit) end)
+    Add(note, 22, "both")
     UFO.AddDesignerSlot(self, db, Add, unit, "text")
 end
 
@@ -1899,6 +1929,17 @@ function UFO.FrameStyleOptions()
     return { BARS = L["Bars"], RING = L["Ring"], _order = { "BARS", "RING" } }
 end
 
+-- The Text Designer library, as dropdown options.
+function UFO.TextTemplateOptions()
+    local opts, order = {}, {}
+    for _, name in ipairs((DF.ListDesignerPresets and DF:ListDesignerPresets("text")) or {}) do
+        opts[name] = name
+        order[#order + 1] = name
+    end
+    opts._order = order
+    return opts
+end
+
 function UFO.RingPortrait3DOptions()
     return { FIT = L["Fit Inside"], COVER = L["Fill and Cover Corners"], ["2D"] = L["2D Portrait"],
              _order = { "FIT", "COVER", "2D" } }
@@ -2163,6 +2204,7 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
         self:RefreshStates()
         UFO.PushLinks(unit)
         RefreshFrames()
+        UFO.RefreshTextStyleNote(unit)
     end
     local w
 
@@ -2188,6 +2230,16 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
         local R = DF.UnitFrames and DF.UnitFrames.Rings
         return not3D(d) or not (d and d.ringPortrait3D == "COVER") or (R and R.CoverAllowed(d))
     end
+    -- One Text Designer template per style. The list is read each time the menu
+    -- opens, so it follows templates added, renamed or deleted on the designer's page.
+    local function textTemplate(label, key)
+        return band:AddWidget(GUI:CreateDropdown(self.child, label, UFO.TextTemplateOptions(), db, key, function()
+            UFO.ApplyTemplateRequests(unit, db[key])
+            changed()
+        end, nil, nil, { optionsFunc = UFO.TextTemplateOptions }), 55)
+    end
+    textTemplate(L["Bars Text Template"], "textDesignerPreset")
+    textTemplate(L["Ring Text Template"], "ringTextDesignerPreset")
     band:AddWidget(GUI:CreateLabel(self.child,
         L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar; absorbs and heal prediction are not drawn on rings."], 250), 70)
     Close(band)

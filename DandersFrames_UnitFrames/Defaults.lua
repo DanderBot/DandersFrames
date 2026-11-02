@@ -135,6 +135,8 @@ local ELEMENTS = {
     rings = UF.RING_DEFAULTS,
     -- A 3D portrait in RING style (Portrait.lua RING 3D): FIT | COVER | 2D.
     ringPortrait3D = "FIT",
+    -- The Text Designer template in RING style; textDesignerPreset is Bars' (Core.lua).
+    ringTextDesignerPreset = UF.TEXT_PRESET,
 
     -- Cast bar (CastBar.lua)
     castbarEnabled = false,
@@ -649,6 +651,18 @@ function UF.MigrateProfileTable(tbl)
                 u[pair[1]] = nil
             end
         end
+    end
+    -- Text templates split per style: a unit already on Ring keeps what it chose, now
+    -- under the ring key, and its Bars template goes back to its default.
+    if not tbl.global.ringTextPresetSplit then
+        for _, unit in ipairs(UF.UNITS) do
+            local u = tbl.units[unit]
+            if u.frameStyle == "RING" and u.ringTextDesignerPreset == nil and u.textDesignerPreset ~= nil then
+                u.ringTextDesignerPreset = u.textDesignerPreset
+                u.textDesignerPreset = nil
+            end
+        end
+        tbl.global.ringTextPresetSplit = true
     end
     -- Linked frames: the old per-page sync becomes unit links, and a profile that
     -- never had links gets the default one (Links.lua ENSURE). Idempotent.

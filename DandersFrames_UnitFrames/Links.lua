@@ -62,7 +62,7 @@ Links.KIND_SOURCE = {
 }
 -- Pages new to unit frames own these prefixes (UFO.Prefixes says the same).
 Links.KIND_PREFIXES = {
-    text = { "textDesignerPreset" }, auradesigner = { "auraDesignerEnabled", "auraDesignerPreset" },
+    text = { "textDesignerPreset", "ringTextDesignerPreset" }, auradesigner = { "auraDesignerEnabled", "auraDesignerPreset" },
     visibility = { "vis" }, castbar = { "castbar" }, classpower = { "classPower" },
     portrait = { "portrait" },
     rings = { "frameStyle", "ringSize", "rings", "ringPortrait3D" },

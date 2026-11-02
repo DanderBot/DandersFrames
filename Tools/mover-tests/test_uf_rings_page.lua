@@ -54,6 +54,7 @@ function DF:DebugWarn() end
 function DF:DebugError() end
 function DF:DeepCopy(t) return deepcopy(t) end
 function DF:RegisterProfileRootTable(key, spec) self.registered[key] = spec; return true end
+function DF:ListDesignerPresets() return { "Default", "A" } end
 DandersFrames = DF
 CreateFrame = nil
 local UF = {}
@@ -126,9 +127,9 @@ function GUI:StyleButton(btn, opts)
     btn.Text:SetText(opts.text)
     btn.SetEnabled = function(self, on) self.enabledState = on end
 end
-function GUI:CreateDropdown(_, label, options, db, key, cb, get, set)
+function GUI:CreateDropdown(_, label, options, db, key, cb, get, set, opts)
     local w = Bound("dropdown", label, get or function() return db[key] end, set or function(v) db[key] = v end, cb)
-    w.options = options
+    w.options, w.dropOpts = options, opts
     w.rebuilds = 0
     w.RebuildOptions = function(self, o) self.options = o; self.rebuilds = self.rebuilds + 1 end
     return w
@@ -211,6 +212,8 @@ function UFO.Explain(test, reason)
     return gate
 end
 function UFO.AddPageHead() end
+function UFO.RefreshTextStyleNote() end
+function UFO.ApplyTemplateRequests() end
 function UFO.PushLinks(u) pushes[#pushes + 1] = u end
 function UFO.LiveSlider(u, key, kind) return function() live[#live + 1] = { u, key, kind } end end
 
@@ -259,6 +262,33 @@ local function Click(btn) btn.opts.onClick(btn) end
 local function CustClick(bar) bar.custBtn.scripts.OnClick(bar.custBtn) end
 local function UpClick(bar) Click(bar.upBtn) end
 local function DownClick(bar) Click(bar.downBtn) end
+
+print("-- Rings page: the text template dropdowns")
+do
+    local function find(label)
+        for _, e in ipairs(bands.uf_rings_style.groupChildren) do
+            if e.widget.labelText == label then return e.widget end
+        end
+    end
+    local bars, ring = find("Bars Text Template"), find("Ring Text Template")
+    check(bars and ring, "one dropdown per style on the Style card")
+    eq(ring.dropOpts.optionsFunc, UFO.TextTemplateOptions, "the list is re-read when the menu opens")
+    eq(table.concat(UFO.TextTemplateOptions()._order, ","), "Default,A", "...from the Text Designer library")
+    ring.set("A")
+    eq(db.ringTextDesignerPreset, "A", "Ring writes the ring key")
+    eq(db.textDesignerPreset, nil, "...not the Bars key")
+    bars.set("Default")
+    eq(db.textDesignerPreset, "Default", "Bars writes the Bars key")
+    local asked
+    local apply = UFO.ApplyTemplateRequests
+    UFO.ApplyTemplateRequests = function(u, n) asked = n end
+    local p, r = #pushes, refreshes
+    ring.cb()
+    eq(asked, "A", "a pick applies what the template asks for")
+    check(#pushes == p + 1 and refreshes == r + 1, "...pushes the link and re-stamps the frames")
+    UFO.ApplyTemplateRequests = apply
+    db.ringTextDesignerPreset, db.textDesignerPreset = nil, nil
+end
 
 print("-- Rings page: the cards")
 eq(bands.uf_rings_style.col, "both", "the Style card is full width")

@@ -504,6 +504,8 @@ R.FORCED = {
 function R.FrameValue(db, key)
     if not R.IsRing(db) then return false end
     if key == "frameWidth" or key == "frameHeight" then return true, R.Size(db) end
+    -- The style's own Text Designer template (Core.lua PER-UNIT DESIGNER TEMPLATES).
+    if key == "textDesignerPreset" then return true, db[UF.RING_TEXT_KEY] end
     local v = R.FORCED[key]
     if v ~= nil then return true, v end
     if (key == "classPowerEnabled" or key == "classPowerDetached") and R.HasBar(db, "CLASSPOWER") then

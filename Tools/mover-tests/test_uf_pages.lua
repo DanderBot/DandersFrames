@@ -1010,7 +1010,9 @@ do
         -- Text: the same seam, no Same as Party Frames.
         islands = {}
         local _, _, _, tAdded = BuildPage("pet", "text")
-        local tslot = tAdded[3] and tAdded[3].w
+        eq(tAdded[3] and tAdded[3].col, "both", "Text page: a line saying which style it edits")
+        eq(UFO.TextStyleLine("pet"), "Bars style: Unit Frames (Small)", "...Bars, naming the template")
+        local tslot = tAdded[4] and tAdded[4].w
         check(tslot and tslot.dfDesignerSlot == "text" and tslot.layoutFill, "Text page: the designer's slot")
         tslot.IsVisible = function() return true end
         tslot.dfShowDesigner()
