@@ -167,8 +167,14 @@ list[1].thickness = 16
 for _, unit in ipairs({ "target", "focus" }) do
     local d = UF:GetUnitDB(unit)
     eq(d.ringSize, 130, unit .. ": ring size 130")
-    check(#d.rings == 1 and d.rings[1].thickness == 16 and d.rings[1].sections[2].reverse == true,
-          unit .. ": the same health and power ring, and no class power ring (it would draw nothing)")
+    local health, power = d.rings[1].sections[1], d.rings[1].sections[2]
+    -- Target is Player's mirror image; Focus isn't in the default link.
+    local healthSide, powerSide = "LEFT", "RIGHT"
+    if unit == "target" then healthSide, powerSide = "RIGHT", "LEFT" end
+    check(#d.rings == 1 and d.rings[1].thickness == 16 and health.position == healthSide and power.position == powerSide,
+          unit .. ": the health and power ring, and no class power ring (it would draw nothing)")
+    check((health.reverse == true) == (unit == "target") and (power.reverse == true) == (unit ~= "target"),
+          unit .. ": ...the right-hand bar filling the other way")
 end
 for _, unit in ipairs({ "pet", "targettarget", "focustarget", "boss" }) do
     local d = UF:GetUnitDB(unit)
@@ -232,9 +238,9 @@ a, len = R.Arc({ coverage = "QUARTER", position = "RIGHT" })
 check(near(a, 0.625) and near(len, 0.25), "right quarter: centred on 0.75")
 a, len = R.Arc({ coverage = "QUARTER", position = "TOPLEFT" })
 check(near(a, 0.25) and near(len, 0.25), "top-left quarter: 9 to 12 o'clock")
-a, len = R.Arc({ coverage = "HALF", position = "TOP" }, true)
-check(near(a, 0.25 + R.SECTION_GAP) and near(len, 0.5 - 2 * R.SECTION_GAP),
-      "two sections on a ring: each pulled in at both ends")
+a, len = R.Arc({ coverage = "HALF", position = "LEFT" })
+local a2, len2 = R.Arc({ coverage = "HALF", position = "RIGHT" })
+check(near((a + len) % 1, a2) and near((a2 + len2) % 1, a), "two halves on a ring meet: no gap between them")
 
 print("-- Rings: reverse keeps the arc where it is (every coverage x position)")
 do
@@ -250,9 +256,9 @@ do
     local all, n = true, 0
     for _, cov in ipairs({ "FULL", "HALF", "QUARTER" }) do
         for _, pos in ipairs(positions) do
-            for _, multi in ipairs({ false, true }) do
+            do
                 local sec = { coverage = cov, position = pos }
-                local a0, l0 = R.Arc(sec, multi)
+                local a0, l0 = R.Arc(sec)
                 for _, rev in ipairs({ false, true }) do
                     R.ShapeArcBar(bar, bar, 64, 48, a0, l0, rev, 0)
                     local c = bar:GetStatusBarTexture()._calls
@@ -260,8 +266,8 @@ do
                     local same = near(cl, l0) and (near(ca, a0 % 1) or near(math.abs(ca - a0 % 1), 1) or l0 >= 1)
                     if not same then
                         all = false
-                        print(string.format("    mismatch %s %s multi=%s rev=%s: want %.3f+%.3f got %.3f+%.3f",
-                            cov, pos, tostring(multi), tostring(rev), a0, l0, ca, cl))
+                        print(string.format("    mismatch %s %s rev=%s: want %.3f+%.3f got %.3f+%.3f",
+                            cov, pos, tostring(rev), a0, l0, ca, cl))
                     end
                     if c.SetRadialProgressBarReverse ~= rev then all = false end
                     n = n + 1
@@ -403,8 +409,8 @@ R:Layout(F)
 eq(#F.dfUFRingHealth, 1, "half health...")
 eq(#F.dfUFRingPower, 1, "...half power, one ring")
 local ht = F.dfUFRingHealth[1]:GetStatusBarTexture()._calls
-check(near(ht.SetRadialProgressBarStartOffset, 0.5 - R.SECTION_GAP), "left half, reversed: starts at its far (top) end, pulled in")
-check(near(ht.SetRadialProgressBarEndOffset, 0.5 + 2 * R.SECTION_GAP), "...and cuts off the other half and the gaps")
+check(near(ht.SetRadialProgressBarStartOffset, 0.5), "left half, reversed: starts at its far (top) end")
+check(near(ht.SetRadialProgressBarEndOffset, 0.5), "...and cuts off the other half")
 check(ht.SetRadialProgressBarReverse == true and ht.SetRadialProgressBarFeather == 0.3, "reverse and feather")
 check(c.arcs[2].track._shown and c.arcs[2].fill._shown, "two arcs drawn")
 eff.rings = { { thickness = 10, gap = 2, sections = { { bar = "HEALTH" } } } }

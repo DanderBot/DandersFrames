@@ -197,9 +197,10 @@ do
     end
     -- 162 = 157 + the classification dragon's side, x, y and tail x (reviewed: all
     -- four move with the frame's end) + its Anchor To (portrait / frame: where it sits).
+    -- 167 = 166 + the ring list (which side each ring bar sits on).
     -- 166 = 162 + the detached resource bar's switch, anchor, x and y (where it sits;
     -- its size and Match Frame Width are look).
-    eq(#layout, 166, "the layout set is the size it was reviewed at (166 keys); a change here wants a look")
+    eq(#layout, 167, "the layout set is the size it was reviewed at (167 keys); a change here wants a look")
     for _, k in ipairs({ "resourceBarDetached", "resourceBarDetachedAnchor", "resourceBarDetachedX",
                          "resourceBarDetachedY" }) do
         eq(Links.Aspect(k), "layout", "layout: " .. k)
@@ -461,7 +462,7 @@ do
     local link = root.global.unitLinks.target
     check(link ~= nil, "a profile with no links gets one: Target")
     eq(link and link.to, "player", "...following Player")
-    eq(keys(link.elements), "border,buffs,castbar,debuffs,health,portrait,resource,text", "...on the eight pieces")
+    eq(keys(link.elements), "border,buffs,castbar,debuffs,health,portrait,resource,rings,text", "...on the nine pieces")
     eq(link.elements.health.layout .. "/" .. link.elements.health.look, "mirror/same", "...layout mirrored, look shared")
     eq(link.elements.border.layout .. "/" .. link.elements.border.look, "own/same", "...the border has no layout")
     -- buffPurgeableEnabled: on for the enemy frames only (Target's default; Player never glows).
@@ -850,7 +851,7 @@ end
 -- ============================================================
 print("-- Links: a Player/Target link drops the aura rows' retired kept keys once")
 do
-    eq(Links.VERSION, 4, "the current link version")
+    eq(Links.VERSION, 5, "the current link version")
     -- A version-3 profile: its default link kept the rows' vertical offsets apart.
     local old = newProfile()
     Links:Ensure(old)
@@ -902,6 +903,102 @@ do
     v2.global.unitLinksVersion = 2
     Links:Ensure(v2)
     eq(v2.global.unitLinksVersion, Links.VERSION, "a version-2 profile is stamped at the current version")
+end
+
+-- ============================================================
+-- 5e. THE RING LIST ACROSS A LINK
+-- ============================================================
+print("-- Links: a mirrored link puts each ring bar on the other side")
+do
+    local ring = function(a, b) return { thickness = 16, gap = 0, sections = { a, b } } end
+    local HEALTH_L = { bar = "HEALTH", coverage = "HALF", position = "LEFT" }
+    local POWER_R = { bar = "POWER", coverage = "HALF", position = "RIGHT", reverse = true }
+    local CP_RING = { thickness = 5, gap = 0, sections = { { bar = "CLASSPOWER", coverage = "FULL", position = "TOP" } } }
+
+    eq(Links.Aspect("rings"), "layout", "the ring list is layout")
+    eq(Links.Aspect("frameStyle"), "look", "...Bars or Ring is look")
+    check(Links.CanMirror("rings"), "the ring list can be mirrored")
+
+    local m = Links.Mirror("rings", { ring(HEALTH_L, POWER_R) })[1].sections
+    eq(m[1].position, "RIGHT", "health moves to the right")
+    eq(m[1].reverse, true, "...filling the other way round")
+    eq(m[2].position, "LEFT", "power moves to the left")
+    eq(m[2].reverse, nil, "...filling the other way round")
+    eq(HEALTH_L.position, "LEFT", "the source is not touched")
+    check(Links.DeepEqual(Links.Mirror("rings", Links.Mirror("rings", { ring(HEALTH_L, POWER_R) })),
+        { ring(HEALTH_L, POWER_R) }), "mirroring twice is where it started")
+    eq(Links.Mirror("rings", { ring({ bar = "HEALTH", position = "TOPLEFT" }) })[1].sections[1].position, "TOPRIGHT",
+        "a corner swaps too")
+
+    -- Class power stays with Player.
+    local toTarget = Links.RingsFor({ ring(HEALTH_L, POWER_R), CP_RING }, "target", nil)
+    eq(#toTarget, 1, "class power does not cross to Target")
+    local mixed = Links.RingsFor({ ring(HEALTH_L, { bar = "CLASSPOWER" }) }, "target", nil)
+    eq(#mixed[1].sections, 1, "...a shared ring keeps its other section")
+    local toPlayer = Links.RingsFor({ ring(HEALTH_L, POWER_R) }, "player", { ring(HEALTH_L, POWER_R), CP_RING })
+    eq(#toPlayer, 2, "Player keeps its class power ring when Target's rings come over")
+    eq(toPlayer[2], CP_RING, "...its own one")
+    eq(#Links.RingsFor({ CP_RING }, "player", { CP_RING }), 1, "...and never gets two")
+
+    -- The shipped defaults: Target is exactly Player's mirror, so nothing is kept apart.
+    local d = Links.DEFAULT
+    check(Links.DeliberateDifferences(d.follower, d.leader, d.elements).rings == nil,
+        "the default link keeps no ring difference")
+    local fresh = newProfile()
+    Links:Ensure(fresh)
+    eq(rawget(fresh.units.target, "rings"), nil, "a fresh Target stores no rings")
+    local tr = UF:GetUnitDefault("target", "rings")
+    eq(tr[1].sections[1].position, "RIGHT", "Target's default health is on the right")
+    eq(tr[1].sections[2].position, "LEFT", "...its power on the left")
+    eq(#tr, 1, "...with no class power ring")
+
+    -- A change on Player reaches Target, mirrored.
+    fresh.units.player.rings = { { thickness = 9, gap = 1, sections = {
+        { bar = "HEALTH", coverage = "HALF", position = "TOP" } } }, CP_RING }
+    Links:ApplyFrom(fresh, "player")
+    eq(#fresh.units.target.rings, 1, "Player's edit reaches Target without its class power")
+    eq(fresh.units.target.rings[1].thickness, 9, "...thickness and all")
+    eq(fresh.units.target.rings[1].sections[1].reverse, true, "...mirrored")
+    -- ...and one on Target leaves Player's class power alone.
+    fresh.units.target.rings[1].thickness = 12
+    Links:ApplyFrom(fresh, "target")
+    eq(fresh.units.player.rings[1].thickness, 12, "Target's edit reaches Player")
+    eq(#fresh.units.player.rings, 2, "...and Player keeps its class power ring")
+
+    -- A profile from before the step: the link gains the ring list, Target's rings flip.
+    local old = newProfile()
+    Links:Ensure(old)
+    local link = old.global.unitLinks.target
+    link.elements.rings = nil
+    old.global.unitLinksVersion = 4
+    old.units.target.rings = { ring(HEALTH_L, POWER_R), CP_RING }
+    old.units.player.rings = { ring(HEALTH_L, POWER_R), CP_RING }
+    old.units.player.rings[1].thickness = 14
+    Links:Ensure(old)
+    eq(old.global.unitLinksVersion, 5, "the step stamps version 5")
+    eq(link.elements.rings.layout, "mirror", "the ring list joins the link, mirrored")
+    eq(link.elements.rings.look, "own", "...Bars or Ring stays each frame's own")
+    eq(old.units.target.rings[1].sections[1].position, "RIGHT", "Target's health flips")
+    eq(#old.units.target.rings, 1, "...and its empty class power band goes")
+    old.units.target.rings[1].thickness = 3
+    Links:Ensure(old)
+    eq(old.units.target.rings[1].thickness, 3, "the step runs once")
+
+    -- Exactly Player's default: Target's stored copy goes (sparse), and it reads its own.
+    local same = newProfile()
+    Links:Ensure(same)
+    same.global.unitLinks.target.elements.rings = nil
+    same.global.unitLinksVersion = 4
+    same.units.target.rings = { ring(HEALTH_L, POWER_R) }
+    Links:Ensure(same)
+    eq(rawget(same.units.target, "rings"), nil, "a Target that lands on its default stores nothing")
+
+    -- Unlinked, or another pair: left alone.
+    local other = newProfile()
+    other.global.unitLinks = { focus = { to = "target", elements = {} } }
+    other.global.unitLinksVersion = 4
+    eq(Links:AddRingsToDefault(other), false, "a pair that is not Player/Target is left alone")
+    eq(other.global.unitLinks.focus.elements.rings, nil, "...with no ring list added")
 end
 
 -- ============================================================

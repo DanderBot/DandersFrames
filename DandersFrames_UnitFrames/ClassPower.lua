@@ -211,10 +211,10 @@ function CP:Layout(f, res)
     cp.res = res
     -- RING style with a class power section: the pips go into the ring.
     local R = UF.Rings
-    local ring, sec, multi = nil, nil, nil
-    if R then ring, sec, multi = R.ClassPowerArc(db) end
+    local ring, sec = nil, nil
+    if R then ring, sec = R.ClassPowerArc(db) end
     if ring then
-        CP:LayoutRing(f, cp, db, res, ring, sec, multi)
+        CP:LayoutRing(f, cp, db, res, ring, sec)
         if UF.Mover and UF.Mover.SyncChild then UF.Mover:SyncChild(f.dfUFUnit, "classpower") end
         if not f.dfUFPreview then CP:Update(f) end
         return
@@ -327,7 +327,7 @@ function CP.HideRing(cp)
     end
 end
 
-function CP:LayoutRing(f, cp, db, res, ring, sec, multi)
+function CP:LayoutRing(f, cp, db, res, ring, sec)
     local R = UF.Rings
     for _, pip in ipairs(cp.pips) do pip:Hide() end
     cp.single:Hide()
@@ -338,7 +338,7 @@ function CP:LayoutRing(f, cp, db, res, ring, sec, multi)
     local single = res and (res.kind == "stagger" or db.classPowerMode == "BAR")
     local n = (res and not single) and CP:MaxPips(res) or 0
     cp.count = n
-    local a, len = R.Arc(sec, multi)
+    local a, len = R.Arc(sec)
     local arcs = (n > 0) and R.PipArcs(a, len, n) or { { start = a, len = len } }
     if not res then arcs = {} end
 

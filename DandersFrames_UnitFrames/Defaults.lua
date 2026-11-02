@@ -122,13 +122,20 @@ local FONT = "DF Roboto SemiBold"
 --               unit's own table on first read (Core.lua), so it is edited in place
 --               and Links / Copy / Reset carry it whole.
 -- Ring 1: health down the left half and power down the right, filling the other way,
--- flush with the portrait. Ring 2: class power all the way round.
+-- flush with the portrait. Ring 2: class power all the way round. Target's ring is
+-- the mirror image (the default link mirrors the ring list; Links.lua).
 -- ⚠ CLASS POWER IS THE PLAYER'S ALONE (ClassPower.lua CP.UNITS): on any other unit a
 -- class power ring draws nothing at all, only a see-through band that eats the frame.
 -- So only Player's default has it. A small frame takes the same ring at half the
 -- thickness, or the portrait would have no room (RingDefaults).
 -- ============================================================
-local function HealthPowerRing(thickness)
+local function HealthPowerRing(thickness, mirrored)
+    if mirrored then
+        return { thickness = thickness, gap = 0, sections = {
+            { bar = "HEALTH", coverage = "HALF", position = "RIGHT", reverse = true },
+            { bar = "POWER", coverage = "HALF", position = "LEFT" },
+        } }
+    end
     return { thickness = thickness, gap = 0, sections = {
         { bar = "HEALTH", coverage = "HALF", position = "LEFT" },
         { bar = "POWER", coverage = "HALF", position = "RIGHT", reverse = true },
@@ -141,7 +148,7 @@ UF.RING_DEFAULTS = {
 local RING_SIZE_LARGE = 130
 local RING_BY_UNIT = {
     player = { ringSize = RING_SIZE_LARGE, rings = UF.RING_DEFAULTS },
-    target = { ringSize = RING_SIZE_LARGE, rings = { HealthPowerRing(16) } },
+    target = { ringSize = RING_SIZE_LARGE, rings = { HealthPowerRing(16, true) } },
     focus  = { ringSize = RING_SIZE_LARGE, rings = { HealthPowerRing(16) } },
 }
 

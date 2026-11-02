@@ -81,8 +81,6 @@ R.SIZE_MIN, R.SIZE_MAX = 24, 256
 R.THICK_MIN, R.THICK_MAX = 1, 40
 R.GAP_MIN, R.GAP_MAX = 0, 20
 R.MAX_RINGS, R.MAX_SECTIONS = 4, 4
--- Two or more sections on one ring are pulled apart by this much each side.
-R.SECTION_GAP = 0.008
 -- Class power pips: this much of a turn clear each side of a pip.
 R.PIP_GAP = 0.012
 
@@ -192,18 +190,12 @@ function R.Geometry(db)
 end
 
 -- A section's arc: start (a share of a turn clockwise from the bottom, 0..1) and
--- length. Full: the whole circle from the bottom. `multi`: the ring has more than
--- one section, so each is pulled in a little at both ends.
-function R.Arc(sec, multi)
+-- length. Full: the whole circle from the bottom.
+function R.Arc(sec)
     local len = R.COVERAGE[sec and sec.coverage] or 1
     if len >= 1 then return 0, 1 end
     local mid = R.POSITIONS[sec and sec.position] or 0.5
-    local a = (mid - len / 2) % 1
-    if multi then
-        a = (a + R.SECTION_GAP) % 1
-        len = len - 2 * R.SECTION_GAP
-    end
-    return a, len
+    return (mid - len / 2) % 1, len
 end
 
 -- Start / end offsets of the arc a..a+len (see ARC MATHS above).
@@ -238,29 +230,28 @@ function R.ArcsOverlap(a1, l1, a2, l2)
 end
 
 -- Do any two sections of a ring (a stored one: cleaned here) cover the same part of
--- it? Worked out from the arcs the ring is drawn with (R.Arc), pulled-in ends and all.
+-- it? Worked out from the arcs the ring is drawn with (R.Arc).
 function R.RingOverlaps(ring)
     local secs = type(ring) == "table" and ring.sections
     if type(secs) ~= "table" then return false end
-    local multi = #secs > 1
     for i = 1, #secs do
-        local a1, l1 = R.Arc(R.NormalizeSection(secs[i]), multi)
+        local a1, l1 = R.Arc(R.NormalizeSection(secs[i]))
         for j = i + 1, #secs do
-            local a2, l2 = R.Arc(R.NormalizeSection(secs[j]), multi)
+            local a2, l2 = R.Arc(R.NormalizeSection(secs[j]))
             if R.ArcsOverlap(a1, l1, a2, l2) then return true end
         end
     end
     return false
 end
 
--- Where the CLASSPOWER section is: ring geometry, the section, and whether the
--- ring has others (nil when no ring has one).
+-- Where the CLASSPOWER section is: ring geometry and the section (nil when no ring
+-- has one).
 function R.ClassPowerArc(db)
     if not R.IsRing(db) then return nil end
     local geo = R.Geometry(db)
     for _, ring in ipairs(geo.rings) do
         for _, s in ipairs(ring.sections) do
-            if s.bar == "CLASSPOWER" then return ring, s, #ring.sections > 1, geo end
+            if s.bar == "CLASSPOWER" then return ring, s, geo end
         end
     end
     return nil
@@ -381,9 +372,8 @@ function R.DecorateMock(mock, db, chrome)
 
     local used = 0
     for _, rg in ipairs(geo.rings) do
-        local multi = #rg.sections > 1
         for _, sec in ipairs(rg.sections) do
-            local a, len = R.Arc(sec, multi)
+            local a, len = R.Arc(sec)
             if sec.bar == "CLASSPOWER" then
                 local arcs = R.PipArcs(a, len, R.MOCK_PIPS)
                 for i = 1, #arcs do
@@ -457,9 +447,8 @@ R.SIDE_ANGLE = { RING_GAP_LEFT = 0.25, RING_GAP_RIGHT = 0.75 }
 -- Does any section of `ring` cover the point `angle` (a share of a turn clockwise
 -- from the bottom)?
 function R.Covers(ring, angle)
-    local multi = #ring.sections > 1
     for _, s in ipairs(ring.sections) do
-        local a, len = R.Arc(s, multi)
+        local a, len = R.Arc(s)
         if len >= 1 then return true end
         local d = (angle - a) % 1
         if d <= len then return true end
@@ -709,13 +698,12 @@ function R:Layout(f)
 
     local used, health, power = 0, {}, {}
     for _, ring in ipairs(geo.rings) do
-        local multi = #ring.sections > 1
         for _, sec in ipairs(ring.sections) do
             -- Class power draws its own pips into the ring (ClassPower.lua).
             if sec.bar ~= "CLASSPOWER" then
                 used = used + 1
                 local arc = AcquireArc(c, used)
-                local a, len = R.Arc(sec, multi)
+                local a, len = R.Arc(sec)
                 R.ShapeArcBar(arc.track, c, ring.outer, ring.inner, a, len, false, 0)
                 R.ShapeArcBar(arc.fill, c, ring.outer, ring.inner, a, len, sec.reverse, sec.feather)
                 arc.fill:SetFrameLevel(arc.track:GetFrameLevel() + 1)

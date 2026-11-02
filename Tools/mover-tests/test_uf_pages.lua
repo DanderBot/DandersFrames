@@ -1577,13 +1577,13 @@ do
     -- ---- the groups --------------------------------------------------------------
     local linked, separate = UFO.LinkPageGroups("target", "player")
     local function ids(list) local t = {} for i, e in ipairs(list) do t[i] = e.id end return table.concat(t, ",") end
-    eq(ids(linked), "health,resource,portrait,castbar,text,buffs,debuffs,border", "Linked by default: the default link's parts, in page order")
-    eq(ids(separate), "absorbs,healpred,icons,unitIcons,tooltips,visibility,fading,frame,rings,highlights",
+    eq(ids(linked), "health,resource,rings,portrait,castbar,text,buffs,debuffs,border", "Linked by default: the default link's parts, in page order")
+    eq(ids(separate), "absorbs,healpred,icons,unitIcons,tooltips,visibility,fading,frame,highlights",
        "Separate by default: everything else both frames have")
     local n, total = UFO.LinkedPartCount("target", "player")
-    eq(n .. "/" .. total, "8/18", "8 of 18 parts linked")
+    eq(n .. "/" .. total, "9/18", "9 of 18 parts linked")
     linked, separate = UFO.LinkPageGroups("targettarget", "focustarget")
-    eq(ids(linked) .. "|" .. ids(separate), "health,text,border|tooltips,fading,frame,rings,highlights", "a pair with fewer parts lists only those")
+    eq(ids(linked) .. "|" .. ids(separate), "health,rings,text,border|tooltips,fading,frame,highlights", "a pair with fewer parts lists only those")
 
     -- ---- the layout decision -----------------------------------------------------
     local m = UFO.LinkDefaultMeasures()
@@ -1675,7 +1675,7 @@ do
     eq(byId.absorbs.result:GetText(), "Not linked. Each frame has its own.", "Absorbs' result line")
     eq(byId.health.badge:GetText(), "+1", "Health: one thing kept apart")
     eq(byId.portrait.badge:GetText(), "", "Portrait: nothing kept apart")
-    eq(card.summary:GetText(), "8 of 18 parts linked", "the card's summary")
+    eq(card.summary:GetText(), "9 of 18 parts linked", "the card's summary")
     -- "+ Link Two Frames" sits on the first card's header line, not on the page head.
     check(card.addButton ~= nil, "the first link card carries + Link Two Frames")
     eq(rawget(blocks[1].w, "addButton"), nil, "...and the page head does not")

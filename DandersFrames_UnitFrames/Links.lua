@@ -98,9 +98,9 @@ local FRAME_WITHOUT = { "frameBorder", "frameShowBorder", "frameStyle" }
 Links.ELEMENTS = {
     { id = "frame",        kind = "frame",        title = "Frame",           layout = false, without = FRAME_WITHOUT },
     { id = "border",       kind = "frame",        title = "Border",          layout = false, only = BORDER_PREFIXES },
-    -- Frame Style and the ring list (Rings.lua). No layout aspect: the ring list is
-    -- one value, shared whole (a mirror does not turn its sections round -- v1).
-    { id = "rings",        kind = "rings",        title = "Frame Style",     layout = false },
+    -- Frame Style and the ring list (Rings.lua). The ring list is the layout aspect:
+    -- one value, moved whole, and a mirror turns its sections round (Links.MirrorRings).
+    { id = "rings",        kind = "rings",        title = "Frame Style",     layout = true },
     { id = "visibility",   kind = "visibility",   title = "Visibility",      layout = false },
     { id = "tooltips",     kind = "tooltips",     title = "Tooltips",        layout = true, mirror = false },
     { id = "fading",       kind = "fading",       title = "Fading",          layout = false },
@@ -229,7 +229,11 @@ local function EndsWith(key, suffix)
     return #key >= #suffix and key:sub(-#suffix) == suffix
 end
 
+-- Layout whatever the name says: the ring list, which says where each bar sits.
+Links.LAYOUT_KEYS = { rings = true }
+
 local function Classify(key)
+    if Links.LAYOUT_KEYS[key] then return "layout" end
     for _, s in ipairs(Links.LOOK_EXCEPTIONS) do
         if EndsWith(key, s) then return "look" end
     end
@@ -294,14 +298,82 @@ function Links.MirrorFlips(key)
     return true
 end
 
+-- The ring list's mirror image: each section on the other side, filling the other
+-- way round, so both bars still rise from the same end of the ring.
+function Links.MirrorRings(list)
+    local out = {}
+    for i, ring in ipairs(list) do
+        local r = {}
+        for k, v in pairs(ring) do r[k] = v end
+        r.sections = {}
+        for j, sec in ipairs(type(ring.sections) == "table" and ring.sections or {}) do
+            local s = {}
+            for k, v in pairs(sec) do s[k] = v end
+            if type(s.position) == "string" then s.position = SwapLR(s.position) end
+            s.reverse = (not s.reverse) or nil
+            r.sections[j] = s
+        end
+        out[i] = r
+    end
+    return out
+end
+
 function Links.Mirror(key, v)
     if not Links.MirrorFlips(key) then return v end
+    if key == "rings" and type(v) == "table" then return Links.MirrorRings(v) end
     if type(v) == "string" then return SwapLR(v) end
     if type(v) == "number" and EndsWith(key, "X") then
         if v == 0 then return 0 end
         return -v
     end
     return v
+end
+
+-- ============================================================
+-- CLASS POWER RINGS STAY WITH PLAYER
+-- Only Player can draw class power (ClassPower.lua CP.UNITS): on any other unit a
+-- class power ring is an empty band that squeezes the rest. So a ring list crossing a
+-- link leaves its class power behind, and Player keeps the ones it has. `own` is the
+-- ring list `to` has now.
+-- ============================================================
+Links.CLASSPOWER_UNIT = "player"
+
+local function HasClassPower(ring)
+    for _, s in ipairs(type(ring) == "table" and type(ring.sections) == "table" and ring.sections or {}) do
+        if type(s) == "table" and s.bar == "CLASSPOWER" then return true end
+    end
+    return false
+end
+
+function Links.RingsFor(list, to, own)
+    if type(list) ~= "table" then return list end
+    local out, any = {}, false
+    if to == Links.CLASSPOWER_UNIT then
+        for i, ring in ipairs(list) do
+            out[i] = ring
+            any = any or HasClassPower(ring)
+        end
+        if not any and type(own) == "table" then
+            for _, ring in ipairs(own) do
+                if HasClassPower(ring) then out[#out + 1] = ring end
+            end
+        end
+        return out
+    end
+    for _, ring in ipairs(list) do
+        if HasClassPower(ring) then
+            local r, secs = {}, {}
+            for k, v in pairs(ring) do r[k] = v end
+            for _, s in ipairs(ring.sections) do
+                if s.bar ~= "CLASSPOWER" then secs[#secs + 1] = s end
+            end
+            r.sections = secs
+            if #secs > 0 then out[#out + 1] = r end
+        else
+            out[#out + 1] = ring
+        end
+    end
+    return out
 end
 
 -- ============================================================
@@ -481,6 +553,7 @@ function Links:ApplyFrom(root, from)
             if mode ~= "own" then
                 local v = Effective(root, from, key)
                 if mode == "mirror" then v = Links.Mirror(key, v) end
+                if key == "rings" then v = Links.RingsFor(v, to, Effective(root, to, key)) end
                 local cur = rawget(dst, key)
                 if v == nil or DeepEqual(v, Default(to, key)) then
                     if cur ~= nil then
@@ -580,8 +653,9 @@ end
 -- ============================================================
 -- THE DEFAULT LINK: Target follows Player
 -- Layout mirrored, look shared, for the pieces a target frame is the mirror of
--- the player's in: health, power, portrait, buffs, debuffs, cast bar, text and
--- border. Everything else -- status icons, unit icons, highlights, fading,
+-- the player's in: health, power, the ring list, portrait, buffs, debuffs, cast bar,
+-- text and border. Frame Style's look (Bars or Ring, ring size) is each frame's own.
+-- Everything else -- status icons, unit icons, highlights, fading,
 -- tooltips, visibility, the frame's size and fade, absorbs and heal prediction
 -- (their anchors follow the health bar's fill, which a mirror does not turn
 -- round) -- is each frame's own.
@@ -593,6 +667,7 @@ Links.DEFAULT = {
     elements = {
         health   = { layout = "mirror", look = "same" },
         resource = { layout = "mirror", look = "same" },
+        rings    = { layout = "mirror", look = "own" },
         portrait = { layout = "mirror", look = "same" },
         buffs    = { layout = "mirror", look = "same" },
         debuffs  = { layout = "mirror", look = "same" },
@@ -615,6 +690,7 @@ function Links.DeliberateDifferences(follower, leader, elements)
             if mode ~= "own" then
                 local want = Default(leader, key)
                 if mode == "mirror" then want = Links.Mirror(key, want) end
+                if key == "rings" then want = Links.RingsFor(want, follower, Default(follower, key)) end
                 if not DeepEqual(want, Default(follower, key)) then out[key] = true end
             end
         end
@@ -659,7 +735,10 @@ function Links.MirrorDefaults(leaderDefaults, followerDefaults, explicit, elemen
         local layout = Links.Normalise(id, aspects)
         if layout == "mirror" then
             for _, key in ipairs(Links.StaticKeys(id)) do
-                if Links.Aspect(key) == "layout" and not (explicit and explicit[key] ~= nil) then
+                -- Not the ring list: class power stays with Player, so Defaults.lua sets
+                -- Target's own.
+                if Links.Aspect(key) == "layout" and not Links.LAYOUT_KEYS[key]
+                    and not (explicit and explicit[key] ~= nil) then
                     local v = leaderDefaults[key]
                     if v == nil and DF.PartyDefaults then v = DF.PartyDefaults[key] end
                     local m = Links.Mirror(key, v)
@@ -739,7 +818,7 @@ end
 -- current version for a later step must not run an earlier one a second time (this
 -- one would turn a Player-follows-Target link the user made since round again).
 -- ============================================================
-Links.VERSION = 4
+Links.VERSION = 5
 function Links:RepairOrientation(root)
     local g = Global(root)
     if (tonumber(g.unitLinksVersion) or 1) >= 2 then return false end
@@ -790,6 +869,30 @@ function Links:DropRetiredKept(root)
 end
 
 -- ============================================================
+-- ONE-TIME STEP (unitLinksVersion 5). The ring list joined the default link, mirrored.
+-- A Player/Target link made before that gets it once, and the follower takes the
+-- leader's rings mirrored. A pair that isn't Player/Target is the user's own.
+-- ============================================================
+function Links:AddRingsToDefault(root)
+    local g = Global(root)
+    if (tonumber(g.unitLinksVersion) or 1) >= 5 then return false end
+    g.unitLinksVersion = 5
+    local d = Links.DEFAULT
+    local link, follower, leader = self:LinkOf(root, d.follower)
+    local pair = link and ((follower == d.follower and leader == d.leader)
+        or (follower == d.leader and leader == d.follower))
+    if not pair then return false end
+    if type(link.elements) ~= "table" then link.elements = {} end
+    local cur = link.elements.rings
+    link.elements.rings = { layout = "mirror", look = (type(cur) == "table" and cur.look == "same") and "same" or "own" }
+    local v = Links.RingsFor(Links.Mirror("rings", Effective(root, leader, "rings")), follower,
+        Effective(root, follower, "rings"))
+    local dst = Stored(root, follower)
+    if DeepEqual(v, Default(follower, "rings")) then dst.rings = nil else dst.rings = Copy(v) end
+    return true
+end
+
+-- ============================================================
 -- ENSURE: migrate, then the default link on a profile that never had links.
 -- Safe to run any number of times, on any stored profile's table.
 -- ============================================================
@@ -801,6 +904,7 @@ function Links:Ensure(root)
     self:Migrate(root)
     self:RepairOrientation(root)
     self:DropRetiredKept(root)
+    self:AddRingsToDefault(root)
     if first then self:CreateDefault(root) end
 end
 
