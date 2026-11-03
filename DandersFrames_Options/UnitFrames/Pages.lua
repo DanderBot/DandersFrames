@@ -2835,6 +2835,166 @@ end
 -- holders, taking the party cards' pins with it. Moving frames lives on the
 -- module Settings page instead (Position card), one row per unit.
 -- ============================================================
+-- WHAT A RING DOESN'T USE
+-- A ring draws its own fills, so the page's bar layout, border and display mode
+-- controls have nothing to act on (Rings.lua R.HideBars, and the frame view it forces).
+-- After a build every such control greys and says why. The rest of the page reads the
+-- unit through UFO.RingView: a switch the ring ignores answers as the ring behaves, so a
+-- stored "Show Resource Bar" off can't grey the Texture a POWER ring still draws, and a
+-- colour hidden behind a mode the ring doesn't have (Background Color, a section's track)
+-- stays reachable. Bars style is untouched: the view is the unit, the tests are false.
+-- ============================================================
+function UFO.KeySet(...)
+    local t = {}
+    for i = 1, select("#", ...) do t[select(i, ...)] = true end
+    return t
+end
+
+UFO.RING_DEAD = {
+    frame = UFO.KeySet("frameWidth", "frameHeight", "frameShowBorder"),
+    fading = UFO.KeySet("oorMissingHealthAlpha", "oorBorderAlpha", "fadeDeadPowerBar",
+        "fadeDeadUseCustomColor", "fadeDeadBackgroundColor"),
+    portrait = UFO.KeySet("portraitSide", "portraitSize", "portraitX", "portraitY", "portraitShape"),
+    health = UFO.KeySet("healthOrientation", "backgroundColorMode", "backgroundClassAlpha", "backgroundMode"),
+    resource = UFO.KeySet("resourceBarEnabled", "resourceBarClassFilter", "resourceBarMatchWidth",
+        "resourceBarMatchAdjustFrameBorder", "resourceBarWidth", "resourceBarHeight", "resourceBarAnchor",
+        "resourceBarX", "resourceBarY", "resourceBarFrameLevel", "resourceBarOrientation",
+        "resourceBarReverseFill", "resourceBarSmooth", "resourceBarBackgroundEnabled", "resourceBarShowBorder",
+        "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "DEATHKNIGHT", "SHAMAN", "MAGE", "WARLOCK",
+        "MONK", "DRUID", "DEMONHUNTER", "EVOKER"),
+    absorbs = UFO.KeySet("absorbBarMode", "absorbBarOverlayReverse", "absorbBarShowOvershield",
+        "absorbBarOvershieldStyle", "absorbBarOvershieldColor", "absorbBarOvershieldAlpha",
+        "absorbBarOvershieldReverse", "absorbBarOrientation", "absorbBarReverse", "absorbBarWidth",
+        "absorbBarHeight", "absorbBarAnchor", "absorbBarX", "absorbBarY", "absorbBarFrameLevel",
+        "healAbsorbBarMode", "healAbsorbBarOverlayReverse", "healAbsorbBarOrientation",
+        "healAbsorbBarReverse", "healAbsorbBarWidth", "healAbsorbBarHeight", "healAbsorbBarAnchor",
+        "healAbsorbBarX", "healAbsorbBarY"),
+    healpred = UFO.KeySet("healPredictionEnabled", "healPredictionMode", "healPredictionShowOverheal",
+        "healPredictionShowMode", "healPredictionMyColor", "healPredictionOthersColor",
+        "healPredictionOrientation", "healPredictionReverse", "healPredictionWidth", "healPredictionHeight",
+        "healPredictionAnchor", "healPredictionX", "healPredictionY", "healPredictionFrameLevel"),
+    unitIcons = UFO.KeySet("restingIconGlowPortrait", "classDragonAnchor"),
+}
+
+-- Whole families, by the key's start.
+UFO.RING_DEAD_PREFIX = {
+    frame = { "frameBorder" },
+    health = { "missingHealth", "reducedMaxHealth" },
+    resource = { "resourceBarBorder", "resourceBarDetached" },
+}
+
+-- Only some rings: Class Power draws on a ring only with a section of its own, and the
+-- bar's layout applies until then.
+UFO.RING_DEAD_CLASSPOWER = UFO.KeySet("classPowerEnabled", "classPowerDetached", "classPowerMatchWidth",
+    "classPowerWidth", "classPowerHeight", "classPowerGap", "classPowerPosition", "classPowerX", "classPowerY",
+    "classPowerBorderEnabled", "classPowerBorderSize", "classPowerBorderColor", "classPowerEmptyColor")
+UFO.RING_DEAD_2D = UFO.KeySet("portrait3DZoom", "portrait3DRotation")
+
+function UFO.IsRingDB(d) return d and d.frameStyle == "RING" and true or false end
+
+function UFO.RingHasClassPower(d)
+    local R = DF.UnitFrames and DF.UnitFrames.Rings
+    return R and R.HasBar(d, "CLASSPOWER") and true or false
+end
+
+-- The test and reason for a control on a page, or nil when rings use it.
+function UFO.RingDead(kind, key)
+    if type(key) ~= "string" then return nil end
+    local keys = UFO.RING_DEAD[kind]
+    if keys and keys[key] then
+        return UFO.IsRingDB, function() return L["Set Frame Style to Bars to change this."] end
+    end
+    for _, prefix in ipairs(UFO.RING_DEAD_PREFIX[kind] or {}) do
+        if key:sub(1, #prefix) == prefix then
+            return UFO.IsRingDB, function() return L["Set Frame Style to Bars to change this."] end
+        end
+    end
+    if kind == "classpower" and UFO.RING_DEAD_CLASSPOWER[key] then
+        return function(d) return UFO.IsRingDB(d) and UFO.RingHasClassPower(d) end,
+            function() return L["Take Class Power off the rings to change this."] end
+    end
+    if kind == "portrait" and UFO.RING_DEAD_2D[key] then
+        return function(d) return UFO.IsRingDB(d) and d.ringPortrait3D == "2D" end,
+            function() return L["Set 3D Portrait to 3D Model to change this."] end
+    end
+    return nil
+end
+
+UFO.RING_VIEW = {
+    resourceBarEnabled = true, resourceBarBackgroundEnabled = true, healPredictionEnabled = true,
+    backgroundColorMode = "CUSTOM", healPredictionShowMode = "ALL",
+    absorbBarMode = "FLOATING", healAbsorbBarMode = "FLOATING", healPredictionMode = "FLOATING",
+}
+
+UFO.ringViews = setmetatable({}, { __mode = "k" })
+function UFO.RingView(d)
+    if not UFO.IsRingDB(d) then return d end
+    local view = UFO.ringViews[d]
+    if not view then
+        view = setmetatable({}, { __index = function(_, k)
+            local forced = UFO.RING_VIEW[k]
+            if forced ~= nil then return forced end
+            if k == "classPowerEnabled" and UFO.RingHasClassPower(d) then return true end
+            if k == "classPowerDetached" and UFO.RingHasClassPower(d) then return false end
+            return d[k]
+        end })
+        UFO.ringViews[d] = view
+    end
+    return view
+end
+
+function UFO.RingGate(kind, key, old, oldWhy)
+    local test, reason = UFO.RingDead(kind, key)
+    local function gate(d)
+        if test and test(d) then return true end
+        if old then return old(UFO.RingView(d)) and true or false end
+        return false
+    end
+    local function why(d)
+        if test and test(d) then return reason(d) end
+        if type(oldWhy) == "function" then return oldWhy(UFO.RingView(d)) end
+        return oldWhy
+    end
+    return gate, why
+end
+
+function UFO.ApplyRingGates(list, kind)
+    for _, w in ipairs(list or {}) do
+        if type(w) == "table" then
+            local key = rawget(w, "dfDbKey")
+            local old = rawget(w, "disableOn")
+            if old or UFO.RingDead(kind, key) then
+                local oldWhy = rawget(w, "disableReason") or (old and UFO.gateReasons[old]) or nil
+                local gate, why = UFO.RingGate(kind, key, old, oldWhy)
+                w.disableOn = gate
+                w.disableReason = why
+                UFO.gateReasons[gate] = why
+            end
+            local hide = rawget(w, "hideOn")
+            if hide then
+                w.hideOn = function(d) return hide(UFO.RingView(d)) end
+            end
+            local children = rawget(w, "disableChildrenOn")
+            if children then
+                w.disableChildrenOn = function(d) return children(UFO.RingView(d)) end
+            end
+            local kids = rawget(w, "groupChildren")
+            if type(kids) == "table" then
+                local ws = {}
+                for i, e in ipairs(kids) do ws[i] = e.widget end
+                UFO.ApplyRingGates(ws, kind)
+            end
+        end
+    end
+end
+
+-- Factories the page's controls come from, and where each takes its key (after self).
+UFO.KEYED_FACTORIES = {
+    CreateCheckbox = 4, CreateShadowCheckbox = 4, CreateDropdown = 5, CreateTextureDropdown = 4,
+    CreateFontDropdown = 4, CreateOutlineDropdown = 4, CreateGrowthControl = 3,
+}
+
+-- ============================================================
 -- LIVE SLIDERS AND COLOURS (drag previews)
 -- The settings kit runs a slider's `lightweight` callback once per rendered
 -- frame while it is dragged, and its own callback only on release; a slider
@@ -2855,24 +3015,54 @@ end
 
 function UFO.WithLiveSliders(rec, unit, build, ...)
     local orig, origColor = GUI.CreateSlider, GUI.CreateColorPicker
+    local origSection = GUI.CreateCollapsibleSection
+    local function Stamped(w, key)
+        if type(w) == "table" and key then rawset(w, "dfDbKey", key) end
+        return w
+    end
     GUI.CreateSlider = function(g, parent, label, lo, hi, step, dbTable, dbKey, callback, _, ...)
         local key = (type(dbKey) == "string") and dbKey or nil
-        return orig(g, parent, label, lo, hi, step, dbTable, dbKey, callback,
-            UFO.LiveSlider(unit, key, rec.kind), ...)
+        return Stamped(orig(g, parent, label, lo, hi, step, dbTable, dbKey, callback,
+            UFO.LiveSlider(unit, key, rec.kind), ...), key)
     end
     GUI.CreateColorPicker = function(g, parent, label, dbTable, dbKey, hasAlpha, callback)
         local key = (type(dbKey) == "string") and dbKey or nil
-        return origColor(g, parent, label, dbTable, dbKey, hasAlpha, callback,
-            UFO.LiveSlider(unit, key, rec.kind), true)
+        return Stamped(origColor(g, parent, label, dbTable, dbKey, hasAlpha, callback,
+            UFO.LiveSlider(unit, key, rec.kind), true), key)
+    end
+    -- Which key each control edits, for UFO.ApplyRingGates after the build.
+    local held = {}
+    for name, keyAt in pairs(UFO.KEYED_FACTORIES) do
+        local factory = GUI[name]
+        if factory then
+            held[name] = rawget(GUI, name) or false
+            GUI[name] = function(g, ...)
+                local key = select(keyAt, ...)
+                return Stamped(factory(g, ...), (type(key) == "string") and key or nil)
+            end
+        end
+    end
+    -- A card's header tick isn't one of the page's widgets: its gate goes in here.
+    if origSection then
+        GUI.CreateCollapsibleSection = function(g, parent, text, expanded, width, opts)
+            local toggle = opts and opts.toggle
+            if type(toggle) == "table" and type(toggle.key) == "string" then
+                toggle.disableOn = UFO.RingGate(rec.kind, toggle.key, toggle.disableOn)
+            end
+            return origSection(g, parent, text, expanded, width, opts)
+        end
     end
     local ok, err = pcall(build, ...)
     GUI.CreateSlider, GUI.CreateColorPicker = orig, origColor
+    if origSection then GUI.CreateCollapsibleSection = origSection end
+    for name, factory in pairs(held) do GUI[name] = factory or nil end
     if not ok then error(err, 0) end
 end
 
 function UFO.PageBuilder(rec, unit)
     return function(self, db, Add, AddSpace, AddSyncPoint)
         UFO.WithLiveSliders(rec, unit, UFO.BuildPageBody, self, db, Add, AddSpace, AddSyncPoint, rec, unit)
+        UFO.ApplyRingGates(self.children, rec.kind)
         -- Every gated control says why it is grey (GREYED CONTROLS SAY WHY).
         UFO.ApplyDisableReasons(self.children)
     end
