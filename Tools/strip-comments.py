@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-ROOTS = ["DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"]
+ROOTS = ["DandersFrames", "DandersFrames_Options", "DandersFrames_UnitFrames", "DandersMover", "DandersUI"]
 # Libs is third-party (and licence headers); Locales carries every packager
 # directive (--@do-not-package@, --@localization(...)@) and must reach the
 # packager untouched.

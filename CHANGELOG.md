@@ -4,14 +4,26 @@
 
 ### New Features
 
+- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. Turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
+- (Unit Frames) Each frame can be drawn as bars or as **rings** round a round portrait. Use up to 8 rings to show health, power, class power, shields, heal absorbs and heal prediction. Find it on a frame's **Frame Style** page; settings a ring doesn't use grey out and say why.
+- (Unit Frames) Each frame has its own Text Designer template, and Player and Pet have their own Aura Designer. Link frames on the **Linked Frames** page so that changing one changes the other.
+- (Unit Frames) New **Units** test mode to preview every frame without a group or a target, and copy a page's settings from another frame or from your party and raid frames.
 - (Settings) The settings window has a new layout: an icon bar down the left side replaces the Global / Party / Raid / Binds tabs. **Groups** holds your party and raid settings (switch between them with the Party and Raid tabs along the top), **Binds** is click-casting, and **Modules**, **Profiles** and **Global** sit at the bottom.
 - (Settings) New **Home** page: search every setting, jump to any part of the addon, see what's new in this version, and get a short **Needs attention** list of problems with a one-click fix, such as Blizzard frames still showing, a reload being needed, or test mode left on.
 - (Settings) New **Modules** page to turn Group Frames (with separate Party and Raid switches) and Click-Casting on or off in one place. Turned-off modules leave the icon bar.
 - (Profiles) Every profile tool now lives on the **Profiles** page: manage profiles, spec switching, Auto Layouts, click-casting profiles, import/export and changed settings. You can now **rename** profiles, and one import box accepts profile, click-casting and filter strings.
 
+- (Test Mode) The test popup is now a slim popout with a rail of modes. With Indicator Info on, click an element on a test frame to open its settings.
+- (Mover) An anchored element can mirror its target's position on X and Y.
+- (Rested Indicator) New soft outer glow style.
+- (Modules) Reset a module to its defaults from the **Modules** page.
+- (Icons) Combat and leader icons use sharper art.
+
 ### Bug Fixes
 
 - (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
+- (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
+- (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
 
 ## [5.6.1]
 
