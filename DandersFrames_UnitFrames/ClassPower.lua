@@ -359,6 +359,7 @@ function CP:LayoutRing(f, cp, db, res, ring, sec)
             cp.ringPips[i] = p
         end
         local arc = sec.reverse and arcs[#arcs - i + 1] or arcs[i]
+        R.SetArcTexture(p.fill, R.FillTexture(db, sec))
         R.ShapeArcBar(p.track, cp, ring.outer, ring.inner, arc.start, arc.len, false, 0)
         R.ShapeArcBar(p.fill, cp, ring.outer, ring.inner, arc.start, arc.len, sec.reverse, sec.feather)
         p.fill:SetFrameLevel(p.track:GetFrameLevel() + 1)

@@ -79,7 +79,11 @@ local function Make(kind, parent)
     if kind == "StatusBar" then
         f._tex = Make("Texture", f)
         f._min, f._max, f._value = 0, 1, 0
-        function f:SetStatusBarTexture() end
+        function f:SetStatusBarTexture(path)
+            self._path = path
+            self._pathSets = (self._pathSets or 0) + 1
+            if self._newTexOnSet then self._tex = Make("Texture", self) end
+        end
         function f:GetStatusBarTexture() return self._tex end
         function f:SetMinMaxValues(lo, hi) self._min, self._max = lo, hi end
         function f:GetMinMaxValues() return self._min, self._max end
@@ -372,6 +376,37 @@ eq(tex._vertex[1], 0.5, "...and its colour")
 eq(F.healthBar._alpha, 0, "the health bar goes see-through")
 check(not F.background._shown, "the background hides")
 eq(fill:GetStatusBarTexture()._calls.SetRadialProgressBarEndOffset, 0, "a full ring: nothing cut off")
+
+print("-- Rings: each bar's texture setting")
+local RK = UF.Elements.Kit
+eff.healthTexture, eff.resourceBarTexture = "HealthTex", "PowerTex"
+eff.backgroundTexture = "BgTex"
+F.dfDB = UF:FrameDB("target")
+R:Layout(F)
+eq(F.dfUFRingHealth[1]._path, "HealthTex", "a health fill: the health bar's texture")
+eq(F.dfUFRingPower[1]._path, "PowerTex", "a power fill: the power bar's texture")
+local healthTrack, powerTrack
+for _, arc in ipairs(F.dfUFRings.arcs) do
+    if arc.fill == F.dfUFRingHealth[1] then healthTrack = arc.track end
+    if arc.fill == F.dfUFRingPower[1] then powerTrack = arc.track end
+end
+eq(healthTrack._path, "BgTex", "a health track: the background texture")
+eq(powerTrack._path, RK.WHITE, "a power track stays plain")
+local sets = F.dfUFRingHealth[1]._pathSets
+R:Layout(F)
+eq(F.dfUFRingHealth[1]._pathSets, sets, "the same texture isn't set again")
+eff.backgroundTexture = "Solid"
+F.dfDB = UF:FrameDB("target")
+R:Layout(F)
+eq(healthTrack._path, RK.WHITE, "a Solid background: a plain track")
+eff.healthTexture, eff.resourceBarTexture, eff.backgroundTexture = nil, nil, nil
+F.dfDB = UF:FrameDB("target")
+
+local swapBar = R.NewArcBar(Make("Frame", UIParent))
+swapBar._newTexOnSet = true
+R.SetArcTexture(swapBar, "Other")
+eq(swapBar._path, "Other", "a new file is set")
+eq(#swapBar:GetStatusBarTexture()._masks, 2, "a new texture object gets both masks back")
 
 print("-- Rings: health writes copied onto the fills")
 local sv = Secret("hp")

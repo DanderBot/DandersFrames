@@ -315,8 +315,10 @@ local function MockArc(c, i)
 end
 
 -- One arc of the mock: a track and a fill at a FIXED value (0..1).
-local function PaintMockArc(c, i, ring, start, len, sec, value, color)
+local function PaintMockArc(c, i, ring, start, len, sec, value, color, db)
     local a = MockArc(c, i)
+    R.SetArcTexture(a.track, R.TrackTexture(db, sec))
+    R.SetArcTexture(a.fill, R.FillTexture(db, sec))
     R.ShapeArcBar(a.track, c, ring.outer, ring.inner, start, len, false, 0)
     R.ShapeArcBar(a.fill, c, ring.outer, ring.inner, start, len, sec.reverse, sec.feather)
     a.fill:SetFrameLevel(a.track:GetFrameLevel() + 1)
@@ -380,12 +382,12 @@ function R.DecorateMock(mock, db, chrome)
                     local arc = sec.reverse and arcs[#arcs - i + 1] or arcs[i]
                     used = used + 1
                     PaintMockArc(c, used, rg, arc.start, arc.len, sec, (i <= R.MOCK_PIPS_ON) and 1 or 0,
-                        R.MOCK_COLOR.CLASSPOWER)
+                        R.MOCK_COLOR.CLASSPOWER, db)
                 end
             else
                 used = used + 1
                 PaintMockArc(c, used, rg, a, len, sec, R.MOCK_FILL[sec.bar] or 1,
-                    R.MOCK_COLOR[sec.bar] or R.MOCK_COLOR.HEALTH)
+                    R.MOCK_COLOR[sec.bar] or R.MOCK_COLOR.HEALTH, db)
             end
         end
     end
@@ -517,6 +519,7 @@ end
 function R.NewArcBar(parent)
     local bar = CreateFrame("StatusBar", nil, parent)
     bar:SetStatusBarTexture(K.WHITE)
+    bar.dfArcTexture = K.WHITE
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     local radial = Enum and Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial
@@ -525,6 +528,39 @@ function R.NewArcBar(parent)
     bar.dfOuterMask = Mask(bar, tex, R.DISC, "CLAMPTOBLACKADDITIVE")
     bar.dfInnerMask = Mask(bar, tex, R.HOLE, "CLAMPTOWHITE")
     return bar
+end
+
+-- What a section draws with: its bar's own texture setting. A track takes the frame's
+-- background texture on a health section; "Solid" and the others stay plain.
+function R.FillTexture(db, sec)
+    if sec.bar == "POWER" then return db.resourceBarTexture or K.BAR end
+    if sec.bar == "CLASSPOWER" then return db.classPowerTexture or K.BAR end
+    return db.healthTexture or K.BAR
+end
+
+function R.TrackTexture(db, sec)
+    local bg = db.backgroundTexture
+    if sec.bar == "HEALTH" and bg and bg ~= "" and bg ~= "Solid" then return bg end
+    return K.WHITE
+end
+
+-- Only when the path changes. Setting a file may hand back a new texture object, which
+-- has none of the old one's masks; offsets and colours follow from the callers, which
+-- call this before R.ShapeArcBar and paint afterwards.
+function R.SetArcTexture(bar, path)
+    if bar.dfArcTexture == path then return end
+    bar.dfArcTexture = path
+    local old = bar:GetStatusBarTexture()
+    if DF.SafeSetStatusBarTexture then
+        DF:SafeSetStatusBarTexture(bar, path)
+    else
+        bar:SetStatusBarTexture(path)
+    end
+    local tex = bar:GetStatusBarTexture()
+    if tex ~= old then
+        tex:AddMaskTexture(bar.dfOuterMask)
+        tex:AddMaskTexture(bar.dfInnerMask)
+    end
 end
 
 -- Size `bar` to the ring (diameters) on `center`, and draw the arc start..start+len.
@@ -705,6 +741,8 @@ function R:Layout(f)
                 used = used + 1
                 local arc = AcquireArc(c, used)
                 local a, len = R.Arc(sec)
+                R.SetArcTexture(arc.track, R.TrackTexture(db, sec))
+                R.SetArcTexture(arc.fill, R.FillTexture(db, sec))
                 R.ShapeArcBar(arc.track, c, ring.outer, ring.inner, a, len, false, 0)
                 R.ShapeArcBar(arc.fill, c, ring.outer, ring.inner, a, len, sec.reverse, sec.feather)
                 arc.fill:SetFrameLevel(arc.track:GetFrameLevel() + 1)
