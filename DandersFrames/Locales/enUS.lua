@@ -971,6 +971,7 @@ L["DF Stops"] = true
 L["Color by Time Remaining"] = true
 L["Colors"] = true
 L["Damager"] = true
+L["DandersFrames now has Unit Frames: player, target, focus, pet and boss frames.\n\nWould you like to try them? Yes turns them on and reloads your UI. You can turn them on or off any time from the Modules page."] = true
 L["Role"] = true
 L["Role Colors"] = true
 L["Role Debuffs"] = true

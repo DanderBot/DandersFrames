@@ -4,7 +4,7 @@
 
 ### New Features
 
-- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. Turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
+- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. It starts switched off: say yes to the popup, or turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
 - (Unit Frames) Each frame can be drawn as bars or as **rings** round a round portrait. Use up to 8 rings to show health, power, class power, shields, heal absorbs and heal prediction. Find it on a frame's **Frame Style** page; settings a ring doesn't use grey out and say why.
 - (Unit Frames) Each frame has its own Text Designer template, and Player and Pet have their own Aura Designer. Link frames on the **Linked Frames** page so that changing one changes the other.
 - (Unit Frames) New **Units** test mode to preview every frame without a group or a target, and copy a page's settings from another frame or from your party and raid frames.

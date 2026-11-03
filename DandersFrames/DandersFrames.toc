@@ -210,5 +210,8 @@ ClickCasting\Events.lua
 # checks read; the checks are lazy, so this only orders definitions.
 Features\Attention.lua
 
+# One-time offer of the Unit Frames module, which ships switched off.
+Features\UnitFramesInvite.lua
+
 # External API (for Wago UI Packs, etc.)
 Core\API.lua

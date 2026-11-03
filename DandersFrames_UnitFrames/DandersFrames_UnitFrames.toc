@@ -4,6 +4,7 @@
 ## Author: Danders
 ## Version: v6.0.0-alpha.1
 ## Category: Danders
+## DefaultState: disabled
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## RequiredDeps: DandersFrames
 ## OptionalDeps: DandersMover
