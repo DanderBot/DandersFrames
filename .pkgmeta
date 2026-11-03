@@ -44,6 +44,8 @@ ignore:
   - DandersMoverDemo
   # its in-addon twin: the /mover demo frames (also cut from the TOC by do-not-package)
   - DandersMover/Demo.lua
+  # test images for the /dfring probe (the probe itself is cut from the TOC by do-not-package)
+  - DandersFrames_UnitFrames/Media/Probe
 
 manual-changelog:
   # Written by release.yml: this build's section of CHANGELOG.md only.

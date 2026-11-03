@@ -185,8 +185,8 @@ end
 -- One see-through ring: a track (dark, half alpha) and a radial fill, both masked.
 -- arc (optional): { start, len, reverse, noTrack, level }. A reversed fill starts at
 -- the arc's far end and runs back (Rings.lua R.Offsets). level lifts the fill over a
--- bar already on the same band.
-local function SeeThroughRing(parent, outer, thickness, list, color, arc)
+-- bar already on the same band. texture (optional) replaces the fill's plain white.
+local function SeeThroughRing(parent, outer, thickness, list, color, arc, texture)
     local inner = outer - 2 * thickness
     local baseLevel = parent:GetFrameLevel() + 1
     if not (arc and arc.noTrack) then
@@ -211,7 +211,7 @@ local function SeeThroughRing(parent, outer, thickness, list, color, arc)
     bar:SetSize(outer, outer)
     bar:SetPoint("CENTER")
     bar:SetFrameLevel(baseLevel + 1 + (arc and arc.level or 0))
-    bar:SetStatusBarTexture(WHITE)
+    bar:SetStatusBarTexture(texture or WHITE)
     bar:SetStatusBarColor(color[1], color[2], color[3], 1)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
@@ -363,6 +363,60 @@ local function FeedAbsorbs(unit)
     P.absorbSecret = shield ~= nil and issecretvalue and issecretvalue(shield) or false
 end
 
+-- ============================================================
+-- TEXTURES ON A RING (2026-11-03)
+-- Does a radial fill take any image, and how does it look? Its own panel on the left of
+-- the main one. Top: normal bar textures, whose lines should run straight across the
+-- ring. Middle: art drawn as a ring (Media/Probe), where the shade should follow the
+-- curve, and the same art on a thinner ring, which only shows part of the bevel.
+-- Bottom: held at 60% so a part-filled ring shows at full health. Check there: is the
+-- image cut off where the fill ends (right), or squashed into the filled part (wrong)?
+-- The top two rows are fed real health, so errors must stay at 0 in combat too.
+-- ============================================================
+local BAR_BLIZZARD = "Interface\\TargetingFrame\\UI-StatusBar"
+local BAR_BEVEL = "Interface\\AddOns\\DandersFrames\\Media\\DF_Bevel"
+local ART_SHADE = "Interface\\AddOns\\DandersFrames_UnitFrames\\Media\\Probe\\RingProbeShade"
+local ART_GRAIN = "Interface\\AddOns\\DandersFrames_UnitFrames\\Media\\Probe\\RingProbeGrain"
+
+local function BuildTextureTests(panel)
+    local size, gap, thick = 86, 6, 14
+    local f = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    f:SetSize(3 * size + 2 * gap + 16, 3 * (size + 14 + gap) + 34)
+    f:SetPoint("TOPRIGHT", panel, "TOPLEFT", -12, 0)
+    if f.SetBackdrop then
+        f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        f:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+        f:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    end
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 10, -8)
+    title:SetText("Textures on a ring")
+
+    local held = {}
+    local half = { start = 0, len = 0.5, reverse = true }
+    local tests = {
+        { "Plain white", thick, P.bars },
+        { "Blizzard bar", thick, P.bars, BAR_BLIZZARD },
+        { "DF bevel", thick, P.bars, BAR_BEVEL },
+        { "Ring shade", thick, P.bars, ART_SHADE },
+        { "Ring shade thin", 6, P.bars, ART_SHADE },
+        { "Ring grain", thick, P.bars, ART_GRAIN },
+        { "Bar at 60%", thick, held, BAR_BLIZZARD },
+        { "Ring art at 60%", thick, held, ART_SHADE },
+        { "Reversed half arc", thick, held, ART_SHADE, half },
+    }
+    for i, t in ipairs(tests) do
+        local holder = AbsorbTest(f, size, t[1], function(b, s)
+            SeeThroughRing(b, s, t[2], t[3], COLOR_HEALTH, t[5], t[4])
+        end)
+        holder:SetPoint("TOPLEFT", 8 + ((i - 1) % 3) * (size + gap), -30 - math.floor((i - 1) / 3) * (size + 14 + gap))
+    end
+    for _, bar in ipairs(held) do
+        bar:SetMinMaxValues(0, 1)
+        bar:SetValue(0.6)
+    end
+end
+
 local function TransparentRing(panel)
     local holder = CreateFrame("Frame", nil, panel)
     holder:SetSize(140, 160)
@@ -477,6 +531,7 @@ local function Build()
 
     TransparentRing(f)
     BuildAbsorbRow(f)
+    BuildTextureTests(f)
     return f
 end
 
