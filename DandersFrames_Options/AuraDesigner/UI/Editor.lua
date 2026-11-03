@@ -56,6 +56,7 @@ local BADGE_COLORS = P.BADGE_COLORS
 local placedIndicators = P.placedIndicators
 local ClearPlacedIndicators = P.ClearPlacedIndicators
 local RefreshPlacedIndicators = P.RefreshPlacedIndicators
+local RefreshLiveFramesThrottled = P.RefreshLiveFramesThrottled
 local RefreshPreviewEffects = P.RefreshPreviewEffects
 local CreateEnableBanner = P.CreateEnableBanner
 local CreateSpecDropdown = P.CreateSpecDropdown
@@ -602,14 +603,25 @@ local function GroupApply(kind)
     end
 end
 
+-- What a drag frame costs: the designer's preview at once, the real frames at the
+-- throttled rate every other designer slider runs at. The full apply waits for release.
+-- A debuff group's bump is GroupApply's, for the same record cache.
+local function GroupDrag(kind)
+    return function()
+        RefreshPlacedIndicators()
+        if kind == "debuff" then DF:InvalidateAuraLayout() end
+        RefreshLiveFramesThrottled()
+    end
+end
+
 -- ── PLACEMENT (every group kind) ──
 -- The controls bind the group record itself.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
     place(GUI:CreateDropdown(host, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", apply), 54)
-    place(GUI:CreateSlider(host, L["Offset X"], -150, 150, 1, group, "offsetX", apply, RefreshPlacedIndicators), 54)
-    place(GUI:CreateSlider(host, L["Offset Y"], -150, 150, 1, group, "offsetY", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Offset X"], -150, 150, 1, group, "offsetX", apply, GroupDrag(kind)), 54)
+    place(GUI:CreateSlider(host, L["Offset Y"], -150, 150, 1, group, "offsetY", apply, GroupDrag(kind)), 54)
 end
 
 -- ── GROWTH (every group kind) ──
@@ -628,16 +640,16 @@ local function BuildGroupGrowth(env, group, kind)
     end
 
     place(GUI:CreateGrowthControl(host, group, "growDirection", apply), 158)
-    place(GUI:CreateSlider(host, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow", apply, RefreshPlacedIndicators), 54)
-    place(GUI:CreateSlider(host, L["Spacing"], -5, 20, 1, group, "spacing", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow", apply, GroupDrag(kind)), 54)
+    place(GUI:CreateSlider(host, L["Spacing"], -5, 20, 1, group, "spacing", apply, GroupDrag(kind)), 54)
     if kind == "members" then return end
 
     -- Uniform per-group styling: one icon size + slot cap for every spell the
     -- group matches (no per-spell styling by design).
-    place(GUI:CreateSlider(host, L["Icon Size"], 8, 64, 1, group, "iconSize", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Icon Size"], 8, 64, 1, group, "iconSize", apply, GroupDrag(kind)), 54)
     -- Max Icons is STRUCTURAL (slot count is declared at container build) — the
     -- factory Rebuild path handles it (OOC-deferred).
-    place(GUI:CreateSlider(host, L["Max Icons"], 1, 20, 1, group, "maxIcons", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Max Icons"], 1, 20, 1, group, "maxIcons", apply, GroupDrag(kind)), 54)
 
     -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory re-applies it in
     -- place via ApplyTuning (OOC-immediate; self-defers in combat) — no rebuild.

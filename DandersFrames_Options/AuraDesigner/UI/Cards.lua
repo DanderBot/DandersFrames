@@ -2191,7 +2191,7 @@ local function BuildGlobalView(parent)
     local contentWidth = parentW - 16  -- 8px padding each side
     local totalHeight = 8
     local widgets = {}
-    local function RPL() if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end end
+    local function RPL() if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end RefreshLiveFramesThrottled() end
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
