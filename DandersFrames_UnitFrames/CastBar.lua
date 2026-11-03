@@ -772,7 +772,6 @@ end
 -- values, secret or not, and updates the text itself). Fallback: OnUpdate,
 -- formatting in Lua only a value that is NOT secret.
 -- ============================================================
-CB.TIMER_FORMATS = { REMAINING = true, REMAINING_TOTAL = true, ELAPSED = true }
 
 local function Decimals(db)
     local d = tonumber(db.castbarTimerDecimals) or 1

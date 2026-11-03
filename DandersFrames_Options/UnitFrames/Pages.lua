@@ -1970,10 +1970,6 @@ function UFO.RingBarOptionsFor(unit)
     return o
 end
 
-function UFO.RingCoverageOptions()
-    return { FULL = L["Full"], HALF = L["Half"], QUARTER = L["Quarter"], _order = { "FULL", "HALF", "QUARTER" } }
-end
-
 -- A half sits on a side; a quarter also on a corner.
 function UFO.RingPositionOptions(coverage)
     local o = { TOP = L["Top"], BOTTOM = L["Bottom"], LEFT = L["Left"], RIGHT = L["Right"],
@@ -3097,7 +3093,6 @@ end
 -- Unit Frames on/off, who draws each frame, Blizzard's cast bar, and a way into
 -- the mover per frame. Its table is the module's own (DF.db.unitframes.global).
 -- ============================================================
-UFO.SOURCES = { "DF", "Blizzard", "Hidden" }
 -- A unit whose Blizzard frame lives inside another's: it can be Blizzard's only
 -- while that one is.
 UFO.INSIDE = { targettarget = "target", focustarget = "focus" }
@@ -3169,7 +3164,7 @@ function UFO.BuildSettingsPage(self, db, Add)
     Close(band)
 
     -- (The units test mode has no switch here: the window's Test button, on any
-    -- Unit Frames page, opens its panel -- TestPanel.lua.)
+    -- Unit Frames page, opens its panel -- TestMode.lua.)
 
     -- One row per frame this build draws: its name, Edit in Mover, Reset Position.
     band = Open(L["Position"], "uf_movers", 1, nil, "position")

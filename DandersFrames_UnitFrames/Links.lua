@@ -287,7 +287,6 @@ local function SwapLR(s)
     if not (s:find("LEFT", 1, true) or s:find("RIGHT", 1, true)) then return s end
     return (s:gsub("LEFT", SWAP_MARK):gsub("RIGHT", "LEFT"):gsub(SWAP_MARK, "RIGHT"))
 end
-Links.SwapLR = SwapLR
 
 -- Can a mirror change this key at all? A layout key that is not vertical (a Y
 -- offset or position never changes), not excluded, not inside an icon.

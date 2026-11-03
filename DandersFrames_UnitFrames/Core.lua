@@ -21,7 +21,7 @@ UF.DF = DF
 UF.ADDON = addonName
 
 -- Every unit the settings table knows. boss1-5 share one "boss" table.
--- focustarget (v1.1): the focus's target, the target-of-target pattern on focus.
+-- focustarget: the focus's target, the target-of-target pattern on focus.
 UF.UNITS = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" }
 -- The units this build spawns. "boss" is a container of UF.BOSS_COUNT slots
 -- (Boss.lua), whose frames sit in UF.frames as boss1..bossN.
@@ -129,15 +129,6 @@ function UF:GetGlobalDB()
     if type(root.global) ~= "table" then root.global = {} end
     RegisterGlobalAdapter(root.global)
     return root.global
-end
-
--- A module-wide setting, falling back to UF.GlobalDefaults (the stored table is
--- sparse, like the unit tables).
-function UF:GetGlobalSetting(key)
-    local g = UF:GetGlobalDB()
-    local v = g and g[key]
-    if v == nil and UF.GlobalDefaults then v = UF.GlobalDefaults[key] end
-    return v
 end
 
 -- The units test mode's own settings (its test panel): DF.db.unitframes.global.testMode,
@@ -294,7 +285,7 @@ function UF:IsQueued(key) return combatQueue[key] ~= nil end
 
 -- ============================================================
 -- TEXT DESIGNER PRESETS
--- Two built-in presets in the profile's Text Designer library, created only when
+-- Built-in presets in the profile's Text Designer library, created only when
 -- absent so the user's own edits to them are never overwritten:
 --   "Unit Frames"         name left, health right, status centre
 --   "Unit Frames (Small)" name only, centred (target of target, pet)
@@ -692,8 +683,8 @@ end
 -- ============================================================
 -- RESET (the Modules page's Reset on Unit Frames)
 -- The current profile's DF.db.unitframes becomes a new profile's -- every unit's
--- settings and position, the links, the module-wide settings -- and the two
--- built-in Text Designer templates ("Unit Frames", "Unit Frames (Small)") are
+-- settings and position, the links, the module-wide settings -- and the
+-- built-in Text Designer templates are
 -- dropped so EnsureTextPresets makes them fresh. Then what a profile change runs
 -- (OnProfileChanged): the default Player/Target link made again (Links:Ensure,
 -- which only seeds a table with no unitLinks), the proxies dropped, positions,

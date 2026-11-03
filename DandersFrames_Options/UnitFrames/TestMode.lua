@@ -31,7 +31,6 @@ local ipairs, pairs, type, tostring = ipairs, pairs, type, tostring
 -- ============================================================
 
 local MODE_ID = "units"
-UFO.TEST_MODE_ID = MODE_ID
 
 local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 

@@ -352,10 +352,6 @@ function P:SetTestMode(on, reason)
     return true
 end
 
-function P:ToggleTestMode()
-    return P:SetTestMode(not P:IsTestMode())
-end
-
 -- After DandersFrames' SetTestModeOwner ran: the USER claimed the party or raid
 -- test mode, so this one steps aside.
 local function OnGroupOwner(_, scope, owner, wanted)

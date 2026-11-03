@@ -293,7 +293,6 @@ local function Relabel()
         if DF.UpdateTestLabels then DF:UpdateTestLabels() end
     end)
 end
-UFO.RelabelPreviews = Relabel
 
 local function Hook()
     local uf = UF()

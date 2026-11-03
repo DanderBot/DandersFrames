@@ -21,7 +21,7 @@
 # Defaults, whose migrate hook and mirrored target defaults use it) -> Defaults (registers the profile
 # table) -> Units (spawning, events) -> Elements (the registry + kit the next four
 # register into) -> Rings (the ring frame style) -> Portrait / CastBar / ClassPower / Indicators -> Preview
-# (sample frames) -> Boss (the boss container) -> BlizzardHide -> Mover.
+# (sample frames) -> Boss (the boss container) -> BlizzardHide -> Mover -> LivePaint (drag painters).
 
 Core.lua
 Links.lua

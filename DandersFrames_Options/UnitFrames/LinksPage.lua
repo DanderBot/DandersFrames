@@ -378,7 +378,6 @@ local function AfterLinks(...)
         elseif page.Invalidate then page:Invalidate() end
     end
 end
-UFO.AfterLinks = AfterLinks
 
 local function Popup(title, message, okLabel, onOk, onCancel)
     DF:ShowPopupAlert({
@@ -1188,7 +1187,6 @@ function UFO.BuildLinksPage(self, db, Add)
         local layoutFn = card.refreshContent
         card.refreshContent = function(c, d) c:Refresh(); layoutFn(c, d) end
     end
-    UFO.linkCards = cards
 
     if Search then Search.SuppressRegistration = held end
 

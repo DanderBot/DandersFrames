@@ -54,7 +54,7 @@ local addonName, UF = ...
 --   * on the health ring (ringShow*OnHealth, R.ON_HEALTH): shield and incoming fill
 --     back from the far end of each health section, heal absorb from its start
 --
--- v1: the cast bar is never a ring; highlights keep the frame's square outline.
+-- The cast bar is never a ring.
 -- ============================================================
 
 local DF = DandersFrames
@@ -73,9 +73,7 @@ if not (E and K) then return end
 R.DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 R.HOLE = "Interface\\AddOns\\DandersFrames_UnitFrames\\Media\\RingInnerMask"
 
-R.STYLES = { BARS = true, RING = true }
 R.BARS = { HEALTH = true, POWER = true, CLASSPOWER = true, SHIELD = true, HEALABSORB = true, INCOMING = true }
-R.BAR_ORDER = { "HEALTH", "POWER", "CLASSPOWER", "SHIELD", "HEALABSORB", "INCOMING" }
 -- The settings each amount bar shares with its DandersFrames bar. Test data: the
 -- share of max health in a sample, and the test panel switch that shows it.
 R.AMOUNTS = {
@@ -108,12 +106,9 @@ R.ON_HEALTH = {
     { bar = "HEALABSORB", key = "ringShowHealAbsorbOnHealth" },
 }
 R.COVERAGE = { FULL = 1, HALF = 0.5, QUARTER = 0.25 }
-R.COVERAGE_ORDER = { "FULL", "HALF", "QUARTER" }
 -- An arc's middle, as a share of a turn clockwise from the bottom.
 R.POSITIONS = { BOTTOM = 0, BOTTOMLEFT = 0.125, LEFT = 0.25, TOPLEFT = 0.375,
                 TOP = 0.5, TOPRIGHT = 0.625, RIGHT = 0.75, BOTTOMRIGHT = 0.875 }
-R.SIDES = { "TOP", "BOTTOM", "LEFT", "RIGHT" }
-R.CORNERS = { "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
 
 R.DEFAULT_SIZE = 64
 R.SIZE_MIN, R.SIZE_MAX = 24, 256
@@ -136,7 +131,6 @@ local function Clamp(v, lo, hi, default)
     if v > hi then return hi end
     return v
 end
-R.Clamp = Clamp
 
 function R.IsRing(db)
     return (db and db.frameStyle == "RING") and true or false
@@ -555,7 +549,7 @@ local function Mask(owner, tex, path, wrap)
     return m
 end
 
--- A radial StatusBar with its two ring masks. `level` above its parent.
+-- A radial StatusBar with its two ring masks.
 function R.NewArcBar(parent)
     local bar = CreateFrame("StatusBar", nil, parent)
     bar:SetStatusBarTexture(K.WHITE)
@@ -622,7 +616,7 @@ end
 --              (the base of health and power has no Tile Size control, so never there)
 -- Call before R.ShapeArcBar. The repeats (bar.dfArcCoordU, V) do not stay on a real ring:
 -- read back in game, they were gone once a drag ended, with nothing in Lua clearing them.
--- What clears them isn't known yet (/dfring's Tile Size panel tests it), so R.HoldCoords
+-- What clears them isn't known, so R.HoldCoords
 -- puts them back after every value, after a layout, and again the frame after one.
 function R.SetArcTile(bar, override, sizeValue, ring, allowPreset)
     if not (DF.ResolveTileMode and DF.ApplyBarTextureTiling) then return end

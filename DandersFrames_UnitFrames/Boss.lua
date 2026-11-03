@@ -119,7 +119,6 @@ local function Sides(point)
     local sy = (point:find("TOP") and 1) or (point:find("BOTTOM") and -1) or 0
     return sx, sy
 end
-B.Sides = Sides
 
 -- Slot i's rect (l, r, b, t) relative to the container's CENTER, in the
 -- container's own units, for a container sized for every slot.
@@ -354,7 +353,6 @@ local function FrameRect(f)
     local ux, uy = UIParent:GetCenter()
     return cx * ratio - ux, cy * ratio - uy, w * ratio, h * ratio
 end
-B.FrameRect = FrameRect
 
 -- Union of the shown slots, UIParent units from UIParent's centre; nil when none.
 function B:Rect()

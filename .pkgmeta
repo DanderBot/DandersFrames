@@ -15,11 +15,12 @@ enable-nolib-creation: no
 # out of it once on the assumption that it would collide.
 #
 # Everything at the repo root that is not an addon folder is stripped by the
-# ignore list below, so the zip contains only the two addon folders.
+# ignore list below, so the zip contains only the addon folders.
 move-folders:
   DandersFrames/DandersFrames: DandersFrames
   DandersFrames/DandersFrames_Options: DandersFrames_Options
   DandersFrames/DandersMover: DandersMover
+  DandersFrames/DandersFrames_UnitFrames: DandersFrames_UnitFrames
 
 ignore:
   - CHANGELOG.md
@@ -46,6 +47,7 @@ ignore:
   - DandersMover/Demo.lua
   # test images for the /dfring probe (the probe itself is cut from the TOC by do-not-package)
   - DandersFrames_UnitFrames/Media/Probe
+  - DandersFrames_UnitFrames/RingProbe.lua
 
 manual-changelog:
   # Written by release.yml: this build's section of CHANGELOG.md only.

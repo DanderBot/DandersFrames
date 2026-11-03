@@ -112,7 +112,6 @@ local function Elements(method, f, ...)
     local E = UF.Elements
     if E then E:Call(method, f, ...) end
 end
-Units.CallElements = Elements
 
 -- ============================================================
 -- PAINTING (DF's updaters, nothing of our own)
@@ -221,7 +220,6 @@ local HANDLERS = {
     UNIT_THREAT_SITUATION_UPDATE = function(f) if DF.UpdateHighlights then DF:UpdateHighlights(f) end end,
     UNIT_TARGETABLE_CHANGED = function(f) if UF.Boss then UF.Boss:Settle(f) end end,
 }
-Units.HANDLERS = HANDLERS
 
 function Units.OnEvent(self, event, unit)
     if not self:IsVisible() then return end

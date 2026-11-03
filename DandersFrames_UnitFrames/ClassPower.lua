@@ -32,7 +32,7 @@ local DF = DandersFrames
 if not DF then return end
 
 local ipairs, pairs, type, pcall, select = ipairs, pairs, type, pcall, select
-local tonumber, math_floor, math_ceil = tonumber, math.floor, math.ceil
+local tonumber, math_ceil = tonumber, math.ceil
 
 local CP = { NAME = "ClassPower" }
 UF.ClassPower = CP
@@ -314,8 +314,8 @@ end
 -- bar with its own track, ranged and fed exactly as the linear pips are, so
 -- Update / runes / charged points / the preview run unchanged on cp.active.
 -- Stagger and Bar mode: one slice, the whole arc. Reversed: pip 1 at the arc's
--- far end and every slice fills the other way. The bar's own size, position,
--- border and texture do not apply; the empty colour is the section's track colour
+-- far end and every slice fills the other way. The bar's own size, position and
+-- border do not apply; the empty colour is the section's track colour
 -- (else Empty Color).
 -- ============================================================
 function CP.HideRing(cp)
