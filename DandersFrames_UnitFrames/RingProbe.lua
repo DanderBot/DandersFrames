@@ -183,29 +183,184 @@ local function MaskRing(tex, owner, outer, inner)
 end
 
 -- One see-through ring: a track (dark, half alpha) and a radial fill, both masked.
-local function SeeThroughRing(parent, outer, thickness, list, color)
+-- arc (optional): { start, len, reverse, noTrack, level }. A reversed fill starts at
+-- the arc's far end and runs back (Rings.lua R.Offsets). level lifts the fill over a
+-- bar already on the same band.
+local function SeeThroughRing(parent, outer, thickness, list, color, arc)
     local inner = outer - 2 * thickness
-    local track = CreateFrame("StatusBar", nil, parent)
-    track:SetSize(outer, outer)
-    track:SetPoint("CENTER")
-    track:SetStatusBarTexture(WHITE)
-    track:SetStatusBarColor(0, 0, 0, 0.5)
-    track:SetMinMaxValues(0, 1)
-    track:SetValue(1)
-    try("track SetRenderMode", track.SetRenderMode, track, Enum.StatusBarRenderMode.Radial)
-    MaskRing(track:GetStatusBarTexture(), track, outer, inner)
+    local baseLevel = parent:GetFrameLevel() + 1
+    if not (arc and arc.noTrack) then
+        local track = CreateFrame("StatusBar", nil, parent)
+        track:SetSize(outer, outer)
+        track:SetPoint("CENTER")
+        track:SetFrameLevel(baseLevel)
+        track:SetStatusBarTexture(WHITE)
+        track:SetStatusBarColor(0, 0, 0, 0.5)
+        track:SetMinMaxValues(0, 1)
+        track:SetValue(1)
+        try("track SetRenderMode", track.SetRenderMode, track, Enum.StatusBarRenderMode.Radial)
+        MaskRing(track:GetStatusBarTexture(), track, outer, inner)
+        if arc then
+            local tex = track:GetStatusBarTexture()
+            try("track start", tex.SetRadialProgressBarStartOffset, tex, arc.start)
+            try("track end", tex.SetRadialProgressBarEndOffset, tex, 1 - arc.len)
+        end
+    end
 
     local bar = CreateFrame("StatusBar", nil, parent)
     bar:SetSize(outer, outer)
     bar:SetPoint("CENTER")
-    bar:SetFrameLevel(track:GetFrameLevel() + 1)
+    bar:SetFrameLevel(baseLevel + 1 + (arc and arc.level or 0))
     bar:SetStatusBarTexture(WHITE)
     bar:SetStatusBarColor(color[1], color[2], color[3], 1)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
     try("ring SetRenderMode", bar.SetRenderMode, bar, Enum.StatusBarRenderMode.Radial)
     MaskRing(bar:GetStatusBarTexture(), bar, outer, inner)
+    if arc then
+        local tex = bar:GetStatusBarTexture()
+        local s = arc.reverse and ((arc.start + arc.len) % 1) or arc.start
+        try("arc start", tex.SetRadialProgressBarStartOffset, tex, s)
+        try("arc end", tex.SetRadialProgressBarEndOffset, tex, 1 - arc.len)
+        if arc.reverse then try("arc reverse", tex.SetRadialProgressBarReverse, tex, true) end
+    end
     list[#list + 1] = bar
+end
+
+-- ============================================================
+-- SHIELDS, HEAL ABSORBS AND INCOMING HEALS ON A RING (2026-11-03)
+-- A radial fill has no moving edge to anchor to, so these can't sit at the tip of the
+-- health fill as they do on a bar. Each is its own radial bar instead, fed straight
+-- from the same calculator the bars read (Frames/Bars.lua UpdateAbsorb, UpdateHealAbsorb,
+-- UpdateHealPrediction): no Lua maths, so a secret value goes through as it is.
+-- Checks: the fills move in combat, errors stay at 0, and the numbers under the rings
+-- agree with what the rings show. A shield is measured against max health
+-- (clamp mode 2), so it shows in full on a frame at full health.
+-- ============================================================
+local COLOR_HEALTH = { 0.2, 0.85, 0.3 }
+local COLOR_SHIELD = { 0.85, 0.9, 1 }
+local COLOR_HEAL_ABSORB = { 0.75, 0.1, 0.15 }
+local COLOR_INCOMING = { 0.55, 1, 0.65 }
+
+local function AbsorbTest(parent, size, label, build)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetSize(size, size + 14)
+    local box = CreateFrame("Frame", nil, holder)
+    box:SetSize(size, size)
+    box:SetPoint("TOP")
+    build(box, size)
+    local text = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("BOTTOM")
+    text:SetText(label)
+    return holder
+end
+
+local function BuildAbsorbRow(f)
+    P.shieldBars, P.healAbsorbBars, P.incomingBars = {}, {}, {}
+    local size = 86
+    local tests = {
+        { "Shield ring", function(b, s)
+            SeeThroughRing(b, s, 5, P.shieldBars, COLOR_SHIELD)
+            SeeThroughRing(b, s - 10, 11, P.bars, COLOR_HEALTH)
+        end },
+        { "Shield far end", function(b, s)
+            SeeThroughRing(b, s, 14, P.bars, COLOR_HEALTH, { start = 0, len = 0.5 })
+            SeeThroughRing(b, s, 14, P.shieldBars, COLOR_SHIELD, { start = 0, len = 0.5, reverse = true, noTrack = true, level = 1 })
+        end },
+        { "Heal absorb ring", function(b, s)
+            SeeThroughRing(b, s, 5, P.healAbsorbBars, COLOR_HEAL_ABSORB)
+            SeeThroughRing(b, s - 10, 11, P.bars, COLOR_HEALTH)
+        end },
+        { "Heal absorb over", function(b, s)
+            SeeThroughRing(b, s, 14, P.bars, COLOR_HEALTH)
+            SeeThroughRing(b, s, 14, P.healAbsorbBars, COLOR_HEAL_ABSORB, { start = 0, len = 1, noTrack = true, level = 1 })
+        end },
+        { "Incoming ring", function(b, s)
+            SeeThroughRing(b, s, 5, P.incomingBars, COLOR_INCOMING)
+            SeeThroughRing(b, s - 10, 11, P.bars, COLOR_HEALTH)
+        end },
+        { "All three", function(b, s)
+            SeeThroughRing(b, s, 4, P.shieldBars, COLOR_SHIELD)
+            SeeThroughRing(b, s - 8, 4, P.healAbsorbBars, COLOR_HEAL_ABSORB)
+            SeeThroughRing(b, s - 16, 4, P.incomingBars, COLOR_INCOMING)
+            SeeThroughRing(b, s - 24, 8, P.bars, COLOR_HEALTH)
+        end },
+    }
+    local x = 8
+    for _, t in ipairs(tests) do
+        local holder = AbsorbTest(f, size, t[1], t[2])
+        holder:SetPoint("TOPLEFT", x, -460)
+        x = x + size + 6
+    end
+    local function value(name, xPos)
+        local label = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("TOPLEFT", xPos, -566)
+        label:SetText(name)
+        local v = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        v:SetPoint("LEFT", label, "RIGHT", 6, 0)
+        return v
+    end
+    P.shieldText = value("Shield:", 12)
+    P.healAbsorbText = value("Heal absorb:", 170)
+    P.incomingText = value("Incoming:", 360)
+end
+
+-- The three values, each from its own calculator with the settings the bars use:
+-- shield, heal absorb, incoming heal, max health. All can be secret.
+local function ReadAbsorbs(unit)
+    if not CreateUnitHealPredictionCalculator then return end
+    if not P.calcs then
+        P.calcs = { shield = CreateUnitHealPredictionCalculator(),
+                    healAbsorb = CreateUnitHealPredictionCalculator(),
+                    incoming = CreateUnitHealPredictionCalculator() }
+        P.calcs.shield:SetDamageAbsorbClampMode(2)
+        P.calcs.shield:SetHealAbsorbMode(0)
+        P.calcs.healAbsorb:SetHealAbsorbClampMode(0)
+        P.calcs.healAbsorb:SetHealAbsorbMode(1)
+        P.calcs.incoming:SetIncomingHealClampMode(0)
+        P.calcs.incoming:SetIncomingHealOverflowPercent(1.0)
+        P.calcs.incoming:SetHealAbsorbMode(0)
+    end
+    UnitGetDetailedHealPrediction(unit, nil, P.calcs.shield)
+    UnitGetDetailedHealPrediction(unit, nil, P.calcs.healAbsorb)
+    UnitGetDetailedHealPrediction(unit, nil, P.calcs.incoming)
+    local shield = P.calcs.shield:GetDamageAbsorbs()
+    local healAbsorb = P.calcs.healAbsorb:GetHealAbsorbs()
+    local incoming = P.calcs.incoming:GetIncomingHeals()
+    return shield, healAbsorb, incoming, P.calcs.shield:GetMaximumHealth()
+end
+
+local function FeedAbsorbList(list, value, max, label)
+    if value == nil or max == nil then return end
+    for _, bar in ipairs(list) do
+        try(label .. " SetMinMaxValues", bar.SetMinMaxValues, bar, 0, max)
+        try(label .. " SetValue", bar.SetValue, bar, value)
+    end
+end
+
+local function FeedAbsorbs(unit)
+    if not P.shieldBars then return end
+    local ok, shield, healAbsorb, incoming, max = pcall(ReadAbsorbs, unit)
+    if not ok then
+        P.errors = P.errors + 1
+        P.lastError = "calculator: " .. tostring(shield)
+        return
+    end
+    P.calcMissing = not CreateUnitHealPredictionCalculator
+    FeedAbsorbList(P.shieldBars, shield, max, "shield")
+    FeedAbsorbList(P.healAbsorbBars, healAbsorb, max, "heal absorb")
+    FeedAbsorbList(P.incomingBars, incoming, max, "incoming")
+    local function show(fs, v, label)
+        if v == nil then
+            fs:SetText("none")
+        else
+            try(label .. " text", fs.SetText, fs, AbbreviateNumbers(v))
+        end
+    end
+    show(P.shieldText, shield, "shield")
+    show(P.healAbsorbText, healAbsorb, "heal absorb")
+    show(P.incomingText, incoming, "incoming")
+    P.absorbSecret = shield ~= nil and issecretvalue and issecretvalue(shield) or false
 end
 
 local function TransparentRing(panel)
@@ -242,8 +397,8 @@ end
 
 local function Build()
     local f = CreateFrame("Frame", "DandersFramesRingProbe", UIParent, "BackdropTemplate")
-    f:SetSize(560, 520)
-    f:SetPoint("CENTER", 0, 120)
+    f:SetSize(560, 640)
+    f:SetPoint("CENTER", 0, 60)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -321,6 +476,7 @@ local function Build()
     lt:SetText("Linear bar, rounded mask")
 
     TransparentRing(f)
+    BuildAbsorbRow(f)
     return f
 end
 
@@ -365,11 +521,14 @@ local function Feed()
             try("name text", fs.SetText, fs, UnitName(unit))
         end
     end
+    FeedAbsorbs(unit)
     P.updates = P.updates + 1
     local function sec(v) return v ~= nil and issecretvalue and issecretvalue(v) and "yes" or "no" end
-    P.status:SetText(format("Unit %s | in combat: %s | updates: %d | errors: %d\nSecret: health %s, power %s, %s %s (pips %d%s)%s",
+    P.status:SetText(format("Unit %s | in combat: %s | updates: %d | errors: %d\nSecret: health %s, power %s, shield %s, %s %s (pips %d%s)%s%s",
         unit, InCombatLockdown() and "yes" or "no", P.updates, P.errors,
-        sec(cur), sec(pcur), tostring(P.classToken), sec(ccur), P.pipCount or 0, P.pipSecret and ", max secret" or "",
+        sec(cur), sec(pcur), P.absorbSecret and "yes" or "no", tostring(P.classToken), sec(ccur), P.pipCount or 0,
+        P.pipSecret and ", max secret" or "",
+        P.calcMissing and "\nNo heal prediction calculator on this client." or "",
         P.lastError and ("\nLast error: " .. P.lastError) or ""))
 end
 
@@ -399,6 +558,9 @@ local function Toggle(msg)
     events:RegisterEvent("UNIT_POWER_FREQUENT")
     events:RegisterEvent("UNIT_MAXPOWER")
     events:RegisterEvent("UNIT_DISPLAYPOWER")
+    events:RegisterEvent("UNIT_ABSORB_AMOUNT_CHANGED")
+    events:RegisterEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED")
+    events:RegisterEvent("UNIT_HEAL_PREDICTION")
     events:RegisterEvent("PLAYER_TARGET_CHANGED")
     events:RegisterEvent("PLAYER_REGEN_DISABLED")
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
