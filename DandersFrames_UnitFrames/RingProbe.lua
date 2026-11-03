@@ -415,6 +415,111 @@ local function BuildTextureTests(panel)
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(0.6)
     end
+    return f
+end
+
+-- ============================================================
+-- TILE SIZE ON A RING (2026-11-03)
+-- A bar's Tile Size repeats the image with SetTexCoord. On a ring that does nothing
+-- visible, so: does a radial fill ignore texcoords, or does the bar reset them when its
+-- value is written? All six use the same stripes, 8 repeats across the ring.
+--   Plain texture    no bar at all: what 8 repeats should look like
+--   Set before value / Set after value / Set every feed   the three possible timings
+--   Tile flags       no texcoords: the image repeating at its own file size
+--   Zoomed in        texcoords below 1, no repeat needed: do they do anything at all?
+-- The line under the panel reads the coordinates back off two of the bars. 8 means the
+-- bar kept them; 1 means it reset them.
+-- ============================================================
+local TILE_ART = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes"
+local TILE_REPEATS = 8
+
+local function CoordOf(tex)
+    local ok, _, _, _, _, urx = pcall(tex.GetTexCoord, tex)
+    if ok and type(urx) == "number" then return format("%.2f", urx) end
+    return "?"
+end
+
+local function BuildTileTests(above)
+    local size, gap, thick = 86, 6, 14
+    local f = CreateFrame("Frame", nil, above, "BackdropTemplate")
+    f:SetSize(3 * size + 2 * gap + 16, 2 * (size + 14 + gap) + 52)
+    f:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -8)
+    if f.SetBackdrop then
+        f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        f:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+        f:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    end
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 10, -8)
+    title:SetText("Tile size on a ring")
+
+    P.tileLive, P.tileHeld = {}, {}
+    local function Coords(tex, u) try("tile coords", tex.SetTexCoord, tex, 0, u or TILE_REPEATS, 0, u or TILE_REPEATS) end
+    -- A held ring at 60%. `before` and `after` run either side of its value being written.
+    local function Held(b, s, before, after)
+        local list = {}
+        SeeThroughRing(b, s, thick, list, COLOR_HEALTH, nil, TILE_ART)
+        local bar = list[1]
+        local tex = bar:GetStatusBarTexture()
+        try("tile wrap", tex.SetTexture, tex, TILE_ART, "REPEAT", "REPEAT")
+        if before then before(tex) end
+        bar:SetMinMaxValues(0, 1)
+        bar:SetValue(0.6)
+        if after then after(tex) end
+        return bar, tex
+    end
+    local tests = {
+        { "Plain texture", function(b, s)
+            local tex = b:CreateTexture(nil, "ARTWORK")
+            tex:SetSize(s, s)
+            tex:SetPoint("CENTER")
+            tex:SetTexture(TILE_ART, "REPEAT", "REPEAT")
+            tex:SetVertexColor(COLOR_HEALTH[1], COLOR_HEALTH[2], COLOR_HEALTH[3], 1)
+            MaskRing(tex, b, s, s - 2 * thick)
+            Coords(tex)
+        end },
+        { "Set before value", function(b, s)
+            local _, tex = Held(b, s, function(t) Coords(t) end)
+            P.tileBefore = tex
+        end },
+        { "Set after value", function(b, s)
+            local _, tex = Held(b, s, nil, function(t) Coords(t) end)
+            P.tileAfter = tex
+        end },
+        { "Set every feed", function(b, s)
+            SeeThroughRing(b, s, thick, P.tileLive, COLOR_HEALTH, nil, TILE_ART)
+            local tex = P.tileLive[#P.tileLive]:GetStatusBarTexture()
+            try("tile wrap", tex.SetTexture, tex, TILE_ART, "REPEAT", "REPEAT")
+        end },
+        { "Tile flags", function(b, s)
+            Held(b, s, function(t)
+                try("tile horiz", t.SetHorizTile, t, true)
+                try("tile vert", t.SetVertTile, t, true)
+            end)
+        end },
+        { "Zoomed in", function(b, s)
+            Held(b, s, nil, function(t) Coords(t, 0.25) end)
+        end },
+    }
+    for i, t in ipairs(tests) do
+        local holder = AbsorbTest(f, size, t[1], t[2])
+        holder:SetPoint("TOPLEFT", 8 + ((i - 1) % 3) * (size + gap), -30 - math.floor((i - 1) / 3) * (size + 14 + gap))
+    end
+    P.tileRead = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    P.tileRead:SetPoint("BOTTOMLEFT", 10, 8)
+end
+
+local function FeedTile(unit)
+    if not P.tileLive then return end
+    local cur, max = UnitHealth(unit), UnitHealthMax(unit)
+    for _, bar in ipairs(P.tileLive) do
+        try("tile SetMinMaxValues", bar.SetMinMaxValues, bar, 0, max)
+        try("tile SetValue", bar.SetValue, bar, cur)
+        local tex = bar:GetStatusBarTexture()
+        try("tile coords", tex.SetTexCoord, tex, 0, TILE_REPEATS, 0, TILE_REPEATS)
+    end
+    P.tileRead:SetText(format("Read back (8 = kept, 1 = reset): before %s, after %s",
+        CoordOf(P.tileBefore), CoordOf(P.tileAfter)))
 end
 
 local function TransparentRing(panel)
@@ -531,7 +636,7 @@ local function Build()
 
     TransparentRing(f)
     BuildAbsorbRow(f)
-    BuildTextureTests(f)
+    BuildTileTests(BuildTextureTests(f))
     return f
 end
 
@@ -577,6 +682,7 @@ local function Feed()
         end
     end
     FeedAbsorbs(unit)
+    FeedTile(unit)
     P.updates = P.updates + 1
     local function sec(v) return v ~= nil and issecretvalue and issecretvalue(v) and "yes" or "no" end
     P.status:SetText(format("Unit %s | in combat: %s | updates: %d | errors: %d\nSecret: health %s, power %s, shield %s, %s %s (pips %d%s)%s%s",
