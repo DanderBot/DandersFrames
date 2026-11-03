@@ -36,7 +36,7 @@ local K = E and E.Kit
 if not (E and K) then return end
 local IsSecret = K.IsSecret
 
-PO.UNITS = { player = true, target = true, focus = true, pet = true, boss = true }
+PO.UNITS = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true }
 PO.EVENTS = { "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED" }
 PO.MODES = { ["3D"] = true, ["2D"] = true, CLASS = true, SPEC = true }
 PO.QUESTION_MODEL = "interface/buttons/talktomequestionmark.m2"

@@ -85,6 +85,10 @@ EXTRA_CARDS = {"unitIcons": [("class_decorations", {"target", "focus", "boss"})]
 #   Health Threshold     Every unit: the fade is DandersFrames' own (HealthFade.lua,
 #   Fading               curve-based), it runs on any standalone frame, and "fade
 #                        at full health" is as useful on a target as on the player.
+# Units added to a whole page since the inventory: page id -> units. Every card follows.
+#   Portrait  Target of Target / Focus Target: a Ring-style frame is round a portrait, so
+#             without one its middle stays empty. Off by default (Defaults.lua).
+EXTRA_PAGE_UNITS = {"uf_portrait": {"targettarget", "focustarget"}}
 EXTRA_CARD_UNITS = {
     "indicators_highlights": {"Selection Highlight": {"targettarget", "focustarget"}},
     "indicators_icons": {"Elite / Rare": {"boss"}},
@@ -145,7 +149,8 @@ def main():
         if pid == "uf_settings":
             continue                       # the module page: built by Pages.lua, not per unit
         kind = KIND[pid]
-        units = [u for u in UNITS if u in p["units"]]
+        page_extra = EXTRA_PAGE_UNITS.get(pid, set())
+        units = [u for u in UNITS if u in p["units"] or u in page_extra]
         rec = {"kind": kind, "category": p["category"], "title": p["title"], "units": units}
         if p["origin"] == "new" and pid not in BUILT_NEW:
             rec["later"] = True
@@ -156,7 +161,7 @@ def main():
         split = []                         # (title, units, controls) of SPLIT_CARDS cards
         for g in p["groups"]:
             for c in g["cards"]:
-                extra = EXTRA_CARD_UNITS.get(pid, {}).get(c["title"], set())
+                extra = EXTRA_CARD_UNITS.get(pid, {}).get(c["title"], set()) | page_extra
                 cu = [u for u in units if u in (c.get("units") or units) or u in extra]
                 key = None
                 if p["origin"] == "df":

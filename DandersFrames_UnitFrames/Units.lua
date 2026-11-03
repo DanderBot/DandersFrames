@@ -292,6 +292,11 @@ end
 -- unit changed: a readable GUID that differs, or `force` -- the ticker start and
 -- RepollPolled, which UNIT_TARGET, PLAYER_TARGET_CHANGED and PLAYER_FOCUS_CHANGED
 -- drive.
+-- No UNIT_HEALTH for a polled unit, so its portrait's grey-when-dead follows the tick.
+local function PortraitDead(f)
+    if UF.Portrait and UF.Portrait.UpdateDead then UF.Portrait:UpdateDead(f) end
+end
+
 function Units:TickPolled(f, force)
     if not f:IsVisible() then return end
     local guid = UnitGUID(f.unit)
@@ -302,11 +307,13 @@ function Units:TickPolled(f, force)
     elseif secret then
         f.dfUFLastGUID = nil
         Units:RepaintIdentityLight(f)
+        PortraitDead(f)
     elseif guid == nil or guid ~= f.dfUFLastGUID then
         f.dfUFLastGUID = guid
         Units:FullRefresh(f)
     else
         Units:RepaintValues(f)
+        PortraitDead(f)
     end
 end
 

@@ -134,19 +134,19 @@ DF.UnitFramePageData = {
         },
         {
             kind = "portrait", category = "display", title = "Portrait",
-            units = { player = true, target = true, focus = true, pet = true, boss = true },
+            units = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             cards = {
-                settings = { player = true, target = true, focus = true, pet = true, boss = true },
-                size_position = { player = true, target = true, focus = true, pet = true, boss = true },
-                look = { player = true, target = true, focus = true, pet = true, boss = true },
-                border = { player = true, target = true, focus = true, pet = true, boss = true },
+                settings = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                size_position = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                look = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
+                border = { player = true, target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             },
             hide = {
-                portrait2DZoom = { target = true, focus = true, pet = true, boss = true },
+                portrait2DZoom = { target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
                 portraitDesatDead = { pet = true },
-                portraitMirror = { target = true, focus = true, boss = true },
+                portraitMirror = { target = true, targettarget = true, focus = true, focustarget = true, boss = true },
                 portraitNpcMode = { pet = true },
-                portraitShape = { target = true, focus = true, pet = true, boss = true },
+                portraitShape = { target = true, targettarget = true, focus = true, focustarget = true, pet = true, boss = true },
             },
         },
         {

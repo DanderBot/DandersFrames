@@ -257,8 +257,8 @@ eq(G:ModuleForPage("uf_settings"), "units", "...on the module's sidebar")
 local WANT = {
     player = "frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,classpower,text,buffs,debuffs,defensive,dispel,auradesigner,icons,unitIcons,highlights",
     target = "frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
-    targettarget = "frame,rings,tooltips,fading,health,text,highlights",
-    focustarget = "frame,rings,tooltips,fading,health,text,highlights",
+    targettarget = "frame,rings,tooltips,fading,portrait,health,text,highlights",
+    focustarget = "frame,rings,tooltips,fading,portrait,health,text,highlights",
     focus ="frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     pet = "frame,rings,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
     boss = "frame,rings,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
@@ -1596,7 +1596,7 @@ do
     local n, total = UFO.LinkedPartCount("target", "player")
     eq(n .. "/" .. total, "9/18", "9 of 18 parts linked")
     linked, separate = UFO.LinkPageGroups("targettarget", "focustarget")
-    eq(ids(linked) .. "|" .. ids(separate), "health,rings,text,border|tooltips,fading,frame,highlights", "a pair with fewer parts lists only those")
+    eq(ids(linked) .. "|" .. ids(separate), "health,rings,portrait,text,border|tooltips,fading,frame,highlights", "a pair with fewer parts lists only those")
 
     -- ---- the layout decision -----------------------------------------------------
     local m = UFO.LinkDefaultMeasures()
