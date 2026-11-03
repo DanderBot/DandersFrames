@@ -181,8 +181,8 @@ end
 print("-- Absorbs page: the dropdown vocabulary at page scope")
 do
     local VOCAB = {
-        { "modeOptions",     'ATTACHED_OVERFLOW = L["Attached + Overflow"]' },
-        { "healModeOptions", 'OVERLAY = L["Overlay (on health bar)"]' },
+        { "modeOptions",     'ATTACHED_OVERFLOW = L["Attached + Wrap Back"]' },
+        { "healModeOptions", 'ATTACHED = L["Attached (into health)"]' },
         { "orientOptions",   'HORIZONTAL= L["Horizontal"]' },
         { "anchorOptions",   'BOTTOMRIGHT= L["Bottom Right"]' },
     }
