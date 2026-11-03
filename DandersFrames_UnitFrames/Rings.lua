@@ -605,7 +605,10 @@ end
 --   override   the Tile setting (nil / "AUTO": the texture's own)
 --   sizeValue  the Tile Size setting. allowPreset: Auto uses the texture's preset size
 --              (the base of health and power has no Tile Size control, so never there)
--- Call before R.ShapeArcBar: setting a file can reset the radial offsets.
+-- Call before R.ShapeArcBar, which applies the repeats (bar.dfArcCoordU, V) last: the
+-- /dfring test held them through a value write but set no radial offsets, while real
+-- rings set offsets after them and ignored Tile Size (the offsets are the suspect,
+-- unconfirmed).
 function R.SetArcTile(bar, override, sizeValue, ring, allowPreset)
     if not (DF.ResolveTileMode and DF.ApplyBarTextureTiling) then return end
     if override == "AUTO" then override = nil end
@@ -634,10 +637,12 @@ function R.SetArcTile(bar, override, sizeValue, ring, allowPreset)
         tex:SetHorizTile(false)
         tex:SetVertTile(false)
         local repeats = ring.outer / unit
-        tex:SetTexCoord(0, (mode == "BOTH" or mode == "HORIZ") and repeats or 1,
-            0, (mode == "BOTH" or mode == "VERT") and repeats or 1)
+        bar.dfArcCoordU = (mode == "BOTH" or mode == "HORIZ") and repeats or 1
+        bar.dfArcCoordV = (mode == "BOTH" or mode == "VERT") and repeats or 1
     else
+        bar.dfArcCoordU, bar.dfArcCoordV = nil, nil
         tex.dfWrapPath = nil
+        tex:SetTexCoord(0, 1, 0, 1)
         DF:ApplyBarTextureTiling(bar, path)
     end
 end
@@ -668,6 +673,7 @@ function R.ShapeArcBar(bar, center, outer, inner, start, len, reverse, feather)
     if tex.SetRadialProgressBarEndOffset then tex:SetRadialProgressBarEndOffset(e) end
     if tex.SetRadialProgressBarReverse then tex:SetRadialProgressBarReverse(reverse and true or false) end
     if tex.SetRadialProgressBarFeather then tex:SetRadialProgressBarFeather(tonumber(feather) or 0) end
+    if bar.dfArcCoordU then tex:SetTexCoord(0, bar.dfArcCoordU, 0, bar.dfArcCoordV) end
 end
 
 -- ============================================================
@@ -737,18 +743,6 @@ function R.PutValues(list, lo, hi, v)
             end
         end
     end
-end
-
--- The layers' colours, without laying the rings out.
-function R:PaintLayers(f)
-    local c = f and f.dfUFRings
-    if not (c and c.arcs) then return end
-    local db = K.DB(f)
-    local function Paint(fill)
-        for _, layer in ipairs(fill.dfLayers or {}) do PaintLayer(layer, db) end
-    end
-    for _, arc in ipairs(c.arcs) do Paint(arc.fill) end
-    for _, bar in ipairs(c.overlays or {}) do Paint(bar) end
 end
 
 -- ============================================================

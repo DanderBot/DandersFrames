@@ -71,7 +71,10 @@ local function Make(kind, parent)
     function f:SetRenderMode(m) self._render = m end
     for _, m in ipairs({ "SetRadialProgressBarStartOffset", "SetRadialProgressBarEndOffset",
                          "SetRadialProgressBarReverse", "SetRadialProgressBarFeather" }) do
-        f[m] = function(self, v) self._calls[m] = v end
+        f[m] = function(self, v)
+            self._calls[m] = v
+            self._coord = nil
+        end
     end
     function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
     function f:GetVertexColor() local v = rawget(self, "_vertex") or { 1, 1, 1 }; return v[1], v[2], v[3] end
@@ -572,8 +575,8 @@ do
 
     eff.healthLayer2Color = { r = 0.7, g = 0.2, b = 0.3, a = 0.4 }
     F.dfDB = UF:FrameDB("target")
-    R:PaintLayers(F)
-    eq(layer._barColor[1], 0.7, "a colour drag repaints the layer")
+    R:Layout(F)
+    eq(layer._barColor[1], 0.7, "a colour change repaints the layer")
 
     eff.resourceBarTextureLayersEnabled, eff.resourceBarLayer3Enabled, eff.resourceBarLayer3Texture = true, true, "PowerStripes"
     F.dfDB = UF:FrameDB("target")
@@ -639,6 +642,15 @@ do
     R:Layout(F)
     local outer = s._w
     check(near(tex._coord[2], outer / 8) and near(tex._coord[4], outer / 8), "Tile Size: repeats measured on the ring")
+    R:Layout(F)
+    check(tex._coord and near(tex._coord[2], outer / 8), "...and they survive the next layout's offsets")
+    eff.absorbBarTileSize = 16
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    check(near(tex._coord[2], outer / 16), "...and follow the slider")
+    eff.absorbBarTileSize = 8
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
     eq(tex._texture, "PlainTex", "...with the file re-set to repeat")
     eq(tex._calls.SetRadialProgressBarEndOffset, 0, "...the arc re-applied after it")
 
@@ -646,6 +658,11 @@ do
     F.dfDB = UF:FrameDB("target")
     R:Layout(F)
     check(near(tex._coord[2], outer / 10), "Fit to Bar: one repeat is the ring's thickness")
+
+    eff.absorbBarTileSize = nil
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    check(s.dfArcCoordU == nil and (tex._coord == nil or tex._coord[2] == 1), "back to Auto: no repeats left behind")
 
     eff.rings = saved
     eff.absorbBarTexture, eff.absorbBarBlendMode, eff.absorbBarTileSize = nil, nil, nil

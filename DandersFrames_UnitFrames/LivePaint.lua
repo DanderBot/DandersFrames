@@ -49,20 +49,15 @@ local function GradientStop(f)
     Missing(f)
 end
 
-local function RingLayers(f)
+-- A bar's texture settings on its rings (colour, blend, tiling, layers). Plain frames,
+-- so a drag runs it in combat too; returns at once in Bars style.
+local function RingLayout(f)
     local R = UF.Rings
-    if R and R.PaintLayers then R:PaintLayers(f) end
-end
-
-local function RingAmounts(f)
-    local R = UF.Rings
-    if R and R.PaintAmounts then R:PaintAmounts(f) end
-    RingLayers(f)
-    Tracks(f)
+    if R and R.Layout then R:Layout(f) end
 end
 
 local function HealthLayers(f, db)
-    RingLayers(f)
+    RingLayout(f)
     local bar = f.healthBar
     if not (bar and DF:BarTextureLayersWanted(bar, db, "health")) then return end
     local o = db.healthOrientation
@@ -90,7 +85,7 @@ end
 local function Resource(f, db)
     DF:LayoutResourceBar(f, db)
     Tracks(f)
-    RingLayers(f)
+    RingLayout(f)
 end
 
 local function Power(f)
@@ -101,17 +96,17 @@ end
 
 local function Absorb(f)
     DF:UpdateAbsorb(f)
-    RingAmounts(f)
+    RingLayout(f)
 end
 
 local function HealAbsorb(f)
     DF:UpdateHealAbsorb(f)
-    RingAmounts(f)
+    RingLayout(f)
 end
 
 local function HealPrediction(f)
     DF:UpdateHealPrediction(f)
-    RingAmounts(f)
+    RingLayout(f)
 end
 
 -- Every part's fade: oor*, fadeDead*. Ends in the unit frame's own parts
