@@ -140,7 +140,10 @@ function Units:RepaintValues(f)
     if DF.UpdateHealthFast then DF:UpdateHealthFast(f) end
     if DF.UpdatePower then DF:UpdatePower(f) end
     -- A ring's power fills (Rings.lua; nothing to do in BARS style).
-    if UF.Rings and UF.Rings.FeedPower then UF.Rings:FeedPower(f) end
+    if UF.Rings and UF.Rings.FeedPower then
+        UF.Rings:FeedPower(f)
+        UF.Rings:FeedAmounts(f)
+    end
     if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(f) end
     if DF.UpdateHealPrediction then DF:UpdateHealPrediction(f) end
     if DF.UpdateAbsorb then DF:UpdateAbsorb(f) end

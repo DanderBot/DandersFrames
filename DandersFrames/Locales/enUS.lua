@@ -74,6 +74,7 @@ L["Add Bar"] = true
 L["Add Ring"] = true
 L["Always separate"] = true
 L["Arrangement"] = true
+L["A ring can't place these at the end of the health fill. Shields and heal prediction fill back from the far end, heal absorbs from the start. Turn one off here if it has its own ring."] = true
 L["At most %d rings."] = true
 L["Attached"] = true
 L["Aura Designer (incl. sounds)"] = true
@@ -268,7 +269,8 @@ L["Reset %s settings to defaults?\n\nThe linked settings on %s are reset too.\n\
 L["Resting Icon"] = true
 L["Result"] = true
 L["Ring"] = true
-L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar; absorbs and heal prediction are not drawn on rings."] = true
+L["On the Health Ring"] = true
+L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar."] = true
 L["Ring Size"] = true
 L["Ring Text Template"] = true
 L["Ring: Above"] = true

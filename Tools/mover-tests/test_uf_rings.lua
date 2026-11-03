@@ -19,7 +19,8 @@ local NS = ...
 local G, G_NAMES = {}, { "DandersFrames", "CreateFrame", "issecretvalue", "LibStub", "hooksecurefunc",
                      "UnitExists", "UnitPower", "UnitPowerMax", "UnitClass", "UnitIsPlayer", "UnitIsVisible",
                      "UnitIsDeadOrGhost", "GetClassAtlas", "RAID_CLASS_COLORS", "PowerBarColor",
-                     "GetSpecialization", "GetSpecializationInfo", "GetShapeshiftFormID", "UnitAffectingCombat" }
+                     "GetSpecialization", "GetSpecializationInfo", "GetShapeshiftFormID", "UnitAffectingCombat",
+                     "CreateUnitHealPredictionCalculator", "UnitGetDetailedHealPrediction" }
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 local ENUM_HELD = { StatusBarRenderMode = Enum.StatusBarRenderMode, PowerType = Enum.PowerType }
 
@@ -206,8 +207,8 @@ local TWO_RINGS = {
 
 print("-- Rings: the list, cleaned")
 local clean = R.List({ rings = { { thickness = 99, gap = -3, sections = { { bar = "NOPE", coverage = "X", position = "Y",
-    feather = 5 } } }, "junk", {}, {}, {}, {} } })
-eq(#clean, 4, "at most four rings (junk skipped)")
+    feather = 5 } } }, "junk", {}, {}, {}, {}, {}, {}, {}, {}, {} } })
+eq(#clean, 8, "at most eight rings (junk skipped)")
 eq(clean[1].thickness, 40, "thickness clamped")
 eq(clean[1].gap, 0, "gap clamped")
 local s = clean[1].sections[1]
@@ -408,6 +409,102 @@ R.SetArcTexture(swapBar, "Other")
 eq(swapBar._path, "Other", "a new file is set")
 eq(#swapBar:GetStatusBarTexture()._masks, 2, "a new texture object gets both masks back")
 
+print("-- Rings: shields, heal absorbs and incoming heals")
+do
+    local sShield, sAbsorb, sMine, sOthers, sAll, sMax =
+        Secret("shield"), Secret("absorb"), Secret("mine"), Secret("others"), Secret("all"), Secret("max")
+    CreateUnitHealPredictionCalculator = function()
+        local calc = setmetatable({}, { __index = function() return function() end end })
+        calc.GetDamageAbsorbs = function() return sShield, true end
+        calc.GetHealAbsorbs = function() return sAbsorb end
+        calc.GetIncomingHeals = function() return sAll, sMine, sOthers, true end
+        calc.GetMaximumHealth = function() return sMax end
+        return calc
+    end
+    UnitGetDetailedHealPrediction = function() end
+
+    local saved = eff.rings
+    local function One(bar, coverage, position)
+        return { thickness = 4, gap = 0, sections = { { bar = bar, coverage = coverage, position = position } } }
+    end
+    eff.rings = { One("HEALTH", "HALF", "LEFT"), One("SHIELD", "FULL"), One("HEALABSORB", "FULL"),
+                  One("INCOMING", "FULL"), One("POWER", "FULL"), One("HEALTH", "FULL"),
+                  One("HEALTH", "QUARTER", "TOP"), One("HEALTH", "QUARTER", "BOTTOM") }
+    eq(#R.List(eff), 8, "eight rings stay in the list")
+    eff.absorbBarTexture, eff.healAbsorbBarTexture, eff.healPredictionTexture = "ShieldTex", "HealAbsorbTex", "IncomingTex"
+    eff.absorbBarColor = { r = 0.1, g = 0.2, b = 0.3, a = 0.4 }
+    eff.healPredictionShowMode = "MINE"
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+
+    local am = F.dfUFRingAmounts
+    eq(#F.dfUFRingHealth, 4, "the amounts' rings aren't health fills")
+    eq(#F.dfUFRingPower, 1, "...or power fills")
+    eq(#am.SHIELD, 5, "shield: its own ring and all four health sections")
+    eq(#am.HEALABSORB, 5, "heal absorb: the same")
+    eq(#am.INCOMING, 5, "incoming: the same")
+    -- Listed in drawing order, outermost ring first: find each ring's own bar by its size.
+    local function OwnRing(list)
+        for _, bar in ipairs(list) do
+            for _, arc in ipairs(F.dfUFRings.arcs) do
+                if arc.fill == bar then return bar end
+            end
+        end
+    end
+    local shield, healAbsorb, incoming = OwnRing(am.SHIELD), OwnRing(am.HEALABSORB), OwnRing(am.INCOMING)
+    eq(shield._path, "ShieldTex", "a shield ring: the absorb bar's texture")
+    eq(healAbsorb._path, "HealAbsorbTex", "a heal absorb ring: its texture")
+    eq(incoming._path, "IncomingTex", "an incoming ring: heal prediction's texture")
+    eq(shield._barColor[1], 0.1, "a shield ring: the absorb bar's colour")
+    check(shield._value == sShield and shield._max == sMax, "a secret shield and max passed on unread")
+    check(healAbsorb._value == sAbsorb, "heal absorb")
+    check(incoming._value == sMine, "incoming: Show mode Mine")
+
+    local function OnHealth(list, own)
+        for _, bar in ipairs(list) do
+            if bar ~= own then return bar end
+        end
+    end
+    local shieldOver, absorbOver = OnHealth(am.SHIELD, shield), OnHealth(am.HEALABSORB, healAbsorb)
+    eq(shieldOver._path, "ShieldTex", "on the health ring: the same texture")
+    eq(shieldOver:GetStatusBarTexture()._calls.SetRadialProgressBarReverse, true, "a shield on health fills back from the far end")
+    eq(absorbOver:GetStatusBarTexture()._calls.SetRadialProgressBarReverse, false, "a heal absorb fills the same way as the health")
+
+    shield._value = nil
+    R:OnUnitEvent(F, "UNIT_ABSORB_AMOUNT_CHANGED")
+    check(shield._value == sShield, "the absorb event feeds it")
+    shield._value = nil
+    R:OnUnitEvent(F, "UNIT_HEALTH")
+    check(shield._value == sShield, "...and so does health")
+
+    eff.ringShowShieldOnHealth = false
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    am = F.dfUFRingAmounts
+    eq(#am.SHIELD, 1, "switched off on the health ring: only its own ring")
+    eq(#am.HEALABSORB, 5, "...the others stay")
+    eff.ringShowHealAbsorbOnHealth, eff.ringShowIncomingOnHealth = false, false
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    check(not shieldOver._shown, "a bar no longer used hides")
+    eff.ringShowShieldOnHealth, eff.ringShowHealAbsorbOnHealth, eff.ringShowIncomingOnHealth = nil, nil, nil
+
+    F.dfUFPreview = true
+    F.dfTestData = { absorbPercent = 0.2, healAbsorbPercent = 0.1, healPredictionPercent = 0.3, powerPercent = 0.5 }
+    F.dfDB = UF:FrameDB("target")
+    R:Preview(F)
+    eq(OwnRing(F.dfUFRingAmounts.SHIELD)._value, 0.2, "a preview: the sample's shield")
+    eq(OwnRing(F.dfUFRingAmounts.HEALABSORB)._value, 0.1, "a preview: the sample's heal absorb")
+    eq(OwnRing(F.dfUFRingAmounts.INCOMING)._value, 0.3, "a preview: the sample's incoming")
+    F.dfUFPreview, F.dfTestData = nil, nil
+
+    eff.rings = saved
+    eff.absorbBarTexture, eff.healAbsorbBarTexture, eff.healPredictionTexture = nil, nil, nil
+    eff.absorbBarColor, eff.healPredictionShowMode = nil, nil
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+end
+
 print("-- Rings: health writes copied onto the fills")
 local sv = Secret("hp")
 F.healthBar:SetValue(sv, 3)
@@ -591,12 +688,13 @@ eq(Lk.OwnerOf("frameStyle"), "rings", "frameStyle: the Frame Style element's, no
 eq(Lk.OwnerOf("rings"), "rings", "rings")
 eq(Lk.OwnerOf("ringSize"), "rings", "ringSize")
 eq(Lk.OwnerOf("ringPortrait3D"), "rings", "ringPortrait3D")
+eq(Lk.OwnerOf("ringShowShieldOnHealth"), "rings", "the on-health switches")
 check(Lk.OwnerOf("frameWidth") ~= "rings", "frameWidth stays the Frame page's")
 
 print("-- Rings: the settings page's list edits")
 do
     local src = options_file_source("UnitFrames/Pages.lua"):gsub("\r\n", "\n")
-    local s0 = src:find("UFO.RING_MAX = 4", 1, true)
+    local s0 = src:find("UFO.RING_MAX = 8", 1, true)
     local s1 = src:find("function UFO.BuildRingsPage", 1, true)
     check(s0 and s1, "the list edits can be cut out of Pages.lua")
     local env = setmetatable({ UFO = {} }, { __index = _G })
@@ -608,9 +706,11 @@ do
     check(U.RingMove(rings, 2, -1) and rings[1].sections[1].bar == "POWER", "move a ring in")
     check(not U.RingMove(rings, 1, -1), "the innermost cannot move further in")
     check(U.RingAdd(rings) and #rings == 3, "add a ring")
-    U.RingAdd(rings)
-    check(not U.RingAdd(rings), "at most four")
-    check(U.RingRemove(rings, 4) and #rings == 3, "remove one")
+    for _ = 4, 8 do U.RingAdd(rings) end
+    eq(#rings, 8, "add up to eight")
+    check(not U.RingAdd(rings), "at most eight")
+    for i = 8, 4, -1 do check(U.RingRemove(rings, i), "remove one") end
+    eq(#rings, 3, "back to three")
     local one = { rings[1] }
     check(not U.RingRemove(one, 1), "the last ring stays")
     check(U.RingSectionAdd(rings[1]) and #rings[1].sections == 2, "add a section")

@@ -477,15 +477,15 @@ do
     Click(list.Bars[1].removeBtn)
     eq(#rings, 1, "...and cannot remove it")
     local add = Rows()[#Rows()]
-    for _ = 1, 3 do add.button.scripts.OnClick() end
-    eq(#rings, 4, "Add Ring up to four")
+    for _ = 1, 7 do add.button.scripts.OnClick() end
+    eq(#rings, 8, "Add Ring up to eight")
     page:RefreshStates()
     eq(add.button.enabledState, false, "Add Ring greys at the limit")
-    eq(add.disableReason(db), "At most 4 rings.", "...and says why")
+    eq(add.disableReason(db), "At most 8 rings.", "...and says why")
     eq(list.Bars[1].removeBtn.enabledState, true, "the X is back with more than one")
-    Click(list.Bars[4].removeBtn)
-    eq(Index(list.Bars[4]), nil, "a removed ring's bar leaves the band")
-    check(not list.Bars[4].shown, "...and hides")
+    Click(list.Bars[8].removeBtn)
+    eq(Index(list.Bars[8]), nil, "a removed ring's bar leaves the band")
+    check(not list.Bars[8].shown, "...and hides")
 end
 
 print("-- Rings page: nothing is made per click")

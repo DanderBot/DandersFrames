@@ -274,7 +274,7 @@ function UFO.Prefixes(kind)
     if kind == "portrait" then return { "portrait" } end
     -- With the two text templates its Style card shows (a link's Text element owns those).
     if kind == "rings" then
-        return { "frameStyle", "ringSize", "rings", "ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }
+        return { "frameStyle", "ringSize", "rings", "ringShow", "ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }
     end
     if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
     if kind == "bosslayout" then return { "boss" } end
@@ -1947,7 +1947,8 @@ end
 
 function UFO.RingBarOptions()
     return { HEALTH = L["Health"], POWER = L["Power"], CLASSPOWER = L["Class Power"],
-             _order = { "HEALTH", "POWER", "CLASSPOWER" } }
+             SHIELD = L["Absorb Shield"], HEALABSORB = L["Heal Absorb"], INCOMING = L["Heal Prediction"],
+             _order = { "HEALTH", "POWER", "CLASSPOWER", "SHIELD", "HEALABSORB", "INCOMING" } }
 end
 
 function UFO.RingCoverageOptions()
@@ -1975,7 +1976,7 @@ function UFO.RingList(db)
     return t
 end
 
-UFO.RING_MAX = 4
+UFO.RING_MAX = 8
 UFO.RING_SECTION_MAX = 4
 
 -- Pure list edits (tested): each returns true when it changed the list.
@@ -2241,13 +2242,26 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
     textTemplate(L["Bars Text Template"], "textDesignerPreset")
     textTemplate(L["Ring Text Template"], "ringTextDesignerPreset")
     band:AddWidget(GUI:CreateLabel(self.child,
-        L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar; absorbs and heal prediction are not drawn on rings."], 250), 70)
+        L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar."], 250), 70)
     Close(band)
 
     band = Open(L["Rings"], "uf_rings_list", "both", function(d)
         return format(L["Rings: %d"], #UFO.RingList(d))
     end, "layout")
     UFO.BuildRingList(self, band, db, unit, off)
+    Close(band)
+
+    -- Shields and heals over the health fills, whatever rings of their own they have.
+    band = Open(L["On the Health Ring"], "uf_rings_on_health", "both", nil, "layout")
+    w = band:AddWidget(GUI:CreateLabel(self.child,
+        L["A ring can't place these at the end of the health fill. Shields and heal prediction fill back from the far end, heal absorbs from the start. Turn one off here if it has its own ring."], 250), 58)
+    w.fullRow = true
+    for _, row in ipairs({ { L["Absorb Shield"], "ringShowShieldOnHealth" },
+                           { L["Heal Absorb"], "ringShowHealAbsorbOnHealth" },
+                           { L["Heal Prediction"], "ringShowIncomingOnHealth" } }) do
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, row[1], db, row[2], changed), 30)
+        w.disableOn = off
+    end
     Close(band)
 end
 

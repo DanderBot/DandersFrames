@@ -9,7 +9,7 @@ local addonName, UF = ...
 --   rings       { { thickness, gap, sections = { section, ... } }, ... }
 --               index 1 is the INNERMOST ring. `gap` is the space just inside
 --               the ring (between it and the ring inside it, or the portrait).
---   section     { bar = "HEALTH"|"POWER"|"CLASSPOWER",
+--   section     { bar = "HEALTH"|"POWER"|"CLASSPOWER"|"SHIELD"|"HEALABSORB"|"INCOMING",
 --                 coverage = "FULL"|"HALF"|"QUARTER",
 --                 position = "TOP"|"BOTTOM"|"LEFT"|"RIGHT" (+ the four corners,
 --                            for a quarter), the arc's middle,
@@ -46,8 +46,15 @@ local addonName, UF = ...
 -- begins (a share of a turn, clockwise from the bottom) and EndOffset is how
 -- much of the circle is CUT OFF, so the arc a..b is Start = a, End = 1 - (b - a).
 --
--- v1: the cast bar is never a ring; absorbs, heal absorbs and heal prediction are
--- not drawn in RING style; highlights keep the frame's square outline.
+-- SHIELDS, HEAL ABSORBS AND INCOMING HEALS (R.AMOUNTS). DandersFrames' own bars for
+-- these stay off or hidden (R.FORCED). A radial fill has no moving edge to anchor to
+-- and a secret can't be added to the health value, so nothing can sit at the tip of
+-- the health fill. Each is its own radial bar, fed straight from a calculator:
+--   * as a section, a ring (or part of one) of its own
+--   * on the health ring (ringShow*OnHealth, R.ON_HEALTH): shield and incoming fill
+--     back from the far end of each health section, heal absorb from its start
+--
+-- v1: the cast bar is never a ring; highlights keep the frame's square outline.
 -- ============================================================
 
 local DF = DandersFrames
@@ -66,8 +73,25 @@ R.DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 R.HOLE = "Interface\\AddOns\\DandersFrames_UnitFrames\\Media\\RingInnerMask"
 
 R.STYLES = { BARS = true, RING = true }
-R.BARS = { HEALTH = true, POWER = true, CLASSPOWER = true }
-R.BAR_ORDER = { "HEALTH", "POWER", "CLASSPOWER" }
+R.BARS = { HEALTH = true, POWER = true, CLASSPOWER = true, SHIELD = true, HEALABSORB = true, INCOMING = true }
+R.BAR_ORDER = { "HEALTH", "POWER", "CLASSPOWER", "SHIELD", "HEALABSORB", "INCOMING" }
+-- The settings each amount bar shares with its DandersFrames bar. Test data: the
+-- share of max health in a sample, and the test panel switch that shows it.
+R.AMOUNTS = {
+    SHIELD = { texture = "absorbBarTexture", background = "absorbBarBackgroundColor",
+               testValue = "absorbPercent", testShow = "testShowAbsorbs" },
+    HEALABSORB = { texture = "healAbsorbBarTexture", background = "healAbsorbBarBackgroundColor",
+                   testValue = "healAbsorbPercent", testShow = "testShowAbsorbs" },
+    INCOMING = { texture = "healPredictionTexture", background = "healPredictionBackgroundColor",
+                 testValue = "healPredictionPercent", testShow = "testShowHealPrediction" },
+}
+-- Drawn over each health section, bottom layer first. A far-end bar fills the other
+-- way from the health fill, towards it.
+R.ON_HEALTH = {
+    { bar = "INCOMING", key = "ringShowIncomingOnHealth", farEnd = true },
+    { bar = "SHIELD", key = "ringShowShieldOnHealth", farEnd = true },
+    { bar = "HEALABSORB", key = "ringShowHealAbsorbOnHealth" },
+}
 R.COVERAGE = { FULL = 1, HALF = 0.5, QUARTER = 0.25 }
 R.COVERAGE_ORDER = { "FULL", "HALF", "QUARTER" }
 -- An arc's middle, as a share of a turn clockwise from the bottom.
@@ -80,7 +104,7 @@ R.DEFAULT_SIZE = 64
 R.SIZE_MIN, R.SIZE_MAX = 24, 256
 R.THICK_MIN, R.THICK_MAX = 1, 40
 R.GAP_MIN, R.GAP_MAX = 0, 20
-R.MAX_RINGS, R.MAX_SECTIONS = 4, 4
+R.MAX_RINGS, R.MAX_SECTIONS = 8, 4
 -- Class power pips: this much of a turn clear each side of a pip.
 R.PIP_GAP = 0.012
 
@@ -300,8 +324,9 @@ R.LEVEL_PORTRAIT, R.LEVEL_RINGS, R.LEVEL_CLASSPOWER = 2, 5, 6
 -- back for Bars. It also answers the ring spots (dfTDAnchorSpot) and, for Show
 -- Hover State, dims the placeholder when the unit's portrait dims on hover.
 -- ============================================================
-R.MOCK_FILL = { HEALTH = 0.75, POWER = 0.6 }
-R.MOCK_COLOR = { HEALTH = { 0.18, 0.80, 0.44 }, POWER = { 0.27, 0.53, 1 }, CLASSPOWER = { 1, 0.82, 0 } }
+R.MOCK_FILL = { HEALTH = 0.75, POWER = 0.6, SHIELD = 0.35, HEALABSORB = 0.2, INCOMING = 0.3 }
+R.MOCK_COLOR = { HEALTH = { 0.18, 0.80, 0.44 }, POWER = { 0.27, 0.53, 1 }, CLASSPOWER = { 1, 0.82, 0 },
+                 SHIELD = { 0, 0.84, 1 }, HEALABSORB = { 1, 0.25, 0.25 }, INCOMING = { 0, 0.8, 0.2 } }
 R.MOCK_TRACK = { 0, 0, 0, 0.5 }
 R.MOCK_PIPS, R.MOCK_PIPS_ON = 5, 3
 R.MOCK_PORTRAIT = { 0.22, 0.22, 0.26, 1 }
@@ -533,6 +558,8 @@ end
 -- What a section draws with: its bar's own texture setting. A track takes the frame's
 -- background texture on a health section; "Solid" and the others stay plain.
 function R.FillTexture(db, sec)
+    local amount = R.AMOUNTS[sec.bar]
+    if amount then return db[amount.texture] or K.BAR end
     if sec.bar == "POWER" then return db.resourceBarTexture or K.BAR end
     if sec.bar == "CLASSPOWER" then return db.classPowerTexture or K.BAR end
     return db.healthTexture or K.BAR
@@ -589,6 +616,7 @@ end
 -- f.dfUFRings          the container (centred on the frame, ringSize square)
 -- f.dfUFRingHealth     the health fills (written by R.HookHealth)
 -- f.dfUFRingPower      the power fills
+-- f.dfUFRingAmounts    { SHIELD = bars, HEALABSORB = bars, INCOMING = bars }
 -- f.dfUFRingGeom       the last geometry (Text Designer's ring anchors read it)
 -- ============================================================
 function R:Attach(f)
@@ -596,6 +624,7 @@ function R:Attach(f)
     local c = CreateFrame("Frame", nil, f)
     c:Hide()
     c.arcs = {}
+    c.overlays = {}
     f.dfUFRings = c
     R.HookHealth(f)
     return c
@@ -696,9 +725,20 @@ end
 -- A track's colour: the section's own, else the bar's background colour.
 function R.TrackColor(db, sec)
     if type(sec.trackColor) == "table" then return K.RGBA(sec.trackColor, 0, 0, 0, 0.6) end
+    local amount = R.AMOUNTS[sec.bar]
+    if amount then return K.RGBA(db[amount.background], 0, 0, 0, 0.5) end
     if sec.bar == "POWER" then return K.RGBA(db.resourceBarBackgroundColor, 0, 0, 0, 0.8) end
     if sec.bar == "CLASSPOWER" then return K.RGBA(db.classPowerEmptyColor, 0.15, 0.15, 0.15, 0.6) end
     return K.RGBA(db.backgroundColor, 0.1, 0.1, 0.1, 0.8)
+end
+
+-- A fill with no track, over a health section.
+local function AcquireOverlay(c, i)
+    local bar = c.overlays[i]
+    if bar then return bar end
+    bar = R.NewArcBar(c)
+    c.overlays[i] = bar
+    return bar
 end
 
 local function AcquireArc(c, i)
@@ -721,7 +761,7 @@ function R:Layout(f)
     if not on then
         c:Hide()
         c.used = nil
-        f.dfUFRingHealth, f.dfUFRingPower, f.dfUFRingGeom = nil, nil, nil
+        f.dfUFRingHealth, f.dfUFRingPower, f.dfUFRingGeom, f.dfUFRingAmounts = nil, nil, nil, nil
         return
     end
     R.HookHealthTexture(f)
@@ -733,7 +773,8 @@ function R:Layout(f)
     -- Over the (hidden) bars, under the text and the frame's icons.
     c:SetFrameLevel(f:GetFrameLevel() + R.LEVEL_RINGS)
 
-    local used, health, power = 0, {}, {}
+    local used, overlays, health, power = 0, 0, {}, {}
+    local amounts = { SHIELD = {}, HEALABSORB = {}, INCOMING = {} }
     for _, ring in ipairs(geo.rings) do
         for _, sec in ipairs(ring.sections) do
             -- Class power draws its own pips into the ring (ClassPower.lua).
@@ -749,7 +790,28 @@ function R:Layout(f)
                 arc.sec = sec
                 arc.track:Show()
                 arc.fill:Show()
-                if sec.bar == "POWER" then power[#power + 1] = arc.fill else health[#health + 1] = arc.fill end
+                local list = amounts[sec.bar]
+                if list then
+                    list[#list + 1] = arc.fill
+                elseif sec.bar == "POWER" then
+                    power[#power + 1] = arc.fill
+                else
+                    health[#health + 1] = arc.fill
+                    for n, on in ipairs(R.ON_HEALTH) do
+                        if db[on.key] ~= false then
+                            overlays = overlays + 1
+                            local bar = AcquireOverlay(c, overlays)
+                            R.SetArcTexture(bar, R.FillTexture(db, on))
+                            local reverse = sec.reverse and true or false
+                            if on.farEnd then reverse = not reverse end
+                            R.ShapeArcBar(bar, c, ring.outer, ring.inner, a, len, reverse, 0)
+                            bar:SetFrameLevel(arc.fill:GetFrameLevel() + n)
+                            bar:Show()
+                            local onList = amounts[on.bar]
+                            onList[#onList + 1] = bar
+                        end
+                    end
+                end
             end
         end
     end
@@ -757,12 +819,17 @@ function R:Layout(f)
         c.arcs[i].track:Hide()
         c.arcs[i].fill:Hide()
     end
-    f.dfUFRingHealth, f.dfUFRingPower = health, power
+    for i = overlays + 1, #c.overlays do c.overlays[i]:Hide() end
+    f.dfUFRingHealth, f.dfUFRingPower, f.dfUFRingAmounts = health, power, amounts
     c.used = used
     R:PaintTracks(f)
+    R:PaintAmounts(f)
     c:Show()
     R.SyncHealth(f)
-    if not f.dfUFPreview then R:FeedPower(f) end
+    if not f.dfUFPreview then
+        R:FeedPower(f)
+        R:FeedAmounts(f)
+    end
     R:ApplyRange(f)
 end
 
@@ -777,22 +844,101 @@ function R:PaintTracks(f)
     end
 end
 
--- Range fade: tracks with Background Alpha, power fills with Power Bar Alpha. A health
--- fill's alpha is the health bar's, copied onto its texture, so its frame stays at 1.
+-- Range fade: tracks with Background Alpha, power fills with Power Bar Alpha, amounts
+-- with Absorb Bar Alpha. A health fill's alpha is the health bar's, copied onto its
+-- texture, so its frame stays at 1.
 function R:ApplyRange(f)
     local c = f and f.dfUFRings
     if not (c and c.arcs and f.dfUFRingPower) then return end
     local db = K.DB(f)
     local trackA = tonumber(db and db.oorBackgroundAlpha) or 0.1
     local powerA = tonumber(db and db.oorPowerBarAlpha) or 0.2
+    local amountA = tonumber(db and db.oorAbsorbBarAlpha) or 0.2
     local isPower = {}
     for _, bar in ipairs(f.dfUFRingPower) do isPower[bar] = true end
     for _, arc in ipairs(c.arcs) do
         K.RangeAlpha(f, arc.track, 1, trackA)
         if isPower[arc.fill] then
             K.RangeAlpha(f, arc.fill, 1, powerA)
+        elseif arc.sec and R.AMOUNTS[arc.sec.bar] then
+            K.RangeAlpha(f, arc.fill, 1, amountA)
         else
             arc.fill:SetAlpha(1)
+        end
+    end
+    for _, bar in ipairs(c.overlays) do K.RangeAlpha(f, bar, 1, amountA) end
+end
+
+-- An amount's colour: its bar's setting. Incoming follows Heal Prediction's Show mode.
+function R.AmountColor(db, bar)
+    if bar == "SHIELD" then return K.RGBA(db.absorbBarColor, 0, 0.84, 1, 0.8) end
+    if bar == "HEALABSORB" then return K.RGBA(db.healAbsorbBarColor, 1, 0.25, 0.25, 0.8) end
+    local mode = db.healPredictionShowMode
+    if mode == "MINE" then return K.RGBA(db.healPredictionMyColor, 0, 0.8, 0.2, 0.7) end
+    if mode == "OTHERS" then return K.RGBA(db.healPredictionOthersColor, 0, 0.5, 0.8, 0.7) end
+    return K.RGBA(db.healPredictionAllColor, 0, 0.7, 0.4, 0.7)
+end
+
+function R:PaintAmounts(f)
+    local amounts = f and f.dfUFRingAmounts
+    if not amounts then return end
+    local db = K.DB(f)
+    for bar, list in pairs(amounts) do
+        local r, g, b, a = R.AmountColor(db, bar)
+        for _, fill in ipairs(list) do fill:SetStatusBarColor(r, g, b, a) end
+    end
+end
+
+-- One calculator per amount, set the way DandersFrames' bars set theirs
+-- (Frames/Bars.lua). A shield is measured against max health, so it shows at full
+-- health too.
+local calculators
+local function Calculators()
+    if calculators or not CreateUnitHealPredictionCalculator then return calculators end
+    local shield = CreateUnitHealPredictionCalculator()
+    shield:SetDamageAbsorbClampMode(2)
+    shield:SetHealAbsorbMode(0)
+    local healAbsorb = CreateUnitHealPredictionCalculator()
+    healAbsorb:SetHealAbsorbClampMode(0)
+    healAbsorb:SetHealAbsorbMode(1)
+    local incoming = CreateUnitHealPredictionCalculator()
+    incoming:SetIncomingHealClampMode(0)
+    incoming:SetIncomingHealOverflowPercent(1.0)
+    incoming:SetHealAbsorbMode(0)
+    calculators = { SHIELD = shield, HEALABSORB = healAbsorb, INCOMING = incoming }
+    return calculators
+end
+
+-- The value and its max, from one snapshot. Both can be secret: passed on unread.
+local function ReadAmount(unit, bar, db)
+    local calc = Calculators()[bar]
+    if bar ~= "INCOMING" then
+        UnitGetDetailedHealPrediction(unit, nil, calc)
+        local v
+        if bar == "SHIELD" then v = calc:GetDamageAbsorbs() else v = calc:GetHealAbsorbs() end
+        return v, calc:GetMaximumHealth()
+    end
+    UnitGetDetailedHealPrediction(unit, "player", calc)
+    local all, mine, others = calc:GetIncomingHeals()
+    local mode = db.healPredictionShowMode
+    local v = all
+    if mode == "MINE" then v = mine elseif mode == "OTHERS" then v = others end
+    return v, calc:GetMaximumHealth()
+end
+
+function R:FeedAmounts(f)
+    local amounts = f and f.dfUFRingAmounts
+    if not amounts or f.dfUFPreview or not Calculators() then return end
+    local unit = f.unit
+    if not (unit and UnitExists and UnitExists(unit)) then return end
+    local db = K.DB(f)
+    for bar, list in pairs(amounts) do
+        if #list > 0 then
+            local v, mx = ReadAmount(unit, bar, db)
+            for _, fill in ipairs(list) do
+                if not K.IsNil(mx) then fill:SetMinMaxValues(0, mx) end
+                if not K.IsNil(v) then fill:SetValue(v) end
+            end
         end
     end
 end
@@ -816,18 +962,27 @@ end
 
 R.POWER_EVENTS = { UNIT_POWER_UPDATE = true, UNIT_MAXPOWER = true, UNIT_DISPLAYPOWER = true }
 
+-- Health too: an incoming heal is clamped to the missing health, and a shield and a
+-- heal absorb are measured against the max.
+R.AMOUNT_EVENTS = { UNIT_ABSORB_AMOUNT_CHANGED = true, UNIT_HEAL_ABSORB_AMOUNT_CHANGED = true,
+                    UNIT_HEAL_PREDICTION = true, UNIT_HEALTH = true, UNIT_MAXHEALTH = true }
+
 function R:OnUnitEvent(f, event)
     if R.POWER_EVENTS[event] then R:FeedPower(f) end
+    if R.AMOUNT_EVENTS[event] then R:FeedAmounts(f) end
 end
 
 function R:Refresh(f)
-    if f and f.dfUFRingPower then R:FeedPower(f) end
+    if f and f.dfUFRingPower then
+        R:FeedPower(f)
+        R:FeedAmounts(f)
+    end
 end
 
 function R:OnUnitChanged(f) R:Refresh(f) end
 
--- A preview: the sample's power share. Health comes through the hooks, from the
--- test painter's write to the health bar.
+-- A preview: the sample's power and amount shares. Health comes through the hooks,
+-- from the test painter's write to the health bar.
 function R:Preview(f)
     if not (f and f.dfUFRings) then return end
     R:Layout(f)
@@ -848,6 +1003,14 @@ function R:Preview(f)
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(pct)
         bar:SetStatusBarColor(r, g, b, 1)
+    end
+    for name, bars in pairs(f.dfUFRingAmounts or {}) do
+        local amount = R.AMOUNTS[name]
+        local share = (type(t) == "table" and db[amount.testShow] ~= false) and tonumber(t[amount.testValue]) or 0
+        for _, bar in ipairs(bars) do
+            bar:SetMinMaxValues(0, 1)
+            bar:SetValue(share)
+        end
     end
     R.SyncHealth(f)
 end

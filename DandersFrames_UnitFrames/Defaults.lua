@@ -161,6 +161,11 @@ local ELEMENTS = {
     ringPortrait3D = "COVER",
     -- The Text Designer template in RING style; textDesignerPreset is Bars' (Core.lua).
     ringTextDesignerPreset = UF.RING_TEXT_PRESET,
+    -- Shield, heal absorb and incoming heal drawn on the health ring (Rings.lua
+    -- R.ON_HEALTH). Off when one has a ring of its own and needn't show twice.
+    ringShowShieldOnHealth = true,
+    ringShowHealAbsorbOnHealth = true,
+    ringShowIncomingOnHealth = true,
 
     -- Cast bar (CastBar.lua)
     castbarEnabled = false,
