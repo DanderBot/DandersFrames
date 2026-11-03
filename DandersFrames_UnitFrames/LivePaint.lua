@@ -49,7 +49,19 @@ local function GradientStop(f)
     Missing(f)
 end
 
+local function RingLayers(f)
+    local R = UF.Rings
+    if R and R.PaintLayers then R:PaintLayers(f) end
+end
+
+local function RingAmounts(f)
+    local R = UF.Rings
+    if R and R.PaintAmounts then R:PaintAmounts(f) end
+    RingLayers(f)
+end
+
 local function HealthLayers(f, db)
+    RingLayers(f)
     local bar = f.healthBar
     if not (bar and DF:BarTextureLayersWanted(bar, db, "health")) then return end
     local o = db.healthOrientation
@@ -77,6 +89,7 @@ end
 local function Resource(f, db)
     DF:LayoutResourceBar(f, db)
     Tracks(f)
+    RingLayers(f)
 end
 
 local function Power(f)
@@ -85,9 +98,20 @@ local function Power(f)
     if R and R.FeedPower then R:FeedPower(f) end
 end
 
-local function Absorb(f) DF:UpdateAbsorb(f) end
-local function HealAbsorb(f) DF:UpdateHealAbsorb(f) end
-local function HealPrediction(f) DF:UpdateHealPrediction(f) end
+local function Absorb(f)
+    DF:UpdateAbsorb(f)
+    RingAmounts(f)
+end
+
+local function HealAbsorb(f)
+    DF:UpdateHealAbsorb(f)
+    RingAmounts(f)
+end
+
+local function HealPrediction(f)
+    DF:UpdateHealPrediction(f)
+    RingAmounts(f)
+end
 
 -- Every part's fade: oor*, fadeDead*. Ends in the unit frame's own parts
 -- (UF.OnElementAppearance).

@@ -350,8 +350,8 @@ local function PaintMockArc(c, i, ring, start, len, sec, value, color, db)
     a.track:SetMinMaxValues(0, 1)
     a.track:SetValue(1)
     a.track:SetStatusBarColor(R.MOCK_TRACK[1], R.MOCK_TRACK[2], R.MOCK_TRACK[3], R.MOCK_TRACK[4])
-    a.fill:SetMinMaxValues(0, 1)
-    a.fill:SetValue(value)
+    R.LayoutFillLayers(a.fill, c, ring, start, len, sec.reverse, sec.feather, db, sec.bar)
+    R.PutValues({ a.fill }, 0, 1, value)
     a.fill:SetStatusBarColor(color[1], color[2], color[3], 1)
     a.track:Show()
     a.fill:Show()
@@ -612,6 +612,82 @@ function R.ShapeArcBar(bar, center, outer, inner, start, len, reverse, feather)
 end
 
 -- ============================================================
+-- TEXTURE LAYERS (<bar>TextureLayersEnabled, <bar>Layer2* and 3*)
+-- On a bar (Frames/TextureLayers.lua) a clip frame anchored to the fill cuts the
+-- layers. A radial fill's rect never shrinks, so that can't cut anything here. Each
+-- layer is a radial bar of its own instead: the fill's arc and value, the layer's
+-- texture, colour and blend. A child of its fill, so it hides and range-fades with it.
+-- A layer's Tile and Tile Size are not carried over: what they do to a radial fill is
+-- unknown.
+-- fill.dfLayers  the layers showing, bottom first (values: R.PutValues)
+-- ============================================================
+R.LAYER_PREFIX = { HEALTH = "health", POWER = "resourceBar", SHIELD = "absorbBar",
+                   HEALABSORB = "healAbsorbBar", INCOMING = "healPrediction" }
+
+local function PaintLayer(layer, db)
+    layer:SetStatusBarColor(K.RGBA(db[layer.dfColorKey], 1, 1, 1, 1))
+    local tex = layer:GetStatusBarTexture()
+    if tex.SetBlendMode then tex:SetBlendMode(db[layer.dfBlendKey] or "BLEND") end
+end
+
+function R.LayoutFillLayers(fill, center, ring, start, len, reverse, feather, db, barName)
+    local keys = DF.TEXTURE_LAYER_KEYS and DF.TEXTURE_LAYER_KEYS[R.LAYER_PREFIX[barName]]
+    local on = keys and db[keys.on]
+    local pool, active = fill.dfLayerPool, {}
+    for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
+        local kn = keys and keys[n]
+        local layer = pool and pool[n]
+        if on and db[kn.enabled] and db[kn.texture] then
+            if not layer then
+                pool = pool or {}
+                fill.dfLayerPool = pool
+                layer = R.NewArcBar(fill)
+                pool[n] = layer
+            end
+            R.SetArcTexture(layer, DF:ResolveBarTexture(db[kn.texture], false, db[kn.mirror]))
+            R.ShapeArcBar(layer, center, ring.outer, ring.inner, start, len, reverse, feather)
+            layer:SetFrameLevel(fill:GetFrameLevel() + n - 1)
+            layer.dfColorKey, layer.dfBlendKey = kn.color, kn.blend
+            PaintLayer(layer, db)
+            layer:Show()
+            active[#active + 1] = layer
+        elseif layer then
+            layer:Hide()
+        end
+    end
+    fill.dfLayers = active
+end
+
+-- Value and range onto fills and their layers. Any of them can be secret: passed on unread.
+function R.PutValues(list, lo, hi, v)
+    if not list then return end
+    for i = 1, #list do
+        local bar = list[i]
+        if not K.IsNil(hi) then bar:SetMinMaxValues(lo, hi) end
+        if not K.IsNil(v) then bar:SetValue(v) end
+        local layers = bar.dfLayers
+        if layers then
+            for j = 1, #layers do
+                if not K.IsNil(hi) then layers[j]:SetMinMaxValues(lo, hi) end
+                if not K.IsNil(v) then layers[j]:SetValue(v) end
+            end
+        end
+    end
+end
+
+-- The layers' colours, without laying the rings out.
+function R:PaintLayers(f)
+    local c = f and f.dfUFRings
+    if not (c and c.arcs) then return end
+    local db = K.DB(f)
+    local function Paint(fill)
+        for _, layer in ipairs(fill.dfLayers or {}) do PaintLayer(layer, db) end
+    end
+    for _, arc in ipairs(c.arcs) do Paint(arc.fill) end
+    for _, bar in ipairs(c.overlays or {}) do Paint(bar) end
+end
+
+-- ============================================================
 -- THE ELEMENT
 -- f.dfUFRings          the container (centred on the frame, ringSize square)
 -- f.dfUFRingHealth     the health fills (written by R.HookHealth)
@@ -635,6 +711,19 @@ local function Each(list, fn)
     for i = 1, #list do fn(list[i]) end
 end
 
+-- Fills and their layers: what a layer shares with its fill. Its colour is its own.
+local function EachLayered(list, fn)
+    if not list then return end
+    for i = 1, #list do
+        local bar = list[i]
+        fn(bar)
+        local layers = bar.dfLayers
+        if layers then
+            for j = 1, #layers do fn(layers[j]) end
+        end
+    end
+end
+
 local function SetValueOn(bar, v, interp)
     if interp ~= nil then bar:SetValue(v, interp) else bar:SetValue(v) end
 end
@@ -648,10 +737,10 @@ function R.HookHealth(f)
     if not hb or not hooksecurefunc or f.dfUFRingHooked then return end
     f.dfUFRingHooked = true
     hooksecurefunc(hb, "SetMinMaxValues", function(_, lo, hi)
-        Each(f.dfUFRingHealth, function(b) b:SetMinMaxValues(lo, hi) end)
+        EachLayered(f.dfUFRingHealth, function(b) b:SetMinMaxValues(lo, hi) end)
     end)
     hooksecurefunc(hb, "SetValue", function(_, v, interp)
-        Each(f.dfUFRingHealth, function(b) SetValueOn(b, v, interp) end)
+        EachLayered(f.dfUFRingHealth, function(b) SetValueOn(b, v, interp) end)
     end)
     hooksecurefunc(hb, "SetStatusBarColor", function(_, r, g, b, a)
         Each(f.dfUFRingHealth, function(bar)
@@ -677,12 +766,12 @@ function R.HookHealthTexture(f)
     end)
     hooksecurefunc(tex, "SetAlpha", function(self, a)
         if f.dfUFRingHookedTex ~= self then return end
-        Each(f.dfUFRingHealth, function(bar) bar:GetStatusBarTexture():SetAlpha(a) end)
+        EachLayered(f.dfUFRingHealth, function(bar) bar:GetStatusBarTexture():SetAlpha(a) end)
     end)
     if tex.SetAlphaFromBoolean then
         hooksecurefunc(tex, "SetAlphaFromBoolean", function(self, flag, ifTrue, ifFalse)
             if f.dfUFRingHookedTex ~= self then return end
-            Each(f.dfUFRingHealth, function(bar)
+            EachLayered(f.dfUFRingHealth, function(bar)
                 local t = bar:GetStatusBarTexture()
                 if t.SetAlphaFromBoolean then t:SetAlphaFromBoolean(flag, ifTrue, ifFalse) end
             end)
@@ -700,12 +789,13 @@ function R.SyncHealth(f)
     local r, g, b
     if tex and tex.GetVertexColor then r, g, b = tex:GetVertexColor() end
     local a = tex and tex.GetAlpha and tex:GetAlpha()
-    for _, bar in ipairs(list) do
+    EachLayered(list, function(bar)
         if not K.IsNil(lo) and not K.IsNil(hi) then bar:SetMinMaxValues(lo, hi) end
         if not K.IsNil(v) then bar:SetValue(v) end
-        local t = bar:GetStatusBarTexture()
-        if not K.IsNil(r) then t:SetVertexColor(r, g, b) end
-        if not K.IsNil(a) then t:SetAlpha(a) end
+        if not K.IsNil(a) then bar:GetStatusBarTexture():SetAlpha(a) end
+    end)
+    for _, bar in ipairs(list) do
+        if not K.IsNil(r) then bar:GetStatusBarTexture():SetVertexColor(r, g, b) end
     end
 end
 
@@ -787,6 +877,7 @@ function R:Layout(f)
                 R.ShapeArcBar(arc.track, c, ring.outer, ring.inner, a, len, false, 0)
                 R.ShapeArcBar(arc.fill, c, ring.outer, ring.inner, a, len, sec.reverse, sec.feather)
                 arc.fill:SetFrameLevel(arc.track:GetFrameLevel() + 1)
+                R.LayoutFillLayers(arc.fill, c, ring, a, len, sec.reverse, sec.feather, db, sec.bar)
                 arc.sec = sec
                 arc.track:Show()
                 arc.fill:Show()
@@ -805,7 +896,9 @@ function R:Layout(f)
                             local reverse = sec.reverse and true or false
                             if on.farEnd then reverse = not reverse end
                             R.ShapeArcBar(bar, c, ring.outer, ring.inner, a, len, reverse, 0)
-                            bar:SetFrameLevel(arc.fill:GetFrameLevel() + n)
+                            -- Room above each fill for its two layers.
+                            bar:SetFrameLevel(arc.fill:GetFrameLevel() + n * 3)
+                            R.LayoutFillLayers(bar, c, ring, a, len, reverse, 0, db, on.bar)
                             bar:Show()
                             local onList = amounts[on.bar]
                             onList[#onList + 1] = bar
@@ -935,10 +1028,7 @@ function R:FeedAmounts(f)
     for bar, list in pairs(amounts) do
         if #list > 0 then
             local v, mx = ReadAmount(unit, bar, db)
-            for _, fill in ipairs(list) do
-                if not K.IsNil(mx) then fill:SetMinMaxValues(0, mx) end
-                if not K.IsNil(v) then fill:SetValue(v) end
-            end
+            R.PutValues(list, 0, mx, v)
         end
     end
 end
@@ -953,11 +1043,8 @@ function R:FeedPower(f)
     local cur, mx = UnitPower(unit), UnitPowerMax(unit)
     local r, g, b = 0, 0.5, 1
     if DF.GetResourceBarColor then r, g, b = DF:GetResourceBarColor(unit, db) end
-    for _, bar in ipairs(list) do
-        bar:SetMinMaxValues(0, mx)
-        bar:SetValue(cur)
-        bar:SetStatusBarColor(r, g, b, 1)
-    end
+    R.PutValues(list, 0, mx, cur)
+    for _, bar in ipairs(list) do bar:SetStatusBarColor(r, g, b, 1) end
 end
 
 R.POWER_EVENTS = { UNIT_POWER_UPDATE = true, UNIT_MAXPOWER = true, UNIT_DISPLAYPOWER = true }
@@ -999,18 +1086,12 @@ function R:Preview(f)
             r, g, b = DF:GetResourceBarColor(nil, db, type(t) == "table" and t.class or nil, "MANA")
         end
     end
-    for _, bar in ipairs(list) do
-        bar:SetMinMaxValues(0, 1)
-        bar:SetValue(pct)
-        bar:SetStatusBarColor(r, g, b, 1)
-    end
+    R.PutValues(list, 0, 1, pct)
+    for _, bar in ipairs(list) do bar:SetStatusBarColor(r, g, b, 1) end
     for name, bars in pairs(f.dfUFRingAmounts or {}) do
         local amount = R.AMOUNTS[name]
         local share = (type(t) == "table" and db[amount.testShow] ~= false) and tonumber(t[amount.testValue]) or 0
-        for _, bar in ipairs(bars) do
-            bar:SetMinMaxValues(0, 1)
-            bar:SetValue(share)
-        end
+        R.PutValues(bars, 0, 1, share)
     end
     R.SyncHealth(f)
 end

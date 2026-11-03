@@ -77,6 +77,7 @@ local function Make(kind, parent)
     function f:GetVertexColor() local v = rawget(self, "_vertex") or { 1, 1, 1 }; return v[1], v[2], v[3] end
     function f:SetAlphaFromBoolean(flag, a, b) self._alphaFrom = { flag, a, b } end
     function f:SetDesaturated() end
+    function f:SetBlendMode(m) self._blend = m end
     if kind == "StatusBar" then
         f._tex = Make("Texture", f)
         f._min, f._max, f._value = 0, 1, 0
@@ -501,6 +502,90 @@ do
     eff.rings = saved
     eff.absorbBarTexture, eff.healAbsorbBarTexture, eff.healPredictionTexture = nil, nil, nil
     eff.absorbBarColor, eff.healPredictionShowMode = nil, nil
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+end
+
+print("-- Rings: texture layers")
+do
+    local function LayerKeys(prefix)
+        local k = { on = prefix .. "TextureLayersEnabled" }
+        for _, n in ipairs({ 2, 3 }) do
+            local p = prefix .. "Layer" .. n
+            k[n] = { enabled = p .. "Enabled", texture = p .. "Texture", color = p .. "Color",
+                     blend = p .. "BlendMode", mirror = p .. "TileMirror" }
+        end
+        return k
+    end
+    DF.TEXTURE_LAYER_EXTRA = { 2, 3 }
+    DF.TEXTURE_LAYER_KEYS = { health = LayerKeys("health"), resourceBar = LayerKeys("resourceBar"),
+                              absorbBar = LayerKeys("absorbBar"), healAbsorbBar = LayerKeys("healAbsorbBar"),
+                              healPrediction = LayerKeys("healPrediction") }
+    function DF:ResolveBarTexture(path) return path end
+
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    local hf = F.dfUFRingHealth[1]
+    eq(#hf.dfLayers, 0, "switch off: no layers")
+
+    eff.healthLayer2Enabled, eff.healthLayer2Texture = true, "Stripes"
+    eff.healthLayer2Color = { r = 0.1, g = 0.2, b = 0.3, a = 0.4 }
+    eff.healthLayer2BlendMode = "ADD"
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    eq(#hf.dfLayers, 0, "a ticked layer behind the switch stays off")
+
+    eff.healthTextureLayersEnabled = true
+    F.dfDB = UF:FrameDB("target")
+    F.healthBar:SetMinMaxValues(0, 100)
+    F.healthBar:SetValue(62)
+    R:Layout(F)
+    eq(#hf.dfLayers, 1, "switch on: one layer")
+    local layer = hf.dfLayers[1]
+    eq(layer._path, "Stripes", "the layer's texture")
+    eq(layer._barColor[1], 0.1, "the layer's colour")
+    eq(layer._barColor[4], 0.4, "...and alpha")
+    eq(layer:GetStatusBarTexture()._blend, "ADD", "the layer's blend")
+    eq(layer._w, hf._w, "the fill's size")
+    eq(#layer:GetStatusBarTexture()._masks, 2, "cut to the ring")
+    local lc, fc = layer:GetStatusBarTexture()._calls, hf:GetStatusBarTexture()._calls
+    eq(lc.SetRadialProgressBarStartOffset, fc.SetRadialProgressBarStartOffset, "the fill's start")
+    eq(lc.SetRadialProgressBarEndOffset, fc.SetRadialProgressBarEndOffset, "the fill's end")
+    eq(layer:GetFrameLevel(), hf:GetFrameLevel() + 1, "above the fill")
+    check(F.dfUFRingAmounts.SHIELD[1]:GetFrameLevel() > layer:GetFrameLevel(), "under what sits on the health ring")
+    eq(layer._value, 62, "a new layer starts from the health value")
+
+    local sv2, smax2 = Secret("hp2"), Secret("max2")
+    F.healthBar:SetMinMaxValues(0, smax2)
+    F.healthBar:SetValue(sv2)
+    check(layer._value == sv2 and layer._max == smax2, "health writes reach the layer, secrets unread")
+    F.healthBar:GetStatusBarTexture():SetAlpha(0.3)
+    eq(layer:GetStatusBarTexture()._alpha, 0.3, "the health fill's fade too")
+    F.healthBar:GetStatusBarTexture():SetVertexColor(0.9, 0.9, 0.9)
+    eq(layer:GetStatusBarTexture()._vertex, nil, "...but not its colour")
+    F.healthBar:GetStatusBarTexture():SetAlpha(1)
+    F.healthBar:SetMinMaxValues(0, 100)
+    F.healthBar:SetValue(62)
+
+    eff.healthLayer2Color = { r = 0.7, g = 0.2, b = 0.3, a = 0.4 }
+    F.dfDB = UF:FrameDB("target")
+    R:PaintLayers(F)
+    eq(layer._barColor[1], 0.7, "a colour drag repaints the layer")
+
+    eff.resourceBarTextureLayersEnabled, eff.resourceBarLayer3Enabled, eff.resourceBarLayer3Texture = true, true, "PowerStripes"
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    local pf = F.dfUFRingPower[1]
+    eq(pf.dfLayers[1]._path, "PowerStripes", "a power fill has its own layers")
+    eq(pf.dfLayers[1]._value, pf._value, "...with the power value")
+
+    eff.healthTextureLayersEnabled, eff.resourceBarTextureLayersEnabled = nil, nil
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    eq(#hf.dfLayers, 0, "switched off again: no layers")
+    check(not layer._shown, "...and the bar hides")
+    eff.healthLayer2Enabled, eff.healthLayer2Texture, eff.healthLayer2Color, eff.healthLayer2BlendMode = nil, nil, nil, nil
+    eff.resourceBarLayer3Enabled, eff.resourceBarLayer3Texture = nil, nil
     F.dfDB = UF:FrameDB("target")
     R:Layout(F)
 end
