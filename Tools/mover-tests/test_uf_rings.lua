@@ -20,7 +20,7 @@ local G, G_NAMES = {}, { "DandersFrames", "CreateFrame", "issecretvalue", "LibSt
                      "UnitExists", "UnitPower", "UnitPowerMax", "UnitClass", "UnitIsPlayer", "UnitIsVisible",
                      "UnitIsDeadOrGhost", "GetClassAtlas", "RAID_CLASS_COLORS", "PowerBarColor",
                      "GetSpecialization", "GetSpecializationInfo", "GetShapeshiftFormID", "UnitAffectingCombat",
-                     "CreateUnitHealPredictionCalculator", "UnitGetDetailedHealPrediction" }
+                     "CreateUnitHealPredictionCalculator", "UnitGetDetailedHealPrediction", "C_Timer" }
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 local ENUM_HELD = { StatusBarRenderMode = Enum.StatusBarRenderMode, PowerType = Enum.PowerType }
 
@@ -95,7 +95,10 @@ local function Make(kind, parent)
         function f:GetStatusBarTexture() return self._tex end
         function f:SetMinMaxValues(lo, hi) self._min, self._max = lo, hi end
         function f:GetMinMaxValues() return self._min, self._max end
-        function f:SetValue(v, interp) self._value, self._interp = v, interp end
+        function f:SetValue(v, interp)
+            self._value, self._interp = v, interp
+            self._tex._coord = nil
+        end
         function f:GetValue() return self._value end
         function f:SetStatusBarColor(r, g, b, a) self._barColor = { r, g, b, a } end
     end
@@ -643,7 +646,26 @@ do
     local outer = s._w
     check(near(tex._coord[2], outer / 8) and near(tex._coord[4], outer / 8), "Tile Size: repeats measured on the ring")
     R:Layout(F)
-    check(tex._coord and near(tex._coord[2], outer / 8), "...and they survive the next layout's offsets")
+    check(tex._coord and near(tex._coord[2], outer / 8), "...and they survive the next layout")
+    s._value = nil
+    tex._coord = nil
+    R:FeedAmounts(F)
+    check(tex._coord and near(tex._coord[2], outer / 8), "...and a value write")
+    local level = tex._calls.SetRadialProgressBarStartOffset
+    tex._calls.SetRadialProgressBarStartOffset = "untouched"
+    R:Layout(F)
+    eq(tex._calls.SetRadialProgressBarStartOffset, "untouched", "a layout with nothing changed leaves the arc alone")
+    tex._calls.SetRadialProgressBarStartOffset = level
+    tex._coord = nil
+    local later
+    C_Timer = { After = function(_, fn) later = fn end }
+    F.dfUFRings.dfHoldQueued = nil
+    R:Layout(F)
+    tex._coord = nil
+    check(later ~= nil, "a layout queues a re-apply for the next frame")
+    later()
+    check(tex._coord and near(tex._coord[2], outer / 8), "...which puts them back")
+    C_Timer = nil
     eff.absorbBarTileSize = 16
     F.dfDB = UF:FrameDB("target")
     R:Layout(F)

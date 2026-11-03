@@ -60,7 +60,8 @@ local addonName, UF = ...
 local DF = DandersFrames
 if not DF then return end
 
-local ipairs, type, tonumber, floor = ipairs, type, tonumber, math.floor
+local ipairs, type, tonumber, tostring, floor = ipairs, type, tonumber, tostring, math.floor
+local format = string.format
 
 local R = { NAME = "Rings" }
 UF.Rings = R
@@ -586,7 +587,7 @@ end
 function R.SetArcTexture(bar, path)
     if bar.dfArcTexture == path then return end
     bar.dfArcTexture = path
-    bar.dfArcTileKey = nil
+    bar.dfArcTileKey, bar.dfArcShape = nil, nil
     local old = bar:GetStatusBarTexture()
     if DF.SafeSetStatusBarTexture then
         DF:SafeSetStatusBarTexture(bar, path)
@@ -605,10 +606,10 @@ end
 --   override   the Tile setting (nil / "AUTO": the texture's own)
 --   sizeValue  the Tile Size setting. allowPreset: Auto uses the texture's preset size
 --              (the base of health and power has no Tile Size control, so never there)
--- Call before R.ShapeArcBar, which applies the repeats (bar.dfArcCoordU, V) last: the
--- /dfring test held them through a value write but set no radial offsets, while real
--- rings set offsets after them and ignored Tile Size (the offsets are the suspect,
--- unconfirmed).
+-- Call before R.ShapeArcBar. The repeats (bar.dfArcCoordU, V) do not stay on a real ring:
+-- read back in game, they were gone once a drag ended, with nothing in Lua clearing them.
+-- What clears them isn't known yet (/dfring's Tile Size panel tests it), so R.HoldCoords
+-- puts them back after every value, after a layout, and again the frame after one.
 function R.SetArcTile(bar, override, sizeValue, ring, allowPreset)
     if not (DF.ResolveTileMode and DF.ApplyBarTextureTiling) then return end
     if override == "AUTO" then override = nil end
@@ -629,6 +630,7 @@ function R.SetArcTile(bar, override, sizeValue, ring, allowPreset)
     local key = tostring(override) .. ":" .. tostring(mode) .. ":" .. (custom and unit or 0) .. ":" .. ring.outer
     if bar.dfArcTileKey == key then return end
     bar.dfArcTileKey = key
+    bar.dfArcShape = nil
     bar.dfTileOverride = override
     local tex = bar:GetStatusBarTexture()
     if custom then
@@ -655,25 +657,39 @@ function R.SetFillTexture(bar, db, sec, ring)
 end
 
 -- Size `bar` to the ring (diameters) on `center`, and draw the arc start..start+len.
+-- Only what changed: a drag lays the rings out every frame, and a bar left alone is one
+-- less thing that can drop its repeats.
 function R.ShapeArcBar(bar, center, outer, inner, start, len, reverse, feather)
-    bar:ClearAllPoints()
-    bar:SetPoint("CENTER", center, "CENTER", 0, 0)
-    bar:SetSize(outer, outer)
-    bar.dfOuterMask:ClearAllPoints()
-    bar.dfOuterMask:SetPoint("CENTER", bar, "CENTER", 0, 0)
-    bar.dfOuterMask:SetSize(outer, outer)
-    bar.dfInnerMask:ClearAllPoints()
-    bar.dfInnerMask:SetPoint("CENTER", bar, "CENTER", 0, 0)
     -- A ring as thick as its radius has no hole: a 0-size mask would cut nothing.
     local hole = inner > 0 and inner or 0.01
-    bar.dfInnerMask:SetSize(hole, hole)
-    local tex = bar:GetStatusBarTexture()
     local s, e = R.Offsets(start, len, reverse)
-    if tex.SetRadialProgressBarStartOffset then tex:SetRadialProgressBarStartOffset(s) end
-    if tex.SetRadialProgressBarEndOffset then tex:SetRadialProgressBarEndOffset(e) end
-    if tex.SetRadialProgressBarReverse then tex:SetRadialProgressBarReverse(reverse and true or false) end
-    if tex.SetRadialProgressBarFeather then tex:SetRadialProgressBarFeather(tonumber(feather) or 0) end
-    if bar.dfArcCoordU then tex:SetTexCoord(0, bar.dfArcCoordU, 0, bar.dfArcCoordV) end
+    feather = tonumber(feather) or 0
+    reverse = reverse and true or false
+    local shape = format("%s:%s:%s:%s:%s:%s:%s", tostring(center), outer, hole, s, e, tostring(reverse), feather)
+    if bar.dfArcShape ~= shape then
+        bar.dfArcShape = shape
+        bar:ClearAllPoints()
+        bar:SetPoint("CENTER", center, "CENTER", 0, 0)
+        bar:SetSize(outer, outer)
+        bar.dfOuterMask:ClearAllPoints()
+        bar.dfOuterMask:SetPoint("CENTER", bar, "CENTER", 0, 0)
+        bar.dfOuterMask:SetSize(outer, outer)
+        bar.dfInnerMask:ClearAllPoints()
+        bar.dfInnerMask:SetPoint("CENTER", bar, "CENTER", 0, 0)
+        bar.dfInnerMask:SetSize(hole, hole)
+        local tex = bar:GetStatusBarTexture()
+        if tex.SetRadialProgressBarStartOffset then tex:SetRadialProgressBarStartOffset(s) end
+        if tex.SetRadialProgressBarEndOffset then tex:SetRadialProgressBarEndOffset(e) end
+        if tex.SetRadialProgressBarReverse then tex:SetRadialProgressBarReverse(reverse) end
+        if tex.SetRadialProgressBarFeather then tex:SetRadialProgressBarFeather(feather) end
+    end
+    R.HoldCoords(bar)
+end
+
+-- Put a bar's Tile Size repeats back (see R.SetArcTile). Nothing to do on most bars.
+function R.HoldCoords(bar)
+    local u = bar.dfArcCoordU
+    if u then bar:GetStatusBarTexture():SetTexCoord(0, u, 0, bar.dfArcCoordV) end
 end
 
 -- ============================================================
@@ -735,11 +751,13 @@ function R.PutValues(list, lo, hi, v)
         local bar = list[i]
         if not K.IsNil(hi) then bar:SetMinMaxValues(lo, hi) end
         if not K.IsNil(v) then bar:SetValue(v) end
+        R.HoldCoords(bar)
         local layers = bar.dfLayers
         if layers then
             for j = 1, #layers do
                 if not K.IsNil(hi) then layers[j]:SetMinMaxValues(lo, hi) end
                 if not K.IsNil(v) then layers[j]:SetValue(v) end
+                R.HoldCoords(layers[j])
             end
         end
     end
@@ -784,6 +802,7 @@ end
 
 local function SetValueOn(bar, v, interp)
     if interp ~= nil then bar:SetValue(v, interp) else bar:SetValue(v) end
+    R.HoldCoords(bar)
 end
 
 -- Every write DandersFrames makes to the frame's health bar and its fill texture
@@ -972,7 +991,7 @@ function R:Layout(f)
     end
     for i = overlays + 1, #c.overlays do c.overlays[i]:Hide() end
     f.dfUFRingHealth, f.dfUFRingPower, f.dfUFRingAmounts = health, power, amounts
-    c.used = used
+    c.used, c.overlaysUsed = used, overlays
     R:PaintTracks(f)
     R:PaintAmounts(f)
     c:Show()
@@ -982,6 +1001,28 @@ function R:Layout(f)
         R:FeedAmounts(f)
     end
     R:ApplyRange(f)
+    R:HoldCoordsNextFrame(f)
+end
+
+-- Every bar drawing on this frame, layers too.
+function R.EachFill(c, fn)
+    local function One(bar)
+        fn(bar)
+        for _, layer in ipairs(bar.dfLayers or {}) do fn(layer) end
+    end
+    for i = 1, c.used or 0 do One(c.arcs[i].fill) end
+    for i = 1, c.overlaysUsed or 0 do One(c.overlays[i]) end
+end
+
+-- Once per rendered frame, however many layouts ran in it.
+function R:HoldCoordsNextFrame(f)
+    local c = f.dfUFRings
+    if c.dfHoldQueued or not (C_Timer and C_Timer.After) then return end
+    c.dfHoldQueued = true
+    C_Timer.After(0, function()
+        c.dfHoldQueued = nil
+        R.EachFill(c, R.HoldCoords)
+    end)
 end
 
 -- The tracks' colours, without laying the rings out.

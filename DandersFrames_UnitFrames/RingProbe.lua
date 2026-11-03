@@ -427,8 +427,11 @@ end
 --   Set before value / Set after value / Set every feed   the three possible timings
 --   Tile flags       no texcoords: the image repeating at its own file size
 --   Zoomed in        texcoords below 1, no repeat needed: do they do anything at all?
--- The line under the panel reads the coordinates back off two of the bars. 8 means the
--- bar kept them; 1 means it reset them.
+--   Offsets after    the repeats, then radial offsets on top, as a real ring's layout did
+--   Re-anchored      the repeats, then the bar re-anchored and re-sized
+--   Live value       the repeats once, then real health writes with no re-apply
+-- The lines under the panel read the coordinates back off the bars, on every update. 8
+-- means the bar kept them; 1 means it reset them.
 -- ============================================================
 local TILE_ART = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes"
 local TILE_REPEATS = 8
@@ -442,7 +445,7 @@ end
 local function BuildTileTests(above)
     local size, gap, thick = 86, 6, 14
     local f = CreateFrame("Frame", nil, above, "BackdropTemplate")
-    f:SetSize(3 * size + 2 * gap + 16, 2 * (size + 14 + gap) + 52)
+    f:SetSize(3 * size + 2 * gap + 16, 3 * (size + 14 + gap) + 66)
     f:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -8)
     if f.SetBackdrop then
         f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
@@ -500,6 +503,28 @@ local function BuildTileTests(above)
         { "Zoomed in", function(b, s)
             Held(b, s, nil, function(t) Coords(t, 0.25) end)
         end },
+        { "Offsets after", function(b, s)
+            local _, tex = Held(b, s, function(t) Coords(t) end)
+            try("tile start", tex.SetRadialProgressBarStartOffset, tex, 0)
+            try("tile end", tex.SetRadialProgressBarEndOffset, tex, 0)
+            try("tile reverse", tex.SetRadialProgressBarReverse, tex, false)
+            try("tile feather", tex.SetRadialProgressBarFeather, tex, 0)
+            P.tileOffsets = tex
+        end },
+        { "Re-anchored", function(b, s)
+            local bar, tex = Held(b, s, function(t) Coords(t) end)
+            bar:ClearAllPoints()
+            bar:SetPoint("CENTER")
+            bar:SetSize(s, s)
+            P.tileAnchored = tex
+        end },
+        { "Live value", function(b, s)
+            SeeThroughRing(b, s, thick, P.bars, COLOR_HEALTH, nil, TILE_ART)
+            local tex = P.bars[#P.bars]:GetStatusBarTexture()
+            try("tile wrap", tex.SetTexture, tex, TILE_ART, "REPEAT", "REPEAT")
+            Coords(tex)
+            P.tileValue = tex
+        end },
     }
     for i, t in ipairs(tests) do
         local holder = AbsorbTest(f, size, t[1], t[2])
@@ -507,6 +532,7 @@ local function BuildTileTests(above)
     end
     P.tileRead = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     P.tileRead:SetPoint("BOTTOMLEFT", 10, 8)
+    P.tileRead:SetJustifyH("LEFT")
 end
 
 local function FeedTile(unit)
@@ -518,8 +544,8 @@ local function FeedTile(unit)
         local tex = bar:GetStatusBarTexture()
         try("tile coords", tex.SetTexCoord, tex, 0, TILE_REPEATS, 0, TILE_REPEATS)
     end
-    P.tileRead:SetText(format("Read back (8 = kept, 1 = reset): before %s, after %s",
-        CoordOf(P.tileBefore), CoordOf(P.tileAfter)))
+    P.tileRead:SetText(format("Read back (8 = kept, 1 = reset): before %s, after %s\noffsets %s, re-anchored %s, live value %s",
+        CoordOf(P.tileBefore), CoordOf(P.tileAfter), CoordOf(P.tileOffsets), CoordOf(P.tileAnchored), CoordOf(P.tileValue)))
 end
 
 local function TransparentRing(panel)
