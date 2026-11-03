@@ -12,11 +12,12 @@ local function check(ok, name)
     if ok then passed = passed + 1 else failed = failed + 1; print("FAIL: " .. name) end
 end
 
-local G_NAMES = { "C_AddOns", "C_Timer", "CreateFrame", "DandersFramesDB_v2", "InCombatLockdown", "ReloadUI" }
+local G_NAMES = { "C_AddOns", "C_Timer", "CreateFrame", "DandersFramesDB_v2", "ElvUI", "InCombatLockdown", "ReloadUI" }
 local G = {}
 for _, k in ipairs(G_NAMES) do G[k] = _G[k] end
 
 local exists, loaded, enabled, enabledCalls, reloads, combat, popupBusy, timers
+local others = {}
 local function Reset()
     exists, loaded, enabled, enabledCalls, reloads, combat, popupBusy = true, false, 0, 0, 0, false, false
     timers = {}
@@ -25,7 +26,10 @@ end
 
 C_AddOns = {
     DoesAddOnExist = function() return exists end,
-    IsAddOnLoaded = function() return loaded end,
+    IsAddOnLoaded = function(name)
+        if name == "DandersFrames_UnitFrames" then return loaded end
+        return others[name] or false
+    end,
     GetAddOnEnableState = function() return enabled end,
     EnableAddOn = function(name)
         if name == "DandersFrames_UnitFrames" then enabledCalls = enabledCalls + 1 end
@@ -99,6 +103,28 @@ Reset(); shown = nil; popupBusy = true
 Invite.Show(Invite.MAX_TRIES)
 check(#timers == 0, "gives up after a while")
 check(DandersFramesDB_v2.unitFramesInviteShown == nil, "...and asks at the next login")
+
+print("-- Unit frames invite: another addon draws these frames")
+Reset(); shown = nil; ElvUI = nil
+check(Invite.OtherUnitFrames() == nil, "none running")
+check(Invite.OtherUnitFramesWarning() == "", "no warning")
+Invite.Show(0)
+local plain = shown.message
+
+others = { ShadowedUnitFrames = true }
+Reset(); shown = nil
+check(Invite.OtherUnitFrames() == "Shadowed Unit Frames", "named")
+Invite.Show(0)
+check(shown.message ~= plain and shown.message:find("Shadowed Unit Frames", 1, true), "the popup says so")
+
+others = { ElvUI = true }
+ElvUI = { { private = { unitframe = { enable = false } } } }
+check(Invite.OtherUnitFrames() == nil, "ElvUI with its unit frames off: no warning")
+ElvUI[1].private.unitframe.enable = true
+check(Invite.OtherUnitFrames() == "ElvUI", "ElvUI with them on: warned")
+ElvUI = nil
+check(Invite.OtherUnitFrames() == "ElvUI", "ElvUI, can't tell: warned")
+others = {}
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end
 print(passed .. " passed, " .. failed .. " failed")

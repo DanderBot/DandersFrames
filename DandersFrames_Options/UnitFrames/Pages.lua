@@ -172,7 +172,8 @@ function UFO.SetEnabled(on, _, onDone)
     end
     if onDone then onDone() end
     if (on and true or false) ~= UFO.IsLoaded() then
-        UFO.PromptReload(L["Turning Unit Frames on or off requires a UI reload to take effect.\n\nReload now?"])
+        local warning = on and DF.UnitFramesInvite and DF.UnitFramesInvite.OtherUnitFramesWarning() or ""
+        UFO.PromptReload(L["Turning Unit Frames on or off requires a UI reload to take effect.\n\nReload now?"] .. warning)
     end
 end
 

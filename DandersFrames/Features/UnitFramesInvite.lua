@@ -10,12 +10,54 @@ local addonName, DF = ...
 local Invite = {}
 DF.UnitFramesInvite = Invite
 
+local format, ipairs, type = string.format, ipairs, type
+
 Invite.ADDON = "DandersFrames_UnitFrames"
 Invite.KEY = "unitFramesInviteShown"
 -- The popup is a singleton and may be busy (the changelog, a wizard): wait for it, and
 -- for combat to end, then give up until the next login.
 Invite.RETRY_SECONDS = 2
 Invite.MAX_TRIES = 30
+
+-- Other addons that draw these frames. Nothing stops both running, so this only warns,
+-- at the two places someone chooses to turn the module on.
+Invite.OTHER_ADDONS = {
+    { addon = "ElvUI", label = "ElvUI" },
+    { addon = "ShadowedUnitFrames", label = "Shadowed Unit Frames" },
+    { addon = "PitBull4", label = "PitBull 4" },
+    { addon = "UnhaltedUnitFrames", label = "Unhalted Unit Frames" },
+    { addon = "MidnightSimpleUnitFrames", label = "Midnight Simple Unit Frames" },
+    { addon = "EllesmereUIUnitFrames", label = "EllesmereUI Unit Frames" },
+}
+
+-- ElvUI can have its unit frames turned off.
+local function ElvUIDrawsUnitFrames()
+    local E = type(ElvUI) == "table" and ElvUI[1]
+    local private = type(E) == "table" and E.private
+    local unitframe = type(private) == "table" and private.unitframe
+    if type(unitframe) ~= "table" then return true end
+    return unitframe.enable ~= false
+end
+
+-- The name of a loaded addon that also draws unit frames, or nil.
+function Invite.OtherUnitFrames()
+    local A = C_AddOns
+    if not (A and A.IsAddOnLoaded) then return nil end
+    for _, other in ipairs(Invite.OTHER_ADDONS) do
+        if A.IsAddOnLoaded(other.addon)
+            and (other.addon ~= "ElvUI" or ElvUIDrawsUnitFrames()) then
+            return other.label
+        end
+    end
+    return nil
+end
+
+-- The warning line, ready to add to a message, or "".
+function Invite.OtherUnitFramesWarning()
+    local other = Invite.OtherUnitFrames()
+    if not other then return "" end
+    return "\n\n" .. format(DF.L["You're using %s. Running both may show two sets of frames, so turn one off."], other)
+end
 
 function Invite.Accept()
     local A = C_AddOns
@@ -49,7 +91,8 @@ function Invite.Show(tries)
     local L = DF.L
     DF:ShowPopupAlert({
         title = L["Unit Frames"],
-        message = L["DandersFrames now has Unit Frames: player, target, focus, pet and boss frames.\n\nWould you like to try them? Yes turns them on and reloads your UI. You can turn them on or off any time from the Modules page."],
+        message = L["DandersFrames now has Unit Frames: player, target, focus, pet and boss frames.\n\nWould you like to try them? Yes turns them on and reloads your UI. You can turn them on or off any time from the Modules page."]
+            .. Invite.OtherUnitFramesWarning(),
         buttons = {
             { label = L["Yes"], onClick = Invite.Accept },
             { label = L["No"] },
