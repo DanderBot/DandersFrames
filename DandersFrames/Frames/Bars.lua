@@ -838,6 +838,14 @@ function DF:UpdateAbsorb(frame, testIndex)
     if not frame.healthBar then return end
     if testFrameNeedsData(frame, testIndex) then return end
 
+    -- A unit frame with no shield settings of its own (DandersFrames_UnitFrames/Rings.lua).
+    if frame.dfNoShieldBar then
+        if frame.dfAbsorbBar then frame.dfAbsorbBar:Hide() end
+        if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
+        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
+        return
+    end
+
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
     if DF:MemTestDisabled("enableAbsorbs") and not DF:FrameInTestScope(frame, "any") then
         if frame.absorbBar then frame.absorbBar:Hide() end
@@ -1942,6 +1950,13 @@ end
 function DF:UpdateHealAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
+
+    -- A unit frame with no heal absorb settings of its own (DandersFrames_UnitFrames/Rings.lua).
+    if frame.dfNoHealAbsorbBar then
+        if frame.dfHealAbsorbBar then frame.dfHealAbsorbBar:Hide() end
+        return
+    end
+
     -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
     if DF:FrameInTestScope(frame, "any") and testIndex == nil and frame.dfIsTestFrame then return end
     

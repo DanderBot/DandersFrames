@@ -86,6 +86,20 @@ R.AMOUNTS = {
     INCOMING = { texture = "healPredictionTexture", background = "healPredictionBackgroundColor", blend = "healPredictionBlendMode",
                  testValue = "healPredictionPercent", testShow = "testShowHealPrediction" },
 }
+-- The units with a settings card for each (DandersFrames_Options/UnitFrames/PageData.lua:
+-- keep the two the same). A unit with no card draws no such bar, in either style: it
+-- would be showing party settings nobody can reach from its pages.
+R.AMOUNT_UNITS = {
+    SHIELD = { player = true, target = true, focus = true, pet = true, boss = true },
+    HEALABSORB = { player = true, target = true, focus = true },
+    INCOMING = { player = true, target = true, focus = true, pet = true },
+}
+
+function R.UnitHasAmount(unit, bar)
+    local units = R.AMOUNT_UNITS[bar]
+    return (units and units[unit]) and true or false
+end
+
 -- Drawn over each health section, bottom layer first. A far-end bar fills the other
 -- way from the health fill, towards it.
 R.ON_HEALTH = {
@@ -771,8 +785,15 @@ end
 -- f.dfUFRingAmounts    { SHIELD = bars, HEALABSORB = bars, INCOMING = bars }
 -- f.dfUFRingGeom       the last geometry (Text Designer's ring anchors read it)
 -- ============================================================
+-- Read by DandersFrames' own absorb bars, in BARS style.
+local function StampAmounts(f)
+    f.dfNoShieldBar = not R.UnitHasAmount(f.dfUFUnit, "SHIELD")
+    f.dfNoHealAbsorbBar = not R.UnitHasAmount(f.dfUFUnit, "HEALABSORB")
+end
+
 function R:Attach(f)
     if not f or f.dfUFRings then return end
+    StampAmounts(f)
     local c = CreateFrame("Frame", nil, f)
     c:Hide()
     c.arcs = {}
@@ -927,6 +948,8 @@ function R:Layout(f)
     if not c then return end
     local db = K.DB(f)
     local on = R.IsRing(db)
+    local unit = f.dfUFUnit
+    StampAmounts(f)
     R.HideBars(f, on)
     if not on then
         c:Hide()
@@ -947,8 +970,9 @@ function R:Layout(f)
     local amounts = { SHIELD = {}, HEALABSORB = {}, INCOMING = {} }
     for _, ring in ipairs(geo.rings) do
         for _, sec in ipairs(ring.sections) do
-            -- Class power draws its own pips into the ring (ClassPower.lua).
-            if sec.bar ~= "CLASSPOWER" then
+            -- Class power draws its own pips into the ring (ClassPower.lua). A bar this
+            -- unit has no settings for leaves its part of the ring empty.
+            if sec.bar ~= "CLASSPOWER" and (not R.AMOUNTS[sec.bar] or R.UnitHasAmount(unit, sec.bar)) then
                 used = used + 1
                 local arc = AcquireArc(c, used)
                 local a, len = R.Arc(sec)
@@ -969,7 +993,7 @@ function R:Layout(f)
                 else
                     health[#health + 1] = arc.fill
                     for n, on in ipairs(R.ON_HEALTH) do
-                        if db[on.key] ~= false then
+                        if db[on.key] ~= false and R.UnitHasAmount(unit, on.bar) then
                             overlays = overlays + 1
                             local bar = AcquireOverlay(c, overlays)
                             R.SetFillTexture(bar, db, on, ring)

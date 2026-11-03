@@ -482,6 +482,7 @@ local PER_UNIT = {
     },
     targettarget = {
         frameWidth = 110, frameHeight = 24,
+        healPredictionEnabled = false,      -- no Heal Prediction page (Rings.lua R.AMOUNT_UNITS)
         healthColorMode = "CLASS_REACTION",
         resourceBarEnabled = false,
         showBuffs = false, showDebuffs = false,
@@ -523,6 +524,7 @@ local PER_UNIT = {
     -- keeps it clear if the portrait is moved to the right.
     focustarget = {
         frameWidth = 110, frameHeight = 24,
+        healPredictionEnabled = false,
         healthColorMode = "CLASS_REACTION",
         resourceBarEnabled = false,
         showBuffs = false, showDebuffs = false,
@@ -553,6 +555,7 @@ local PER_UNIT = {
     },
     boss = {
         frameWidth = 180, frameHeight = 40,
+        healPredictionEnabled = false,
         healthColorMode = "CLASS_REACTION",
         resourceBarEnabled = true, resourceBarHeight = 4,
         showBuffs = false,

@@ -1951,6 +1951,25 @@ function UFO.RingBarOptions()
              _order = { "HEALTH", "POWER", "CLASSPOWER", "SHIELD", "HEALABSORB", "INCOMING" } }
 end
 
+-- Does this unit have settings for a shield, heal absorb or heal prediction bar?
+function UFO.RingUnitHasAmount(unit, bar)
+    local R = DF.UnitFrames and DF.UnitFrames.Rings
+    return not R or R.UnitHasAmount(unit, bar)
+end
+
+-- What a unit's Bar dropdown offers: not a bar it has no settings for. The name stays in
+-- the table, so a section already holding one (a link) can still say what it is.
+function UFO.RingBarOptionsFor(unit)
+    local o = UFO.RingBarOptions()
+    local order = {}
+    for _, bar in ipairs(o._order) do
+        local amount = bar == "SHIELD" or bar == "HEALABSORB" or bar == "INCOMING"
+        if not amount or UFO.RingUnitHasAmount(unit, bar) then order[#order + 1] = bar end
+    end
+    o._order = order
+    return o
+end
+
 function UFO.RingCoverageOptions()
     return { FULL = L["Full"], HALF = L["Half"], QUARTER = L["Quarter"], _order = { "FULL", "HALF", "QUARTER" } }
 end
@@ -2252,17 +2271,24 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
     Close(band)
 
     -- Shields and heals over the health fills, whatever rings of their own they have.
-    band = Open(L["On the Health Ring"], "uf_rings_on_health", "both", nil, "layout")
-    w = band:AddWidget(GUI:CreateLabel(self.child,
-        L["A ring can't place these at the end of the health fill. Shields and heal prediction fill back from the far end, heal absorbs from the start. Turn one off here if it has its own ring."], 250), 58)
-    w.fullRow = true
-    for _, row in ipairs({ { L["Absorb Shield"], "ringShowShieldOnHealth" },
-                           { L["Heal Absorb"], "ringShowHealAbsorbOnHealth" },
-                           { L["Heal Prediction"], "ringShowIncomingOnHealth" } }) do
-        w = band:AddWidget(GUI:CreateCheckbox(self.child, row[1], db, row[2], changed), 30)
-        w.disableOn = off
+    -- Only those this unit has settings for; Target of Target and the like have none.
+    local onHealth = {}
+    for _, row in ipairs({ { "SHIELD", L["Absorb Shield"], "ringShowShieldOnHealth" },
+                           { "HEALABSORB", L["Heal Absorb"], "ringShowHealAbsorbOnHealth" },
+                           { "INCOMING", L["Heal Prediction"], "ringShowIncomingOnHealth" } }) do
+        if UFO.RingUnitHasAmount(unit, row[1]) then onHealth[#onHealth + 1] = row end
     end
-    Close(band)
+    if #onHealth > 0 then
+        band = Open(L["On the Health Ring"], "uf_rings_on_health", "both", nil, "layout")
+        w = band:AddWidget(GUI:CreateLabel(self.child,
+            L["A ring can't place these at the end of the health fill. Shields and heal prediction fill back from the far end, heal absorbs from the start. Turn one off here if it has its own ring."], 250), 58)
+        w.fullRow = true
+        for _, row in ipairs(onHealth) do
+            w = band:AddWidget(GUI:CreateCheckbox(self.child, row[2], db, row[3], changed), 30)
+            w.disableOn = off
+        end
+        Close(band)
+    end
 end
 
 -- The Rings card's rows. See FRAME STYLE above for why nothing here is per click.
@@ -2386,7 +2412,7 @@ function UFO.BuildRingList(self, band, db, unit, off)
                 if ring and UFO.RingSectionRemove(ring, b.dfIndex) then reshaped() end
             end,
         }), 28)
-        e.drop = Track(GUI:CreateDropdown(self.child, L["Bar"], UFO.RingBarOptions(), nil, nil, wrote,
+        e.drop = Track(GUI:CreateDropdown(self.child, L["Bar"], UFO.RingBarOptionsFor(unit), nil, nil, wrote,
             function() local s = Sec(j); return s and s.bar or "HEALTH" end,
             function(v) local s = Sec(j); if s then s.bar = v end end), 55)
         e.shape = Track(UFO.CreateShapeRow(self.child,

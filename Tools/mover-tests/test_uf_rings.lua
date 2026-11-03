@@ -693,6 +693,38 @@ do
     R:Layout(F)
 end
 
+print("-- Rings: only the bars a unit has settings for")
+do
+    check(R.UnitHasAmount("player", "HEALABSORB"), "Player has heal absorb settings")
+    check(not R.UnitHasAmount("targettarget", "SHIELD"), "Target of Target has no shield settings")
+    check(not R.UnitHasAmount("focustarget", "INCOMING"), "...and Focus Target no heal prediction")
+    check(R.UnitHasAmount("pet", "SHIELD") and not R.UnitHasAmount("pet", "HEALABSORB"), "Pet: a shield, no heal absorb")
+    check(not R.UnitHasAmount("boss", "INCOMING"), "Boss: no heal prediction")
+
+    local tt = UF:GetUnitDB("targettarget")
+    eq(tt.healPredictionEnabled, false, "Target of Target's bar heal prediction is off")
+    eq(UF:GetUnitDB("focustarget").healPredictionEnabled, false, "...and Focus Target's")
+    eq(UF:GetUnitDB("boss").healPredictionEnabled, false, "...and Boss's")
+
+    tt.frameStyle = "RING"
+    tt.rings = { { thickness = 6, gap = 0, sections = { { bar = "HEALTH", coverage = "HALF", position = "LEFT" },
+                                                         { bar = "SHIELD", coverage = "HALF", position = "RIGHT" } } } }
+    local T = Owner("targettarget")
+    T.dfDB = UF:FrameDB("targettarget")
+    R:Attach(T)
+    R:Layout(T)
+    eq(#T.dfUFRingHealth, 1, "Target of Target: its health fill")
+    eq(#T.dfUFRingAmounts.SHIELD, 0, "...no shield, on its own ring or the health ring")
+    eq(#T.dfUFRingAmounts.HEALABSORB, 0, "...no heal absorb")
+    eq(#T.dfUFRingAmounts.INCOMING, 0, "...no heal prediction")
+    eq(T.dfUFRings.used, 1, "...and the stored shield section draws nothing")
+    eq(T.dfNoShieldBar, true, "the frame's own shield bar is told to stay off")
+    eq(T.dfNoHealAbsorbBar, true, "...and its heal absorb bar")
+    tt.frameStyle, tt.rings = nil, nil
+
+    eq(F.dfNoShieldBar, false, "Target's shield bar stays on")
+end
+
 print("-- Rings: every test frame has absorbs to show")
 do
     for _, unit in ipairs({ "player", "target", "focus", "pet", "boss" }) do
