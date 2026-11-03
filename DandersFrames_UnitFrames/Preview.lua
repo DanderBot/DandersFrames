@@ -158,7 +158,6 @@ function P:TestData(unit, slot)
         t.level = lvl + 1
         SetHealth(t, 0.62)
         t.powerPercent = 0.4
-        t.absorbPercent = 0.12
         t.targetName = me
     elseif unit == "focus" then
         t.index = 3
@@ -184,6 +183,10 @@ function P:TestData(unit, slot)
         SetHealth(t, P.BOSS_HEALTH[slot] or 0.5)
         t.powerPercent = 0.5
         t.targetName = me
+    end
+    -- Something for the absorb and heal prediction settings to show on every frame.
+    if unit ~= "player" and unit ~= "targettarget" and unit ~= "focustarget" then
+        t.absorbPercent, t.healAbsorbPercent, t.healPredictionPercent = 0.12, 0.08, 0.10
     end
     P:ApplyTestSettings(t, unit, slot)
     return t

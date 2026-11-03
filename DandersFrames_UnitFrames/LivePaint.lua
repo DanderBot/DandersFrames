@@ -58,6 +58,7 @@ local function RingAmounts(f)
     local R = UF.Rings
     if R and R.PaintAmounts then R:PaintAmounts(f) end
     RingLayers(f)
+    Tracks(f)
 end
 
 local function HealthLayers(f, db)

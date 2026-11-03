@@ -78,11 +78,11 @@ R.BAR_ORDER = { "HEALTH", "POWER", "CLASSPOWER", "SHIELD", "HEALABSORB", "INCOMI
 -- The settings each amount bar shares with its DandersFrames bar. Test data: the
 -- share of max health in a sample, and the test panel switch that shows it.
 R.AMOUNTS = {
-    SHIELD = { texture = "absorbBarTexture", background = "absorbBarBackgroundColor",
+    SHIELD = { texture = "absorbBarTexture", background = "absorbBarBackgroundColor", blend = "absorbBarBlendMode",
                testValue = "absorbPercent", testShow = "testShowAbsorbs" },
-    HEALABSORB = { texture = "healAbsorbBarTexture", background = "healAbsorbBarBackgroundColor",
+    HEALABSORB = { texture = "healAbsorbBarTexture", background = "healAbsorbBarBackgroundColor", blend = "healAbsorbBarBlendMode",
                    testValue = "healAbsorbPercent", testShow = "testShowAbsorbs" },
-    INCOMING = { texture = "healPredictionTexture", background = "healPredictionBackgroundColor",
+    INCOMING = { texture = "healPredictionTexture", background = "healPredictionBackgroundColor", blend = "healPredictionBlendMode",
                  testValue = "healPredictionPercent", testShow = "testShowHealPrediction" },
 }
 -- Drawn over each health section, bottom layer first. A far-end bar fills the other
@@ -343,7 +343,7 @@ end
 local function PaintMockArc(c, i, ring, start, len, sec, value, color, db)
     local a = MockArc(c, i)
     R.SetArcTexture(a.track, R.TrackTexture(db, sec))
-    R.SetArcTexture(a.fill, R.FillTexture(db, sec))
+    R.SetFillTexture(a.fill, db, sec, ring)
     R.ShapeArcBar(a.track, c, ring.outer, ring.inner, start, len, false, 0)
     R.ShapeArcBar(a.fill, c, ring.outer, ring.inner, start, len, sec.reverse, sec.feather)
     a.fill:SetFrameLevel(a.track:GetFrameLevel() + 1)
@@ -558,11 +558,20 @@ end
 -- What a section draws with: its bar's own texture setting. A track takes the frame's
 -- background texture on a health section; "Solid" and the others stay plain.
 function R.FillTexture(db, sec)
-    local amount = R.AMOUNTS[sec.bar]
-    if amount then return db[amount.texture] or K.BAR end
-    if sec.bar == "POWER" then return db.resourceBarTexture or K.BAR end
     if sec.bar == "CLASSPOWER" then return db.classPowerTexture or K.BAR end
-    return db.healthTexture or K.BAR
+    local amount = R.AMOUNTS[sec.bar]
+    local path
+    if amount then
+        path = db[amount.texture] or K.BAR
+    elseif sec.bar == "POWER" then
+        path = db.resourceBarTexture or K.BAR
+    else
+        path = db.healthTexture or K.BAR
+    end
+    -- The bar's Mirror tick picks the file's mirrored twin.
+    local keys = R.LayerKeys(sec.bar)
+    if keys and DF.ResolveBarTexture then path = DF:ResolveBarTexture(path, false, db[keys.mirror]) end
+    return path
 end
 
 function R.TrackTexture(db, sec)
@@ -577,6 +586,7 @@ end
 function R.SetArcTexture(bar, path)
     if bar.dfArcTexture == path then return end
     bar.dfArcTexture = path
+    bar.dfArcTileKey = nil
     local old = bar:GetStatusBarTexture()
     if DF.SafeSetStatusBarTexture then
         DF:SafeSetStatusBarTexture(bar, path)
@@ -588,6 +598,55 @@ function R.SetArcTexture(bar, path)
         tex:AddMaskTexture(bar.dfOuterMask)
         tex:AddMaskTexture(bar.dfInnerMask)
     end
+end
+
+-- The tiling settings on an arc, as a bar's (Frames/TextureLayers.lua), measured on the
+-- ring's square: a repeat of Tile Size pixels, Fit to Bar being the ring's thickness.
+--   override   the Tile setting (nil / "AUTO": the texture's own)
+--   sizeValue  the Tile Size setting. allowPreset: Auto uses the texture's preset size
+--              (the base of health and power has no Tile Size control, so never there)
+-- Call before R.ShapeArcBar: setting a file can reset the radial offsets.
+function R.SetArcTile(bar, override, sizeValue, ring, allowPreset)
+    if not (DF.ResolveTileMode and DF.ApplyBarTextureTiling) then return end
+    if override == "AUTO" then override = nil end
+    local path = bar.dfAppliedTexture or bar.dfArcTexture
+    local v = tonumber(sizeValue)
+    local asked = v == DF.TILE_SIZE_FIT or (v ~= nil and v > 0)
+    local mode = DF:ResolveTileMode(path, override)
+    if not mode and asked and override ~= "OFF" then mode = "BOTH" end
+    local unit = 0
+    if v == DF.TILE_SIZE_FIT then
+        unit = ring.thickness
+    elseif asked then
+        unit = v
+    elseif allowPreset and DF.GetBarTextureTileSize then
+        unit = DF:GetBarTextureTileSize(path) or 0
+    end
+    local custom = mode ~= nil and unit > 0
+    local key = tostring(override) .. ":" .. tostring(mode) .. ":" .. (custom and unit or 0) .. ":" .. ring.outer
+    if bar.dfArcTileKey == key then return end
+    bar.dfArcTileKey = key
+    bar.dfTileOverride = override
+    local tex = bar:GetStatusBarTexture()
+    if custom then
+        -- Wrap without the tile flags: the texcoords decide how many repeats.
+        tex:SetTexture(path, "REPEAT", "REPEAT")
+        tex:SetHorizTile(false)
+        tex:SetVertTile(false)
+        local repeats = ring.outer / unit
+        tex:SetTexCoord(0, (mode == "BOTH" or mode == "HORIZ") and repeats or 1,
+            0, (mode == "BOTH" or mode == "VERT") and repeats or 1)
+    else
+        tex.dfWrapPath = nil
+        DF:ApplyBarTextureTiling(bar, path)
+    end
+end
+
+-- A section's fill: its bar's texture and tiling.
+function R.SetFillTexture(bar, db, sec, ring)
+    R.SetArcTexture(bar, R.FillTexture(db, sec))
+    local keys = R.LayerKeys(sec.bar)
+    if keys then R.SetArcTile(bar, db[keys.tileMode], db[keys.tileSize], ring, R.AMOUNTS[sec.bar] ~= nil) end
 end
 
 -- Size `bar` to the ring (diameters) on `center`, and draw the arc start..start+len.
@@ -616,13 +675,17 @@ end
 -- On a bar (Frames/TextureLayers.lua) a clip frame anchored to the fill cuts the
 -- layers. A radial fill's rect never shrinks, so that can't cut anything here. Each
 -- layer is a radial bar of its own instead: the fill's arc and value, the layer's
--- texture, colour and blend. A child of its fill, so it hides and range-fades with it.
--- A layer's Tile and Tile Size are not carried over: what they do to a radial fill is
--- unknown.
+-- texture, tiling, colour and blend. A child of its fill, so it hides and range-fades
+-- with it.
 -- fill.dfLayers  the layers showing, bottom first (values: R.PutValues)
 -- ============================================================
 R.LAYER_PREFIX = { HEALTH = "health", POWER = "resourceBar", SHIELD = "absorbBar",
                    HEALABSORB = "healAbsorbBar", INCOMING = "healPrediction" }
+
+-- A bar's texture settings keys (Frames/TextureLayers.lua); nil for class power.
+function R.LayerKeys(barName)
+    return DF.TEXTURE_LAYER_KEYS and DF.TEXTURE_LAYER_KEYS[R.LAYER_PREFIX[barName]]
+end
 
 local function PaintLayer(layer, db)
     layer:SetStatusBarColor(K.RGBA(db[layer.dfColorKey], 1, 1, 1, 1))
@@ -631,7 +694,7 @@ local function PaintLayer(layer, db)
 end
 
 function R.LayoutFillLayers(fill, center, ring, start, len, reverse, feather, db, barName)
-    local keys = DF.TEXTURE_LAYER_KEYS and DF.TEXTURE_LAYER_KEYS[R.LAYER_PREFIX[barName]]
+    local keys = R.LayerKeys(barName)
     local on = keys and db[keys.on]
     local pool, active = fill.dfLayerPool, {}
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
@@ -645,6 +708,7 @@ function R.LayoutFillLayers(fill, center, ring, start, len, reverse, feather, db
                 pool[n] = layer
             end
             R.SetArcTexture(layer, DF:ResolveBarTexture(db[kn.texture], false, db[kn.mirror]))
+            R.SetArcTile(layer, db[kn.tileMode], db[kn.tileSize], ring, true)
             R.ShapeArcBar(layer, center, ring.outer, ring.inner, start, len, reverse, feather)
             layer:SetFrameLevel(fill:GetFrameLevel() + n - 1)
             layer.dfColorKey, layer.dfBlendKey = kn.color, kn.blend
@@ -873,7 +937,7 @@ function R:Layout(f)
                 local arc = AcquireArc(c, used)
                 local a, len = R.Arc(sec)
                 R.SetArcTexture(arc.track, R.TrackTexture(db, sec))
-                R.SetArcTexture(arc.fill, R.FillTexture(db, sec))
+                R.SetFillTexture(arc.fill, db, sec, ring)
                 R.ShapeArcBar(arc.track, c, ring.outer, ring.inner, a, len, false, 0)
                 R.ShapeArcBar(arc.fill, c, ring.outer, ring.inner, a, len, sec.reverse, sec.feather)
                 arc.fill:SetFrameLevel(arc.track:GetFrameLevel() + 1)
@@ -892,7 +956,7 @@ function R:Layout(f)
                         if db[on.key] ~= false then
                             overlays = overlays + 1
                             local bar = AcquireOverlay(c, overlays)
-                            R.SetArcTexture(bar, R.FillTexture(db, on))
+                            R.SetFillTexture(bar, db, on, ring)
                             local reverse = sec.reverse and true or false
                             if on.farEnd then reverse = not reverse end
                             R.ShapeArcBar(bar, c, ring.outer, ring.inner, a, len, reverse, 0)
@@ -978,7 +1042,12 @@ function R:PaintAmounts(f)
     local db = K.DB(f)
     for bar, list in pairs(amounts) do
         local r, g, b, a = R.AmountColor(db, bar)
-        for _, fill in ipairs(list) do fill:SetStatusBarColor(r, g, b, a) end
+        local blend = db[R.AMOUNTS[bar].blend] or "BLEND"
+        for _, fill in ipairs(list) do
+            fill:SetStatusBarColor(r, g, b, a)
+            local tex = fill:GetStatusBarTexture()
+            if tex.SetBlendMode then tex:SetBlendMode(blend) end
+        end
     end
 end
 

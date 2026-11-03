@@ -78,6 +78,9 @@ local function Make(kind, parent)
     function f:SetAlphaFromBoolean(flag, a, b) self._alphaFrom = { flag, a, b } end
     function f:SetDesaturated() end
     function f:SetBlendMode(m) self._blend = m end
+    function f:SetHorizTile(v) self._hTile = v end
+    function f:SetVertTile(v) self._vTile = v end
+    function f:SetTexCoord(a, b, c, d) self._coord = { a, b, c, d } end
     if kind == "StatusBar" then
         f._tex = Make("Texture", f)
         f._min, f._max, f._value = 0, 1, 0
@@ -588,6 +591,75 @@ do
     eff.resourceBarLayer3Enabled, eff.resourceBarLayer3Texture = nil, nil
     F.dfDB = UF:FrameDB("target")
     R:Layout(F)
+end
+
+print("-- Rings: the bars' other texture settings")
+do
+    DF.TILE_SIZE_FIT = -1
+    local applied = 0
+    function DF:ResolveTileMode(path, override)
+        if override == "OFF" then return nil end
+        if override then return override end
+        return path == "TiledTex" and "BOTH" or nil
+    end
+    function DF:ApplyBarTextureTiling() applied = applied + 1 end
+    function DF:ResolveBarTexture(path, _, mirror) return mirror and (path .. "Mirrored") or path end
+    for _, prefix in ipairs({ "health", "resourceBar", "absorbBar", "healAbsorbBar", "healPrediction" }) do
+        local k = DF.TEXTURE_LAYER_KEYS[prefix]
+        k.tileMode, k.tileSize, k.mirror = prefix .. "TileMode", prefix .. "TileSize", prefix .. "TileMirror"
+    end
+
+    local saved = eff.rings
+    eff.rings = { { thickness = 10, gap = 0, sections = { { bar = "SHIELD", coverage = "FULL" } } } }
+    eff.absorbBarTexture, eff.absorbBarBlendMode = "PlainTex", "ADD"
+    eff.ringShowShieldOnHealth = false
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    local s = F.dfUFRingAmounts.SHIELD[1]
+    local tex = s:GetStatusBarTexture()
+    eq(tex._blend, "ADD", "Blend Mode reaches the ring")
+
+    eff.absorbBarTileMirror = true
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    eq(s._path, "PlainTexMirrored", "Mirror picks the twin")
+    eff.absorbBarTileMirror = nil
+
+    eff.absorbBarTileMode = "HORIZ"
+    F.dfDB = UF:FrameDB("target")
+    local before = applied
+    R:Layout(F)
+    eq(s.dfTileOverride, "HORIZ", "Tile reaches the ring")
+    eq(applied, before + 1, "...and is applied")
+    R:Layout(F)
+    eq(applied, before + 1, "...once, while nothing changes")
+
+    eff.absorbBarTileMode, eff.absorbBarTileSize = nil, 8
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    local outer = s._w
+    check(near(tex._coord[2], outer / 8) and near(tex._coord[4], outer / 8), "Tile Size: repeats measured on the ring")
+    eq(tex._texture, "PlainTex", "...with the file re-set to repeat")
+    eq(tex._calls.SetRadialProgressBarEndOffset, 0, "...the arc re-applied after it")
+
+    eff.absorbBarTileSize = -1
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+    check(near(tex._coord[2], outer / 10), "Fit to Bar: one repeat is the ring's thickness")
+
+    eff.rings = saved
+    eff.absorbBarTexture, eff.absorbBarBlendMode, eff.absorbBarTileSize = nil, nil, nil
+    eff.ringShowShieldOnHealth = nil
+    F.dfDB = UF:FrameDB("target")
+    R:Layout(F)
+end
+
+print("-- Rings: every test frame has absorbs to show")
+do
+    for _, unit in ipairs({ "player", "target", "focus", "pet", "boss" }) do
+        local t = UF.Preview:TestData(unit, unit == "boss" and 1 or nil)
+        check(t.absorbPercent > 0 and t.healAbsorbPercent > 0 and t.healPredictionPercent > 0, unit .. ": all three")
+    end
 end
 
 print("-- Rings: health writes copied onto the fills")
