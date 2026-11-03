@@ -2,7 +2,7 @@
 ## Title: DandersFrames |cffa66bffUnit Frames|r
 ## Notes: Player, target, target of target, focus, pet and boss frames, drawn and configured by DandersFrames.
 ## Author: Danders
-## Version: v5.7.0-alpha.1
+## Version: v6.0.0-alpha.1
 ## Category: Danders
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## RequiredDeps: DandersFrames
