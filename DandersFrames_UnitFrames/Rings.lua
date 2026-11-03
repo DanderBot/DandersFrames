@@ -814,7 +814,10 @@ function R.HookHealth(f)
     if not hb or not hooksecurefunc or f.dfUFRingHooked then return end
     f.dfUFRingHooked = true
     hooksecurefunc(hb, "SetMinMaxValues", function(_, lo, hi)
-        EachLayered(f.dfUFRingHealth, function(b) b:SetMinMaxValues(lo, hi) end)
+        EachLayered(f.dfUFRingHealth, function(b)
+            b:SetMinMaxValues(lo, hi)
+            R.HoldCoords(b)
+        end)
     end)
     hooksecurefunc(hb, "SetValue", function(_, v, interp)
         EachLayered(f.dfUFRingHealth, function(b) SetValueOn(b, v, interp) end)

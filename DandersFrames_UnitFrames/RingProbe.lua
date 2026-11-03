@@ -758,6 +758,108 @@ SLASH_DANDERSFRAMESRINGPROBE1 = "/dfring"
 SlashCmdList.DANDERSFRAMESRINGPROBE = Toggle
 
 -- ============================================================
+-- RING TEXTURE WATCH (dev only)
+-- /dfringwatch  a panel listing, as they happen, every change to a ring bar's texture
+-- and Tile Size on the live and test frames. Told apart by who did it:
+--   size      our code asked for a new number of repeats (u, nil = no Tile Size)
+--   file      our code set a different image
+--   GAME      the bar's real coordinates stopped matching what we asked for, with no
+--             new ask: something outside the ring code changed them
+--   back      they match again
+-- Read once per rendered frame. Nothing here changes a bar.
+-- ============================================================
+local watch = { lines = {}, bars = setmetatable({}, { __mode = "k" }) }
+
+local function WatchLog(text)
+    local lines = watch.lines
+    lines[#lines + 1] = format("%.2f  %s", GetTime() % 1000, text)
+    if #lines > 18 then table.remove(lines, 1) end
+    watch.text:SetText(table.concat(lines, "\n"))
+end
+
+local function WatchShort(path)
+    return tostring(path):match("([^\\]+)$") or tostring(path)
+end
+
+local function WatchBar(bar, name)
+    local tex = bar:GetStatusBarTexture()
+    local ok, _, _, _, _, actual = pcall(tex.GetTexCoord, tex)
+    if not ok or type(actual) ~= "number" then return end
+    local wanted, path = bar.dfArcCoordU, bar.dfArcTexture
+    local st = watch.bars[bar]
+    if not st then
+        watch.bars[bar] = { wanted = wanted, path = path, wrong = false }
+        return
+    end
+    if st.path ~= path then
+        WatchLog(format("%s file %s", name, WatchShort(path)))
+        st.path = path
+    end
+    if st.wanted ~= wanted then
+        WatchLog(format("%s size %s -> %s", name, tostring(st.wanted), tostring(wanted)))
+        st.wanted = wanted
+    end
+    local wrong = wanted ~= nil and math.abs(actual - wanted) > 0.01
+    if wrong ~= st.wrong then
+        st.wrong = wrong
+        if wrong then
+            WatchLog(format("%s GAME %.2f (asked %.2f)", name, actual, wanted))
+        else
+            WatchLog(format("%s back %.2f", name, actual))
+        end
+    end
+end
+
+local function WatchFrame(f, unit)
+    local c = f and f.dfUFRings
+    if not (c and c:IsVisible() and UF.Rings) then return end
+    local n = 0
+    UF.Rings.EachFill(c, function(bar)
+        n = n + 1
+        WatchBar(bar, format("%s #%d%s", unit, n, bar.dfColorKey and " layer" or ""))
+    end)
+end
+
+local function WatchTick()
+    for key, f in pairs(UF.frames or {}) do WatchFrame(f, tostring(key)) end
+    local preview = UF.Preview and UF.Preview.frames
+    for key, f in pairs(preview or {}) do WatchFrame(f, "test " .. tostring(key)) end
+end
+
+local function WatchToggle()
+    if not watch.frame then
+        local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        f:SetSize(420, 260)
+        f:SetPoint("TOPRIGHT", -40, -120)
+        f:SetFrameStrata("DIALOG")
+        f:SetMovable(true)
+        f:EnableMouse(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", f.StartMoving)
+        f:SetScript("OnDragStop", f.StopMovingOrSizing)
+        if f.SetBackdrop then
+            f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+            f:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+            f:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+        end
+        local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("TOPLEFT", 8, -6)
+        title:SetText("Ring texture watch (/dfringwatch to close)")
+        watch.text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        watch.text:SetPoint("TOPLEFT", 8, -24)
+        watch.text:SetPoint("RIGHT", -8, 0)
+        watch.text:SetJustifyH("LEFT")
+        f:SetScript("OnUpdate", WatchTick)
+        watch.frame = f
+        return
+    end
+    watch.frame:SetShown(not watch.frame:IsShown())
+end
+
+SLASH_DANDERSFRAMESRINGWATCH1 = "/dfringwatch"
+SlashCmdList.DANDERSFRAMESRINGWATCH = WatchToggle
+
+-- ============================================================
 -- SECRET SetEnabled TRAP (dev only)
 -- /dfsecretbtn swaps the shared Button:SetEnabled for a wrapper that, when handed
 -- a SECRET value, records the button's debug name (and a short stack if the game
