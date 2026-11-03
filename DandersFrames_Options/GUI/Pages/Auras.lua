@@ -2776,14 +2776,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- shield and the heal absorb builders BOTH read them, and each is a closure of
         -- its own. Same tables, same values, one declaration.
         local modeOptions = {
-            OVERLAY = L["Overlay (on health bar)"],
-            ATTACHED = L["Attached to Health"],
-            ATTACHED_OVERFLOW = L["Attached + Overflow"],
+            OVERLAY = L["Overlay on Health"],
+            ATTACHED = L["Attached (stops at full)"],
+            ATTACHED_OVERFLOW = L["Attached + Wrap Back"],
             FLOATING = L["Floating Bar"],
         }
         local healModeOptions = {
-            OVERLAY = L["Overlay (on health bar)"],
-            ATTACHED = L["Attached to Health"],
+            OVERLAY = L["Overlay on Health"],
+            ATTACHED = L["Attached (into health)"],
             FLOATING = L["Floating Bar"],
         }
         local orientOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
@@ -2817,10 +2817,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             local function add(w, h) return group:AddWidget(w, h) end
 
-            add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
+            local absorbModeDropdown = add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55, 1)
+            absorbModeDropdown.tooltip = L["Overlay on Health: the whole shield is drawn over the health bar from its empty end.\nAttached (stops at full): the shield fills the missing health and stops at the end of the bar. Show Overshield Glow marks when it is cut off.\nAttached + Wrap Back: the shield fills the missing health, and once it no longer fits the whole shield is drawn back over the health from the end of the bar.\nFloating Bar: a separate bar you place anywhere on the frame.\nThe shield always stays inside the health bar."]
 
             local textureOptions = DF:GetTextureList()
             local stripeTextures = {
@@ -2950,10 +2951,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             add(GUI:CreateLabel(parent, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
 
-            add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
+            local healAbsorbModeDropdown = add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55, 1)
+            healAbsorbModeDropdown.tooltip = L["Overlay on Health: the heal absorb is drawn over the health bar from its start.\nAttached (into health): the heal absorb runs back from the end of the current health and never goes past zero.\nFloating Bar: a separate bar you place anywhere on the frame."]
 
             local healTextureOptions = DF:GetTextureList()
             local healStripeTextures = {
