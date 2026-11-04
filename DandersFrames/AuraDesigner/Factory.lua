@@ -58,8 +58,10 @@ local otherIdentWarned = {}
 local function warnOtherUnresolved(auraName, where)
     if not otherIdentWarned[auraName] then
         otherIdentWarned[auraName] = true
-        DF:DebugWarn(DBG, "%s aura %s has no resolvable spell identity (expected a SpellDB spell name, a #<id> key, or a live filter reference); skipping",
-            where or "Other Buffs", tostring(auraName))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "%s aura %s has no resolvable spell identity (expected a SpellDB spell name, a #<id> key, or a live filter reference); skipping",
+                where or "Other Buffs", tostring(auraName))
+        end
     end
 end
 
@@ -4297,7 +4299,9 @@ local function registerAuraSound(event, unit, spellID, argKey, argVal, channel)
     if trig == nil then return nil end
     local ok, id = pcall(C_UnitAuras.AddAuraSound, trig, sound)
     if ok then return id end
-    DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
+    if DF:DebugActive(DBG) then
+        DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
+    end
     return nil
 end
 
@@ -5111,8 +5115,10 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix, defs)
                 -- Warn once per group id (this sync runs per aura event).
                 if not fgroupExcludeWarned[group] then
                     fgroupExcludeWarned[group] = true
-                    DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
-                        tostring(group.id))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
+                            tostring(group.id))
+                    end
                 end
             end
             -- res.kind == "all" (empty/no selection): render nothing — the group

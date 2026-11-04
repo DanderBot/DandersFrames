@@ -181,8 +181,8 @@ end
 print("-- Absorbs page: the dropdown vocabulary at page scope")
 do
     local VOCAB = {
-        { "modeOptions",     'ATTACHED_OVERFLOW = L["Attached + Overflow"]' },
-        { "healModeOptions", 'OVERLAY = L["Overlay (on health bar)"]' },
+        { "modeOptions",     'ATTACHED_OVERFLOW = L["Attached (wraps back)"]' },
+        { "healModeOptions", 'ATTACHED = L["Attached (into health)"]' },
         { "orientOptions",   'HORIZONTAL= L["Horizontal"]' },
         { "anchorOptions",   'BOTTOMRIGHT= L["Bottom Right"]' },
     }
@@ -254,6 +254,7 @@ end
 -- ============================================================
 local ABSORB_SHIELD = {
     { "dropdown",        "Display Mode",         "absorbBarMode",              55, 1 },
+    { "slider",          "Overflow (%)",         "absorbBarBreakout",          55, 1 },
     { "texturedropdown", "Texture",              "absorbBarTexture",           55, 1 },
     { "colorpicker",     "Bar Color",            "absorbBarColor",             35, 1 },
     { "dropdown",        "Blend Mode",           "absorbBarBlendMode",         55, 1 },

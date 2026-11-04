@@ -2776,14 +2776,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- shield and the heal absorb builders BOTH read them, and each is a closure of
         -- its own. Same tables, same values, one declaration.
         local modeOptions = {
-            OVERLAY = L["Overlay (on health bar)"],
-            ATTACHED = L["Attached to Health"],
-            ATTACHED_OVERFLOW = L["Attached + Overflow"],
+            OVERLAY = L["Overlay on Health"],
+            ATTACHED = L["Attached (overflows)"],
+            ATTACHED_OVERFLOW = L["Attached (wraps back)"],
             FLOATING = L["Floating Bar"],
         }
         local healModeOptions = {
-            OVERLAY = L["Overlay (on health bar)"],
-            ATTACHED = L["Attached to Health"],
+            OVERLAY = L["Overlay on Health"],
+            ATTACHED = L["Attached (into health)"],
             FLOATING = L["Floating Bar"],
         }
         local orientOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
@@ -2817,10 +2817,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             local function add(w, h) return group:AddWidget(w, h) end
 
-            add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
+            local absorbModeDropdown = add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55, 1)
+            absorbModeDropdown.tooltip = L["Overlay on Health: the whole shield is drawn over the health bar from its empty end.\nAttached (overflows): the shield fills the missing health and, with Overflow above 0, runs on past the end of the bar. Show Overshield Glow marks when it reaches the end.\nAttached (wraps back): the shield fills the missing health, and once it no longer fits the whole shield is drawn back over the health from the end of the bar.\nFloating Bar: a separate bar you place anywhere on the frame.\nOnly Attached (overflows) draws past the end of the bar."]
+
+            -- Directly under the mode that uses it, so it shows where Attached (overflows) is picked.
+            local absorbBreakout = add(GUI:CreateSlider(parent, L["Overflow (%)"], 0, 100, 5, db, "absorbBarBreakout", nil, function() DF:UpdateAllFrames() end, true), 55, 1)
+            absorbBreakout.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbBreakout.tooltip = L["How far the shield may run past the end of the health bar, as a share of the bar's length. 0 keeps it inside the bar."]
 
             local textureOptions = DF:GetTextureList()
             local stripeTextures = {
@@ -2950,10 +2956,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             add(GUI:CreateLabel(parent, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
 
-            add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
+            local healAbsorbModeDropdown = add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55, 1)
+            healAbsorbModeDropdown.tooltip = L["Overlay on Health: the heal absorb is drawn over the health bar from its start.\nAttached (into health): the heal absorb runs back from the end of the current health and never goes past zero.\nFloating Bar: a separate bar you place anywhere on the frame."]
 
             local healTextureOptions = DF:GetTextureList()
             local healStripeTextures = {
@@ -3127,6 +3134,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- The spark is drawn on the attached display only; Floating has no bar end to mark.
             overhealCheckbox.hideOn = function(d) return d.healPredictionMode == "FLOATING" end
             overhealCheckbox.tooltip = L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."]
+
+            local healBreakout = group:AddWidget(GUI:CreateSlider(parent, L["Overflow (%)"], 0, 100, 5, db, "healPredictionBreakout", nil, function() DF:UpdateAllFrames() end, true), 55)
+            healBreakout.disableOn = function(d) return not d.healPredictionEnabled end
+            healBreakout.hideOn = function(d) return d.healPredictionMode == "FLOATING" end
+            healBreakout.tooltip = L["How far incoming heals may run past the end of the health bar, as a share of the bar's length. 0 keeps them inside the bar."]
 
             -- ⚠ tools2.refreshStates, and nothing else. This pick drives the two
             -- FLOATING ROWS' own hideOn, which live on the page rather than in this

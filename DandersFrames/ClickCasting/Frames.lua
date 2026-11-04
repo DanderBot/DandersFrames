@@ -458,8 +458,10 @@ function CC:CreateClickCastHeader()
     -- until a /reload. A frame with no WrapScript is not our header, so rebuild.
     if self.header then
         if self.header.WrapScript then return end
-        DF:DebugError("CLICK", "CC.header held a non-secure frame (%s) — rebuilding the secure header",
-            tostring((self.header.GetName and self.header:GetName()) or "unnamed"))
+        if DF:DebugActive("CLICK") then
+            DF:DebugError("CLICK", "CC.header held a non-secure frame (%s) — rebuilding the secure header",
+                tostring((self.header.GetName and self.header:GetName()) or "unnamed"))
+        end
         self.header = nil
     end
 
@@ -999,7 +1001,9 @@ function CC:ReconcileClickCastFrames()
             self:RegisterFrame(frame)
         end
         if #nowReady > 0 then
-            DF:Debug("CLICK", "Reconcile: registered %d frame(s) that became eligible", #nowReady)
+            if DF:DebugActive("CLICK") then
+                DF:Debug("CLICK", "Reconcile: registered %d frame(s) that became eligible", #nowReady)
+            end
         end
     end
 
@@ -1015,7 +1019,9 @@ function CC:ReconcileClickCastFrames()
             self:UnregisterFrame(frame)
         end
         if #revoked > 0 then
-            DF:DebugWarn("CLICK", "Reconcile: released %d frame(s) opted out via ClickCastFrames", #revoked)
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "Reconcile: released %d frame(s) opted out via ClickCastFrames", #revoked)
+            end
         end
     end
 end
@@ -1403,8 +1409,10 @@ function CC:RegisterBlizzardFrames()
         -- Bail out if any values are secret (can't do boolean operations on them)
         if issecretvalue(protected) or issecretvalue(name) or issecretvalue(anchorRestricted) then
             skippedSecret = skippedSecret + 1
-            DF:DebugWarn("CLICK", "Blizzard frame %s skipped — client returned secret values for the suitability checks",
-                tostring(frameName))
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "Blizzard frame %s skipped — client returned secret values for the suitability checks",
+                    tostring(frameName))
+            end
             return
         end
         
@@ -1727,9 +1735,11 @@ function CC:StartDiagnosticTicker(frame)
         -- a fault would log BINDINGS VANISHED and re-wrap every registered frame for nothing.
         local stillOurs = (CC.currentHoveredFrame == frame) and frame:IsMouseOver()
         if CC.diagLastBindState and not bindingsActive and stillOurs then
-            DF:DebugError("CLICK", "BINDINGS VANISHED on %s at tick %d! wrapEnter=%d wrapLeave=%d isSecureMO=%s visible=%s mouseOver=%s combat=%s",
-                frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(isSecureMouseover),
-                tostring(frame:IsVisible()), tostring(frame:IsMouseOver()), tostring(InCombatLockdown()))
+            if DF:DebugActive("CLICK") then
+                DF:DebugError("CLICK", "BINDINGS VANISHED on %s at tick %d! wrapEnter=%d wrapLeave=%d isSecureMO=%s visible=%s mouseOver=%s combat=%s",
+                    frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(isSecureMouseover),
+                    tostring(frame:IsVisible()), tostring(frame:IsMouseOver()), tostring(InCombatLockdown()))
+            end
             CC:RequestBindingRepair("bindings-vanished")
         end
 
@@ -1749,8 +1759,10 @@ function CC:StartDiagnosticTicker(frame)
             -- episode.
             if not CC.diagDesyncReported then
                 CC.diagDesyncReported = true
-                DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
-                    frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(bindingsActive))
+                if DF:DebugActive("CLICK") then
+                    DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
+                        frameName, CC.diagTickCount, wrapEnterCount, wrapLeaveCount, tostring(bindingsActive))
+                end
             end
         else
             CC.diagDesyncReported = nil
@@ -1791,14 +1803,18 @@ function CC:ScheduleWrapRetry(frame, frameName, reason)
     if frame.dfWrapRetries > WRAP_RETRY_LIMIT then
         if not frame.dfWrapRetryGaveUp then
             frame.dfWrapRetryGaveUp = true
-            DF:DebugError("CLICK", "Hover-bind setup for %s failed %d times (%s) — giving up; no more retries will be logged for this frame",
-                frameName, WRAP_RETRY_LIMIT, tostring(reason))
+            if DF:DebugActive("CLICK") then
+                DF:DebugError("CLICK", "Hover-bind setup for %s failed %d times (%s) — giving up; no more retries will be logged for this frame",
+                    frameName, WRAP_RETRY_LIMIT, tostring(reason))
+            end
         end
         return false
     end
 
-    DF:DebugWarn("CLICK", "Hover-bind setup for %s failed (%s) — retry %d/%d in %ds",
-        frameName, tostring(reason), frame.dfWrapRetries, WRAP_RETRY_LIMIT, WRAP_RETRY_DELAY)
+    if DF:DebugActive("CLICK") then
+        DF:DebugWarn("CLICK", "Hover-bind setup for %s failed (%s) — retry %d/%d in %ds",
+            frameName, tostring(reason), frame.dfWrapRetries, WRAP_RETRY_LIMIT, WRAP_RETRY_DELAY)
+    end
     self:DeferAfter("wrapRetry:" .. frameName, WRAP_RETRY_DELAY, function()
         CC:SetupSecureHandlers(frame)
     end)
@@ -2076,8 +2092,10 @@ function CC:SetupSecureHandlers(frame)
         local wasHovered = (CC.currentHoveredFrame == self)
         if wasHovered then
             local clearedBy = self:GetAttribute("dfClearedBy") or "?"
-            DF:DebugWarn("CLICK", "OnHide %s while HOVERED — clearedBy=%s combat=%s visFlips=%d",
-                self:GetName() or "unnamed", clearedBy, tostring(InCombatLockdown()), self.dfVisFlips)
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "OnHide %s while HOVERED — clearedBy=%s combat=%s visFlips=%d",
+                    self:GetName() or "unnamed", clearedBy, tostring(InCombatLockdown()), self.dfVisFlips)
+            end
             CC.currentHoveredFrame = nil
         end
     end)
@@ -2148,12 +2166,14 @@ function CC:SetupSecureHandlers(frame)
         -- normal session builds the evidence without any extra logging.
         local sdFired = self:GetAttribute("dfStateDriverCount") or 0
         local hideFired = self:GetAttribute("dfHideFired") or 0
-        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d sdFired=%d hideFired=%d",
-            frameName, tostring(unit), tostring(bindingsActive),
-            tostring(hasKeyboardBindings), tostring(type1),
-            tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
-            enterPhase, prevMouseover, postCheck, showClaimed, reasserted,
-            sdFired, hideFired)
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d sdFired=%d hideFired=%d",
+                frameName, tostring(unit), tostring(bindingsActive),
+                tostring(hasKeyboardBindings), tostring(type1),
+                tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
+                enterPhase, prevMouseover, postCheck, showClaimed, reasserted,
+                sdFired, hideFired)
+        end
 
         -- THE MEASUREMENT: was a redundant set path load-bearing on THIS hover?
         --
@@ -2197,9 +2217,11 @@ function CC:SetupSecureHandlers(frame)
                 -- actually covers it. A repair request here would re-wrap every
                 -- registered frame for a condition it cannot affect.
                 DF:DebugWarn("CLICK", "  WrapScript OnEnter DID NOT FIRE (enterCount=%d leaveCount=%d)", wrapEnterCount, wrapLeaveCount)
-                DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
-                    tostring(self:IsVisible()), tostring(self:IsShown()),
-                    tostring(self:IsMouseOver()), tostring(InCombatLockdown()))
+                if DF:DebugActive("CLICK") then
+                    DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
+                        tostring(self:IsVisible()), tostring(self:IsShown()),
+                        tostring(self:IsMouseOver()), tostring(InCombatLockdown()))
+                end
                 -- Pinned-boss wrap-skip hypothesis: is this a visibility-driven
                 -- pinned frame, and how much has it churned? (The old line here
                 -- printed the GLOBAL header's name — which says nothing about
@@ -2211,20 +2233,26 @@ function CC:SetupSecureHandlers(frame)
                 -- motion is exactly what the OnShow wrap exists to cover, so a
                 -- non-zero value means the gap was already closed before this
                 -- warning fired, and a zero means it was not.
-                DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s showClaimed=%d",
-                    parent and parent:GetName() or "nil",
-                    tostring(self.isPinnedBossFrame), tostring(self.isPinnedFrame),
-                    self.dfVisFlips or 0, tostring(self.dfWrapApplied),
-                    self:GetAttribute("dfShowClaimed") or 0)
+                if DF:DebugActive("CLICK") then
+                    DF:DebugWarn("CLICK", "  parent=%s pinnedBoss=%s pinned=%s visFlips=%d wrapApplied=%s showClaimed=%d",
+                        parent and parent:GetName() or "nil",
+                        tostring(self.isPinnedBossFrame), tostring(self.isPinnedFrame),
+                        self.dfVisFlips or 0, tostring(self.dfWrapApplied),
+                        self:GetAttribute("dfShowClaimed") or 0)
+                end
             else
-                DF:DebugWarn("CLICK", "  WrapScript fired (enterCount=%d phase=%d) but dfBindingsActive=%s snippet=%d chars",
-                    wrapEnterCount, enterPhase, tostring(bindingsActive), #snippet)
+                if DF:DebugActive("CLICK") then
+                    DF:DebugWarn("CLICK", "  WrapScript fired (enterCount=%d phase=%d) but dfBindingsActive=%s snippet=%d chars",
+                        wrapEnterCount, enterPhase, tostring(bindingsActive), #snippet)
+                end
                 if DF:DebugActive("CLICK") then
                     DF:DebugWarn("CLICK", "  snippet preview: %s", snippet:sub(1, 200))
                 end
             end
-            DF:DebugWarn("CLICK", "  handlersSetup=%s registered=%s",
-                tostring(self.dfKeyboardHandlersSetup), tostring(self.dfClickCastRegistered))
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "  handlersSetup=%s registered=%s",
+                    tostring(self.dfKeyboardHandlersSetup), tostring(self.dfClickCastRegistered))
+            end
         end
 
         -- Self-heal detection: this frame's snippet is empty but the profile
@@ -2264,8 +2292,10 @@ function CC:SetupSecureHandlers(frame)
 
         local bindingsActive = self:GetAttribute("dfBindingsActive")
 
-        DF:Debug("CLICK", "OnLeave %s wrapLeave=%s(%d) kbStillActive=%s",
-            frameName, tostring(wrapLeaveFired), wrapLeaveCount, tostring(bindingsActive))
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "OnLeave %s wrapLeave=%s(%d) kbStillActive=%s",
+                frameName, tostring(wrapLeaveFired), wrapLeaveCount, tostring(bindingsActive))
+        end
 
         if not wasTracked then
             DF:DebugWarn("CLICK", "OnLeave %s but wasn't tracked as hovered — possible orphan leave", frameName)
@@ -2273,8 +2303,10 @@ function CC:SetupSecureHandlers(frame)
 
         -- Warn if WrapScript OnLeave didn't fire (bindings may not have been cleared)
         if not wrapLeaveFired and wasTracked then
-            DF:DebugWarn("CLICK", "WrapScript OnLeave DID NOT FIRE for %s! leaveCount=%d kbActive=%s",
-                frameName, wrapLeaveCount, tostring(bindingsActive))
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "WrapScript OnLeave DID NOT FIRE for %s! leaveCount=%d kbActive=%s",
+                    frameName, wrapLeaveCount, tostring(bindingsActive))
+            end
         end
 
         -- Warn if bindings are still active after leave (WrapScript should have cleared them)
@@ -2304,10 +2336,14 @@ function CC:SetupSecureHandlers(frame)
             -- show-claim from a motion-enter after the fact, and the two have
             -- completely different release paths.
             local showClaimed = self:GetAttribute("dfShowClaimed") or 0
-            DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
-                frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
-            DF:DebugError("CLICK", "  clearedBy=%s showClaimed=%d stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
-                clearedBy, showClaimed, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
+            if DF:DebugActive("CLICK") then
+                DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
+                    frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
+            end
+            if DF:DebugActive("CLICK") then
+                DF:DebugError("CLICK", "  clearedBy=%s showClaimed=%d stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
+                    clearedBy, showClaimed, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
+            end
 
             -- STUCK-BINDS BACKSTOP: the client sometimes skips the secure
             -- OnLeave wrap (and the mouseoverstate driver has a blind spot
@@ -2399,9 +2435,11 @@ function CC:SetupSecureHandlers(frame)
             macroAttr = self:GetAttribute("macrotext-" .. button)
         end
 
-        DF:Debug("CLICK", "PreClick %s btn=%s unit=%s hovered=%s type=%s macro=%s",
-            frameName, button, tostring(unit), tostring(hovered), tostring(typeAttr),
-            macroAttr and macroAttr:sub(1, 50) or "nil")
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "PreClick %s btn=%s unit=%s hovered=%s type=%s macro=%s",
+                frameName, button, tostring(unit), tostring(hovered), tostring(typeAttr),
+                macroAttr and macroAttr:sub(1, 50) or "nil")
+        end
 
         -- Warn if click-cast type is missing for this button
         if not typeAttr or typeAttr == "" then
@@ -2412,10 +2450,14 @@ function CC:SetupSecureHandlers(frame)
             local isHovered = (CC.currentHoveredFrame == self)
 
             DF:DebugWarn("CLICK", "MISSING TYPE for btn=%s on %s - click won't cast!", button, frameName)
-            DF:DebugWarn("CLICK", "  kbActive=%s snippet=%d chars combat=%s isHovered=%s",
-                tostring(bindingsActive), #snippet, tostring(InCombatLockdown()), tostring(isHovered))
-            DF:DebugWarn("CLICK", "  wrapEnter=%d wrapLeave=%d visible=%s mouseOver=%s",
-                wrapEnterCount, wrapLeaveCount, tostring(self:IsVisible()), tostring(self:IsMouseOver()))
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "  kbActive=%s snippet=%d chars combat=%s isHovered=%s",
+                    tostring(bindingsActive), #snippet, tostring(InCombatLockdown()), tostring(isHovered))
+            end
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "  wrapEnter=%d wrapLeave=%d visible=%s mouseOver=%s",
+                    wrapEnterCount, wrapLeaveCount, tostring(self:IsVisible()), tostring(self:IsMouseOver()))
+            end
         end
     end)
 
@@ -2604,8 +2646,10 @@ function CC:RewrapSecureHandlers(frame)
     -- to bail silently — the repair would report "re-wrapped 0 frames" and look
     -- like it had nothing to do. Say why, and try to get the header back.
     if not (self.header and self.header.WrapScript) then
-        DF:DebugError("CLICK", "RewrapSecureHandlers: no secure header — cannot re-wrap %s",
-            tostring(frame.GetName and frame:GetName() or "unnamed"))
+        if DF:DebugActive("CLICK") then
+            DF:DebugError("CLICK", "RewrapSecureHandlers: no secure header — cannot re-wrap %s",
+                tostring(frame.GetName and frame:GetName() or "unnamed"))
+        end
         self:CreateClickCastHeader()
         return false
     end
@@ -2680,18 +2724,24 @@ function CC:ReassertHoverBinds(frame)
     end)
 
     if ok then
-        DF:Debug("CLICK", "Re-asserted hover binds on %s (a rebuild happened while it was hovered)",
-            frame:GetName() or "unnamed")
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "Re-asserted hover binds on %s (a rebuild happened while it was hovered)",
+                frame:GetName() or "unnamed")
+        end
     else
-        DF:DebugWarn("CLICK", "Hover re-assert failed for %s — binds return on the next hover",
-            frame:GetName() or "unnamed")
+        if DF:DebugActive("CLICK") then
+            DF:DebugWarn("CLICK", "Hover re-assert failed for %s — binds return on the next hover",
+                frame:GetName() or "unnamed")
+        end
     end
 end
 
 function CC:RequestBindingRepair(reason)
     if InCombatLockdown() then
         if not (self.deferred and self.deferred.bindingRepair) then
-            DF:DebugWarn("CLICK", "Binding repair queued for combat end (%s)", tostring(reason))
+            if DF:DebugActive("CLICK") then
+                DF:DebugWarn("CLICK", "Binding repair queued for combat end (%s)", tostring(reason))
+            end
         end
         self:Defer("bindingRepair", reason)
         return
@@ -2708,8 +2758,10 @@ function CC:RunBindingRepair(reason, force)
             -- Say so. A silent return here made a refused repair indistinguishable
             -- from a completed one in the log, right after a detector had reported
             -- the breakage that asked for it.
-            DF:Debug("CLICK", "Binding repair (%s) skipped — %0.1fs into the %ds cooldown",
-                tostring(reason), GetTime() - self.lastBindingRepair, REPAIR_COOLDOWN)
+            if DF:DebugActive("CLICK") then
+                DF:Debug("CLICK", "Binding repair (%s) skipped — %0.1fs into the %ds cooldown",
+                    tostring(reason), GetTime() - self.lastBindingRepair, REPAIR_COOLDOWN)
+            end
             return
         end
     end
@@ -2743,21 +2795,27 @@ function CC:RunBindingRepair(reason, force)
         self.repairHoverSince = self.repairHoverSince or GetTime()
         local waited = GetTime() - self.repairHoverSince
         if waited < REPAIR_HOVER_BUDGET then
-            DF:Debug("CLICK", "Binding repair (%s) postponed — cursor is on %s (%.1fs of %ds)",
-                tostring(reason), hovered:GetName() or "unnamed", waited, REPAIR_HOVER_BUDGET)
+            if DF:DebugActive("CLICK") then
+                DF:Debug("CLICK", "Binding repair (%s) postponed — cursor is on %s (%.1fs of %ds)",
+                    tostring(reason), hovered:GetName() or "unnamed", waited, REPAIR_HOVER_BUDGET)
+            end
             self:DeferAfter("repairHoverWait", REPAIR_HOVER_WAIT, function()
                 CC:RunBindingRepair(reason, force)
             end)
             return
         end
-        DF:DebugWarn("CLICK", "Binding repair (%s) proceeding with %s still hovered after %.1fs — its hover binds will need a re-hover",
-            tostring(reason), hovered:GetName() or "unnamed", waited)
+        if DF:DebugActive("CLICK") then
+            DF:DebugWarn("CLICK", "Binding repair (%s) proceeding with %s still hovered after %.1fs — its hover binds will need a re-hover",
+                tostring(reason), hovered:GetName() or "unnamed", waited)
+        end
     end
     self.repairHoverSince = nil
 
     self.lastBindingRepair = GetTime()
 
-    DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
+    if DF:DebugActive("CLICK") then
+        DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
+    end
 
     -- 1. Reset restricted-env hover tracking (handle + string mirror). OnEnter does not
     --    method-call the shared handle, but the mouseoverstate driver still reads geometry

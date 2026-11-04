@@ -2660,8 +2660,10 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     -- runs this exact click; see the Dot* hooks below.
     local function OnCheckClick(self)
         local val = self:GetChecked()
-        DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
-            tostring(dbKey), tostring(overrideKey), tostring(val))
+        if DF:DebugActive("GUI") then
+            DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
+                tostring(dbKey), tostring(overrideKey), tostring(val))
+        end
 
         -- ☠ THE HOST BRACKET, NOT A SECOND COPY OF IT. What stood here was the
         -- runtime-redirect gate and the override record written out by hand --

@@ -28,6 +28,7 @@ local function load(inCombat)
     drainer = nil
     local DF = { playerInCombat = inCombat }
     function DF:Debug() end
+    function DF:DebugActive() return true end
     function DF:DebugWarn() end
     local chunk = assert(loadstring(
         "local DF, DBG, CreateFrame, GetTime, debugprofilestop, AuraContainer = ...\n" .. block .. "\nreturn pacedBuild",

@@ -707,8 +707,10 @@ function CC:ApplyBindings()
                     -- Combat started during batch - flag for retry after combat
                     CC:Defer("bindingRefresh")
                     CC.batchBindingTimer = nil
-                    DF:Debug("CLICK", "ApplyBindings sweep INTERRUPTED by combat: %d/%d frames in %dms",
-                        applied, #allFrames, (GetTime() - sweepStart) * 1000)
+                    if DF:DebugActive("CLICK") then
+                        DF:Debug("CLICK", "ApplyBindings sweep INTERRUPTED by combat: %d/%d frames in %dms",
+                            applied, #allFrames, (GetTime() - sweepStart) * 1000)
+                    end
                     return
                 end
 
@@ -736,7 +738,9 @@ function CC:ApplyBindings()
                     if ok then
                         applied = applied + 1
                     elseif DF and DF.Debug then
-                        DF:Debug("CLICK", "ApplyBindings: frame %d threw: %s", i, tostring(err))
+                        if DF:DebugActive("CLICK") then
+                            DF:Debug("CLICK", "ApplyBindings: frame %d threw: %s", i, tostring(err))
+                        end
                     end
                 end
 
@@ -795,8 +799,10 @@ function CC:ApplyBindings()
                     -- destroy the evidence a capture was taken for. The hovered-frame WARNs
                     -- and every per-frame warning still fire; only the routine per-frame INFO
                     -- chatter is folded into this.
-                    DF:Debug("CLICK", "ApplyBindings sweep: %d frames in %dms",
-                        applied, (GetTime() - sweepStart) * 1000)
+                    if DF:DebugActive("CLICK") then
+                        DF:Debug("CLICK", "ApplyBindings sweep: %d frames in %dms",
+                            applied, (GetTime() - sweepStart) * 1000)
+                    end
                 end
             end
 
@@ -898,7 +904,9 @@ function CC:CreateHovercastButton()
     end)
 
     self.hovercastButton:HookScript("PostClick", function(btn, mouseButton, isDown)
-        DF:Debug("CLICK", "Hovercast PostClick: button=%s isDown=%s", tostring(mouseButton), tostring(isDown))
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "Hovercast PostClick: button=%s isDown=%s", tostring(mouseButton), tostring(isDown))
+        end
     end)
 end
 
@@ -2679,7 +2687,9 @@ function CC:ResolveColdStartProfile(reason)
     self.provisionalResolveTimer = C_Timer.NewTimer(0.5, function()
         CC.provisionalResolveTimer = nil
         if CC.loadoutCheckUnresolved then
-            DF:Debug("CLICK", "Re-running deferred loadout profile check (%s)", tostring(reason))
+            if DF:DebugActive("CLICK") then
+                DF:Debug("CLICK", "Re-running deferred loadout profile check (%s)", tostring(reason))
+            end
             CC:CheckLoadoutProfileSwitch()
         end
     end)
@@ -2755,7 +2765,9 @@ function CC:BuildUnifiedMacroMap()
                 isSpecialAction = true,
             }
             
-            DF:Debug("CLICK", "Special: %s -> %s", tostring(keyString), tostring(specialBinding.actionType or "?"))
+            if DF:DebugActive("CLICK") then
+                DF:Debug("CLICK", "Special: %s -> %s", tostring(keyString), tostring(specialBinding.actionType or "?"))
+            end
         elseif itemBinding then
             -- Item binding - build simple /use macro
             local macroText = self:BuildMacroTextForBinding(itemBinding)
@@ -2768,12 +2780,16 @@ function CC:BuildUnifiedMacroMap()
                     keyString = keyString,
                 }
                 
-                DF:Debug("CLICK", "Item: %s\n%s", tostring(keyString), tostring(macroText))
+                if DF:DebugActive("CLICK") then
+                    DF:Debug("CLICK", "Item: %s\n%s", tostring(keyString), tostring(macroText))
+                end
             else
                 -- Warn rather than dropping the key in silence: a binding that shows in
                 -- the list and does nothing is worse than one that says why.
-                DF:DebugWarn("CLICK", "Item %s dropped: BuildMacroTextForBinding returned nothing",
-                    tostring(keyString))
+                if DF:DebugActive("CLICK") then
+                    DF:DebugWarn("CLICK", "Item %s dropped: BuildMacroTextForBinding returned nothing",
+                        tostring(keyString))
+                end
             end
         else
             -- Normal spell/macro binding - try to build combined macro
@@ -2787,13 +2803,17 @@ function CC:BuildUnifiedMacroMap()
                     keyString = keyString,
                 }
                 
-                DF:Debug("CLICK", "Macro: %s\n%s", tostring(keyString), tostring(macroText))
+                if DF:DebugActive("CLICK") then
+                    DF:Debug("CLICK", "Macro: %s\n%s", tostring(keyString), tostring(macroText))
+                end
             else
                 -- Same silent drop as the item branch above. Named separately so the log
                 -- says which half failed: no macro text at all, or text with no template
                 -- binding to attach it to.
-                DF:DebugWarn("CLICK", "Macro %s dropped: macroText=%s templateBinding=%s",
-                    tostring(keyString), tostring(macroText ~= nil), tostring(templateBinding ~= nil))
+                if DF:DebugActive("CLICK") then
+                    DF:DebugWarn("CLICK", "Macro %s dropped: macroText=%s templateBinding=%s",
+                        tostring(keyString), tostring(macroText ~= nil), tostring(templateBinding ~= nil))
+                end
             end
         end
     end
@@ -2948,11 +2968,15 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     -- Debug: track when bindings are reapplied (helps diagnose unexpected clears)
     local isHovered = (self.currentHoveredFrame == frame) or (frame.IsMouseOver and frame:IsMouseOver())
     if not quiet then
-        DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+        end
     end
     if isHovered then
-        DF:DebugWarn("CLICK", "ApplyBindings on HOVERED frame %s — bindings may flicker! caller: %s",
-            frameName, debugstack(2, 1, 0) or "unknown")
+        if DF:DebugActive("CLICK") then
+            DF:DebugWarn("CLICK", "ApplyBindings on HOVERED frame %s — bindings may flicker! caller: %s",
+                frameName, debugstack(2, 1, 0) or "unknown")
+        end
     end
 
     -- Build unified macro map if not already built
@@ -3089,8 +3113,10 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
                 -- back. Warn, because a binding that shows in the list and does
                 -- nothing is worse than one that says why.
                 if not buttonNum then
-                    DF:DebugWarn("CLICK", "Skipping binding with unrecognised button '%s' on %s",
-                        tostring(binding.button), frameName)
+                    if DF:DebugActive("CLICK") then
+                        DF:DebugWarn("CLICK", "Skipping binding with unrecognised button '%s' on %s",
+                            tostring(binding.button), frameName)
+                    end
 
                 else
                     -- Track base (no modifier) mouse buttons that get a binding on this frame
@@ -3143,8 +3169,10 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     if not quiet then
         local finalType1 = frame:GetAttribute("type1")
         local finalMacro1 = frame:GetAttribute("macrotext1")
-        DF:Debug("CLICK", "ApplyBindings DONE %s type1=%s macro1=%s",
-            frameName, tostring(finalType1), finalMacro1 and finalMacro1:sub(1, 50) or "nil")
+        if DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "ApplyBindings DONE %s type1=%s macro1=%s",
+                frameName, tostring(finalType1), finalMacro1 and finalMacro1:sub(1, 50) or "nil")
+        end
     end
 
     -- Update keyboard binding snippet for WrapScript to use
@@ -3671,8 +3699,10 @@ SlashCmdList["DFCCDEBUGCLICKS"] = function()
                         tostring(typeAttr), tostring(macroAttr and macroAttr:sub(1, 60)))
                 end)
                 frame:HookScript("PostClick", function(self, button, down)
-                    DF:Debug("CLICK", "PostClick mouseover=%s",
-                        tostring(UnitExists("mouseover") and UnitName("mouseover") or "none"))
+                    if DF:DebugActive("CLICK") then
+                        DF:Debug("CLICK", "PostClick mouseover=%s",
+                            tostring(UnitExists("mouseover") and UnitName("mouseover") or "none"))
+                    end
                 end)
                 frame.dfDebugClickHooked = true
                 hooked = hooked + 1

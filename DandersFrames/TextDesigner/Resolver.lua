@@ -493,8 +493,10 @@ function Resolver:Resolve(elem, source)
     if not elem or not elem.contentType then return "" end
     local fn = RESOLVERS[elem.contentType]
     if not fn then
-        DF:Debug("TD", "Resolver: unknown contentType '%s' for elem id=%s",
-            tostring(elem.contentType), tostring(elem.id))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Resolver: unknown contentType '%s' for elem id=%s",
+                tostring(elem.contentType), tostring(elem.id))
+        end
         return ""
     end
     return fn(elem, source) or ""

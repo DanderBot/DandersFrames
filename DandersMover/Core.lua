@@ -522,7 +522,7 @@ end
 -- Ignored while unlocked -- a live session is keyed by the ids it opened with.
 function Lib:RenameKey(addon, old, new)
     if Lib:IsUnlocked() then
-        NS:Debug("RenameKey ignored while unlocked: " .. tostring(old))
+        if NS.db and NS.db.debug then NS:Debug("RenameKey ignored while unlocked: " .. tostring(old)) end
         return false
     end
     local ok = Registry:RenameKey(addon, old, new)

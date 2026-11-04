@@ -2539,10 +2539,12 @@ local function buildMarchingAnts(border, anim)
             if not warnedAntsBuild then
                 warnedAntsBuild = true
                 if DF.DebugWarn then
-                    DF:DebugWarn("AURACONTAINER",
-                        "MarchingAnts create failed on a %s host, effect will not render: %s",
-                        border._secretRect and "container-button" or "DF-owned",
-                        tostring(made))
+                    if DF:DebugActive("AURACONTAINER") then
+                        DF:DebugWarn("AURACONTAINER",
+                            "MarchingAnts create failed on a %s host, effect will not render: %s",
+                            border._secretRect and "container-button" or "DF-owned",
+                            tostring(made))
+                    end
                 end
             end
             return false

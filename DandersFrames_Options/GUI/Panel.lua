@@ -3345,11 +3345,15 @@ function DF:CreateGUI()
         if ownsTrace and switchMarks then
             SwitchMark(GUI._lastRepaintNodes and format("theme(walked %d)", GUI._lastRepaintNodes) or "theme")
             local t0 = switchMarks.t0
-            DF:Debug("GUI", "switch to %s: %s | total %.1fms", name,
-                table.concat(switchMarks, " | "), debugprofilestop() - t0)
+            if DF:DebugActive("GUI") then
+                DF:Debug("GUI", "switch to %s: %s | total %.1fms", name,
+                    table.concat(switchMarks, " | "), debugprofilestop() - t0)
+            end
             switchMarks = nil
             C_Timer.After(0, function()
-                DF:Debug("GUI", "switch to %s: next frame began at +%.1fms", name, debugprofilestop() - t0)
+                if DF:DebugActive("GUI") then
+                    DF:Debug("GUI", "switch to %s: next frame began at +%.1fms", name, debugprofilestop() - t0)
+                end
             end)
         end
     end

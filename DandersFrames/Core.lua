@@ -41,12 +41,16 @@ function DF:RunLocaleRefreshers()
         if not ok then
             failed = failed + 1
             if DF.DebugError then
-                DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+                if DF:DebugActive("SCRIPT") then
+                    DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+                end
             end
         end
     end
-    DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
-        #DF._localeRefreshers, failed)
+    if DF:DebugActive("SCRIPT") then
+        DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
+            #DF._localeRefreshers, failed)
+    end
 end
 
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).
@@ -658,11 +662,13 @@ function DF:OnSliderDragStart(lightweightFunc, funcName, usePreviewMode)
     DF.sliderLightweightName = funcName or "unknown"
     DF.sliderUpdateCallCount = 0  -- Reset counter
 
-    DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
-        DF.sliderDragCount,
-        lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
-            or "no lightweight function (will skip until release)",
-        usePreviewMode and " (PREVIEW MODE)" or "")
+    if DF:DebugActive("GUI") then
+        DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
+            DF.sliderDragCount,
+            lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
+                or "no lightweight function (will skip until release)",
+            usePreviewMode and " (PREVIEW MODE)" or "")
+    end
 end
 
 -- Called when a slider stops being dragged (mouse up)
@@ -678,8 +684,10 @@ function DF:OnSliderDragStop()
     DF.sliderDragCount = count
     DF.sliderDragging = count > 0
 
-    DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
-        count, tostring(DF.sliderUpdateCallCount))
+    if DF:DebugActive("GUI") then
+        DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
+            count, tostring(DF.sliderUpdateCallCount))
+    end
 
     -- Still someone holding a bar: keep the lightweight slot and do NOT run the
     -- test-mode catch-up below, which is the "the gesture is over" pass.
@@ -1055,7 +1063,7 @@ local function warnMissingTexture(path)
     -- it to chat, yet the log entry sat at INFO -- so anyone who raised the log level to
     -- cut chatter lost the only line this category has. TEXTURE has exactly one call site;
     -- filtering it out by severity left the category permanently empty.
-    if DF.DebugWarn then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
+    if DF.DebugActive and DF:DebugActive("TEXTURE") then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
 
     local shown = tostring(path)
     -- Ours: show just the filename, and say plainly that it is not coming back.
@@ -2756,6 +2764,10 @@ function DF:LightweightUpdateAbsorbBarColor()
         if frame.dfAbsorbBar and db.absorbBarColor then
             local c = db.absorbBarColor
             frame.dfAbsorbBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+            -- The part past the bar end matches the shield.
+            if frame.dfAbsorbBreakout then
+                frame.dfAbsorbBreakout:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+            end
         end
         if frame.dfAbsorbBar and frame.dfAbsorbBar.bg and db.absorbBarBackgroundColor then
             local c = db.absorbBarBackgroundColor
@@ -8715,9 +8727,11 @@ function DF:FullProfileRefresh()
     -- Falls back to direct SetPoint if the function isn't loaded yet.
     if DF.raidContainer then
         local scale = raidDB.frameScale or 1.0
-        DF:Debug("RAIDPOS", "FullProfileRefresh: applying raid container pos (%.1f,%.1f) scale=%.3f autoActive=%s",
-            raidDB.raidAnchorX or 0, raidDB.raidAnchorY or 0, scale,
-            tostring(DF.AutoProfilesUI and DF.AutoProfilesUI.activeRuntimeProfile and DF.AutoProfilesUI.activeRuntimeProfile.name or "none"))
+        if DF:DebugActive("RAIDPOS") then
+            DF:Debug("RAIDPOS", "FullProfileRefresh: applying raid container pos (%.1f,%.1f) scale=%.3f autoActive=%s",
+                raidDB.raidAnchorX or 0, raidDB.raidAnchorY or 0, scale,
+                tostring(DF.AutoProfilesUI and DF.AutoProfilesUI.activeRuntimeProfile and DF.AutoProfilesUI.activeRuntimeProfile.name or "none"))
+        end
         if DF.UpdateRaidContainerPosition and not InCombatLockdown() then
             DF:UpdateRaidContainerPosition()
         else

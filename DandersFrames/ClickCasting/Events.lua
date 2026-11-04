@@ -256,8 +256,10 @@ local function forEachFrameSafe(self, frames, label, fn)
     for frame in pairs(frames) do
         local ok, err = pcall(fn, self, frame)
         if not ok then
-            DF:DebugError("CLICK", "Deferred '%s' errored on one frame (the rest of the set still ran): %s",
-                label, tostring(err))
+            if DF:DebugActive("CLICK") then
+                DF:DebugError("CLICK", "Deferred '%s' errored on one frame (the rest of the set still ran): %s",
+                    label, tostring(err))
+            end
         end
     end
 end
@@ -379,7 +381,9 @@ local OPPOSED_JOBS = {
 function CC:Defer(job, payload)
     local def = DEFERRED_JOBS[job]
     if not def then
-        DF:DebugError("CLICK", "Defer: unknown job '%s' — work dropped", tostring(job))
+        if DF:DebugActive("CLICK") then
+            DF:DebugError("CLICK", "Defer: unknown job '%s' — work dropped", tostring(job))
+        end
         return false
     end
 
@@ -447,8 +451,10 @@ function CC:DrainDeferred(onlyJob)
                 -- and carry on; the queue keeps draining.
                 local ok, wantsRefresh = pcall(DEFERRED_JOBS[job].run, self, payload)
                 if not ok then
-                    DF:DebugError("CLICK", "Deferred job '%s' errored during drain: %s",
-                        job, tostring(wantsRefresh))
+                    if DF:DebugActive("CLICK") then
+                        DF:DebugError("CLICK", "Deferred job '%s' errored during drain: %s",
+                            job, tostring(wantsRefresh))
+                    end
                 elseif wantsRefresh then
                     needsUIRefresh = true
                 end

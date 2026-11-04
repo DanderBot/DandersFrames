@@ -1536,11 +1536,13 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                             -- here would replace the fault being described with a fresh error before DebugWarn runs.
                             -- (The plain-write probe sits above this block: its result decides whether to latch.)
                             local okName, name = pcall(f.GetDebugName, f)
-                            DF:DebugWarn("AURACONTAINER",
-                                "AD alpha host refused a tainted write. plainSetAlphaOK=%s readableName=%s host=%s err=%s",
-                                tostring(okPlain), tostring(okName),
-                                okName and tostring(name) or "<refused>",
-                                tostring(err))
+                            if DF:DebugActive("AURACONTAINER") then
+                                DF:DebugWarn("AURACONTAINER",
+                                    "AD alpha host refused a tainted write. plainSetAlphaOK=%s readableName=%s host=%s err=%s",
+                                    tostring(okPlain), tostring(okName),
+                                    okName and tostring(name) or "<refused>",
+                                    tostring(err))
+                            end
                         end
                     end
                 end
@@ -2091,8 +2093,10 @@ function DF:UpdateAllElementAppearances(frame)
                 if not DF._warnedElementAppearance then
                     DF._warnedElementAppearance = true
                     if DF.DebugWarn then
-                        DF:DebugWarn("RANGE", "%s threw during the appearance pass on %s: %s",
-                            name, tostring(frame.unit), tostring(err))
+                        if DF:DebugActive("RANGE") then
+                            DF:DebugWarn("RANGE", "%s threw during the appearance pass on %s: %s",
+                                name, tostring(frame.unit), tostring(err))
+                        end
                     end
                 end
             end

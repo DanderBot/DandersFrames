@@ -489,7 +489,9 @@ local function makeStrip(parent, unit, row, rowIndex, yOffset)
         c:AddAuraGroup("dfae_" .. rowIndex, filter, opts)
     end)
     if not built then
-        DF:DebugWarn("AURAROW", "AuraExplorer row %d: AddAuraGroup failed: %s", rowIndex, tostring(err))
+        if DF:DebugActive("AURAROW") then
+            DF:DebugWarn("AURAROW", "AuraExplorer row %d: AddAuraGroup failed: %s", rowIndex, tostring(err))
+        end
         return nil
     end
     pcall(function() c:SetEnabled(true) end)

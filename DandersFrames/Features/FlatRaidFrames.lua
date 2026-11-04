@@ -930,10 +930,12 @@ function FlatRaidFrames:UpdateContainerSize()
     
     local oldW, oldH = DF.raidContainer:GetSize()
     DF.raidContainer:SetSize(containerWidth, containerHeight)
-    DF:Debug("FLATRAID", "UpdateContainerSize: %dx%d -> %dx%d (raidUseGroups=%s)",
-        math.floor(oldW + 0.5), math.floor(oldH + 0.5),
-        math.floor(containerWidth + 0.5), math.floor(containerHeight + 0.5),
-        tostring(db.raidUseGroups))
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "UpdateContainerSize: %dx%d -> %dx%d (raidUseGroups=%s)",
+            math.floor(oldW + 0.5), math.floor(oldH + 0.5),
+            math.floor(containerWidth + 0.5), math.floor(containerHeight + 0.5),
+            tostring(db.raidUseGroups))
+    end
     -- (Removed) a restatement: the line directly above already reports both dimensions,
     -- rounded, alongside the grouped/flat mode that produced them.
 end

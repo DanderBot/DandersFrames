@@ -526,6 +526,12 @@ local function AbsorbLayoutStateChanged(frame, db)
     -- Texture layers are painted only on the full path.
     if DF:BarTextureLayersChanged(s.textureLayers, db, "absorbBar") then return true end
 
+    -- Past the bar end: its length, and the object it hangs off (the heals' breakout fill
+    -- appears and goes with the heal prediction, and is replaced on a texture swap).
+    local breakout = db.absorbBarBreakout or 0
+    if s.breakout        ~= breakout                                      then return true end
+    if breakout > 0 and s.breakoutAnchor ~= DF.ResolveAbsorbBreakoutAnchor(frame, db) then return true end
+
     return false
 end
 
@@ -581,6 +587,8 @@ local function CacheAbsorbLayoutState(frame, db)
     s.overshieldReverse = db.absorbBarOvershieldReverse
     local osc = db.absorbBarOvershieldColor or db.absorbBarColor or DEFAULT_ABSORB_COLOR
     s.overshieldR, s.overshieldG, s.overshieldB = osc.r, osc.g, osc.b
+    s.breakout        = db.absorbBarBreakout or 0
+    s.breakoutAnchor  = s.breakout > 0 and DF.ResolveAbsorbBreakoutAnchor(frame, db) or nil
 end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health bar) when the
@@ -833,6 +841,220 @@ local function HoldFillUntilPlaced(bar)
     fillHoldWatcher:Show()
 end
 
+-- Anchor a full-length bar's leading edge to the trailing edge of a previous fill texture
+-- (the health fill, or the segment before it in the chain), per health orientation.
+-- `cross` insets the other axis (the absorb's translucent-border inset); 0 or nil for none.
+local function AnchorHealPredSegment(seg, prevTex, orient, w, h, cross)
+    cross = cross or 0
+    seg:ClearAllPoints()
+    if orient == "HORIZONTAL_INV" then
+        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(true); seg:SetWidth(w)
+        seg:SetPoint("TOPRIGHT", prevTex, "TOPLEFT", 0, -cross)
+        seg:SetPoint("BOTTOMRIGHT", prevTex, "BOTTOMLEFT", 0, cross)
+    elseif orient == "VERTICAL" then
+        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(false); seg:SetHeight(h)
+        seg:SetPoint("BOTTOMLEFT", prevTex, "TOPLEFT", cross, 0)
+        seg:SetPoint("BOTTOMRIGHT", prevTex, "TOPRIGHT", -cross, 0)
+    elseif orient == "VERTICAL_INV" then
+        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(true); seg:SetHeight(h)
+        seg:SetPoint("TOPLEFT", prevTex, "BOTTOMLEFT", cross, 0)
+        seg:SetPoint("TOPRIGHT", prevTex, "BOTTOMRIGHT", -cross, 0)
+    else  -- HORIZONTAL (default)
+        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(false); seg:SetWidth(w)
+        seg:SetPoint("TOPLEFT", prevTex, "TOPRIGHT", 0, -cross)
+        seg:SetPoint("BOTTOMLEFT", prevTex, "BOTTOMRIGHT", 0, cross)
+    end
+end
+
+local SHIELD_OVERLAY_TEX = "Interface\\RaidFrame\\Shield-Overlay"
+
+-- The absorb fill texture, shared by the shield and its breakout so the two halves match.
+-- Holds the fill when the texture changes (see HoldFillUntilPlaced).
+local function ApplyAbsorbFillTexture(bar, tex)
+    if bar.currentTexture == tex then return end
+    bar.currentTexture = tex
+    if tex == SHIELD_OVERLAY_TEX then
+        bar:SetStatusBarTexture(tex)
+        local barTex = bar:GetStatusBarTexture()
+        if barTex then
+            -- Wrap set WITH the file, as Blizzard's own template declares for
+            -- this texture (UnitFrame.xml, horizTile/vertTile on the node) --
+            -- SetStatusBarTexture alone leaves the sampler clamped. Same rule
+            -- as DF's tiled textures; see ☠ in DF:ApplyBarTextureTiling.
+            barTex:SetTexture(tex, "REPEAT", "REPEAT")
+            barTex:SetHorizTile(true)
+            barTex:SetVertTile(true)
+            barTex:SetTexCoord(0, 2, 0, 1)
+            barTex:SetDesaturated(true)
+            barTex:SetDrawLayer("ARTWORK", 2)
+        end
+    else
+        -- Tiling follows the texture that actually LANDED: if the safe setter
+        -- substituted the stock fallback, tile against that, not the path we
+        -- asked for (the fallback is a stretched texture).
+        local applied = DF:SafeSetStatusBarTexture(bar, tex)
+        DF:ApplyBarTextureTiling(bar, applied == false and DF.STOCK_BAR_TEXTURE or tex)
+        local barTex = bar:GetStatusBarTexture()
+        if barTex then
+            barTex:SetDesaturated(false)
+            barTex:SetDrawLayer("ARTWORK", 1)
+        end
+    end
+    HoldFillUntilPlaced(bar)
+end
+
+-- ============================================================
+-- ★ PAST THE BAR END (the "breakout")
+-- The absorb (Attached) and the heal prediction can draw a set share of the bar's length
+-- past its max-health end, as they did before every bar was masked to the health bar.
+-- Each is a second bar, a CHILD of the bar it continues, so the out-of-range fade and every
+-- hide path reach it through the parent. It draws the same value on the same ruler and is
+-- masked to the strip outside the bar, so inside the bar only the main bar shows.
+--
+-- ☠ THE JOIN GHOST. Outside the bar nothing masks a wrong value, so the strip shows exactly
+-- what the mask hid before: a member's max health is a placeholder for a moment on a join.
+-- Two things keep it out, the same two the main bars rely on: the fill is held until it is
+-- placed (HoldFillUntilPlaced), and the range and the amount come from ONE calculator
+-- snapshot, never UnitHealthMax beside a calculator amount. A third guard, hiding the strip
+-- while the calculator said absorbs or heals exceeded the whole max health, was built and
+-- removed: with it switched off a raid join showed no ghost. If one comes back, that flag
+-- (absorb clamp 2 / heal clamp 1, driving SetAlphaFromBoolean) is the place to start.
+-- ============================================================
+
+-- The strip past the max-health end of the health bar, `pct` percent of its length long.
+-- Same mask texture and filtering as MaskBarToHealthBar, anchored outside the bar.
+local function MaskBarToBreakoutStrip(frame, bar, orient, pct)
+    local hb = frame.healthBar
+    local mask = bar.dfHealthMaskTex
+    if not mask then
+        mask = bar:CreateMaskTexture()
+        mask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE", "NEAREST")
+        bar.dfHealthMaskTex = mask
+    end
+    local w, h = hb:GetWidth(), hb:GetHeight()
+    if mask.dfAnchor ~= hb or mask.dfOrient ~= orient or mask.dfPct ~= pct
+        or mask.dfW ~= w or mask.dfH ~= h then
+        mask.dfAnchor, mask.dfOrient, mask.dfPct, mask.dfW, mask.dfH = hb, orient, pct, w, h
+        mask:ClearAllPoints()
+        if orient == "HORIZONTAL_INV" then
+            mask:SetPoint("TOPRIGHT", hb, "TOPLEFT", 0, 0)
+            mask:SetPoint("BOTTOMRIGHT", hb, "BOTTOMLEFT", 0, 0)
+            mask:SetWidth(w * pct / 100)
+        elseif orient == "VERTICAL" then
+            mask:SetPoint("BOTTOMLEFT", hb, "TOPLEFT", 0, 0)
+            mask:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT", 0, 0)
+            mask:SetHeight(h * pct / 100)
+        elseif orient == "VERTICAL_INV" then
+            mask:SetPoint("TOPLEFT", hb, "BOTTOMLEFT", 0, 0)
+            mask:SetPoint("TOPRIGHT", hb, "BOTTOMRIGHT", 0, 0)
+            mask:SetHeight(h * pct / 100)
+        else
+            mask:SetPoint("TOPLEFT", hb, "TOPRIGHT", 0, 0)
+            mask:SetPoint("BOTTOMLEFT", hb, "BOTTOMRIGHT", 0, 0)
+            mask:SetWidth(w * pct / 100)
+        end
+    end
+    -- Read by TextureLayers for layer textures it creates after this call.
+    bar.dfHealthMask = mask
+    local fill = bar:GetStatusBarTexture()
+    if fill then SetTextureMask(fill, mask) end
+    local layers = bar.dfTextureLayers
+    if layers then
+        for _, tex in pairs(layers.textures) do SetTextureMask(tex, mask) end
+        layers.canvas:SetAlpha(bar.dfFillHeld and 0 or 1)
+    end
+end
+
+-- The absorb's breakout amount: the whole shield, capped at the whole max health (2,
+-- MaximumHealth) -- the most one bar-length StatusBar can draw anyway.
+local function PopulateAbsorbBreakoutCalc(frame, unit)
+    local calc = frame.dfAbsorbBreakoutCalc
+    if not calc then
+        calc = CreateUnitHealPredictionCalculator()
+        if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(2) end
+        if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
+        frame.dfAbsorbBreakoutCalc = calc
+    end
+    UnitGetDetailedHealPrediction(unit, nil, calc)
+    return calc
+end
+
+-- Where the absorb's breakout starts: after the heals' breakout while that is drawn (so
+-- outside the bar the order stays health -> heals -> shield), else where the shield does.
+local function ResolveAbsorbBreakoutAnchor(frame, db)
+    local hbo, pred = frame.dfHealBreakout, frame.dfHealPredictionBar
+    if hbo and hbo:IsShown() and pred and pred:IsShown() then
+        local t = hbo:GetStatusBarTexture()
+        if t then return t end
+    end
+    return DF:ResolveAbsorbChainAnchor(frame, db)
+end
+DF.ResolveAbsorbBreakoutAnchor = ResolveAbsorbBreakoutAnchor   -- the absorb layout cache, above
+
+local function HideBreakout(bar)
+    if bar then bar:Hide() end
+end
+
+-- `layout` is true on UpdateAbsorb's full path: style, anchor and mask. The fast path only
+-- refreshes the value. `absorbs`/`maxHealth` are used for the preview only.
+local function UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxHealth, layout)
+    local pct = db.absorbBarBreakout or 0
+    local bo = frame.dfAbsorbBreakout
+    local main = frame.dfAbsorbBar
+    if pct <= 0 or not main then return HideBreakout(bo) end
+    if not isTestRender and not (unit and CreateUnitHealPredictionCalculator) then return HideBreakout(bo) end
+    if not bo then
+        bo = CreateFrame("StatusBar", nil, main)
+        bo:SetMinMaxValues(0, 1)
+        bo:EnableMouse(false)
+        frame.dfAbsorbBreakout = bo
+        layout = true
+    end
+    if layout then
+        if bo:GetParent() ~= main then bo:SetParent(main) end
+        bo:SetFrameLevel(main:GetFrameLevel())
+        local tex = main.currentTexture or DF.STOCK_BAR_TEXTURE
+        ApplyAbsorbFillTexture(bo, tex)
+        DF:ApplyBarTextureTiling(bo, tex)
+        local blendMode = db.absorbBarBlendMode or "BLEND"
+        local fill = bo:GetStatusBarTexture()
+        if fill then fill:SetBlendMode(blendMode) end
+        SetFillColor(bo, main.dfFillR or 1, main.dfFillG or 1, main.dfFillB or 1, main.dfFillA or 1)
+        if DF:BarTextureLayersWanted(bo, db, "absorbBar") then
+            DF:ApplyBarTextureLayers(bo, "absorbBar", db, DF:BarLayerOpts(frame.healthBar, main.dfIsVerticalFill,
+                { r = main.dfFillR or 1, g = main.dfFillG or 1, b = main.dfFillB or 1, a = main.dfFillA or 1 },
+                blendMode, tex == SHIELD_OVERLAY_TEX))
+        end
+        local orient = db.healthOrientation or "HORIZONTAL"
+        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
+        local inset = 0
+        if db.frameShowBorder ~= false then
+            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)
+        end
+        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local anchorTex = ResolveAbsorbBreakoutAnchor(frame, db)
+        if not anchorTex then return HideBreakout(bo) end
+        AnchorHealPredSegment(bo, anchorTex, orient,
+            frame.healthBar:GetWidth() - inset * 2, frame.healthBar:GetHeight() - inset * 2, edgeInset)
+        MaskBarToBreakoutStrip(frame, bo, orient, pct)
+    end
+    if isTestRender then
+        bo:SetMinMaxValues(0, maxHealth)
+        DF.SetBarValue(bo, math.min(absorbs, maxHealth), frame)
+    else
+        local calc = PopulateAbsorbBreakoutCalc(frame, unit)
+        -- Range from the same snapshot as the value (see UpdateAbsorb).
+        if calc.GetMaximumHealth then
+            bo:SetMinMaxValues(0, calc:GetMaximumHealth())
+        else
+            bo:SetMinMaxValues(0, UnitHealthMax(unit))
+        end
+        local amount = calc:GetDamageAbsorbs()
+        DF.SetBarValue(bo, amount, frame)
+    end
+    bo:Show()
+end
+
 function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
@@ -1002,9 +1224,12 @@ function DF:UpdateAbsorb(frame, testIndex)
                     frame.absorbOverflowBar.visibilityHelper:SetAlphaFromBoolean(isClamped, visAlpha, 0)
                     frame.absorbOverflowBar:SetAlpha(frame.absorbOverflowBar.visibilityHelper:GetAlpha())
                 end
-            elseif mode == "ATTACHED" and frame.absorbOvershieldGlow and db.absorbBarShowOvershield then
+            elseif mode == "ATTACHED" then
                 -- ATTACHED mode: overshield glow visibility toggles with isClamped
-                frame.absorbOvershieldGlow:SetAlphaFromBoolean(isClamped, db.absorbBarOvershieldAlpha or 0.8, 0)
+                if frame.absorbOvershieldGlow and db.absorbBarShowOvershield then
+                    frame.absorbOvershieldGlow:SetAlphaFromBoolean(isClamped, db.absorbBarOvershieldAlpha or 0.8, 0)
+                end
+                UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxHealth, false)
             end
         else
             -- OVERLAY / FLOATING mode: simplest fast path — just value + OOR
@@ -1041,6 +1266,8 @@ function DF:UpdateAbsorb(frame, testIndex)
     if frame.absorbOverflowBar then
         frame.absorbOverflowBar:Hide()
     end
+    -- Only the ATTACHED branch draws past the bar end; it shows this again.
+    HideBreakout(frame.dfAbsorbBreakout)
 
     -- Create custom absorb bar if needed
     if not frame.dfAbsorbBar then
@@ -1080,38 +1307,9 @@ function DF:UpdateAbsorb(frame, testIndex)
     local blendMode = db.absorbBarBlendMode or "BLEND"
     
     -- Apply texture only if changed to prevent flickering
-    if customBar.currentTexture ~= tex then
-        customBar.currentTexture = tex
-        if tex == "Interface\\RaidFrame\\Shield-Overlay" then
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                -- Wrap set WITH the file, as Blizzard's own template declares for
-                -- this texture (UnitFrame.xml, horizTile/vertTile on the node) --
-                -- SetStatusBarTexture alone leaves the sampler clamped. Same rule
-                -- as DF's tiled textures; see ☠ in DF:ApplyBarTextureTiling.
-                barTex:SetTexture(tex, "REPEAT", "REPEAT")
-                barTex:SetHorizTile(true)
-                barTex:SetVertTile(true)
-                barTex:SetTexCoord(0, 2, 0, 1)
-                barTex:SetDesaturated(true)
-                barTex:SetDrawLayer("ARTWORK", 2)
-            end
-        else
-            -- Tiling follows the texture that actually LANDED: if the safe setter
-            -- substituted the stock fallback, tile against that, not the path we
-            -- asked for (the fallback is a stretched texture).
-            local applied = DF:SafeSetStatusBarTexture(customBar, tex)
-            DF:ApplyBarTextureTiling(customBar, applied == false and DF.STOCK_BAR_TEXTURE or tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetDesaturated(false)
-                barTex:SetDrawLayer("ARTWORK", 1)
-            end
-        end
-        HoldFillUntilPlaced(customBar)
-    end
-    
+    ApplyAbsorbFillTexture(customBar, tex)
+    customBar.dfIsVerticalFill = isVerticalFill
+
     -- Always apply blend mode (may have changed without texture change)
     local barTex = customBar:GetStatusBarTexture()
     if barTex then
@@ -1526,7 +1724,8 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Let WoW's StatusBar handle the percentage calculation internally
         customBar:SetMinMaxValues(0, maxHealth)
         DF.SetBarValue(customBar, attachedAbsorbs, frame)
-        
+        UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxHealth, true)
+
         if customBar.border then customBar.border:Hide() end
         customBar:SetScript("OnUpdate", nil)
 
@@ -2312,29 +2511,6 @@ end
 -- the single bar (no arithmetic; the StatusBar fills itself from SetValue).
 -- ============================================================
 
--- Anchor a segment's leading edge to the trailing edge of a previous fill
--- texture (the health fill, or the prior segment), per health orientation.
-local function AnchorHealPredSegment(seg, prevTex, orient, w, h)
-    seg:ClearAllPoints()
-    if orient == "HORIZONTAL_INV" then
-        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(true); seg:SetWidth(w)
-        seg:SetPoint("TOPRIGHT", prevTex, "TOPLEFT", 0, 0)
-        seg:SetPoint("BOTTOMRIGHT", prevTex, "BOTTOMLEFT", 0, 0)
-    elseif orient == "VERTICAL" then
-        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(false); seg:SetHeight(h)
-        seg:SetPoint("BOTTOMLEFT", prevTex, "TOPLEFT", 0, 0)
-        seg:SetPoint("BOTTOMRIGHT", prevTex, "TOPRIGHT", 0, 0)
-    elseif orient == "VERTICAL_INV" then
-        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(true); seg:SetHeight(h)
-        seg:SetPoint("TOPLEFT", prevTex, "BOTTOMLEFT", 0, 0)
-        seg:SetPoint("TOPRIGHT", prevTex, "BOTTOMRIGHT", 0, 0)
-    else  -- HORIZONTAL (default)
-        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(false); seg:SetWidth(w)
-        seg:SetPoint("TOPLEFT", prevTex, "TOPRIGHT", 0, 0)
-        seg:SetPoint("BOTTOMLEFT", prevTex, "BOTTOMRIGHT", 0, 0)
-    end
-end
-
 -- Get/create the second heal-prediction segment ("others' heals" in SPLIT mode).
 local function GetOrCreateHealPredSegment2(frame)
     if not frame.dfHealPredictionBar2 then
@@ -2425,6 +2601,59 @@ local function UpdateOverhealSpark(frame, db, color, overhealing, known)
     spark:Show()
 end
 
+-- Heals past the bar end (see "PAST THE BAR END" above UpdateAbsorb). Drawn from the health
+-- fill like the prediction, by a calculator that lets heals overflow by the breakout share.
+-- In SPLIT the part past the end is the tail of the chain, so it takes the others' colour.
+-- `testAmount` is the preview's plain amount; nil means read the unit.
+local function UpdateHealBreakout(frame, db, unit, showMode, testAmount, maxHealth, style)
+    local pct = db.healPredictionBreakout or 0
+    local bo = frame.dfHealBreakout
+    local main = frame.dfHealPredictionBar
+    if pct <= 0 or not main then return HideBreakout(bo) end
+    if testAmount == nil and not (unit and CreateUnitHealPredictionCalculator) then return HideBreakout(bo) end
+    if not bo then
+        bo = CreateFrame("StatusBar", nil, main)
+        bo:SetMinMaxValues(0, 1)
+        bo:EnableMouse(false)
+        frame.dfHealBreakout = bo
+    end
+    if bo:GetParent() ~= main then bo:SetParent(main) end
+    bo:SetFrameLevel(style.level)
+    StyleHealPredSegment(bo, style.tex, style.blendMode, style.color, db, style.layerOpts)
+    local orient = db.healthOrientation or "HORIZONTAL"
+    AnchorHealPredSegment(bo, style.anchorTex, orient, style.w, style.h)
+    MaskBarToBreakoutStrip(frame, bo, orient, pct)
+    if testAmount ~= nil then
+        bo:SetMinMaxValues(0, maxHealth)
+        DF.SetBarValue(bo, testAmount, frame)
+    else
+        local calc = frame.dfHealBreakoutCalc
+        if not calc then
+            calc = CreateUnitHealPredictionCalculator()
+            calc:SetIncomingHealClampMode(0)
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
+            frame.dfHealBreakoutCalc = calc
+        end
+        calc:SetIncomingHealOverflowPercent(1 + pct / 100)
+        local healerUnit = (showMode == "MINE" or showMode == "OTHERS" or showMode == "SPLIT") and "player" or nil
+        UnitGetDetailedHealPrediction(unit, healerUnit, calc)
+        if calc.GetMaximumHealth then
+            bo:SetMinMaxValues(0, calc:GetMaximumHealth())
+        else
+            bo:SetMinMaxValues(0, UnitHealthMax(unit))
+        end
+        local amount, fromHealer, fromOthers = calc:GetIncomingHeals()
+        if showMode == "MINE" then
+            DF.SetBarValue(bo, fromHealer, frame)
+        elseif showMode == "OTHERS" then
+            DF.SetBarValue(bo, fromOthers, frame)
+        else
+            DF.SetBarValue(bo, amount, frame)
+        end
+    end
+    bo:Show()
+end
+
 -- At file scope, not inside UpdateHealPrediction: defined there it was a fresh closure on
 -- every call -- live calls included, which never run it -- and most of DF's allocation in combat.
 local function testHealValues(frame, db, showMode, testData)
@@ -2446,6 +2675,8 @@ local function testHealValues(frame, db, showMode, testData)
     -- health, with the excess reported as the clamped flag that lights the spark.
     local missing = math.max(0, maxHealth - healthPct * maxHealth)
     local overhealing = total > missing
+    -- Past the bar end, the breakout's own calculator allows `missing + breakout`.
+    local breakoutTotal = math.min(total, missing + (db.healPredictionBreakout or 0) / 100 * maxHealth)
     total = math.min(total, missing)
     -- The breakdown live gets from the calculator. An even split is the only
     -- honest preview: there is no real healer to attribute to.
@@ -2459,7 +2690,9 @@ local function testHealValues(frame, db, showMode, testData)
     else
         incomingHeals = total
     end
-    return maxHealth, incomingHeals, myHeals, othersHeals, overhealing
+    -- The breakout draws the whole chain (SPLIT included); one source is half of it.
+    if showMode == "MINE" or showMode == "OTHERS" then breakoutTotal = breakoutTotal * 0.5 end
+    return maxHealth, incomingHeals, myHeals, othersHeals, overhealing, breakoutTotal
 end
 
 function DF:UpdateHealPrediction(frame, testIndex)
@@ -2500,6 +2733,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     local myHeals, othersHeals          -- Per-source breakdown (SPLIT mode)
     local overhealing                   -- The calculator's clamped flag (may be secret)
     local haveOverheal = false          -- Plain flag: overhealing was set (never test overhealing itself)
+    local testBreakout                  -- The preview's amount past the bar end; nil = read the unit
     -- ⚠ There is deliberately NO isTestMode flag any more. It existed only to pick
     -- a different render path, and every one of those forks was a bug waiting to
     -- happen. If you find yourself wanting it back, the answer is almost certainly
@@ -2519,11 +2753,11 @@ function DF:UpdateHealPrediction(frame, testIndex)
     if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
-        maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
+        maxHealth, incomingHeals, myHeals, othersHeals, overhealing, testBreakout = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
         haveOverheal = true
     elseif testScope then
-        maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
+        maxHealth, incomingHeals, myHeals, othersHeals, overhealing, testBreakout = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
         haveOverheal = true
     else
@@ -2724,6 +2958,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- MODE: FLOATING
     -- ============================================================
     if mode == "FLOATING" then
+        HideBreakout(frame.dfHealBreakout)   -- a free-standing bar has no end to run past
         bar:SetParent(frame)
         
         bar:SetFrameStrata(frame:GetFrameStrata())
@@ -2867,6 +3102,22 @@ function DF:UpdateHealPrediction(frame, testIndex)
         bar:Show()
         UpdateOverhealSpark(frame, db, color, overhealing, haveOverheal)
 
+        -- Past the bar end. Reused table: this runs on every heal-prediction event.
+        if (db.healPredictionBreakout or 0) > 0 then
+            local style = bar.dfBreakoutStyle
+            if not style then
+                style = {}
+                bar.dfBreakoutStyle = style
+            end
+            style.level, style.tex, style.blendMode = predictionLevel, tex, blendMode
+            style.color = isSplit and othersColor or color
+            style.layerOpts, style.anchorTex = healPredLayerOpts, healthFillTexture
+            style.w, style.h = barWidth, barHeight
+            UpdateHealBreakout(frame, db, unit, showMode, testBreakout, maxHealth, style)
+        else
+            HideBreakout(frame.dfHealBreakout)
+        end
+
         -- ============================================================
         -- SPLIT: second segment ("others' heals"), chained after the
         -- primary (my) segment by anchoring to its fill-texture edge.
@@ -2906,8 +3157,12 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- ⚠ testIndex IS FORWARDED: the preview's absorb amount is a parameter of the same
     -- live function, and dropping it repaints a test frame's shield from live (zero) data.
     local chainEnd = DF.ChainEndKey and DF.ChainEndKey(frame, db) or "fill"
-    if frame.dfHealPredChainEnd ~= chainEnd then
+    -- The absorb's breakout hangs off the heals' breakout while that is drawn.
+    local hbo = frame.dfHealBreakout
+    local breakoutOn = (hbo and hbo:IsShown()) and true or false
+    if frame.dfHealPredChainEnd ~= chainEnd or frame.dfHealPredBreakoutOn ~= breakoutOn then
         frame.dfHealPredChainEnd = chainEnd
+        frame.dfHealPredBreakoutOn = breakoutOn
         if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, testIndex) end
     end
 end
@@ -3063,8 +3318,10 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
         -- reappearing with no record of having gone. Exactly the bug class the edge-trigger
         -- was added to prevent, on the reverse edge.
         if frame.dfLastRoleShown ~= false or frame.dfLastRole ~= role then
-            DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
-                tostring(frame.unit), tostring(role))
+            if DF:DebugActive("ROLE") then
+                DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
+                    tostring(frame.unit), tostring(role))
+            end
             frame.dfLastRoleShown = false
             frame.dfLastRole = role
         end
@@ -3092,9 +3349,11 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
     -- party and raid frame, and GUI option callbacks drive it, so logging here
     -- unconditionally floods the console on any slider drag.
     if frame.dfLastRoleShown ~= shouldShow or frame.dfLastRole ~= role then
-        DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
-            tostring(frame.unit), tostring(role), tostring(shouldShow),
-            tostring(db.roleIconHideInCombat), tostring(inCombat))
+        if DF:DebugActive("ROLE") then
+            DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
+                tostring(frame.unit), tostring(role), tostring(shouldShow),
+                tostring(db.roleIconHideInCombat), tostring(inCombat))
+        end
         frame.dfLastRoleShown = shouldShow
         frame.dfLastRole = role
     end
@@ -3130,7 +3389,9 @@ function DF:UpdateAllRoleIcons()
     -- Use our tracked combat state
     local inCombat = DF.playerInCombat or false
     
-    DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
+    if DF:DebugActive("ROLE") then
+        DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
+    end
     
     local function updateFrame(frame)
         if frame and frame:IsShown() then

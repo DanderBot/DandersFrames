@@ -85,6 +85,7 @@ local DF = {
     },
 }
 DF.Debug = function() end
+DF.DebugActive = function() return true end
 local L = setmetatable({}, { __index = function(_, k) return k end })
 local CATEGORY_COLORS = { x = { r = 1, g = 1, b = 1, a = 1 }, group = { r = 1, g = 1, b = 1, a = 1 } }
 local C_TEXT_DIM = { r = 0.6, g = 0.6, b = 0.6 }

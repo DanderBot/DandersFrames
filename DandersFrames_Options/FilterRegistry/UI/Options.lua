@@ -244,7 +244,9 @@ local function ScrubDeletedFilter(cfId)
     -- a dangling reference survives a "fix".
     local ParseRef = DF.ParseADFilterRef
     if not ParseRef then
-        DF:DebugWarn("FILTER", "ScrubDeletedFilter: DF:ParseADFilterRef unavailable -- @custom: references in AD effect keys, triggers and conditions were NOT scrubbed for '%s'", tostring(cfId))
+        if DF:DebugActive("FILTER") then
+            DF:DebugWarn("FILTER", "ScrubDeletedFilter: DF:ParseADFilterRef unavailable -- @custom: references in AD effect keys, triggers and conditions were NOT scrubbed for '%s'", tostring(cfId))
+        end
     end
 
     -- One array of layout-group records: nil the deleted id from every
@@ -736,7 +738,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- runs, and nothing happens. That is indistinguishable from a dead link and
         -- it is what a page-id typo looks like from the outside, so say so.
         if not (GUI.Pages and GUI.Pages[pageId]) then
-            DF:DebugWarn("GUI", "Filter Designer banner link points at unregistered page '%s'", tostring(pageId))
+            if DF:DebugActive("GUI") then
+                DF:DebugWarn("GUI", "Filter Designer banner link points at unregistered page '%s'", tostring(pageId))
+            end
             return
         end
         local section = BANNER_LINK_SECTION[pageId]
@@ -2172,7 +2176,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- A filter that is selected but has no row is a deleted one whose reference
         -- outlived it. Selecting it still opens the right-hand pane's empty state,
         -- which is a truthful landing; say so rather than pulsing nothing.
-        DF:DebugWarn("GUI", "Filter Designer: no row for %s filter '%s'", tostring(kind), tostring(key))
+        if DF:DebugActive("GUI") then
+            DF:DebugWarn("GUI", "Filter Designer: no row for %s filter '%s'", tostring(kind), tostring(key))
+        end
     end
 
     -- ========== SPELL LIST POOLS ==========

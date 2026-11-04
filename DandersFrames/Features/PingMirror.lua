@@ -86,8 +86,10 @@ local function OnBlizzardShowPing(icon, kit)
     local unit = owner and owner.unit
     local guid = SafeGUID(unit)
     if not guid then
-        DF:Debug("PING", "ShowPing on %s with no readable unit/guid (unit=%s)",
-            owner and owner:GetName() or "?", tostring(unit))
+        if DF:DebugActive("PING") then
+            DF:Debug("PING", "ShowPing on %s with no readable unit/guid (unit=%s)",
+                owner and owner:GetName() or "?", tostring(unit))
+        end
         return
     end
     icon.dfPingGUID = guid
@@ -98,10 +100,14 @@ local function OnBlizzardShowPing(icon, kit)
         if expireTokens[guid] == token and activePings[guid] == kit then
             activePings[guid] = nil
             RefreshFramesForGUID(guid)
-            DF:Debug("PING", "Safety expiry cleared ping on %s", tostring(unit))
+            if DF:DebugActive("PING") then
+                DF:Debug("PING", "Safety expiry cleared ping on %s", tostring(unit))
+            end
         end
     end)
-    DF:Debug("PING", "Ping %s on %s (%s)", kit, tostring(unit), owner and owner:GetName() or "?")
+    if DF:DebugActive("PING") then
+        DF:Debug("PING", "Ping %s on %s (%s)", kit, tostring(unit), owner and owner:GetName() or "?")
+    end
     RefreshFramesForGUID(guid)
 end
 
@@ -110,7 +116,9 @@ local function OnBlizzardClearPing(icon)
     icon.dfPingGUID = nil
     if not guid or activePings[guid] == nil then return end
     activePings[guid] = nil
-    DF:Debug("PING", "Ping cleared (%s)", tostring(icon:GetParent() and icon:GetParent().unit))
+    if DF:DebugActive("PING") then
+        DF:Debug("PING", "Ping cleared (%s)", tostring(icon:GetParent() and icon:GetParent().unit))
+    end
     RefreshFramesForGUID(guid)
 end
 
@@ -264,8 +272,10 @@ eventFrame:SetScript("OnEvent", function(_, event)
         InstallSetupHooks()
         SweepBlizzardFrames()
         DF:EnsurePingCVar()
-        DF:Debug("PING", "Ping mirror ready: %d Blizzard icon(s) hooked, enabled=%s",
-            hookedIcons, tostring(DF:IsPingIconEnabledAnywhere()))
+        if DF:DebugActive("PING") then
+            DF:Debug("PING", "Ping mirror ready: %d Blizzard icon(s) hooked, enabled=%s",
+                hookedIcons, tostring(DF:IsPingIconEnabledAnywhere()))
+        end
     elseif event == "GROUP_ROSTER_UPDATE" then
         SweepBlizzardFrames()
     end
