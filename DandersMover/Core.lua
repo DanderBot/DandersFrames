@@ -79,8 +79,7 @@ function NS:Debug(msg) if NS.db and NS.db.debug then print("|cff888888DandersMov
 
 -- ============================================================
 -- SAVED VARIABLES
--- Only editor preferences and enable toggles live here. Never positions
--- (except the demo consumer's, under .demo).
+-- Only editor preferences and enable toggles live here. Never positions.
 -- ============================================================
 NS.DEFAULTS = {
     gridSize = 20, snapToGrid = true, snapToFrames = true, snapToScreen = true, showGrid = true,
@@ -111,7 +110,7 @@ NS.DEFAULTS = {
     scale = 1,
     stripCollapsed = false,               -- top strip folded to its slim tab
     settingsSection = "general",          -- the settings window's last-picked rail section
-    addons = {}, demo = {},
+    addons = {},
 }
 
 local function applyDefaults(db, defaults)

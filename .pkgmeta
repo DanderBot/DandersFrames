@@ -43,6 +43,8 @@ ignore:
   - DandersUI
   # dev-only test consumer, never shipped
   - DandersMoverDemo
+  # DandersMover's guides, for its own repo. Its README and LICENSE do ship.
+  - DandersMover/docs
   # test images for the /dfring probe (the probe itself is cut from the TOC by do-not-package)
   - DandersFrames_UnitFrames/Media/Probe
   - DandersFrames_UnitFrames/RingProbe.lua

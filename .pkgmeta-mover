@@ -28,6 +28,8 @@ ignore:
   - DandersUI
   # dev-only test consumer, never shipped
   - DandersMoverDemo
+  # The guides, for the repo. README and LICENSE do ship.
+  - DandersMover/docs
 
 manual-changelog:
   # Written by release.yml: this build's section of CHANGELOG.md only.
