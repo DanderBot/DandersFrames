@@ -10,6 +10,7 @@ move-folders:
 ignore:
   - DandersFrames
   - DandersFrames_Options
+  - DandersFrames_UnitFrames
   - CHANGELOG.md
   - RELEASE_NOTES.md
   - CHANGELOG_ARCHIVE.md
