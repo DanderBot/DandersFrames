@@ -354,10 +354,28 @@ function R:IsTargetAvailable(entry)
     return R.IsFrameVisible(self:GetFrame(entry))
 end
 
+-- ☠ ONE ADDON'S BAD RECORD MUST NOT TAKE THE EDITOR DOWN FOR EVERY OTHER ADDON. This
+-- runs across every registered element when a session opens and on every graph walk,
+-- so an error here used to stop /mover opening at all. A getPos that errors or returns
+-- no table is reported once and marked recordBroken: the element stays out of sessions
+-- (IsInSession) and hears no onChanged (NS:Notify), and the stand-in keeps the graph
+-- walks running. It heals by itself the moment getPos returns a table again, which is
+-- the normal story for a consumer that creates its record late.
 function R:GetPos(el)
-    local pos = el.getPos()
-    if type(pos) ~= "table" then error("DandersMover: getPos for " .. el.id .. " must return a table") end
-    return pos
+    local ok, pos = pcall(el.getPos)
+    if ok and type(pos) == "table" then
+        el.recordBroken = nil
+        return pos
+    end
+    if not el.recordBroken then
+        el.recordBroken = true
+        geterrorhandler()(ok and ("DandersMover: getPos for " .. el.id .. " must return a table") or pos)
+    end
+    if not el.standInPos then
+        local d = el.default or {}
+        el.standInPos = { point = d.point or "CENTER", x = d.x or 0, y = d.y or 0 }
+    end
+    return el.standInPos
 end
 
 -- ============================================================
@@ -569,6 +587,8 @@ end
 -- Precedence: user toggle > key filter > isRelevant.
 function R:IsInSession(filter, el)
     if not self:IsEnabled(el.addon, el.key) then return false end   -- toggle wins
+    self:GetPos(el)
+    if el.recordBroken then return false end                        -- nothing to edit
     if filter and filter.addon == el.addon and filter.keySet then
         return filter.keySet[el.key] == true                        -- key filter wins
     end

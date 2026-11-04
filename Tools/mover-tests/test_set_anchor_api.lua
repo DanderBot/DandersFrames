@@ -34,7 +34,7 @@ local Lib = LibStub("DandersMover-1.0", true)
 check(Lib ~= nil, "setup: the library object is available")
 check(type(Lib.SetAnchor) == "function" and type(Lib.Detach) == "function", "setup: SetAnchor / Detach are public")
 local src = mover_file_source("Core.lua"):gsub("\r\n", "\n")
-check(src:find('local MAJOR, MINOR = "DandersMover%-1%.0", 7'), "the lib's MINOR is 7")
+check(src:find('local MAJOR, MINOR = "DandersMover%-1%.0", 8'), "the lib's MINOR is 8")
 
 local wasReady = R.ready
 R.ready = true
@@ -125,6 +125,26 @@ Sess:Undo()
 check(posB.anchor == nil, "session: Undo frees it again")
 Sess:Redo()
 check(posB.anchor ~= nil and posB.anchor.edge == "bottom", "session: Redo re-anchors")
+
+-- A target that is not there holds the element, so nothing may move. b is 60x30, so a
+-- TOPLEFT at (100, 50) has its centre at (130, 35).
+Sess:Undo()
+posB.point, posB.x, posB.y = "TOPLEFT", 100, 50
+check(Lib:SetAnchor("SA", "b", { target = "Missing:thing", edge = "bottom" }), "session: SetAnchor to a missing target")
+eq(posB.point, "CENTER", "session: the record becomes a CENTER point")
+eq(posB.x, 130, "session: SetAnchor keeps the frame where it is on x")
+eq(posB.y, 35, "session: SetAnchor keeps the frame where it is on y")
+Sess:Undo()
+eq(posB.point, "TOPLEFT", "session: Undo restores the original point")
+eq(posB.x, 100, "session: Undo restores the original x")
+Sess:AnchorInPlace(elB, "Missing:thing")
+eq(posB.x, 130, "session: the picker keeps the frame where it is on x")
+eq(posB.y, 35, "session: the picker keeps the frame where it is on y")
+Sess:Undo()
+Sess:Anchor(elB, "Missing:thing", "bottom", "center")
+eq(posB.x, 130, "session: a zone anchor keeps the frame where it is on x")
+Sess:Undo()
+
 Sess:Finish("discard")
 check(posB.anchor == nil, "session: Discard puts the record back as it was at Unlock")
 eq(posB.x, bx, "session: ...position included")

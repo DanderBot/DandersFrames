@@ -24,6 +24,8 @@
 - (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
 - (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
 - (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
+- (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
+- (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
 
 ## [5.6.1]
 

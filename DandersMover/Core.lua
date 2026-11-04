@@ -14,7 +14,9 @@ local addonName, NS = ...
 -- (see SCRIPTED ANCHORS below).
 -- MINOR 7 adds anchor mirroring: the anchor block's optional mirrorX / mirrorY /
 -- mirrorPosX / mirrorPosY (Solver.lua, MIRROR), also accepted by Lib:SetAnchor.
-local MAJOR, MINOR = "DandersMover-1.0", 7
+-- MINOR 8: a getPos that fails no longer stops the editor opening (Registry:GetPos), and
+-- anchoring to a target that is not available no longer moves the frame (NS.RecenterRecord).
+local MAJOR, MINOR = "DandersMover-1.0", 8
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -159,6 +161,8 @@ function NS:Notify(el, reason)
         return false
     end
     local pos = Registry:GetPos(el)
+    -- The stand-in for a broken record is not a position; applying it would move the frame.
+    if el.recordBroken then return false end
     xpcall(el.onChanged, geterrorhandler(), pos, reason)
     Lib.callbacks:Fire("PositionChanged", el.addon, el.key, pos, reason)
     return true
@@ -230,6 +234,22 @@ function NS.VisibleOffset(el, pos)
     if not ok then geterrorhandler()(dx) return nil end
     if type(dx) ~= "number" or type(dy) ~= "number" then return nil end
     return dx, dy
+end
+
+-- ☠ AN ANCHORED RECORD IS A CENTER POINT, BUT THE SOLVE THAT WRITES ONE MAY NOT RUN YET.
+-- A target that is not available holds the element, so the solve leaves x/y alone. Just
+-- setting point = "CENTER" then re-reads the old corner coordinates as a centre, and the
+-- frame jumps by half its size until the target appears. Convert them with the point, so
+-- the frame stays exactly where it is. With no size to convert by, the point stays too;
+-- the first solve writes CENTER itself.
+function NS.RecenterRecord(el, pos)
+    local point = pos.point or "CENTER"
+    if point ~= "CENTER" then
+        local w, h = Registry:GetSize(el)
+        if not w then return end
+        pos.x, pos.y = Solver.PointToCenter(point, pos.x or 0, pos.y or 0, w, h)
+    end
+    pos.point = "CENTER"
 end
 
 -- Re-solves an anchored element's absolute x/y from its target's current rect.
@@ -656,7 +676,7 @@ function Lib:SetAnchor(addon, key, spec)
     if sess then return sess:SetAnchor(el, anchor) end
     local pos = Registry:GetPos(el)
     pos.anchor = anchor
-    pos.point = "CENTER"
+    NS.RecenterRecord(el, pos)
     NS:ResolveElement(el)
     applyScripted(el, "anchor")
     return true

@@ -6,7 +6,7 @@ For a step-by-step introduction, start with the [Developer Guide](DEVELOPER_GUID
 local Mover, minor = LibStub("DandersMover-1.0", true)   -- nil when not installed
 ```
 
-The current version is MINOR 7. Anything not listed on this page is internal and may change.
+The current version is MINOR 8. Anything not listed on this page is internal and may change.
 
 ## Addons
 
@@ -31,8 +31,11 @@ Makes a frame movable. It also becomes an anchor target, unless `anchorable = fa
 is `"addon:key"`. Calling it again with the same key replaces the entry, so any field you leave
 out is lost.
 
-Bad definitions raise a Lua error. Treat the return value as private. It doesn't create the record:
-`getPos` must always return a table.
+Bad definitions raise a Lua error. Treat the return value as private.
+
+It doesn't create the record, so `getPos` should always return a table. If it errors or returns
+anything else, the library reports it once, leaves the element out of the editor, and doesn't call
+`onChanged`. Everything goes back to normal as soon as it returns a table.
 
 **Required**
 
@@ -135,9 +138,8 @@ main or backup target would make a loop.
 During a session it's one undo step, and Discard reverts it. Otherwise it writes the record, calls
 `onChanged(pos, "anchor")`, and updates anything anchored to the element.
 
-Setting an anchor sets `point` to `"CENTER"`. If the target isn't available yet, `x` and `y` keep
-their values until the first solve, so a frame that used another point shifts by half its size
-until then.
+Setting an anchor converts the record to a `"CENTER"` point without moving the frame. If the target
+isn't available yet, the frame stays where it is until the first solve.
 
 ### `Mover:Detach(addon, key)`
 
@@ -363,9 +365,9 @@ catches this when the target's rect changes too.
   tether strains from 2x. Past 4x it detaches, which is one undo step. At snap distance 0 it never breaks.
 - **Combat.** A session pauses when combat starts and resumes afterwards. Changes to `secure` elements
   wait until combat ends.
-- **Errors in your callbacks.** `onChanged`, `visibleOffset`, `isRelevant` and `openSettings` are
-  protected: errors go to the normal error handler. `getPos`, `getRect`, `getSize` and `getFrame` aren't,
-  and an error there stops whatever was running, so they must not error.
+- **Errors in your callbacks.** `onChanged`, `getPos`, `visibleOffset`, `isRelevant` and `openSettings`
+  are protected: errors go to the normal error handler. `getRect`, `getSize` and `getFrame` aren't, and
+  an error there stops whatever was running, so they must not error.
 
 ## Saved variables
 
@@ -383,3 +385,4 @@ Check a function exists, or compare `minor`, before relying on these.
 | 5 | `Lock(onDone)` |
 | 6 | `SetAnchor`, `Detach` |
 | 7 | Mirroring: `mirrorX`, `mirrorY`, `mirrorPosX`, `mirrorPosY` |
+| 8 | Fixes: a failing `getPos` no longer stops the editor opening, and anchoring to an unavailable target no longer moves the frame |

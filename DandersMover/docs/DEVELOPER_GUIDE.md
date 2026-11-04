@@ -42,8 +42,9 @@ block. You can save it without looking inside it.
 Two rules:
 
 - **`getPos` must always return the live table**, not a copy. DandersMover edits it directly.
-  `default` doesn't create it for you, and returning nil raises an error that can stop the
-  editor opening, so create the record before you register.
+  `default` doesn't create it for you, so create the record before you register. Until `getPos`
+  returns a table, the library reports an error once, your element is left out of the editor,
+  and `onChanged` isn't called.
 - **Don't replace the table with a new one** while something still holds the old one. If
   you reset it yourself, change its contents instead.
 
@@ -255,9 +256,7 @@ would make a loop. It replaces the whole anchor, so include `fallback` if you wa
 `Mover:Detach(addon, key)` frees the element where it sits.
 
 The target doesn't have to be loaded when you set this. When the other addon registers and
-calls `Apply` or `RefreshAnchorTarget`, yours follows. Until then nothing is solved: `x` and `y`
-keep their values, but `point` becomes `CENTER`, so a frame using another point shifts by half
-its size in the meantime. Keep `point = "CENTER"` if that matters.
+calls `Apply` or `RefreshAnchorTarget`, yours follows. Until then your frame stays where it is.
 
 To get notified of changes:
 

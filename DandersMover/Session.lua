@@ -547,7 +547,7 @@ function Sess:Anchor(el, targetId, edge, align)
     local before = NS.CopyPos(pos)
     pos.anchor = { target = targetId, edge = edge, align = align, offsetX = 0, offsetY = 0 }
     carryFallback(pos, before, targetId)
-    pos.point = "CENTER"
+    NS.RecenterRecord(el, pos)
     NS:ResolveElement(el)
     apply(el, "anchor")
     commit(el, before, L["Anchor %s"])
@@ -587,7 +587,7 @@ function Sess:AnchorInPlace(el, targetId)
                        offsetX = spec.offsetX, offsetY = spec.offsetY }
     end
     carryFallback(pos, before, targetId)
-    pos.point = "CENTER"
+    NS.RecenterRecord(el, pos)
     NS:ResolveElement(el)
     apply(el, "anchor")
     commit(el, before, L["Anchor %s"])
@@ -705,7 +705,7 @@ function Sess:SetAnchor(el, anchor)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     pos.anchor = anchor
-    pos.point = "CENTER"
+    NS.RecenterRecord(el, pos)
     NS:ResolveElement(el)
     apply(el, "anchor")
     commit(el, before, L["Anchor %s"])
