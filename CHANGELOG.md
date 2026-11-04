@@ -20,6 +20,12 @@
 - (Icons) Combat and leader icons use sharper art.
 - (DandersMover) Frames anchored to another addon's frames now follow them automatically.
 - (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
+- (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction: the shield and incoming heals can run past the end of the health bar again, up to a full bar's length. Off (0%) by default. (by Krathe)
+
+### Improvements
+
+- (Performance) Debug logging now costs nothing while it is off: diagnostics and log messages are skipped entirely instead of being built and thrown away, and turning logging off stops them at once. (by Krathe)
+- (Absorbs) The absorb and heal absorb Display Mode options have clearer names: Overlay on Health, Attached (overflows), Attached (wraps back) (was Attached + Overflow) and, for heal absorbs, Attached (into health). The dropdowns now have a tooltip that explains each mode. Saved settings are unchanged. (by Krathe)
 
 ### Bug Fixes
 
