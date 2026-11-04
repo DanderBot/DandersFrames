@@ -772,7 +772,6 @@ SlashCmdList.DANDERSMOVER = function(msg)
     elseif cmd == "lock" then Lib:Lock()
     elseif cmd == "config" then if NS.Settings then NS.Settings:Toggle() end
     elseif cmd == "reset" then NS:ResetCommand(rest)
-    elseif cmd == "demo" then if NS.Demo then NS.Demo:Command(rest) end
     elseif cmd == "debug" then NS.db.debug = not NS.db.debug; NS:Print("debug " .. tostring(NS.db.debug))
     else
         NS:Print(L["Usage: /mover [unlock|lock|config|reset]"])

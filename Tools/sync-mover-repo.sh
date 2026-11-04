@@ -51,6 +51,8 @@ fi
 rm -rf "$WORK/Libs/DandersUI"
 mkdir -p "$WORK/Libs/DandersUI"
 git -C "$REPO_ROOT" archive HEAD:DandersUI | tar -x -C "$WORK/Libs/DandersUI"
+# The kit's developer notes aren't addon files.
+rm -f "$WORK/Libs/DandersUI/README.md"
 
 git -C "$WORK" add -A Libs/DandersUI
 if ! git -C "$WORK" diff --cached --quiet; then

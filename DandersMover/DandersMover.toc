@@ -24,7 +24,3 @@ Session.lua
 Panel.lua
 Picker.lua
 Settings.lua
-# Dev-only test consumer (/mover demo). Stripped from every packaged build.
-#@do-not-package@
-Demo.lua
-#@end-do-not-package@

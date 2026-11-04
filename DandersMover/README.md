@@ -156,7 +156,7 @@ visible rect.
 
 `reason` values: `drag nudge anchor detach fallback reset center copy undo redo discard reapply parent`.
 
-Slash: `/mover` toggle, `/mover config` settings, `/mover reset all | <addon>` every element (or one addon's) back to its declared default — the rescue for a mover that ended up off screen, `/mover demo` built-in demo.
+Slash: `/mover` toggle, `/mover config` settings, `/mover reset all | <addon>` every element (or one addon's) back to its declared default — the rescue for a mover that ended up off screen.
 
 ## Anchoring without dragging
 
