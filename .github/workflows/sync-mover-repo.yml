@@ -1,0 +1,47 @@
+name: Sync DandersMover repo
+
+# One-way copy of DandersMover/ to its standalone repo. See Tools/sync-mover-repo.sh.
+# Needs the MOVER_DEPLOY_KEY secret: the private half of a write-enabled deploy key
+# on DanderBot/DandersMover. GITHUB_TOKEN can't push to another repo.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'DandersMover/**'
+      - 'DandersUI/**'
+      - 'Tools/sync-mover-repo.sh'
+      - '.github/workflows/sync-mover-repo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Queue rather than cancel, so two quick pushes can't race on the standalone repo.
+concurrency:
+  group: sync-mover-repo
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: github.repository == 'DanderBot/DandersFrames'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Sync
+        env:
+          MOVER_DEPLOY_KEY: ${{ secrets.MOVER_DEPLOY_KEY }}
+        run: |
+          if [ -z "$MOVER_DEPLOY_KEY" ]; then
+            echo "::notice::MOVER_DEPLOY_KEY is not set, skipping the DandersMover sync."
+            exit 0
+          fi
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$MOVER_DEPLOY_KEY" > "$KEY_FILE"
+          export GIT_SSH_COMMAND="ssh -i $KEY_FILE -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          bash Tools/sync-mover-repo.sh git@github.com:DanderBot/DandersMover.git
