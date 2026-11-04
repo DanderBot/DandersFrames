@@ -1305,6 +1305,7 @@ DF.PartyDefaults = {
     absorbBarAnchor = "TOPRIGHT",
     absorbBarAttachedClampMode = 1,   -- no control: Missing Health is the only value (DF:MigrateAbsorbClampMode)
     absorbBarBackgroundColor = {r = 0, g = 0, b = 0, a = 1},
+    absorbBarBreakout = 0,   -- % of the bar's length the shield may draw past its end (Attached only)
     absorbBarBlendMode = "BLEND",
     absorbBarColor = {r = 0, g = 0.83529418706894, b = 1, a = 0.80208319425583},
     absorbBarFrameLevel = 11,
@@ -2060,6 +2061,7 @@ DF.PartyDefaults = {
     healPredictionEnabled = true,
     -- ☠ UNDER THE ABSORB (+11) BY DESIGN: where the two overlap, the shield is the more
     -- important readout. See DF:ResolveHealPredictionBarLevel for the band around it.
+    healPredictionBreakout = 0,   -- % of the bar's length heals may draw past its end
     healPredictionFrameLevel = 10,
     healPredictionHeight = 6,
     healPredictionMode = "OVERLAY",

@@ -2764,6 +2764,10 @@ function DF:LightweightUpdateAbsorbBarColor()
         if frame.dfAbsorbBar and db.absorbBarColor then
             local c = db.absorbBarColor
             frame.dfAbsorbBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+            -- The part past the bar end matches the shield.
+            if frame.dfAbsorbBreakout then
+                frame.dfAbsorbBreakout:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+            end
         end
         if frame.dfAbsorbBar and frame.dfAbsorbBar.bg and db.absorbBarBackgroundColor then
             local c = db.absorbBarBackgroundColor
