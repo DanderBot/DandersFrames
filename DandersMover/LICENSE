@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Danders
+Copyright (c) 2026 Danders and contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,11 +36,12 @@ Libs/LibStub
     Nevcairiel, joshbork.
 
 Libs/CallbackHandler-1.0
-    Part of the Ace3 project, under the Ace3 licence.
+    Part of the Ace3 project. Copyright (c) 2007, Ace3 Development Team.
+    Its licence is in licenses/Ace3.txt. It allows this library to be bundled
+    with an addon, but not redistributed as a stand-alone version.
     https://github.com/WoWUIDev/Ace3
 
 Libs/DandersUI/Media/Icons
     Includes icons drawn from Material Symbols by Google, under the Apache
-    License 2.0.
+    License 2.0. Its text is in licenses/Apache-2.0.txt.
     https://github.com/google/material-design-icons
-    https://www.apache.org/licenses/LICENSE-2.0
