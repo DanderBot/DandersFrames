@@ -92,6 +92,7 @@ EXTRA_PAGE_UNITS = {"uf_portrait": {"targettarget", "focustarget"}}
 EXTRA_CARD_UNITS = {
     "indicators_highlights": {"Selection Highlight": {"targettarget", "focustarget"}},
     "indicators_icons": {"Elite / Rare": {"boss"}},
+    "auras_debuffs": {"Highlight": {"target", "focus", "boss"}},
     "display_fading": {"Health Threshold Fading": {"target", "targettarget", "focus", "focustarget", "boss"}},
 }
 

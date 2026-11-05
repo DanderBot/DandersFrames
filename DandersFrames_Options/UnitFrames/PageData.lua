@@ -311,7 +311,7 @@ DF.UnitFramePageData = {
                 debuffs_position = { player = true, target = true, focus = true, pet = true, boss = true },
                 debuffs_appearance = { player = true, target = true, focus = true, pet = true, boss = true },
                 debuffs_border = { player = true, target = true, focus = true, pet = true, boss = true },
-                debuffs_important = { player = true, pet = true },
+                debuffs_important = { player = true, target = true, focus = true, pet = true, boss = true },
                 debuffs_durationbar = { player = true, target = true, focus = true, pet = true, boss = true },
                 debuffs_duration = { player = true, target = true, focus = true, pet = true, boss = true },
                 debuffs_stack = { player = true, target = true, focus = true, pet = true, boss = true },
@@ -332,7 +332,6 @@ DF.UnitFramePageData = {
                 debuffs_blacklist = { "debuffBlacklist" },
                 debuffs_caster = { "debuffCasterAnchor", "debuffCasterClassColor", "debuffCasterColor", "debuffCasterFont", "debuffCasterName", "debuffCasterOutline", "debuffCasterRealm", "debuffCasterScale", "debuffCasterX", "debuffCasterY" },
                 debuffs_dispeltext = { "debuffDispelSymbolAnchor", "debuffDispelSymbolColor", "debuffDispelSymbolEnabled", "debuffDispelSymbolFont", "debuffDispelSymbolOutline", "debuffDispelSymbolScale", "debuffDispelSymbolX", "debuffDispelSymbolY" },
-                debuffs_important = { "debuffImportantBadge", "debuffImportantBadgeColor", "debuffImportantBadgePoint", "debuffImportantBadgeSize", "debuffImportantBadgeX", "debuffImportantBadgeY", "debuffImportantHighlight", "debuffImportantMarkColor", "debuffImportantScale" },
             },
         },
         {
