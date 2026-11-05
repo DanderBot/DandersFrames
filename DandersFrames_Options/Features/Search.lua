@@ -521,17 +521,23 @@ function Search:_FinishRegistryBuild()
     -- tabs mid-drain, and re-showing the page they navigated AWAY from would be
     -- the window changing itself under them a second after they clicked.
     local currentTab = DF.GUI and DF.GUI.CurrentPageName
-    if currentTab and DF.GUI.Pages[currentTab] then
-        -- The page the user is actually looking at comes back out of the dock.
-        -- It was never parked by the steps above (wasShown was true for it), so
-        -- this is normally a no-op -- but it is the one page that MUST be
-        -- adopted when this returns, so it is asserted rather than assumed.
-        if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[currentTab]) end
-        DF.GUI.Pages[currentTab]:Show()
-        if DF.GUI.Pages[currentTab].RefreshStates then
-            DF.GUI.Pages[currentTab]:RefreshStates()
+    -- ☠ PROTECTED: an error from the page must not skip the lines below. RegistryBuilding
+    -- would stay true with nothing left to clear it, and every later search would wait on
+    -- a build that had already finished.
+    local ok, err = pcall(function()
+        if currentTab and DF.GUI.Pages[currentTab] then
+            -- The page the user is actually looking at comes back out of the dock.
+            -- It was never parked by the steps above (wasShown was true for it), so
+            -- this is normally a no-op -- but it is the one page that MUST be
+            -- adopted when this returns, so it is asserted rather than assumed.
+            if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[currentTab]) end
+            DF.GUI.Pages[currentTab]:Show()
+            if DF.GUI.Pages[currentTab].RefreshStates then
+                DF.GUI.Pages[currentTab]:RefreshStates()
+            end
         end
-    end
+    end)
+    if not ok and err then geterrorhandler()(err) end
 
     self.RegistryBuilt = true
     self.RegistryBuilding = false
@@ -623,6 +629,23 @@ end
 -- Several callers can wait on ONE build (the ledger page and the search box both
 -- do), which is the other half of why this is not just "call the budgeted
 -- builder": two surfaces asking at once must not start two builds.
+-- A build that finished in combat can't draw its results, and nothing else would come
+-- back for them: the box would say "Indexing settings..." until its text changed.
+function Search:ShowResultsAfterCombat()
+    local f = self._afterCombatFrame
+    if not f then
+        f = CreateFrame("Frame")
+        f:SetScript("OnEvent", function(frame)
+            frame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            if not (self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
+            local live = self.SearchBar and self.SearchBar.editbox:GetText()
+            if live and live ~= "" then self:ShowResults(live) end
+        end)
+        self._afterCombatFrame = f
+    end
+    f:RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
 function Search:EnsureRegistryAsync(onReady)
     -- Assembled from the pages' own builds when it can be, which needs no frame.
     if self:TryReuseRegistry() then return "ready" end
@@ -1745,7 +1768,10 @@ function Search:ShowResults(query)
         self:ShowBuildingMessage()
         self:EnsureRegistryAsync(function(ok)
             if not (ok and self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                self:ShowResultsAfterCombat()
+                return
+            end
             local live = self.SearchBar and self.SearchBar.editbox:GetText()
             if live and live ~= "" then self:ShowResults(live) end
         end)
