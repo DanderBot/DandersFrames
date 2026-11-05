@@ -2,6 +2,10 @@
 
 ## [5.6.2]
 
+### New Features
+
+- (WoW Forever) New **Name Format** option for name text in the Text Designer: show the first name only, the full name, the first name with a last initial, or initials. Max Length still applies to the result, so raise it if full names get cut short.
+
 ### Bug Fixes
 
 - (WoW Forever) Fix your own frame disappearing from party frames when using Self Position First/Last, Sort by Class, Separate Melee & Ranged DPS or Alphabetical sorting.

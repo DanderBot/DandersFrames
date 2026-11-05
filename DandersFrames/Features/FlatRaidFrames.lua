@@ -178,7 +178,7 @@ function FlatRaidFrames:BuildSortedNameList()
     local numMembers = GetNumGroupMembers()
     if numMembers == 0 then
         -- Solo - just return player name
-        return UnitName("player") or ""
+        return DF:GetPartyHeaderName("player") or ""
     end
     
     -- Settings
@@ -334,8 +334,11 @@ function FlatRaidFrames:BuildSortedNameList()
             
             local isPlayer = DF.UnitIsUnit(unit, "player")
             
+            -- ☠ The player's list token is the roster name itself: that is what the secure
+            -- header matches for raid units. Cutting it at the "-" would drop a WoW Forever
+            -- surname and hide the player.
             local entry = {
-                name = name,
+                name = isPlayer and fullName or name,
                 fullName = fullName,
                 role = role,
                 sortRole = sortRole,

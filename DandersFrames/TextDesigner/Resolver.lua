@@ -24,6 +24,28 @@ end
 -- ============================================================
 
 -- Truncate / ellipsize a name string per the per-element name settings.
+-- WoW Forever only: first name and surname come back separately from UnitName, so each
+-- can be shortened on its own. Returns `name` untouched when there is nothing to format:
+-- a secret part (Lua can't split or join those), no surname, or a nickname in place of
+-- the first name (nicknames stay authoritative).
+local function applyNameFormat(name, elem, source)
+    local fmt = elem.nameFormat
+    if not DF.IS_FOREVER or not fmt or fmt == "FIRST" or not source.GetNameParts then
+        return name
+    end
+    local first, surname = source:GetNameParts()
+    if getMS().IsSecret(first) or getMS().IsSecret(surname) then return name end
+    if not surname or surname == "" or first ~= name then return name end
+    if fmt == "FULL" then
+        return first .. " " .. surname
+    elseif fmt == "FIRST_INITIAL" then
+        return first .. " " .. DF:UTF8Sub(surname, 1, 1)
+    elseif fmt == "INITIALS" then
+        return DF:UTF8Sub(first, 1, 1) .. " " .. DF:UTF8Sub(surname, 1, 1)
+    end
+    return name
+end
+
 local function applyNameTrunc(name, elem)
     local maxLen = elem.nameLength or 30
     -- 0 (or less) means "off" — matches legacy name text, whose slider is
@@ -114,7 +136,7 @@ RESOLVERS.name = function(elem, source)
     -- or the #/sub truncation in applyNameTrunc, throws on a secret string.
     if getMS().IsSecret(n) then return getMS().SafeText(n) end
     if n == "" then return "" end
-    return applyNameTrunc(getMS().SafeText(n), elem)
+    return applyNameTrunc(applyNameFormat(getMS().SafeText(n), elem, source), elem)
 end
 
 RESOLVERS.class = function(elem, source)
@@ -335,7 +357,7 @@ end
 -- the "group" type (DandersFrames_Options/TextDesigner/UI/Options.lua passes
 -- excludeKey = "group"), so RESOLVERS[typeKey] below can never route back into this
 -- function and it is never re-entered. No resolver retains its elem argument either --
--- they read fields, and applyNameTrunc only reads nameLength/truncateMode. This path is
+-- they read fields, and the name helpers only read nameFormat/nameLength/truncateMode. This path is
 -- single-threaded with no yields, so one call always completes before the next starts.
 --
 -- ☠ Every field of groupItemElem MUST be assigned on EVERY iteration, nil included, or a
@@ -387,6 +409,7 @@ RESOLVERS.group = function(elem, source)
             itemElem.aggroText3   = item.aggroText3
             itemElem.rangeInText  = item.rangeInText
             itemElem.rangeOutText = item.rangeOutText
+            itemElem.nameFormat   = item.nameFormat
             itemElem.nameLength   = item.nameLength
             itemElem.truncateMode = item.truncateMode
             itemElem.groupFormat  = item.groupFormat
