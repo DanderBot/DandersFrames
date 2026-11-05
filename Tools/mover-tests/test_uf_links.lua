@@ -336,6 +336,7 @@ do
     eq(U.player.portraitX, -9, "mirror, the other way: the follower's edit lands mirrored on the leader")
 
     -- NEVER keys and except keys
+    check(Links.NEVER.castbarEnabled == true, "a cast bar's on/off stays per frame")
     Links:SetLink(root, "focus", "player", { castbar = { layout = "same", look = "same" } }, { castbarLatency = true })
     U.player.castbarPosition = { point = "CENTER", x = 1, y = 2 }
     U.player.castbarLatency = false

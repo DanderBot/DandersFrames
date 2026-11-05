@@ -44,7 +44,8 @@ UF.Links = Links
 -- KEYS NO LINK EVER MOVES (who draws it, where it is on screen)
 -- ============================================================
 Links.NEVER = { source = true, position = true,
-                castbarPosition = true, classPowerPositionRecord = true }
+                castbarPosition = true, classPowerPositionRecord = true,
+                castbarEnabled = true }
 
 -- ============================================================
 -- PAGES -> KEY PREFIXES
