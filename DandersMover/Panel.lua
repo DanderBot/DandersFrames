@@ -79,7 +79,7 @@ local REDO_ICON     = MEDIA .. "redo"
 local SAVE_ICON     = MEDIA .. "save"
 local DISCARD_ICON  = MEDIA .. "discard"
 local SETTINGS_ICON = MEDIA .. "settings"
-local DEFAULT_ICON = UI.MEDIA .. "DF_Icon"
+local DEFAULT_ICON = MEDIA .. "DF_Icon"
 
 -- The pool key, and the family name -- deliberately the same string, because
 -- for the mover they say the same thing. Per host+key the shell keeps ONE
