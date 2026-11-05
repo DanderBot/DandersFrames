@@ -441,6 +441,22 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
 
     -- Name: length cap + truncate mode
     elseif ct.key == "name" or ct.key == "target_name" then
+        -- Surnames only exist on WoW Forever.
+        if DF.IS_FOREVER and ct.key == "name" then
+            elem.nameFormat = elem.nameFormat or "FULL"
+            local formatOpts = {
+                FIRST = L["First Name"],
+                FULL = L["Full Name"],
+                FIRST_INITIAL = L["First Name + Last Initial"],
+                INITIALS = L["Initials"],
+                _order = { "FIRST", "FULL", "FIRST_INITIAL", "INITIALS" },
+            }
+            local formatDrop = GUI:CreateDropdown(parent, L["Name Format"], formatOpts, elem, "nameFormat", function()
+                if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+            end)
+            place(formatDrop, FIELD_ROW_HEIGHT)
+        end
+
         elem.nameLength = elem.nameLength or 12
         local function lenCB()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end

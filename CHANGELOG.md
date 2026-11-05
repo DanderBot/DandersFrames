@@ -36,6 +36,16 @@
 - (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
 - (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
 
+## [5.6.2]
+
+### New Features
+
+- (WoW Forever) Names on frames now show the full name by default. A new **Name Format** option for name text in the Text Designer lets you switch to the first name only, the first name with a last initial, or initials. Max Length still applies to the result, so raise it if full names get cut short.
+
+### Bug Fixes
+
+- (WoW Forever) Fix your own frame disappearing from party frames when using Self Position First/Last, Sort by Class, Separate Melee & Ranged DPS or Alphabetical sorting.
+
 ## [5.6.1]
 
 ### Bug Fixes

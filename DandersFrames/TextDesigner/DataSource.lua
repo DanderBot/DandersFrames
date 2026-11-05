@@ -37,6 +37,7 @@ end
 local MOCK_DATA = {
     -- Identity
     name             = "Danders",
+    surname          = "Frames",     -- WoW Forever Name Format preview
     classToken       = "SHAMAN",
     classLocalized   = "Shaman",
     level            = 80,
@@ -110,6 +111,7 @@ MockSource.__index = MockSource
 function MockSource:_isPreviewSample() return true end
 
 function MockSource:GetName() return MOCK_DATA.name end
+function MockSource:GetNameParts() return MOCK_DATA.name, MOCK_DATA.surname end
 function MockSource:GetClassToken() return MOCK_DATA.classToken end
 function MockSource:GetClassLocalized() return MOCK_DATA.classLocalized end
 function MockSource:GetLevel() return MOCK_DATA.level end
@@ -168,6 +170,12 @@ LiveSource.__index = LiveSource
 function LiveSource:GetName()
     if DF.GetFrameName then return DF:GetFrameName(self.unit) end
     return UnitName(self.unit) or ""
+end
+
+-- First name and second return, for the WoW Forever Name Format option. The second return
+-- is only a surname on Forever (a realm on retail), so Resolver gates its use on IS_FOREVER.
+function LiveSource:GetNameParts()
+    return UnitName(self.unit)
 end
 
 function LiveSource:GetClassToken()
@@ -441,6 +449,11 @@ local function animHP01(self)
 end
 
 function TestSource:GetName() return tdata(self).name or "" end
+-- Sample surnames so WoW Forever's Name Format option is visible on test frames.
+local TEST_SURNAMES = { "Ashford", "Brightwood", "Coldwater", "Duskwalker", "Everhart" }
+function TestSource:GetNameParts()
+    return tdata(self).name or "", TEST_SURNAMES[((self.index or 0) % #TEST_SURNAMES) + 1]
+end
 function TestSource:GetClassToken() return tdata(self).class end
 function TestSource:GetClassLocalized()
     local c = tdata(self).class

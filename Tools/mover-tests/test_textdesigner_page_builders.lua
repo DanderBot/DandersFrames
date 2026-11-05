@@ -208,6 +208,7 @@ do
         { "slider",   "Decimal Places",     "elem", "decimals" },
         { "checkbox", "Hide % Symbol",      "elem", "hidePercent" },
         -- name
+        { "dropdown", "Name Format", "elem", "nameFormat" },
         { "slider",   "Max Length (0=off)", "elem", "nameLength" },
         { "dropdown", "Truncate Mode",      "elem", "truncateMode" },
         -- custom static text
