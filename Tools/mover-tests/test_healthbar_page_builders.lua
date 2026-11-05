@@ -379,7 +379,7 @@ do
     local seq = { 'OpenSection(L["Color"]', 'OpenSection(L["Texture"]', 'BuildGradientStopBox("healthColor", HealthGradientHiddenOn)',
                   'OpenSection(L["Background"]',
                   'OpenSection(L["Missing Health"]', 'BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)',
-                  'Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")',
+                  'Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, 1)',
                   'OpenSection(L["Settings"]' }
     local prev = 0
     for _, n in ipairs(seq) do

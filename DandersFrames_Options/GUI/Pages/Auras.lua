@@ -2045,7 +2045,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Its own group under the looks: an extra the bar can show, not how the
         -- bar looks. ☠ ITS ENABLE IS THE HEADER TICK (see the page note). A
         -- pin: the overlay's texture, colour and blend are how it LOOKS.
-        Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
+        Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, 1)
         local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
             BuildReducedMaxHealthGroup)
         BuildReducedMaxHealthGroup({
@@ -2526,11 +2526,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF:RefreshAllVisibleFrames()
                 tools2.refreshStates()  -- re-evaluate the custom colour picker's hideOn
             end), 54)
+            rbColorMode.fullRow = true   -- the swatches below pair up on their own
             rbColorMode.tooltip = L["Power Type gives each resource its own game colour — blue mana, yellow energy, red rage. Class colours every bar by the unit's class instead, and Custom uses one fixed colour for everyone."]
 
             -- Custom colour — only shown in Custom mode.
             local resourceCustomColor = GUI:CreateColorPicker(parent, L["Custom Color"], db, "resourceBarCustomColor", false, function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true)
             resourceCustomColor.hideOn = function() return (db.resourceBarColorMode or "POWER_TYPE") ~= "CUSTOM" end
+            resourceCustomColor.fullRow = true
             group:AddWidget(resourceCustomColor, 30)
 
             -- ☠ THE SEED AND THE TEN THAT FOLLOW IT STAY WHERE THEY WERE, inside the
