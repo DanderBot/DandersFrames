@@ -147,8 +147,7 @@ tooltip to their label, and read the spec off the returned widget. Set
 ## Preview vs commit (sliders and the colour picker)
 
 A drag is a stream of values the user is still choosing between, ending in ONE
-value they chose. `CreateSlider` gives those different events different slots
-(the same split Cell draws between `onValueChangedFn` and `afterValueChangedFn`):
+value they chose. `CreateSlider` gives those different events different slots:
 
 - **`lightweight` is the PREVIEW.** It runs only while the bar is held, at most
   once per rendered frame (pumped from an OnUpdate, not from OnValueChanged),
