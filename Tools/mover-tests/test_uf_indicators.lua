@@ -190,6 +190,9 @@ pdb.classPowerEnabled = false
 eq(cbox(), "0,0,0,0", "class power off: nothing")
 eq(IN.ClassPowerRect(P, pdb), nil, "...no rect")
 pdb.classPowerEnabled = true
+P.dfUFClassPower = { IsShown = function() return false end }
+eq(IN.ClassPowerRect(P, pdb), nil, "on but hidden right now: no rect, so no empty space in the outline")
+P.dfUFClassPower = { IsShown = function() return true end }
 eq(rstr({ { IN.ClassPowerRect(P, pdb) } }), "0,-9,220,-1", "on top, matching width: outer edge = the frame's, 2 gap - 1 border to 2 + 6 + 1 up")
 eq(cbox(), "0,0,9,0", "matching width: no reach left or right, 9 above")
 pdb.classPowerPosition = "BOTTOM"

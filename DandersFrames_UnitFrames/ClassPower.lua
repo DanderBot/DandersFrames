@@ -390,6 +390,15 @@ end
 function CP:Update(f)
     local cp = f and f.dfUFClassPower
     if not cp or f.dfUFPreview then return end
+    local wasShown = cp:IsShown()
+    CP:UpdateShown(f, cp)
+    -- The outlines round the frame include this bar only while it shows.
+    if cp:IsShown() ~= wasShown and UF.Indicators and UF.Indicators.Layout then
+        UF.Indicators:Layout(f)
+    end
+end
+
+function CP:UpdateShown(f, cp)
     local db = K.DB(f)
     local res = cp.res
     if not (db and Enabled(db) and res) or not f:IsVisible() or CP:InVehicle() then

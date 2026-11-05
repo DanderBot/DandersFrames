@@ -131,13 +131,15 @@ end
 -- from its TOPLEFT (x right, y DOWN): left, top, right, bottom. From the
 -- settings ClassPower.lua's Layout places it by: matching the frame's width,
 -- its outer edge (border included) IS the frame's width; a set width is that
--- plus the border each side. nil when off, detached, or on a unit without one.
+-- plus the border each side. nil when off, detached, hidden right now (a druid out
+-- of cat form, Hide When Empty), or on a unit without one.
 function IN.ClassPowerRect(f, db)
     local CP = UF.ClassPower
     if not (db and db.classPowerEnabled and CP) or (CP.IsDetached and CP:IsDetached(f, db)) then
         return nil
     end
-    if not (f and f.dfUFClassPower) then return nil end
+    local bar = f and f.dfUFClassPower
+    if not bar or (bar.IsShown and not bar:IsShown()) then return nil end
     local fw, fh = K.FrameWidth(f, db), K.FrameHeight(f, db)
     local border = 0
     if db.classPowerBorderEnabled ~= false then
