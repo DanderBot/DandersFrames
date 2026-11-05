@@ -7,7 +7,7 @@
 ## IconTexture: Interface\AddOns\DandersMover\Media\DF_Icon
 ## SavedVariables: DandersMoverDB
 ## AllowAddOnTableAccess: 1
-## X-Curse-Project-ID: 0
+## X-Curse-Project-ID: 1785887
 
 Libs\LibStub\LibStub.lua
 Libs\DandersUI\DandersUI.xml
