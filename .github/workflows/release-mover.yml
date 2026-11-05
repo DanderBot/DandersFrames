@@ -1,0 +1,136 @@
+name: Release DandersMover
+
+# ============================================================
+# STANDALONE DANDERSMOVER RELEASE
+# Builds only the DandersMover folder and uploads it to its own CurseForge
+# project (the ID is in DandersMover/DandersMover.toc). Independent of the
+# DandersFrames release: tag `mover-v1.2.3` to ship mover v1.2.3.
+#
+#   mover-v1.2.3          -> CurseForge Release
+#   mover-v1.2.3-beta.1   -> CurseForge Beta
+#   mover-v1.2.3-alpha.1  -> CurseForge Alpha
+#
+# The DandersFrames zip still bundles the mover folder; that is unaffected.
+# Release notes come from the top section of DandersMover/CHANGELOG.md.
+# ============================================================
+
+on:
+  push:
+    tags: ['mover-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing mover tag to build (e.g. mover-v1.0.0)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-mover
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.repository == 'DanderBot/DandersFrames'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Work out the version
+        id: version
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          case "$TAG" in
+            mover-v[0-9]*) ;;
+            *) echo "::error::'$TAG' is not a mover tag (expected mover-vX.Y.Z)"; exit 1 ;;
+          esac
+          VERSION="${TAG#mover-}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building DandersMover $VERSION"
+
+      # The packager names the build after the tag on HEAD (git describe --tags).
+      # This checkout also holds every DandersFrames tag, and a DandersFrames tag
+      # on the same commit would win. So: drop every tag from this throwaway
+      # checkout, then tag HEAD with the clean mover version. Local only, never
+      # pushed -- the clean name may well collide with an old DandersFrames tag.
+      - name: Tag HEAD with the mover version
+        run: |
+          git tag -l | xargs -r git tag -d > /dev/null
+          git tag "${{ steps.version.outputs.version }}"
+
+      # The packager does not rewrite "## Version:", so the zip shows whatever
+      # this line says. Not committed.
+      - name: Stamp the TOC version
+        run: |
+          sed -i 's/^## Version: .*/## Version: ${{ steps.version.outputs.version }}/' DandersMover/DandersMover.toc
+          grep -H '^## Version:' DandersMover/DandersMover.toc
+
+      - name: Check the release notes exist
+        run: |
+          if ! grep -q '^## ' DandersMover/CHANGELOG.md; then
+            echo "::error::DandersMover/CHANGELOG.md has no '## ' section to use as release notes."
+            exit 1
+          fi
+          awk '/^## / { n++; if (n > 1) exit } n >= 1 { print }' DandersMover/CHANGELOG.md > RELEASE_NOTES_MOVER.md
+          cat RELEASE_NOTES_MOVER.md
+          # The packager skips untracked files; this is CI-only and never committed.
+          git add -f RELEASE_NOTES_MOVER.md
+
+      - name: Set up Python (comment stripper)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Strip comments from shipped Lua
+        run: |
+          python -m pip install --quiet lupa
+          python Tools/strip-comments.py --selftest
+          python Tools/strip-comments.py --write
+
+      # ☠ The git add -f is what ships the library: the packager drops untracked
+      # paths, and the DandersUI copy is git-ignored (a junction locally).
+      - name: Sync embedded libs
+        run: |
+          bash Tools/sync-libs.sh
+          git add -f DandersMover/Libs/DandersUI
+
+      # Build first with -d (no upload), so a bad zip is caught before it ships.
+      - name: Package (no upload)
+        uses: BigWigsMods/packager@v2
+        with:
+          # ./ prefix is load-bearing: the packager rejects a bare relative dir.
+          args: -d -m .pkgmeta-mover -r ./.release-mover
+
+      - name: Check the zip
+        run: |
+          shopt -s nullglob
+          ZIPS=(.release-mover/*.zip)
+          if [ ${#ZIPS[@]} -ne 1 ]; then
+            echo "::error::Expected one zip in .release-mover, found ${#ZIPS[@]}."
+            exit 1
+          fi
+          echo "Built ${ZIPS[0]}"
+          TOP=$(unzip -Z1 "${ZIPS[0]}" | cut -d/ -f1 | sort -u)
+          echo "Top-level folders: $TOP"
+          if [ "$TOP" != "DandersMover" ]; then
+            echo "::error::The zip must contain only the DandersMover folder."
+            exit 1
+          fi
+          for f in DandersMover/DandersMover.toc DandersMover/Libs/DandersUI/DandersUI.xml DandersMover/LICENSE; do
+            unzip -Z1 "${ZIPS[0]}" | grep -qx "$f" || { echo "::error::$f is missing from the zip."; exit 1; }
+          done
+          unzip -p "${ZIPS[0]}" DandersMover/DandersMover.toc | grep '^## Version:'
+
+      # Same inputs, so the same zip, this time uploaded. No GITHUB_OAUTH: with it
+      # the packager would create a GitHub release, and a tag, for the clean local
+      # version on the DandersFrames repo. Only CurseForge gets this build.
+      - name: Package and upload to CurseForge
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -m .pkgmeta-mover -r ./.release-mover
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}

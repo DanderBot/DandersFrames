@@ -70,9 +70,10 @@ has_curated_changelog() {
 if [ -n "${OVERRIDE_TAG:-}" ]; then
     CURRENT_TAG="$OVERRIDE_TAG"
 else
-    CURRENT_TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
+    CURRENT_TAG=$(git describe --exact-match --tags --match 'v[0-9]*' HEAD 2>/dev/null || echo "")
 fi
-LAST_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || echo "v0.0.0")
+# --match 'v[0-9]*': DandersMover's own mover-v* tags must never become this version.
+LAST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || echo "v0.0.0")
 
 # Branch pushes must always produce alpha builds, even if a tag exists on HEAD
 if [ "${FORCE_ALPHA:-}" = "true" ]; then
@@ -170,7 +171,11 @@ echo "$CHANGELOG_CONTENT" > "$CHANGELOG_FILE"
 # through a dev junction. Syncing only the main TOC left the companion pinned
 # at whatever it was hand-written as, drifting one version further behind on
 # every release.
-for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc" "DandersMover/DandersMover.toc"; do
+#
+# DandersMover is NOT in this list: it has its own version, set by its own
+# release (release-mover.yml, mover-v* tags). Syncing it here would overwrite
+# that with the DandersFrames version.
+for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc"; do
     if [ ! -f "$TOC_FILE" ]; then
         echo "Error: $TOC_FILE not found — the addon layout changed without this script." >&2
         exit 1
