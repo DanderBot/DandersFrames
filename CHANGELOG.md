@@ -24,6 +24,15 @@
 - (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
 - (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
 - (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
+- (Unit Frames) Frame Fade's tick boxes now update your frames straight away, and hovering works with Separate Combat Fade.
+- (Unit Frames) The Unlock button on the Unit Frames pages now moves unit frames without showing other addons' movers.
+- (Unit Frames) Turning the cast bar on or off on one frame no longer changes a linked frame.
+- (Unit Frames) The selection, hover and aggro outlines no longer include space for a hidden class power bar.
+- (Unit Frames) Target, Focus and Boss now have the important debuff highlight settings.
+- (Search) Fix search staying stuck on "Indexing settings..." after combat.
+- (Mover) Clicking now brings the mover controls back if they stayed faded after alt-tabbing.
+- (Test Mode) Turning off Color by Time Remaining now takes effect on test frames.
+- (Settings) Fix a large gap above Reduced Max Health and uneven resource colour swatches.
 - (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
 - (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
 
