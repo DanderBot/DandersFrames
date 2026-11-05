@@ -12,3 +12,4 @@
 # No Libs folder on purpose. LibStub arrives with DandersMover, and Core.lua
 # bails out of the registration path when it is absent.
 Core.lua
+Easy.lua
