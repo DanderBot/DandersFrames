@@ -170,6 +170,11 @@ local function SweepFrameFade()
             if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
         end)
     end
+    -- Standalone frames (unit frames) are in neither walk. Preview frames are test
+    -- frames, and their own refresh owns them.
+    for f in pairs(DF.StandaloneFrames or {}) do
+        if not f.dfPreview and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
+    end
 end
 
 -- Hover edge for the "Show In-Combat Fade When Hovering" option. Cheap gate first --
@@ -2126,6 +2131,18 @@ function DF:UpdateAllFrameAppearances()
     -- all, including from FullProfileRefresh on a profile switch.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(updateFrame)
+    end
+
+    -- Standalone frames (unit frames) are in neither walk. One with no unit showing
+    -- only takes its opacity, so it is right when it next appears.
+    for f in pairs(DF.StandaloneFrames or {}) do
+        if not f.dfPreview and f.dfIsDandersFrame then
+            if f.unit and f:IsVisible() then
+                updateFrame(f)
+            else
+                DF:UpdateFrameAppearance(f)
+            end
+        end
     end
 end
 
