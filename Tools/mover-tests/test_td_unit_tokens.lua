@@ -16,7 +16,7 @@ local STUBS = {
     UnitLevel = function(u) return W.level end,
     UnitClassification = function(u) return W.classification end,
     UnitExists = function(u) return W.exists[u] == true end,
-    UnitName = function(u) return W.names[u] end,
+    UnitName = function(u) return W.names[u], W.surnames and W.surnames[u] end,
     UnitIsAFK = function(u) return W.afk end,
     UnitIsDead = function(u) return W.dead end,
     UnitIsGhost = function(u) return false end,
@@ -89,6 +89,22 @@ eq(resolve("target_name", live, { nameLength = 8 }), "Ragnaros...", "with Name's
 eq(resolve("target_name", TD.DataSource.Live({ unit = "party1" })), "", "no target: nothing")
 world({ exists = { party1target = true }, names = { party1target = "Healbot" } })
 eq(resolve("target_name", TD.DataSource.Live({ unit = "party1" })), "Healbot", "<unit>target, any unit")
+
+print("-- Name Format (WoW Forever), live")
+DF.IS_FOREVER = true
+local party1 = TD.DataSource.Live({ unit = "party1" })
+world({ exists = { party1target = true }, names = { party1 = "Ann", party1target = "Bob" },
+        surnames = { party1 = "Smith", party1target = "Jones" } })
+eq(resolve("name", party1, { nameLength = 0 }), "Ann Smith", "no stored choice: the full name")
+eq(resolve("name", party1, { nameLength = 0, nameFormat = "FULL" }), "Ann Smith", "Full Name")
+eq(resolve("name", party1, { nameLength = 0, nameFormat = "FIRST" }), "Ann", "First Name")
+eq(resolve("name", party1, { nameLength = 0, nameFormat = "FIRST_INITIAL" }), "Ann S", "First Name + Last Initial")
+eq(resolve("name", party1, { nameLength = 0, nameFormat = "INITIALS" }), "A S", "Initials")
+eq(resolve("name", party1, { nameLength = 6, nameFormat = "FULL" }), "Ann Sm...", "Max Length applies afterwards")
+eq(resolve("target_name", party1, { nameLength = 0, nameFormat = "FULL" }), "Bob", "a target name is not formatted")
+DF.IS_FOREVER = false
+eq(resolve("name", party1, { nameLength = 0, nameFormat = "FULL" }), "Ann", "off Forever the second return is a realm")
+DF.IS_FOREVER = nil
 
 print("-- Dead / Offline / Ghost / AFK, live")
 world({ afk = true })

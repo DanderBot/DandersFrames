@@ -129,18 +129,22 @@ local RESOLVERS = {}
 
 -- ───── Identity ─────
 
--- A name, truncated per the element's name settings.
-local function nameText(n, elem)
+-- A name, truncated per the element's name settings. `source` is passed only for the
+-- unit's own name: Name Format splits that unit's first name and surname, which says
+-- nothing about the name of whatever it is targeting.
+local function nameText(n, elem, source)
     if n == nil then return "" end
     -- Secret name: display verbatim (SetText accepts secrets). A `== ""` compare,
     -- or the #/sub truncation in applyNameTrunc, throws on a secret string.
     if getMS().IsSecret(n) then return getMS().SafeText(n) end
     if n == "" then return "" end
-    return applyNameTrunc(applyNameFormat(getMS().SafeText(n), elem, source), elem)
+    n = getMS().SafeText(n)
+    if source then n = applyNameFormat(n, elem, source) end
+    return applyNameTrunc(n, elem)
 end
 
 RESOLVERS.name = function(elem, source)
-    return nameText(source:GetName(), elem)
+    return nameText(source:GetName(), elem, source)
 end
 
 -- The name of what this unit is targeting, with the same length settings as Name.
