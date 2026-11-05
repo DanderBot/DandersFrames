@@ -34,7 +34,7 @@ local Lib = LibStub("DandersMover-1.0", true)
 check(Lib ~= nil, "setup: the library object is available")
 check(type(Lib.SetAnchor) == "function" and type(Lib.Detach) == "function", "setup: SetAnchor / Detach are public")
 local src = mover_file_source("Core.lua"):gsub("\r\n", "\n")
-check(src:find('local MAJOR, MINOR = "DandersMover%-1%.0", 8'), "the lib's MINOR is 8")
+check(src:find('local MAJOR, MINOR = "DandersMover%-1%.0", 9'), "the lib's MINOR is 9")
 
 local wasReady = R.ready
 R.ready = true

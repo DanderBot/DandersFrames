@@ -18,6 +18,8 @@
 - (Rested Indicator) New soft outer glow style.
 - (Modules) Reset a module to its defaults from the **Modules** page.
 - (Icons) Combat and leader icons use sharper art.
+- (DandersMover) Frames anchored to another addon's frames now follow them automatically.
+- (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
 
 ### Bug Fixes
 

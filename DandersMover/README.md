@@ -64,29 +64,28 @@ Add this to your TOC so DandersMover loads first:
 Then register your frame once your saved variables are loaded:
 
 ```lua
-local Mover = LibStub and LibStub("DandersMover-1.0", true)   -- nil when not installed
+local DEFAULT_POS = { point = "CENTER", x = 0, y = -200 }
 
--- Your addon owns the position, so create it and place the frame yourself.
-MyAddonDB.barPosition = MyAddonDB.barPosition or { point = "CENTER", x = 0, y = -200 }
-local pos = MyAddonDB.barPosition
-myBar:ClearAllPoints()
+-- Places the frame when DandersMover isn't installed.
+local pos = MyAddonDB.barPosition or DEFAULT_POS
 myBar:SetPoint(pos.point, UIParent, "CENTER", pos.x, pos.y)
 
-if Mover then
-    Mover:RegisterAddon("MyAddon", { title = "My Addon" })
+local Mover, version
+if LibStub then Mover, version = LibStub("DandersMover-1.0", true) end
+if Mover and version >= 9 then
     Mover:Register("MyAddon", "bar", {
-        title     = "Cooldown Bar",
-        frame     = myBar,
-        default   = { point = "CENTER", x = 0, y = -200 },
-        getPos    = function() return MyAddonDB.barPosition end,
-        onChanged = function(p) Mover.ApplyPosition(myBar, p) end,
+        title   = "My Bar",
+        frame   = myBar,
+        default = DEFAULT_POS,
+        db      = MyAddonDB,
+        dbKey   = "barPosition",
     })
 end
 ```
 
-That gives your frame a mover. To finish the job, follow the
-[Developer Guide](docs/DEVELOPER_GUIDE.md): it has a complete addon you can copy, and
-explains what to do on login and when your frames move, which anchors depend on.
+That's all it takes. DandersMover places your frame, gives it a mover, and watches it so
+that anything anchored to it follows. The [Developer Guide](docs/DEVELOPER_GUIDE.md) has a
+complete addon you can copy, and the options you might want next.
 
 ## Documentation
 

@@ -135,8 +135,8 @@ The order is main target, then backup, then staying in the last position. While 
 its backup, the panel marks the target `(backup)` and the tether is thin and muted. Detaching
 a frame also clears its backup.
 
-The switch happens when the addon that owns the target reports the change, so how quickly a
-frame moves over depends on that addon.
+The switch happens within a moment of the target hiding or coming back. An addon can opt out
+of this and report changes itself, and then how quickly a frame moves over depends on that addon.
 
 ### Mirroring
 

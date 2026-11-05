@@ -378,6 +378,7 @@ local function registerElements()
     Mover:RegisterAddon(ADDON_KEY, {
         title = "DandersFrames",
         icon  = "Interface\\AddOns\\DandersFrames\\Media\\DF_Icon",
+        watch = false,   -- reports its own changes to the mover
     })
 
     Mover:Register(ADDON_KEY, "party", {

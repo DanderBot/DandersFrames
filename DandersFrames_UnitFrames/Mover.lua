@@ -319,6 +319,7 @@ function M:Init()
         -- where these movers come from in DandersMover's Registered addons.
         title = "Danders Unit Frames",
         icon  ="Interface\\AddOns\\DandersFrames\\Media\\DF_Icon",
+        watch = false,   -- reports its own changes to the mover
     })
     for _, unit in ipairs(UF.SPAWNED_UNITS) do
         if unit == "boss" then

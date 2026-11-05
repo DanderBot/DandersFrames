@@ -4,8 +4,8 @@ local R = NS.Registry
 -- ============================================================
 -- THE DEVELOPER GUIDE'S COMPLETE ADDON
 -- Authors copy this example as it stands, so it is lifted out of the guide and
--- run through the login events here. If the API moves on and the example does
--- not, this fails rather than the first person to paste it.
+-- run through its load event here. If the API moves on and the example does not,
+-- this fails rather than the first person to paste it.
 -- ============================================================
 local GUIDE = "DandersMover/docs/DEVELOPER_GUIDE.md"
 
@@ -40,11 +40,18 @@ if not LibStub("DandersMover-1.0", true) then
     CreateFrame = savedCreateFrame
 end
 
-local Lib = LibStub("DandersMover-1.0", true)
+local Lib, libMinor = LibStub("DandersMover-1.0", true)
+check(libMinor >= 9, "docs: the library is new enough for the example's version check")
 
--- Loads the example as addon `name`. Hands back its bar and event handler.
-local function loadExample(name, withLibrary)
-    local bar, handler
+-- Nothing here is about the watcher: test_watcher.lua owns that.
+local W = NS.Watcher
+local wasLoggedIn = W.loggedIn
+W.loggedIn = false
+
+-- Loads the example as addon `name`, with `libStub` as its LibStub (nil = not installed).
+-- Hands back its bar, a function firing an event at its handler, and its events frame.
+local function loadExample(name, libStub)
+    local bar, handler, handlerFrame
     CreateFrame = function(_, frameName)
         local f = FakeFrame(960, 340, 200, 30)
         f._shown, f.points = true, {}
@@ -54,38 +61,43 @@ local function loadExample(name, withLibrary)
             self.points = { point = point, rel = rel, relPoint = relPoint, x = x, y = y }
             self._cx, self._cy = 960 + x, 540 + y
         end
-        function f:SetScript(script, fn) if script == "OnEvent" then handler = fn end end
-        function f:RegisterEvent() end
-        function f:SetSize() end
-        function f:CreateTexture()
-            return setmetatable({}, { __index = function() return function() end end })
+        function f:SetScript(script, fn)
+            if script == "OnEvent" then handler, handlerFrame = fn, self end
         end
+        function f:RegisterEvent() end
+        function f:UnregisterEvent(event) self.unregistered = event end
+        function f:SetSize() end
         if frameName == "MyAddonBar" then bar = f end
         return f
     end
-    if not withLibrary then LibStub = nil end
+    LibStub = libStub
     local chunk = assert((loadstring or load)(source, "@guide-example"))
     chunk(name)
+    local function fire(event, arg)
+        LibStub = libStub
+        handler(handlerFrame, event, arg)
+        LibStub = savedLibStub
+    end
     LibStub, CreateFrame = savedLibStub, savedCreateFrame
-    return bar, handler
+    return bar, fire, handlerFrame
 end
 
 -- ---- with the library -------------------------------------------------------
 MyAddonDB = nil
-local bar, onEvent = loadExample("DocExample", true)
+local bar, fire, events = loadExample("DocExample", savedLibStub)
 check(bar ~= nil, "docs: the example builds its frame")
 
-onEvent(nil, "ADDON_LOADED", "SomeOtherAddon")
+fire("ADDON_LOADED", "SomeOtherAddon")
 check(MyAddonDB == nil, "docs: another addon's ADDON_LOADED is ignored")
+eq(events.unregistered, nil, "docs: the example keeps listening after another addon's load")
 
-onEvent(nil, "ADDON_LOADED", "DocExample")
-eq(MyAddonDB.barPosition.y, -200, "docs: a fresh install gets the default position")
+fire("ADDON_LOADED", "DocExample")
+eq(events.unregistered, "ADDON_LOADED", "docs: the example stops listening after its own load")
+eq(MyAddonDB.barPosition.y, -200, "docs: the library seeds a fresh install from the default")
 eq(bar.points.y, -200, "docs: the frame is placed on load")
 check(R:Get("DocExample:bar") ~= nil, "docs: the element is registered")
-eq(R:GetAddon("DocExample").title, "My Addon", "docs: the addon's title is registered")
-
-onEvent(nil, "PLAYER_LOGIN")
-eq(bar.points.y, -200, "docs: the login Apply keeps a free element where it is")
+eq(R:GetAddon("DocExample").title, "DocExample", "docs: the addon's title falls back to its name")
+eq(R:Get("DocExample:bar").title, "My Bar", "docs: the element's title is registered")
 
 -- What the editor does: edit the live record, then notify.
 local record = MyAddonDB.barPosition
@@ -102,12 +114,10 @@ eq(bar.points.y, -200, "docs: a reset moves the frame back")
 
 -- A reset must not have written through to the example's own defaults.
 record.y = 123
-onEvent(nil, "PLAYER_LOGIN")
-MyAddonDB.barPosition.y = 123
 NS:ResetPositions("DocExample")
 eq(record.y, -200, "docs: the default survives the record being edited")
 
--- The guide's Step 6: anchor to a target that has not registered yet.
+-- The guide's "Anchor from your code": a target that has not registered yet.
 record.x, record.y = 10, 20
 check(Lib:SetAnchor("DocExample", "bar", { target = "LaterAddon:thing", edge = "bottom" }),
     "docs: SetAnchor accepts a target that is not registered yet")
@@ -127,14 +137,34 @@ check(record.anchor == nil, "docs: Detach clears the anchor")
 Lib:UnregisterAddon("LaterAddon")
 Lib:UnregisterAddon("DocExample")
 
+-- ---- a later login, with a saved position -----------------------------------
+local saved = { point = "TOPLEFT", x = 7, y = 8 }
+MyAddonDB = { barPosition = saved }
+local savedBar, savedFire = loadExample("DocExampleSaved", savedLibStub)
+savedFire("ADDON_LOADED", "DocExampleSaved")
+eq(savedBar.points.point, "TOPLEFT", "docs: a saved point is used on load")
+eq(savedBar.points.y, 8, "docs: a saved position is used on load")
+eq(MyAddonDB.barPosition, saved, "docs: registering keeps the saved table")
+eq(saved.y, 8, "docs: registering keeps the saved values")
+Lib:UnregisterAddon("DocExampleSaved")
+
 -- ---- without the library ----------------------------------------------------
 MyAddonDB = nil
-local plainBar, plainEvent = loadExample("DocExamplePlain", false)
-plainEvent(nil, "ADDON_LOADED", "DocExamplePlain")
+local plainBar, plainFire = loadExample("DocExamplePlain", nil)
+plainFire("ADDON_LOADED", "DocExamplePlain")
 eq(plainBar.points.y, -200, "docs: the example works with DandersMover missing")
-plainEvent(nil, "PLAYER_LOGIN")
 check(R:Get("DocExamplePlain:bar") == nil, "docs: nothing registers with DandersMover missing")
 
+-- ---- with a copy that is too old --------------------------------------------
 MyAddonDB = nil
+local oldCalled = false
+local function oldLibStub() return { Register = function() oldCalled = true end }, 8 end
+local oldBar, oldFire = loadExample("DocExampleOld", oldLibStub)
+oldFire("ADDON_LOADED", "DocExampleOld")
+eq(oldBar.points.y, -200, "docs: the example still places its frame on an older copy")
+check(not oldCalled, "docs: the example doesn't register with an older copy")
+
+MyAddonDB = nil
+W.loggedIn = wasLoggedIn
 NS.Proxy = savedProxy
 R.ready = wasReady
