@@ -4915,11 +4915,20 @@ function AuraContainer.BindDurationTextPreview(fs, durSpec, dur, store, key)
     if not (fs and durSpec and dur) then return false end
     if not (C_DurationUtil and C_DurationUtil.CreateDurationTextBinding) then return false end
     local b = store and store[key]
+    -- A binding can be given a colour curve but not have one taken away, and this one
+    -- outlives the setting that asked for it: with Color by Time Remaining unticked,
+    -- only a new binding stops the countdown ramping.
+    local curveKey = key and (key .. "HasCurve")
+    if b and store[curveKey] and not durSpec.colorCurve then
+        b:SetEnabled(false)
+        b = nil
+    end
     if not b then
         b = C_DurationUtil.CreateDurationTextBinding()
         if store then store[key] = b end
         b:SetFontString(fs)
     end
+    if store then store[curveKey] = durSpec.colorCurve and true or nil end
     b:SetDuration(dur)
     -- Options mirrored from bindNative's live SetDurationText block so the preview
     -- formats identically (same formatter object, same texts, same cadence). Guards
