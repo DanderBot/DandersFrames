@@ -31,8 +31,10 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 git clone --quiet "$MIRROR" "$WORK"
-git -C "$WORK" config user.name "DandersFrames sync"
-git -C "$WORK" config user.email "noreply@users.noreply.github.com"
+# Danders' private GitHub noreply address. Not a bare noreply@ address: GitHub links
+# that to a stranger's account and lists them as a contributor.
+git -C "$WORK" config user.name "Danders"
+git -C "$WORK" config user.email "241103671+DanderBot@users.noreply.github.com"
 # An empty repo clones onto whatever the local default branch is called.
 git -C "$WORK" symbolic-ref HEAD refs/heads/main
 
