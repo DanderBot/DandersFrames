@@ -2790,6 +2790,33 @@ function UFO.EditInMover(unit)
     return false
 end
 
+-- The window's Lock / Unlock button while the Unit Frames module is showing: a
+-- session for these frames, not the party or raid one (their filter leaves another
+-- addon's elements out unless the user shows them all).
+function UFO.MoverButtonOwned()
+    return GUI.CurrentModuleId and GUI.CurrentModuleId() == UFO.MODULE or false
+end
+
+function UFO.MoverSessionActive()
+    local UF = DF.UnitFrames
+    local M = UF and UF.Mover
+    return M and M.lib and M.lib:IsUnlocked() or false
+end
+
+function UFO.ToggleMoverSession()
+    local UF = DF.UnitFrames
+    local M = UF and UF.Mover
+    if not (M and M.lib) then
+        if DF.Say then DF:Say(L["DandersMover is disabled"]) end
+        return
+    end
+    if M.lib:IsUnlocked() then
+        M.lib:Lock()
+    else
+        M.lib:Unlock(M.ADDON_KEY)
+    end
+end
+
 function UFO.ResetPosition(unit)
     local UF = DF.UnitFrames
     local stored = UF and UF:GetStoredUnit(unit)

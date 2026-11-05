@@ -2018,13 +2018,17 @@ function DF:CreateGUI()
         if db then
             if GUI.SelectedMode == "raid" then isLocked = db.raidLocked else isLocked = db.locked end
         end
+        -- On the Unit Frames module the button is that module's own session.
+        local unitOptions = GUI.UnitFrameOptions
+        local unitsOwn = unitOptions and unitOptions.MoverButtonOwned and unitOptions.MoverButtonOwned()
+        if unitsOwn then isLocked = not unitOptions.MoverSessionActive() end
 
         -- While an auto layout drives the raid frames, dragging the base position by
         -- accident is the bug we're preventing: disable the toolbar Unlock and steer
         -- users to the active layout's own Unlock button (Auto Layouts page). Only the
         -- UNLOCK action is blocked (isLocked) — locking from here still works to finish
         -- a session.
-        local layoutActive = (GUI.SelectedMode == "raid") and DF.AutoProfilesUI
+        local layoutActive = (not unitsOwn) and (GUI.SelectedMode == "raid") and DF.AutoProfilesUI
             and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive()
         if layoutActive and isLocked then
             btnLock.dfDisabled = true
@@ -2074,6 +2078,14 @@ function DF:CreateGUI()
     btnLock:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
     btnLock:SetScript("OnClick", function()
+        local unitOptions = GUI.UnitFrameOptions
+        if unitOptions and unitOptions.MoverButtonOwned and unitOptions.MoverButtonOwned() then
+            unitOptions.ToggleMoverSession()
+            UpdateLockButtonState()
+            UpdateTestButtonState()
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            return
+        end
         if btnLock.dfDisabled then
             local name = DF.AutoProfilesUI and DF.AutoProfilesUI.GetActiveLayoutName
                 and DF.AutoProfilesUI:GetActiveLayoutName()
