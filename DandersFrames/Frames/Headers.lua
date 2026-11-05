@@ -4309,36 +4309,52 @@ end
 function DF:BuildPartyNameList(selfPosition)
     -- Get members in party (player + party1-4)
     local members = {}
-    local playerName = UnitName("player")
-    
-    -- Add player
-    table.insert(members, {
-        unit = "player",
-        name = playerName,
-        isPlayer = true
-    })
-    
-    -- Add party members. An unresolved name (secret, nil or UNKNOWNOBJECT) must not reach the
-    -- list -- the header hides any unit whose name is not in it -- so report complete = false
-    -- and let ApplyPartyGroupSorting fall back to INDEX.
+
+    -- The name the secure header gives a party-kind unit: UnitName's first return, plus
+    -- "-" and the second return when there is one. Must match it exactly, because the
+    -- header hides any unit whose name is not in the list.
+    -- ☠ The player is not a special case: the second return is the SURNAME on WoW Forever,
+    -- even for "player". Building the player from the first return alone drops only them.
+    -- An unresolved name (secret, nil or UNKNOWNOBJECT) returns nil.
+    -- issecretvalue first: comparing or concatenating a secret string throws.
+    local function GetHeaderName(unit)
+        local name, second = UnitName(unit)
+        if issecretvalue(name) or issecretvalue(second) or not name or name == UNKNOWNOBJECT then
+            return nil
+        end
+        if second and second ~= "" then
+            return name .. "-" .. second
+        end
+        return name
+    end
+
+    -- An unresolved name must not reach the list, so report complete = false and let
+    -- ApplyPartyGroupSorting fall back to INDEX.
     local complete = true
+
+    local playerName = GetHeaderName("player")
+    if playerName then
+        table.insert(members, {
+            unit = "player",
+            name = playerName,
+            isPlayer = true
+        })
+    else
+        complete = false
+    end
+
     for i = 1, 4 do
         local unit = "party" .. i
         if UnitExists(unit) then
-            local name, realm = UnitName(unit)
-            -- issecretvalue first: comparing or concatenating a secret string throws.
-            if issecretvalue(name) or issecretvalue(realm) or not name or name == UNKNOWNOBJECT then
-                complete = false
-            else
-                local fullName = name
-                if realm and realm ~= "" then
-                    fullName = name .. "-" .. realm
-                end
+            local fullName = GetHeaderName(unit)
+            if fullName then
                 table.insert(members, {
                     unit = unit,
                     name = fullName,
                     isPlayer = false
                 })
+            else
+                complete = false
             end
         end
     end

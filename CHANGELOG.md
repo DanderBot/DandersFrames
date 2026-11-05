@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [5.6.2]
+
+### Bug Fixes
+
+- (WoW Forever) Fix your own frame disappearing from party frames when using Self Position First/Last, Sort by Class, Separate Melee & Ranged DPS or Alphabetical sorting.
+
 ## [5.6.1]
 
 ### Bug Fixes
