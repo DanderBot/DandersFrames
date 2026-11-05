@@ -413,7 +413,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
     elseif ct.key == "name" then
         -- Surnames only exist on WoW Forever.
         if DF.IS_FOREVER then
-            elem.nameFormat = elem.nameFormat or "FIRST"
+            elem.nameFormat = elem.nameFormat or "FULL"
             local formatOpts = {
                 FIRST = L["First Name"],
                 FULL = L["Full Name"],

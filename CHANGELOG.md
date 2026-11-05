@@ -4,7 +4,7 @@
 
 ### New Features
 
-- (WoW Forever) New **Name Format** option for name text in the Text Designer: show the first name only, the full name, the first name with a last initial, or initials. Max Length still applies to the result, so raise it if full names get cut short.
+- (WoW Forever) Names on frames now show the full name by default. A new **Name Format** option for name text in the Text Designer lets you switch to the first name only, the first name with a last initial, or initials. Max Length still applies to the result, so raise it if full names get cut short.
 
 ### Bug Fixes
 

@@ -23,16 +23,15 @@ end
 -- HELPERS
 -- ============================================================
 
--- Truncate / ellipsize a name string per the per-element name settings.
 -- WoW Forever only: first name and surname come back separately from UnitName, so each
--- can be shortened on its own. Returns `name` untouched when there is nothing to format:
--- a secret part (Lua can't split or join those), no surname, or a nickname in place of
--- the first name (nicknames stay authoritative).
+-- can be shortened on its own. An element with no stored choice shows the full name.
+-- Returns `name` untouched when there is nothing to format: a secret part (Lua can't
+-- split or join those), no surname, or a nickname in place of the first name (nicknames
+-- stay authoritative).
 local function applyNameFormat(name, elem, source)
-    local fmt = elem.nameFormat
-    if not DF.IS_FOREVER or not fmt or fmt == "FIRST" or not source.GetNameParts then
-        return name
-    end
+    if not DF.IS_FOREVER or not source.GetNameParts then return name end
+    local fmt = elem.nameFormat or "FULL"
+    if fmt == "FIRST" then return name end
     local first, surname = source:GetNameParts()
     if getMS().IsSecret(first) or getMS().IsSecret(surname) then return name end
     if not surname or surname == "" or first ~= name then return name end
@@ -46,6 +45,7 @@ local function applyNameFormat(name, elem, source)
     return name
 end
 
+-- Truncate / ellipsize a name string per the per-element name settings.
 local function applyNameTrunc(name, elem)
     local maxLen = elem.nameLength or 30
     -- 0 (or less) means "off" — matches legacy name text, whose slider is
