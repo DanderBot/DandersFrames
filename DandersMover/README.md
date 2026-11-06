@@ -30,7 +30,11 @@ The more addons that use it, the more of your UI works as one piece.
 
 ## Install
 
-DandersMover has to be its own addon, in this exact folder:
+The easiest way is from **[CurseForge](https://www.curseforge.com/wow/addons/danders-mover)**,
+or any addon manager that uses it. It also comes with
+[DandersFrames](https://github.com/DanderBot/DandersFrames).
+
+To install it by hand, DandersMover has to be its own addon, in this exact folder:
 
 ```
 World of Warcraft\_retail_\Interface\AddOns\DandersMover
@@ -38,9 +42,6 @@ World of Warcraft\_retail_\Interface\AddOns\DandersMover
 
 The folder must contain `DandersMover.toc` directly, and has to be named
 `DandersMover`. GitHub's "Download ZIP" names it `DandersMover-main`, so rename it.
-
-It also comes with [DandersFrames](https://github.com/DanderBot/DandersFrames), and
-each DandersFrames release includes a standalone `DandersMover` zip.
 
 Restart the game fully the first time. `/reload` doesn't pick up a new addon folder.
 
