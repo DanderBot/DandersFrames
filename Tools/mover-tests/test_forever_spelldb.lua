@@ -58,6 +58,24 @@ do  -- Forever carries its OWN generated database, never retail's
         end
     end
     check(dup == nil, "no spell id appears in two Forever records (" .. tostring(dup) .. ")")
+
+    -- consumables: all classes, one record per aura
+    check(countKeys(RF.ByCategory.consumables) >= 24, "Forever lists its consumables")
+    local titans = RF.ByID[17626]
+    check(titans and titans.class == "ALL" and titans.cats.consumables, "Flask of the Titans is an all-class consumable")
+    -- 17548 shares the name "Shadow Protection" but is the potion, not the priest buff
+    local potion = RF.ByID[17548]
+    check(potion and potion.class == "ALL" and potion.cats.consumables and not potion.cats.raidBuffs,
+        "Greater Shadow Protection Potion is a consumable")
+    check(RF.ByID[976] and RF.ByID[976] ~= potion, "...and not part of priest Shadow Protection")
+    for _, id in ipairs({ 7235, 7241, 7242, 7243, 7244 }) do   -- shadow damage absorbs, not the resistance buff
+        check(RF.ByID[id] ~= RF.ByID[976], id .. " is not priest Shadow Protection")
+    end
+    local sor = RF.ByID[27827]
+    check(sor and sor.class == "PRIEST" and sor.cats.defensives, "Spirit of Redemption is a priest defensive")
+    check(RF.ByID[20711] == nil, "...keyed by its aura, not the passive talent")
+    local camp = RF.ByID[1229741]
+    check(camp and camp.class == "ALL" and camp.cats.utility, "Camp Benefits is all-class utility")
 end
 
 do  -- Missing Buffs: the four shared group buffs, every rank, under the retail keys
