@@ -290,10 +290,11 @@ function UF:IsQueued(key) return combatQueue[key] ~= nil end
 --   "Unit Frames"         name left, health right, status centre
 --   "Unit Frames (Small)" name only, centred (target of target, pet)
 -- ============================================================
-function UF:EnsureTextPresets()
-    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
-    if not lib or not DF.NewTextDesignerConfig then return false end
-    if not lib[UF.TEXT_PRESET] then
+-- A fresh copy of one built-in template, by name (nil: not a built-in). What
+-- EnsureTextPresets seeds and what Reset Page on a Text page restores.
+function UF.BuildTextPreset(name)
+    if not DF.NewTextDesignerConfig then return nil end
+    if name == UF.TEXT_PRESET then
         local cfg = DF:NewTextDesignerConfig()
         for _, e in ipairs(cfg.elements or {}) do
             if e.contentType == "name" then
@@ -304,10 +305,9 @@ function UF:EnsureTextPresets()
                 e.anchor, e.offsetX, e.offsetY = "RIGHT", -6, 0
             end
         end
-        lib[UF.TEXT_PRESET] = cfg
-        Debug("created Text Designer preset %s", UF.TEXT_PRESET)
+        return cfg
     end
-    if not lib[UF.TEXT_PRESET_SMALL] then
+    if name == UF.TEXT_PRESET_SMALL then
         local cfg = DF:NewTextDesignerConfig()
         local keep = {}
         for _, e in ipairs(cfg.elements or {}) do
@@ -318,12 +318,22 @@ function UF:EnsureTextPresets()
             end
         end
         cfg.elements = keep
-        lib[UF.TEXT_PRESET_SMALL] = cfg
-        Debug("created Text Designer preset %s", UF.TEXT_PRESET_SMALL)
+        return cfg
     end
-    for key, name in pairs(UF.RING_TEXT_PRESETS) do
+    for key, ringName in pairs(UF.RING_TEXT_PRESETS) do
+        if ringName == name then return UF.BuildRingTextPreset(key) end
+    end
+    return nil
+end
+
+function UF:EnsureTextPresets()
+    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+    if not lib or not DF.NewTextDesignerConfig then return false end
+    local names = { UF.TEXT_PRESET, UF.TEXT_PRESET_SMALL }
+    for _, name in pairs(UF.RING_TEXT_PRESETS) do names[#names + 1] = name end
+    for _, name in ipairs(names) do
         if not lib[name] then
-            local cfg = UF.BuildRingTextPreset(key)
+            local cfg = UF.BuildTextPreset(name)
             if cfg then
                 lib[name] = cfg
                 Debug("created Text Designer preset %s", name)
@@ -331,6 +341,189 @@ function UF:EnsureTextPresets()
         end
     end
     return true
+end
+
+-- ============================================================
+-- GLOBAL FONTS (Options: General > Fonts, "Apply to All")
+-- The unit frames' half of the press. Writes the font keys DandersFrames' painters
+-- read off a unit's table (auras, status icons, the defensive icon, the legacy
+-- name/health/status strings), the cast bar's own two, and every Text Designer
+-- template a unit frame can draw with: each unit's Bars and Ring template plus the
+-- built-in unit frame templates, so picking another built-in later keeps the font.
+-- ★ globalDefaults is what seeds NEW text elements: an element added to a template
+-- follows globalDefaults.font until its own font is overridden (TextDesigner
+-- Render.lua resolveAppearance), so writing it is the "new elements" half too.
+-- ============================================================
+UF.GLOBAL_FONT_KEYS = {
+    { "nameFont", "nameTextOutline" },
+    { "healthFont", "healthTextOutline" },
+    { "statusTextFont", "statusTextOutline" },
+    { "buffStackFont", "buffStackOutline" },
+    { "buffDurationFont", "buffDurationOutline" },
+    { "debuffStackFont", "debuffStackOutline" },
+    { "debuffDurationFont", "debuffDurationOutline" },
+    { "defensiveIconDurationFont", "defensiveIconDurationOutline" },
+    { "statusIconFont", "statusIconFontOutline" },
+    { "castbarSpellFont", "castbarSpellOutline" },
+    { "castbarTimerFont", "castbarTimerOutline" },
+}
+
+-- Every template name a unit frame draws with or ships with (a set).
+function UF:TextTemplatesInUse()
+    local names = {}
+    for _, unit in ipairs(UF.UNITS) do
+        local db = UF:GetUnitDB(unit)
+        local bars, ring = db[UF.DESIGNER_KINDS.text], db[UF.RING_TEXT_KEY]
+        if type(bars) == "string" then names[bars] = true end
+        if type(ring) == "string" then names[ring] = true end
+    end
+    names[UF.TEXT_PRESET] = true
+    names[UF.TEXT_PRESET_SMALL] = true
+    for _, name in pairs(UF.RING_TEXT_PRESETS) do names[name] = true end
+    return names
+end
+
+function UF:ApplyGlobalFont(font, outline)
+    if not (font and outline) then return false end
+    for _, unit in ipairs(UF.UNITS) do
+        local db = UF:GetUnitDB(unit)
+        for _, pair in ipairs(UF.GLOBAL_FONT_KEYS) do
+            db[pair[1]] = font
+            db[pair[2]] = outline
+        end
+        -- The AFK timer follows the status icon font: drop a per-timer override,
+        -- as the party and raid press does.
+        db.afkIconTimerFont = nil
+        db.afkIconTimerOutline = nil
+    end
+    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+    if lib then
+        for name in pairs(UF:TextTemplatesInUse()) do
+            local cfg = lib[name]
+            if type(cfg) == "table" then
+                if type(cfg.elements) == "table" then
+                    for _, el in ipairs(cfg.elements) do
+                        if type(el) == "table" then el.font = font; el.outline = outline end
+                    end
+                end
+                if type(cfg.globalDefaults) ~= "table" then cfg.globalDefaults = {} end
+                cfg.globalDefaults.font = font
+                cfg.globalDefaults.outline = outline
+            end
+        end
+    end
+    UF:RefreshAll()
+    return true
+end
+
+-- ============================================================
+-- RESET A UNIT'S TEXT (Reset Page on a unit's Text page)
+-- A unit's text lives in a SHARED library template, so clearing its template keys
+-- (all the page's own keys are) changed nothing: it was already on its default
+-- template, and that template's edits stood. Per frame style (Bars, Ring):
+--   * already on its default template, which is untouched: nothing to do
+--   * on a template nobody else uses: that template's contents go back to the
+--     default template's (wiped and refilled in place, so the name and anything
+--     holding the table keep it)
+--   * on a template something else uses (another unit, either style; Party, Raid,
+--     a pinned set, an auto layout): THAT TEMPLATE IS NEVER TOUCHED. The unit goes
+--     back to its default template when that one is untouched, else it gets a
+--     fresh default copy of its own ("Target", "Target Ring", "Target 2", ...).
+-- ★ A LINKED PARTNER IS NEVER RESET WITH IT. A Text link with its look shared
+-- would carry the unit's new template to the partner on the next push, so moving
+-- the unit to another template turns the link's Text look to own first (its
+-- layout, the mirror, stays); the Linked Frames page shows it.
+-- `dryRun`: change nothing, only answer. Returns how many style keys changed (or
+-- would), and whether the Text link's look turns own.
+-- ============================================================
+local function SameContent(a, b)
+    if a == b then return true end
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    for k, v in pairs(a) do
+        if not (type(k) == "string" and k:sub(1, 1) == "_") and not SameContent(v, b[k]) then return false end
+    end
+    for k in pairs(b) do
+        if a[k] == nil and not (type(k) == "string" and k:sub(1, 1) == "_") then return false end
+    end
+    return true
+end
+UF.SameTextContent = SameContent
+
+-- Does anything other than `unit`'s `key` draw template `name`?
+function UF:TextTemplateHasOtherUsers(unit, key, name)
+    for _, u in ipairs(UF.UNITS) do
+        local db = UF:GetUnitDB(u)
+        for _, k in ipairs({ UF.DESIGNER_KINDS.text, UF.RING_TEXT_KEY }) do
+            if not (u == unit and k == key) and db[k] == name then return true end
+        end
+    end
+    -- Party, Raid, pinned sets, auto layouts. The units' own labels are left out:
+    -- the walk above has them, with both styles.
+    local users = DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers("text", name) or {}
+    local mine = {}
+    for _, u in ipairs(UF.UNITS) do
+        local label = UF:CarrierLabel(u)
+        if label then mine[label] = true end
+    end
+    for _, label in ipairs(users) do
+        if not mine[label] then return true end
+    end
+    return false
+end
+
+function UF:ResetTextTemplates(unit, dryRun)
+    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+    local db = UF:GetUnitDB(unit)
+    if not (lib and db) then return 0, false end
+    local Lk, root = UF.Links, UF.Links and UF.Links.LiveRoot()
+    local linkLayout, linkLook = "own", "own"
+    if Lk and root then linkLayout, linkLook = Lk:Aspects(root, unit, "text") end
+    local shared = (linkLook == "same")
+    local changed, detach = 0, false
+    local base = UF.UNIT_TEMPLATE_NAMES[unit] or tostring(unit)
+    for _, key in ipairs({ UF.DESIGNER_KINDS.text, UF.RING_TEXT_KEY }) do
+        local cur = db[key]
+        local def = UF:GetUnitDefault(unit, key)
+        local fresh = def and UF.BuildTextPreset(def)
+        if fresh then
+            local curCfg = cur and lib[cur]
+            if cur == def and SameContent(curCfg, fresh) then
+                -- Already default. A stored copy of the default name is dropped.
+                local stored = UF:GetStoredUnit(unit)
+                if stored and rawget(stored, key) ~= nil then
+                    changed = changed + 1
+                    if not dryRun then stored[key] = nil end
+                end
+            elseif type(curCfg) == "table" and not UF:TextTemplateHasOtherUsers(unit, key, cur) then
+                changed = changed + 1
+                if not dryRun then
+                    for k in pairs(curCfg) do curCfg[k] = nil end
+                    for k, v in pairs(fresh) do curCfg[k] = v end
+                end
+            else
+                -- Somebody else draws `cur`: leave it be, move this unit.
+                changed = changed + 1
+                if shared then detach = true end
+                if not dryRun then
+                    if shared and not (Lk.SetElement and Lk:SetElement(root, unit, "text", linkLayout, "own")) then
+                        return 0, false
+                    end
+                    shared = false
+                    local target
+                    if cur ~= def and SameContent(lib[def], fresh) then
+                        target = def
+                    else
+                        local want = (key == UF.RING_TEXT_KEY) and (base .. " Ring") or base
+                        target = DF.CreateDesignerPreset and DF:CreateDesignerPreset("text", want)
+                        if target then lib[target] = fresh end
+                    end
+                    if target then db[key] = (target ~= def) and target or nil end
+                end
+            end
+        end
+    end
+    if not dryRun and changed > 0 then UF:RefreshAll() end
+    return changed, detach
 end
 
 -- ============================================================
@@ -814,6 +1007,18 @@ function UF:MakeOwnTemplate(unit, kind)
     local name = from and DF:DuplicateDesignerPreset(kind, from, base) or nil
     if not name then name = DF:CreateDesignerPreset(kind, base) end
     if not name then return nil end
+    -- ★ ONLY THIS UNIT MOVES (bug #1142). A link sharing this designer's look would
+    -- carry the new template straight to the partner on the next push (the
+    -- template bar pushes after every pick). The element's look turns own first;
+    -- its layout (a mirrored Text link's mirror) stays, and the Linked Frames
+    -- page shows the change.
+    local Lk = UF.Links
+    local root = Lk and Lk.LiveRoot()
+    local elemId = (kind == "text") and "text" or "auradesigner"
+    if root and Lk.Aspects then
+        local layout, look = Lk:Aspects(root, unit, elemId)
+        if look == "same" then Lk:SetElement(root, unit, elemId, layout, "own") end
+    end
     UF:GetUnitDB(unit)[key] = name
     return name
 end

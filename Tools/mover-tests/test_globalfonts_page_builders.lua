@@ -155,14 +155,14 @@ do
     checkCensus(census(body), FONT_SELECTION, "font settings")
 
     -- ★ ON GLOBAL, Apply to All asks which modes: the press as it always was,
-    -- once per mode the choice names, both by default.
-    check(PAGE:find('scope = "both",', 1, true) ~= nil, "apply to: the choice starts on both modes")
+    -- once per mode the choice names, every frame type by default.
+    check(PAGE:find('scope = "all",', 1, true) ~= nil, "apply to: the choice starts on all frame types")
     check(body:find("local function ApplyFontToMode(db, font, outline)", 1, true) ~= nil,
           "apply to: one mode's writes are one function, handed that mode's table")
-    check(body:find('if (scope == "both" or scope == mode) and DF.db and DF.db[mode] then', 1, true) ~= nil
+    check(body:find('if (scope == "all" or scope == mode) and DF.db and DF.db[mode] then', 1, true) ~= nil
       and body:find("ApplyFontToMode(DF.db[mode], font, outline)", 1, true) ~= nil,
           "apply to: ...run for each mode the choice names")
-    check(body:find('if scope ~= "party" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end', 1, true) ~= nil,
+    check(body:find('if (scope == "all" or scope == "raid") and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end', 1, true) ~= nil,
           "apply to: the raid layout is re-run whenever raid was written")
 
     check(body:find('local applyBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")', 1, true) ~= nil,
