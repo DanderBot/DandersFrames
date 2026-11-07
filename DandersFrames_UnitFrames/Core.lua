@@ -334,6 +334,79 @@ function UF:EnsureTextPresets()
 end
 
 -- ============================================================
+-- GLOBAL FONTS (Options: General > Fonts, "Apply to All")
+-- The unit frames' half of the press. Writes the font keys DandersFrames' painters
+-- read off a unit's table (auras, status icons, the defensive icon, the legacy
+-- name/health/status strings), the cast bar's own two, and every Text Designer
+-- template a unit frame can draw with: each unit's Bars and Ring template plus the
+-- built-in unit frame templates, so picking another built-in later keeps the font.
+-- ★ globalDefaults is what seeds NEW text elements: an element added to a template
+-- follows globalDefaults.font until its own font is overridden (TextDesigner
+-- Render.lua resolveAppearance), so writing it is the "new elements" half too.
+-- ============================================================
+UF.GLOBAL_FONT_KEYS = {
+    { "nameFont", "nameTextOutline" },
+    { "healthFont", "healthTextOutline" },
+    { "statusTextFont", "statusTextOutline" },
+    { "buffStackFont", "buffStackOutline" },
+    { "buffDurationFont", "buffDurationOutline" },
+    { "debuffStackFont", "debuffStackOutline" },
+    { "debuffDurationFont", "debuffDurationOutline" },
+    { "defensiveIconDurationFont", "defensiveIconDurationOutline" },
+    { "statusIconFont", "statusIconFontOutline" },
+    { "castbarSpellFont", "castbarSpellOutline" },
+    { "castbarTimerFont", "castbarTimerOutline" },
+}
+
+-- Every template name a unit frame draws with or ships with (a set).
+function UF:TextTemplatesInUse()
+    local names = {}
+    for _, unit in ipairs(UF.UNITS) do
+        local db = UF:GetUnitDB(unit)
+        local bars, ring = db[UF.DESIGNER_KINDS.text], db[UF.RING_TEXT_KEY]
+        if type(bars) == "string" then names[bars] = true end
+        if type(ring) == "string" then names[ring] = true end
+    end
+    names[UF.TEXT_PRESET] = true
+    names[UF.TEXT_PRESET_SMALL] = true
+    for _, name in pairs(UF.RING_TEXT_PRESETS) do names[name] = true end
+    return names
+end
+
+function UF:ApplyGlobalFont(font, outline)
+    if not (font and outline) then return false end
+    for _, unit in ipairs(UF.UNITS) do
+        local db = UF:GetUnitDB(unit)
+        for _, pair in ipairs(UF.GLOBAL_FONT_KEYS) do
+            db[pair[1]] = font
+            db[pair[2]] = outline
+        end
+        -- The AFK timer follows the status icon font: drop a per-timer override,
+        -- as the party and raid press does.
+        db.afkIconTimerFont = nil
+        db.afkIconTimerOutline = nil
+    end
+    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+    if lib then
+        for name in pairs(UF:TextTemplatesInUse()) do
+            local cfg = lib[name]
+            if type(cfg) == "table" then
+                if type(cfg.elements) == "table" then
+                    for _, el in ipairs(cfg.elements) do
+                        if type(el) == "table" then el.font = font; el.outline = outline end
+                    end
+                end
+                if type(cfg.globalDefaults) ~= "table" then cfg.globalDefaults = {} end
+                cfg.globalDefaults.font = font
+                cfg.globalDefaults.outline = outline
+            end
+        end
+    end
+    UF:RefreshAll()
+    return true
+end
+
+-- ============================================================
 -- RING PRESETS (Text Designer templates for a Ring-style frame, Rings.lua)
 -- Made like the two above: once, when absent, so the user's edits stand.
 --   default "Unit Frames Ring"      the default: name over the top of the frame, a
