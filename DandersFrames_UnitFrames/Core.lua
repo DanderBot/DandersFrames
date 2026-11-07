@@ -1007,6 +1007,18 @@ function UF:MakeOwnTemplate(unit, kind)
     local name = from and DF:DuplicateDesignerPreset(kind, from, base) or nil
     if not name then name = DF:CreateDesignerPreset(kind, base) end
     if not name then return nil end
+    -- ★ ONLY THIS UNIT MOVES (bug #1142). A link sharing this designer's look would
+    -- carry the new template straight to the partner on the next push (the
+    -- template bar pushes after every pick). The element's look turns own first;
+    -- its layout (a mirrored Text link's mirror) stays, and the Linked Frames
+    -- page shows the change.
+    local Lk = UF.Links
+    local root = Lk and Lk.LiveRoot()
+    local elemId = (kind == "text") and "text" or "auradesigner"
+    if root and Lk.Aspects then
+        local layout, look = Lk:Aspects(root, unit, elemId)
+        if look == "same" then Lk:SetElement(root, unit, elemId, layout, "own") end
+    end
     UF:GetUnitDB(unit)[key] = name
     return name
 end

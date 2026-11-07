@@ -130,6 +130,22 @@ UF:ResetTextTemplates("focus")
 eq(lib[UF.RING_TEXT_PRESET].elements[1].fontSize, 30, "the shared Ring template is untouched")
 eq(UF:GetUnitDB("focus").ringTextDesignerPreset, "Focus Ring", "focus gets its own Ring template")
 
+print("-- Make Own Template moves only the frame it was picked on (bug #1142)")
+fresh()
+local mine = UF:MakeOwnTemplate("target", "text")
+eq(mine, "Target", "Target's own template")
+eq(UF:GetUnitDB("target").textDesignerPreset, "Target", "...Target draws it")
+UF.Links:ApplyFrom(UF.Links.LiveRoot(), "target")   -- what the template bar's onChange does
+eq(UF:GetUnitDB("player").textDesignerPreset, UF.TEXT_PRESET, "...and the push leaves Player on its template")
+layout, look = aspects("player")
+eq(look, "own", "the Text link's look is own, seen from either side")
+eq(layout, "mirror", "...its mirror stays")
+local _, hk = UF.Links:Aspects(UF.Links.LiveRoot(), "target", "health")
+eq(hk, "same", "the rest of the link is untouched")
+-- An unlinked unit: nothing about links changes.
+eq(UF:MakeOwnTemplate("focus", "text"), "Focus", "an unlinked unit")
+eq(UF.Links:LinkOf(UF.Links.LiveRoot(), "focus"), nil, "...stays unlinked")
+
 print("-- The page")
 local src = options_file_source("UnitFrames/Pages.lua")
 check(src:find('if kind == "text" and UF.ResetTextTemplates then', 1, true) ~= nil, "Reset Page on Text resets the template")
