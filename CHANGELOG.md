@@ -37,6 +37,7 @@
 - (Settings) Fix a large gap above Reduced Max Health and uneven resource colour swatches.
 - (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
 - (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
+- (WoW Forever) Flasks, potions, elixirs, Spirit of Redemption and Camp Benefits now show in aura filters, and shadow protection potions no longer count as the priest buff.
 
 ## [5.6.2]
 

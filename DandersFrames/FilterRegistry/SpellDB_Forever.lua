@@ -15,7 +15,7 @@ if not DF.IS_FOREVER then return end
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
-R.ForeverStamp = { flavor = "forever", harvest = "2026-10-09", gameBuild = 70205 }
+R.ForeverStamp = { flavor = "forever", harvest = "2026-11-06", gameBuild = 70205 }
 
 R.ForeverSpells = {
     -- defensives
@@ -30,6 +30,7 @@ R.ForeverSpells = {
     { id = 642, alts = { 1020 }, n = "Divine Shield", class = "PALADIN", cats = { defensives = true } },
     { id = 425294, n = "Dispersion", class = "PRIEST", cats = { defensives = true } },
     { id = 586, alts = { 9578, 9579, 9592, 10941, 10942 }, n = "Fade", class = "PRIEST", cats = { defensives = true } },
+    { id = 27827, n = "Spirit of Redemption", class = "PRIEST", cats = { defensives = true } },
     { id = 5277, n = "Evasion", class = "ROGUE", cats = { defensives = true } },
     { id = 11327, alts = { 11329, 18461 }, n = "Vanish", class = "ROGUE", cats = { defensives = true } },
     { id = 6229, alts = { 11739, 11740, 28610 }, n = "Shadow Ward", class = "WARLOCK", cats = { defensives = true } },
@@ -102,7 +103,7 @@ R.ForeverSpells = {
     { id = 465, alts = { 10290, 643, 10291, 1032, 10292, 10293 }, n = "Devotion Aura", class = "PALADIN", cats = { raidBuffs = true } },
     { id = 14752, alts = { 14818, 14819, 27841, 16875, 27681 }, n = "Divine Spirit", class = "PRIEST", cats = { raidBuffs = true } },
     { id = 1243, alts = { 1244, 1245, 2791, 10937, 10938, 13864, 23947, 23948, 21562, 21564, 450086 }, n = "Power Word: Fortitude", class = "PRIEST", cats = { raidBuffs = true } },
-    { id = 976, alts = { 10957, 10958, 7235, 7241, 7242, 7243, 7244, 17548, 16874, 27683 }, n = "Shadow Protection", class = "PRIEST", cats = { raidBuffs = true } },
+    { id = 976, alts = { 10957, 10958, 16874, 27683 }, n = "Shadow Protection", class = "PRIEST", cats = { raidBuffs = true } },
     { id = 6673, alts = { 5242, 6192, 11549, 11550, 11551, 25289, 9128, 24438, 25101, 27578, 26043, 26099 }, n = "Battle Shout", class = "WARRIOR", cats = { raidBuffs = true } },
     { id = 403215, alts = { 22440, 403435 }, n = "Commanding Shout", class = "WARRIOR", cats = { raidBuffs = true } },
     -- raidDefensives
@@ -110,6 +111,7 @@ R.ForeverSpells = {
     { id = 425207, n = "Power Word: Barrier", class = "PRIEST", cats = { raidDefensives = true } },
     { id = 426490, n = "Rallying Cry", class = "WARRIOR", cats = { raidDefensives = true } },
     -- utility
+    { id = 1229741, n = "Camp Benefits", class = "ALL", cats = { utility = true } },
     { id = 17116, n = "Nature's Swiftness", class = "DRUID", cats = { utility = true } },
     { id = 1008, alts = { 8455, 10169, 10170 }, n = "Amplify Magic", class = "MAGE", cats = { utility = true } },
     { id = 604, alts = { 8450, 8451, 10173, 10174 }, n = "Dampen Magic", class = "MAGE", cats = { utility = true } },
@@ -118,6 +120,32 @@ R.ForeverSpells = {
     { id = 131, n = "Water Breathing", class = "SHAMAN", cats = { utility = true } },
     { id = 546, n = "Water Walking", class = "SHAMAN", cats = { utility = true } },
     { id = 5697, n = "Unending Breath", class = "WARLOCK", cats = { utility = true } },
+    -- consumables
+    { id = 17626, n = "Flask of the Titans", class = "ALL", cats = { consumables = true } },
+    { id = 17628, n = "Flask of Supreme Power", class = "ALL", cats = { consumables = true } },
+    { id = 17627, n = "Flask of Distilled Wisdom", class = "ALL", cats = { consumables = true } },
+    { id = 17629, n = "Flask of Chromatic Resistance", class = "ALL", cats = { consumables = true } },
+    { id = 6615, n = "Free Action Potion", class = "ALL", cats = { consumables = true } },
+    { id = 3169, n = "Limited Invulnerability Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17543, n = "Greater Fire Protection Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17544, n = "Greater Frost Protection Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17546, n = "Greater Nature Protection Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17548, n = "Greater Shadow Protection Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17549, n = "Greater Arcane Protection Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17538, n = "Elixir of the Mongoose", class = "ALL", cats = { consumables = true } },
+    { id = 17539, n = "Greater Arcane Elixir", class = "ALL", cats = { consumables = true } },
+    { id = 11474, n = "Elixir of Shadow Power", class = "ALL", cats = { consumables = true } },
+    { id = 21920, n = "Elixir of Frost Power", class = "ALL", cats = { consumables = true } },
+    { id = 17537, n = "Elixir of Brute Force", class = "ALL", cats = { consumables = true } },
+    { id = 17535, n = "Elixir of the Sages", class = "ALL", cats = { consumables = true } },
+    { id = 17540, n = "Greater Stoneshield Potion", class = "ALL", cats = { consumables = true } },
+    { id = 17528, n = "Mighty Rage Potion", class = "ALL", cats = { consumables = true } },
+    { id = 2379, n = "Swiftness Potion", class = "ALL", cats = { consumables = true } },
+    { id = 11359, n = "Restorative Potion", class = "ALL", cats = { consumables = true } },
+    { id = 11364, n = "Magic Resistance Potion", class = "ALL", cats = { consumables = true } },
+    { id = 16323, n = "Juju Power", class = "ALL", cats = { consumables = true } },
+    { id = 16329, n = "Juju Might", class = "ALL", cats = { consumables = true } },
+    { id = 17038, n = "Winterfall Firewater", class = "ALL", cats = { consumables = true } },
 }
 
 -- Rank number of every ranked id above (spells with a single rank are left out).
@@ -130,25 +158,25 @@ R.ForeverRanks = {
     [2091] = 5, [2791] = 4, [2983] = 1, [3111] = 2, [3627] = 6, [3661] = 3, [3662] = 4, [3747] = 4,
     [5215] = 1, [5232] = 2, [5234] = 4, [5242] = 2, [5573] = 2, [5599] = 2, [6065] = 5, [6066] = 6,
     [6074] = 2, [6075] = 3, [6076] = 4, [6077] = 5, [6078] = 6, [6192] = 3, [6229] = 1, [6673] = 1,
-    [6756] = 3, [6783] = 2, [6940] = 1, [7128] = 2, [7235] = 1, [7241] = 2, [7242] = 3, [7243] = 4,
-    [7244] = 5, [8450] = 2, [8451] = 3, [8455] = 2, [8494] = 2, [8495] = 3, [8696] = 2, [8907] = 5,
-    [8910] = 7, [8914] = 4, [8918] = 2, [8936] = 1, [8938] = 2, [8939] = 3, [8940] = 4, [8941] = 5,
-    [9578] = 2, [9579] = 3, [9592] = 4, [9750] = 6, [9756] = 5, [9821] = 2, [9839] = 8, [9840] = 9,
-    [9841] = 10, [9856] = 7, [9857] = 8, [9858] = 9, [9862] = 3, [9863] = 4, [9884] = 6, [9885] = 7,
-    [9910] = 6, [9913] = 3, [10156] = 4, [10157] = 5, [10169] = 3, [10170] = 4, [10173] = 4, [10174] = 5,
-    [10191] = 4, [10192] = 5, [10193] = 6, [10278] = 3, [10290] = 2, [10291] = 4, [10292] = 6, [10293] = 7,
-    [10898] = 7, [10899] = 8, [10900] = 9, [10901] = 10, [10927] = 7, [10928] = 8, [10929] = 9, [10937] = 5,
-    [10938] = 6, [10941] = 5, [10942] = 6, [10951] = 5, [10952] = 6, [10957] = 2, [10958] = 3, [11305] = 3,
-    [11327] = 1, [11329] = 2, [11426] = 1, [11549] = 4, [11550] = 5, [11551] = 6, [11739] = 2, [11740] = 3,
-    [13031] = 2, [13032] = 3, [13033] = 4, [13542] = 5, [13543] = 6, [13544] = 7, [14752] = 1, [14818] = 2,
-    [14819] = 3, [15438] = 1, [16874] = 3, [16875] = 3, [16876] = 5, [16877] = 6, [16878] = 7, [19740] = 1,
-    [19742] = 1, [19834] = 2, [19835] = 3, [19836] = 4, [19837] = 5, [19838] = 6, [19850] = 2, [19852] = 3,
-    [19853] = 4, [19854] = 5, [19977] = 1, [19978] = 2, [19979] = 3, [20729] = 2, [21562] = 1, [21564] = 2,
-    [21849] = 1, [21850] = 2, [23947] = 5, [23948] = 6, [24752] = 7, [25289] = 7, [25290] = 6, [25291] = 7,
-    [25299] = 11, [25315] = 10, [25782] = 1, [25894] = 1, [25916] = 2, [25918] = 2, [27578] = 6, [27681] = 1,
-    [27841] = 4, [28610] = 4, [364161] = 2, [364163] = 6, [408120] = 1, [408521] = 1, [425268] = 1, [425269] = 2,
-    [425270] = 3, [425271] = 4, [425272] = 5, [425273] = 6, [425274] = 7, [425275] = 8, [425276] = 9, [425277] = 10,
-    [450086] = 2, [1238214] = 2, [1238215] = 3, [1239242] = 2, [1239243] = 3, [1291335] = 7, [1310503] = 7,
+    [6756] = 3, [6783] = 2, [6940] = 1, [7128] = 2, [8450] = 2, [8451] = 3, [8455] = 2, [8494] = 2,
+    [8495] = 3, [8696] = 2, [8907] = 5, [8910] = 7, [8914] = 4, [8918] = 2, [8936] = 1, [8938] = 2,
+    [8939] = 3, [8940] = 4, [8941] = 5, [9578] = 2, [9579] = 3, [9592] = 4, [9750] = 6, [9756] = 5,
+    [9821] = 2, [9839] = 8, [9840] = 9, [9841] = 10, [9856] = 7, [9857] = 8, [9858] = 9, [9862] = 3,
+    [9863] = 4, [9884] = 6, [9885] = 7, [9910] = 6, [9913] = 3, [10156] = 4, [10157] = 5, [10169] = 3,
+    [10170] = 4, [10173] = 4, [10174] = 5, [10191] = 4, [10192] = 5, [10193] = 6, [10278] = 3, [10290] = 2,
+    [10291] = 4, [10292] = 6, [10293] = 7, [10898] = 7, [10899] = 8, [10900] = 9, [10901] = 10, [10927] = 7,
+    [10928] = 8, [10929] = 9, [10937] = 5, [10938] = 6, [10941] = 5, [10942] = 6, [10951] = 5, [10952] = 6,
+    [10957] = 2, [10958] = 3, [11305] = 3, [11327] = 1, [11329] = 2, [11426] = 1, [11549] = 4, [11550] = 5,
+    [11551] = 6, [11739] = 2, [11740] = 3, [13031] = 2, [13032] = 3, [13033] = 4, [13542] = 5, [13543] = 6,
+    [13544] = 7, [14752] = 1, [14818] = 2, [14819] = 3, [15438] = 1, [16874] = 3, [16875] = 3, [16876] = 5,
+    [16877] = 6, [16878] = 7, [19740] = 1, [19742] = 1, [19834] = 2, [19835] = 3, [19836] = 4, [19837] = 5,
+    [19838] = 6, [19850] = 2, [19852] = 3, [19853] = 4, [19854] = 5, [19977] = 1, [19978] = 2, [19979] = 3,
+    [20729] = 2, [21562] = 1, [21564] = 2, [21849] = 1, [21850] = 2, [23947] = 5, [23948] = 6, [24752] = 7,
+    [25289] = 7, [25290] = 6, [25291] = 7, [25299] = 11, [25315] = 10, [25782] = 1, [25894] = 1, [25916] = 2,
+    [25918] = 2, [27578] = 6, [27681] = 1, [27841] = 4, [28610] = 4, [364161] = 2, [364163] = 6, [408120] = 1,
+    [408521] = 1, [425268] = 1, [425269] = 2, [425270] = 3, [425271] = 4, [425272] = 5, [425273] = 6, [425274] = 7,
+    [425275] = 8, [425276] = 9, [425277] = 10, [450086] = 2, [1238214] = 2, [1238215] = 3, [1239242] = 2, [1239243] = 3,
+    [1291335] = 7, [1310503] = 7,
 }
 
 -- Missing Buffs: the four group buffs Forever shares with retail, under the same
