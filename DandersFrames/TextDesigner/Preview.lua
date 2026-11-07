@@ -98,8 +98,10 @@ function Preview:RefreshLiveFrames()
 end
 
 function Preview:RefreshAll()
-    DF:Debug("TD", "Preview:RefreshAll called, mockFrame=%s tdDB=%s",
-        tostring(activeMockFrame), tostring(activeTdDB))
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "Preview:RefreshAll called, mockFrame=%s tdDB=%s",
+            tostring(activeMockFrame), tostring(activeTdDB))
+    end
     self:RefreshPreview()
     self:RefreshLiveFrames()
 end

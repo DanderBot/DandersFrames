@@ -65,6 +65,7 @@ local function NewHost()
     DF.PartyDefaults = { fakeKey = 0 }
     DF.RaidDefaults  = { fakeKey = 0 }
     function DF:DebugWarn() end
+    function DF:DebugActive() return true end
 
     local rec = { parked = {}, adopted = {}, built = {} }
     local GUI = {

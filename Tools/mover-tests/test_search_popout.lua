@@ -51,6 +51,7 @@ DF.RaidDefaults = {
     hideBlizzardRaidFrames = true,
 }
 function DF:DebugWarn() end
+function DF:DebugActive() return true end
 -- ⚠ SettingsBox mirrors UI.SettingsBox (DandersUI/Theme.lua). This file does not
 -- load the kit, so it cannot read the real one -- test_page_parking DOES, and it
 -- drives Search.lua against the genuine table, so drift is caught there rather

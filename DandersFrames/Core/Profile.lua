@@ -624,7 +624,9 @@ function DF:ActivateProfile(name, message)
     -- the new profile's font settings rather than showing the old profile's
     -- last-used font until the next /reload.
     DF.GlobalFontTemp = nil
-    DF:Debug("PROFILE", "ActivateProfile: cleared runtime state before switching to " .. name)
+    if DF:DebugActive("PROFILE") then
+        DF:Debug("PROFILE", "ActivateProfile: cleared runtime state before switching to " .. name)
+    end
 
     -- Backfill defaults on older profiles
     local p = DandersFramesDB_v2.profiles[name]
@@ -720,7 +722,9 @@ function DF:ActivateProfile(name, message)
     -- "cleared runtime state before switching" and then nothing was indistinguishable from
     -- a switch that half-applied and threw. That is precisely the failure worth catching
     -- here, and it was the one state the category could not describe.
-    DF:Debug("PROFILE", "ActivateProfile: switch to %s complete", tostring(name))
+    if DF:DebugActive("PROFILE") then
+        DF:Debug("PROFILE", "ActivateProfile: switch to %s complete", tostring(name))
+    end
 
     DF:Say(message)
 
@@ -1573,8 +1577,10 @@ local ValidateImportStringInner = DF.ValidateImportString
 function DF:ValidateImportString(str)
     local data, err = ValidateImportStringInner(self, str)
     if not data then
-        DF:DebugWarn("PROFILE", "import rejected: %s (length=%s)",
-            tostring(err), type(str) == "string" and #str or "not a string")
+        if DF:DebugActive("PROFILE") then
+            DF:DebugWarn("PROFILE", "import rejected: %s (length=%s)",
+                tostring(err), type(str) == "string" and #str or "not a string")
+        end
     end
     return data, err
 end

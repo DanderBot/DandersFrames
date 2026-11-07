@@ -77,6 +77,7 @@ local function NewHost()
     DF.PartyDefaults = { keyA = 0, keyB = 0, keyC = 0, keyD = 0 }
     DF.RaidDefaults  = { keyA = 0, keyB = 0, keyC = 0, keyD = 0 }
     function DF:DebugWarn() end
+    function DF:DebugActive() return true end
     DF.db = { party = { mode = "party" }, raid = { mode = "raid" } }
 
     local H = { builds = {}, total = 0, widgets = {} }

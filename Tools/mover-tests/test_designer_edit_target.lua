@@ -354,6 +354,7 @@ do
     local MOCK = {}
     DF.TextDesigner.DataSource = { Mock = function() return MOCK end }
     function DF:Debug() end
+    function DF:DebugActive() return true end
     local chunk = loadstring(PVsrc, "@TD:Preview")
     setfenv(chunk, setmetatable({ }, { __index = _G }))
     chunk("DandersFrames", DF)
@@ -424,6 +425,7 @@ do
     local DF = { TextDesigner = {} }
     local inits, renders = 0, {}
     function DF:Debug() end
+    function DF:DebugActive() return true end
     function DF:UpdateTextDesigner(f) renders[#renders + 1] = f end
     load_df_file_into("TextDesigner/Preview.lua", DF)
     local PV = DF.TextDesigner.Preview

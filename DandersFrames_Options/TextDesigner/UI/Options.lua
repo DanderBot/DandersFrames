@@ -1708,8 +1708,10 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
         if DF.TextDesigner.FullRebuildCards then
             DF.TextDesigner.FullRebuildCards(capturedGUI, capturedPage, capturedTdDB, capturedState)
         end
-        DF:Debug("TD", "Deleted element id=%d (remaining=%d)",
-            elem.id, #capturedTdDB.elements)
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Deleted element id=%d (remaining=%d)",
+                elem.id, #capturedTdDB.elements)
+        end
     end
 
     local deleteBtn = GUI:CreateCloseButton(header, {
@@ -1748,7 +1750,9 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     eyeBtn:SetScript("OnClick", function()
         elem.enabled = not elem.enabled
         updateEyeIcon()
-        DF:Debug("TD", "Element %d enabled=%s", elem.id, tostring(elem.enabled))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Element %d enabled=%s", elem.id, tostring(elem.enabled))
+        end
         if state.UpdateTabCounts then state.UpdateTabCounts(tdDB) end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
@@ -2449,7 +2453,9 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     eyeBtn:SetScript("OnClick", function()
         elem.enabled = not elem.enabled
         updateEyeIcon()
-        DF:Debug("TD", "Group %d enabled=%s", elem.id, tostring(elem.enabled))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Group %d enabled=%s", elem.id, tostring(elem.enabled))
+        end
         if state.UpdateTabCounts then state.UpdateTabCounts(tdDB) end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
@@ -2826,7 +2832,9 @@ local function CreateEnableBanner(GUI, parent, tdDB, onToggle)
         tdDB,
         "enabled",
         function()
-            DF:Debug("TD", "Enable Text Designer = %s", tostring(tdDB.enabled))
+            if DF:DebugActive("TD") then
+                DF:Debug("TD", "Enable Text Designer = %s", tostring(tdDB.enabled))
+            end
             if onToggle then onToggle() end
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end

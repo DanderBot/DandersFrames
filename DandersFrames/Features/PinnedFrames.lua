@@ -1668,9 +1668,11 @@ function PinnedFrames:UpdateHeaderNameList(setIndex)
     
     local nameList = BuildNameList(validRosterNames)
     
-    DF:Debug("PINNED", "Set %d updating nameList (%d players in set, %d valid, list=%s)",
-        setIndex, #set.players, #validRosterNames,
-        nameList ~= "" and nameList or "(empty)")
+    if DF:DebugActive("PINNED") then
+        DF:Debug("PINNED", "Set %d updating nameList (%d players in set, %d valid, list=%s)",
+            setIndex, #set.players, #validRosterNames,
+            nameList ~= "" and nameList or "(empty)")
+    end
     
     -- Only update if not in combat
     if InCombatLockdown() then
@@ -1964,9 +1966,11 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
         end
     end
     
-    DF:Debug("PINNED", "ApplyLayoutSettings set=%d horizontal=%s frameAnchor=%s columnAnchor=%s containerAnchor=%s size=%dx%d spacing=%d,%d",
-        setIndex, tostring(horizontal), tostring(frameAnchor), tostring(columnAnchor),
-        tostring(containerAnchorPoint), frameWidth, frameHeight, hSpacing, vSpacing)
+    if DF:DebugActive("PINNED") then
+        DF:Debug("PINNED", "ApplyLayoutSettings set=%d horizontal=%s frameAnchor=%s columnAnchor=%s containerAnchor=%s size=%dx%d spacing=%d,%d",
+            setIndex, tostring(horizontal), tostring(frameAnchor), tostring(columnAnchor),
+            tostring(containerAnchorPoint), frameWidth, frameHeight, hSpacing, vSpacing)
+    end
     
     -- ============================================================
     -- CRITICAL: 4-step refresh to force repositioning
@@ -2534,7 +2538,9 @@ function PinnedFrames:Initialize()
         return
     end
 
-    DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
+    if DF:DebugActive("PINNED") then
+        DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
+    end
 
     -- ☠ ENABLED sets only, NOT every defined set. CreateSetFrames force-creates up to 40 secure
     -- header children per set via the startingIndex trick, and building them for sets that are
@@ -2729,8 +2735,10 @@ function PinnedFrames:Reinitialize()
         -- deleting the LAST enabled set left its fake frames on screen. Prune walks
         -- the real containers by name; it does not know about testContainers.
         self:RefreshTestModeSets()
-        DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s), pruned",
-            tostring(self.currentMode))
+        if DF:DebugActive("PINNED") then
+            DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s), pruned",
+                tostring(self.currentMode))
+        end
         return
     end
 
@@ -3311,8 +3319,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
         -- Check if mode changed (party <-> raid)
         local actualMode = GetActualMode()
         if PinnedFrames.currentMode and actualMode ~= PinnedFrames.currentMode then
-            DF:Debug("PINNED", "Mode changed from %s to %s — reinitializing",
-                tostring(PinnedFrames.currentMode), tostring(actualMode))
+            if DF:DebugActive("PINNED") then
+                DF:Debug("PINNED", "Mode changed from %s to %s — reinitializing",
+                    tostring(PinnedFrames.currentMode), tostring(actualMode))
+            end
             PinnedFrames:Reinitialize()
             return
         end

@@ -268,8 +268,10 @@ function DF:MigrateTextDesignerFromLegacy(force)
                 tdDB.hideLegacyText = true
                 tdDB.migratedFromLegacy = true
 
-                DF:Debug("TD", "Migrate: mode=%s built %d element(s) (force=%s)",
-                    mode, #tdDB.elements, tostring(force))
+                if DF:DebugActive("TD") then
+                    DF:Debug("TD", "Migrate: mode=%s built %d element(s) (force=%s)",
+                        mode, #tdDB.elements, tostring(force))
+                end
             end
         end
     end

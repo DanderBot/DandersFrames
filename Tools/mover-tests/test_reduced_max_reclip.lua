@@ -53,6 +53,7 @@ local DF = {
     ApplyBarFillOrientation = function() end,
     BarTextureLayersWanted = function() return false end,
     DebugWarn = function() end,
+    DebugActive = function() return true end,
 }
 load_df_file_into("Frames/ReducedMaxHealth.lua", DF)
 

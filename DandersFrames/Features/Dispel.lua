@@ -1856,7 +1856,7 @@ local function BindDispelCarriers(btn, carriers, db, key)
         DarkenAllDims(btn)
         if not warnedTintBind then
             warnedTintBind = true
-            if DF.DebugWarn then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
+            if DF.DebugActive and DF:DebugActive("DISPEL") then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
         end
     end
 end
@@ -2431,11 +2431,13 @@ local function StyleDispelSlots(frame, db, h, slots)
                     -- Name WHICH test tripped: "forbidden" and "carriers never built"
                     -- are different faults with different causes, and a message that
                     -- asserts the wrong one sends the next reader after the wrong thing.
-                    DF:DebugWarn("AURACONTAINER",
-                        "StyleDispelSlots: slot %s still %s after a rebuild, "
-                        .. "skipping the dispel overlay on %s", tostring(info.key),
-                        unreachable and "forbidden" or "missing its carriers",
-                        tostring(frame.unit))
+                    if DF:DebugActive("AURACONTAINER") then
+                        DF:DebugWarn("AURACONTAINER",
+                            "StyleDispelSlots: slot %s still %s after a rebuild, "
+                            .. "skipping the dispel overlay on %s", tostring(info.key),
+                            unreachable and "forbidden" or "missing its carriers",
+                            tostring(frame.unit))
+                    end
                 end
             else
                 -- ★ SAY THAT THE RECOVERY FIRED, not only that it failed. A rebuild is
@@ -2443,9 +2445,11 @@ local function StyleDispelSlots(frame, db, h, slots)
                 -- was found broken and is being repaired -- and until now it produced no
                 -- entry at all unless the repair itself threw. A user reporting "it went
                 -- white once and came back" had nothing in the log to show for it.
-                DF:Debug("DISPEL", "slot %s on %s found %s - rebuilding",
-                    tostring(info.key), tostring(frame.unit),
-                    unreachable and "forbidden" or "without carriers")
+                if DF:DebugActive("DISPEL") then
+                    DF:Debug("DISPEL", "slot %s on %s found %s - rebuilding",
+                        tostring(info.key), tostring(frame.unit),
+                        unreachable and "forbidden" or "without carriers")
+                end
                 btn._dfDispelArtStale = true
                 ResetSlotArt(btn)
                 -- pcall'd for the SAME reason as the style pass below (bug #1011):
@@ -2461,8 +2465,10 @@ local function StyleDispelSlots(frame, db, h, slots)
                     if not okInit and not warnedSlotReinit then
                         warnedSlotReinit = true
                         if DF.DebugWarn then
-                            DF:DebugWarn("DISPEL", "slot re-init %s failed: %s",
-                                tostring(info.key), tostring(errInit))
+                            if DF:DebugActive("DISPEL") then
+                                DF:DebugWarn("DISPEL", "slot re-init %s failed: %s",
+                                    tostring(info.key), tostring(errInit))
+                            end
                         end
                     end
                 end
@@ -2491,8 +2497,10 @@ local function StyleDispelSlots(frame, db, h, slots)
                 if not warnedSlotStyle then
                     warnedSlotStyle = true
                     if DF.DebugWarn then
-                        DF:DebugWarn("DISPEL", "slot style %s failed: %s",
-                            tostring(info.key), tostring(err))
+                        if DF:DebugActive("DISPEL") then
+                            DF:DebugWarn("DISPEL", "slot style %s failed: %s",
+                                tostring(info.key), tostring(err))
+                        end
                     end
                 end
             else
@@ -2563,10 +2571,12 @@ local function dispelFilterRecords(slots, db, frame)
                             if not warnedSlotInit then
                                 warnedSlotInit = true
                                 if DF.DebugWarn then
-                                    DF:DebugWarn("DISPEL",
-                                        "slot init %s refused at birth - carriers missing "
-                                        .. "until the next out-of-combat rebuild: %s",
-                                        tostring(si.key), tostring(errI))
+                                    if DF:DebugActive("DISPEL") then
+                                        DF:DebugWarn("DISPEL",
+                                            "slot init %s refused at birth - carriers missing "
+                                            .. "until the next out-of-combat rebuild: %s",
+                                            tostring(si.key), tostring(errI))
+                                    end
                                 end
                             end
                         elseif btn then
@@ -2635,8 +2645,10 @@ local function dispelIconRowRecords(slots, db)
                         if not okI and not warnedIconRowInit then
                             warnedIconRowInit = true
                             if DF.DebugWarn then
-                                DF:DebugWarn("DISPEL", "icon row init refused at birth: %s",
-                                    tostring(errI))
+                                if DF:DebugActive("DISPEL") then
+                                    DF:DebugWarn("DISPEL", "icon row init refused at birth: %s",
+                                        tostring(errI))
+                                end
                             end
                         end
                     end }
@@ -2694,8 +2706,10 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
     local lvlOff = dispelIconRowLevelOffset(frame)
 
     if h and frame.dispelIconRowSig ~= sig then
-        DF:Debug("DISPEL", "icon row: REBUILD unit=%s  %s -> %s",
-            tostring(frame.unit), tostring(frame.dispelIconRowSig), sig)
+        if DF:DebugActive("DISPEL") then
+            DF:Debug("DISPEL", "icon row: REBUILD unit=%s  %s -> %s",
+                tostring(frame.unit), tostring(frame.dispelIconRowSig), sig)
+        end
         h:Destroy()
         h = nil
     end
@@ -2722,8 +2736,10 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
         if not h then return end
     else
         if frame.dispelIconRowTuneSig ~= tune then
-            DF:Debug("DISPEL", "icon row: TUNE unit=%s  %s -> %s",
-                tostring(frame.unit), tostring(frame.dispelIconRowTuneSig), tune)
+            if DF:DebugActive("DISPEL") then
+                DF:Debug("DISPEL", "icon row: TUNE unit=%s  %s -> %s",
+                    tostring(frame.unit), tostring(frame.dispelIconRowTuneSig), tune)
+            end
             frame.dispelIconRowTuneSig = tune
             h:ApplyTuning({ filter = dispelIconRowRecords(slots, db), max = max })
         end
@@ -2850,9 +2866,11 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- On a frame whose self-ness flips (own frame <-> someone else's) the dispel-type
         -- map differs while key set and filter strings do not, so a TUNE line on that
         -- transition is expected; none means the plan and the signature have drifted apart.
-        DF:Debug("DISPEL", "overlay: TUNE unit=%s racialSelf=%s  %s -> %s",
-            tostring(frame.unit), tostring(isSelf),
-            tostring(frame.dispelFactoryTuneSig), tostring(tuneSig))
+        if DF:DebugActive("DISPEL") then
+            DF:Debug("DISPEL", "overlay: TUNE unit=%s racialSelf=%s  %s -> %s",
+                tostring(frame.unit), tostring(isSelf),
+                tostring(frame.dispelFactoryTuneSig), tostring(tuneSig))
+        end
         frame.dispelFactoryTuneSig = tuneSig
         h:ApplyTuning({ filter = dispelFilterRecords(slots, db, frame) })
         -- Fall through: the unit upkeep and style pass below still apply.
@@ -2863,9 +2881,11 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- first cut of this logging showed nothing at all while the totem was being
         -- talented on and off. A dump that is silent on the transition you are testing is
         -- worse than no dump: it reads as "nothing happened".
-        DF:Debug("DISPEL", "overlay: %s unit=%s racialSelf=%s  %s -> %s",
-            h and "REBUILD" or "BUILD", tostring(frame.unit), tostring(isSelf),
-            tostring(frame.dispelFactorySig), tostring(sig))
+        if DF:DebugActive("DISPEL") then
+            DF:Debug("DISPEL", "overlay: %s unit=%s racialSelf=%s  %s -> %s",
+                h and "REBUILD" or "BUILD", tostring(frame.unit), tostring(isSelf),
+                tostring(frame.dispelFactorySig), tostring(sig))
+        end
         if h then h:Destroy() end
         local filterRecords = dispelFilterRecords(slots, db, frame)
         h = DF.AuraContainer:Create(frame, {

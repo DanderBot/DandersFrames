@@ -706,7 +706,9 @@ local function FindMatchingProfile(contentKey, raidSize)
         end
     end
 
-    DF:Debug("AUTOPROFILE", "FindMatchingProfile: no match for %s (size %d, %d profiles checked)", contentKey, raidSize, #ct.profiles)
+    if DF:DebugActive("AUTOPROFILE") then
+        DF:Debug("AUTOPROFILE", "FindMatchingProfile: no match for %s (size %d, %d profiles checked)", contentKey, raidSize, #ct.profiles)
+    end
     return nil
 end
 
@@ -794,7 +796,9 @@ end
 -- Create a profile
 function AutoProfilesUI:CreateProfile(contentKey, name, min, max)
     self:InitDefaults()
-    DF:Debug("AUTOPROFILE", "CreateProfile: contentKey=%s name=\"%s\" min=%s max=%s", contentKey, name or "?", tostring(min), tostring(max))
+    if DF:DebugActive("AUTOPROFILE") then
+        DF:Debug("AUTOPROFILE", "CreateProfile: contentKey=%s name=\"%s\" min=%s max=%s", contentKey, name or "?", tostring(min), tostring(max))
+    end
 
     if contentKey == "mythic" then
         DF.db.raidAutoProfiles.mythic.profile = {
@@ -849,7 +853,9 @@ function AutoProfilesUI:DeleteProfile(contentKey, index)
             deletedProfile = profiles[index]
             table.remove(profiles, index)
         else
-            DF:DebugWarn("AUTOPROFILE", "DeleteProfile: index %s not found in %s", tostring(index), contentKey)
+            if DF:DebugActive("AUTOPROFILE") then
+                DF:DebugWarn("AUTOPROFILE", "DeleteProfile: index %s not found in %s", tostring(index), contentKey)
+            end
             return false
         end
     end
@@ -874,7 +880,9 @@ end
 -- Update profile range
 function AutoProfilesUI:UpdateProfileRange(contentKey, index, newMin, newMax)
     self:InitDefaults()
-    DF:Debug("AUTOPROFILE", "UpdateProfileRange: %s index=%s newMin=%d newMax=%d", contentKey, tostring(index), newMin, newMax)
+    if DF:DebugActive("AUTOPROFILE") then
+        DF:Debug("AUTOPROFILE", "UpdateProfileRange: %s index=%s newMin=%d newMax=%d", contentKey, tostring(index), newMin, newMax)
+    end
 
     if contentKey == "mythic" then
         return false, L["Mythic has fixed range"]
@@ -942,7 +950,9 @@ function AutoProfilesUI:RenameProfile(contentKey, index, newName)
     local oldName = profile.name
     if oldName == newName then return true end
     profile.name = newName
-    DF:Debug("AUTOPROFILE", "RenameProfile: \"%s\" -> \"%s\"", tostring(oldName), newName)
+    if DF:DebugActive("AUTOPROFILE") then
+        DF:Debug("AUTOPROFILE", "RenameProfile: \"%s\" -> \"%s\"", tostring(oldName), newName)
+    end
     return true
 end
 
@@ -977,7 +987,9 @@ function AutoProfilesUI:GetActiveLayoutName()
 end
 
 function AutoProfilesUI:EnterEditing(contentType, profileIndex)
-    DF:Debug("AUTOPROFILE", "EnterEditing: contentType=%s profileIndex=%s", contentType, tostring(profileIndex))
+    if DF:DebugActive("AUTOPROFILE") then
+        DF:Debug("AUTOPROFILE", "EnterEditing: contentType=%s profileIndex=%s", contentType, tostring(profileIndex))
+    end
 
     -- Enforcement guard (mirror of the row's blockEdit greying in CreateProfileRow).
     -- Editing writes the layout's settings into the live raid db for preview, so
@@ -1055,7 +1067,9 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
             self.editingProfile = profiles[profileIndex]
             self.editingProfileIndex = profileIndex
         else
-            DF:DebugWarn("AUTOPROFILE", "EnterEditing: profile not found at index %s", tostring(profileIndex))
+            if DF:DebugActive("AUTOPROFILE") then
+                DF:DebugWarn("AUTOPROFILE", "EnterEditing: profile not found at index %s", tostring(profileIndex))
+            end
             return false, "Profile not found"
         end
     end
@@ -1267,7 +1281,9 @@ local function DeepCompare(a, b)
 end
 
 function AutoProfilesUI:ExitEditing(skipUIUpdates)
-    DF:Debug("AUTOPROFILE", "ExitEditing: profile=\"%s\" skipUIUpdates=%s", self.editingProfile and self.editingProfile.name or "?", tostring(skipUIUpdates))
+    if DF:DebugActive("AUTOPROFILE") then
+        DF:Debug("AUTOPROFILE", "ExitEditing: profile=\"%s\" skipUIUpdates=%s", self.editingProfile and self.editingProfile.name or "?", tostring(skipUIUpdates))
+    end
 
     -- Diff safety net: before restoring globals, scan live values vs snapshot
     -- to catch any overrides that weren't explicitly tracked by controls
@@ -1284,7 +1300,9 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     local snapOwner = self.globalSnapshotOwner
     local liveOwner = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
     if self.globalSnapshot and snapOwner and snapOwner ~= liveOwner then
-        DF:DebugWarn("AUTOPROFILE", "ExitEditing: profile changed during editing (%s -> %s); abandoning the diff rather than writing one profile's values into another", tostring(snapOwner), tostring(liveOwner))
+        if DF:DebugActive("AUTOPROFILE") then
+            DF:DebugWarn("AUTOPROFILE", "ExitEditing: profile changed during editing (%s -> %s); abandoning the diff rather than writing one profile's values into another", tostring(snapOwner), tostring(liveOwner))
+        end
         -- Drop ONLY the diff/restore inputs, then FALL THROUGH to the shared exit tail: every
         -- block below is nil-guarded on globalSnapshot, so nothing from the stale edit can be
         -- written -- but the editing-state clears, the crash-recovery flag, the sidebar hint, the
@@ -1579,7 +1597,9 @@ function AutoProfilesUI:SetProfileSetting(key, value)
     else
         -- Different from global, store override (deep copy to avoid reference issues)
         self.editingProfile.overrides[key] = DeepCopyValue(value)
-        DF:Debug("AUTOPROFILE", "SetProfileSetting: %s overridden (value=%s)", key, tostring(value))
+        if DF:DebugActive("AUTOPROFILE") then
+            DF:Debug("AUTOPROFILE", "SetProfileSetting: %s overridden (value=%s)", key, tostring(value))
+        end
     end
 
     -- Refresh tab stars so they update live as settings change
@@ -2051,9 +2071,11 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
         -- Same correction as the table-key branch below: the write at :1825 is inside
         -- `if pf and pf.sets and pf.sets[setIndex]`, so claiming it unconditionally
         -- misreported the exact case worth seeing -- a pinned set that is not there.
-        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: pinned key %s — overridden=%s, wrote=%s",
-            key, tostring(isOverridden),
-            tostring(pf ~= nil and pf.sets ~= nil and pf.sets[setIndex] ~= nil))
+        if DF:DebugActive("AUTOPROFILE") then
+            DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: pinned key %s — overridden=%s, wrote=%s",
+                key, tostring(isOverridden),
+                tostring(pf ~= nil and pf.sets ~= nil and pf.sets[setIndex] ~= nil))
+        end
         return isOverridden
     end
 
@@ -2077,15 +2099,19 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
         -- so on the one path worth debugging, the table being absent, the log claimed a
         -- write that never happened. A line that lies about its failure case is worse
         -- than no line: it sends the reader straight past the fault.
-        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: table key %s — overridden=%s, wrote=%s",
-            key, tostring(isOverridden), tostring(type(tbl) == "table"))
+        if DF:DebugActive("AUTOPROFILE") then
+            DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: table key %s — overridden=%s, wrote=%s",
+                key, tostring(isOverridden), tostring(type(tbl) == "table"))
+        end
         return isOverridden
     end
 
     -- Simple key: write to real table so user changes persist in the global profile
     if DF.raidOverrides[key] ~= nil then
         DF._realRaidDB[key] = value
-        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: %s — overridden, wrote value=%s to global", key, tostring(value))
+        if DF:DebugActive("AUTOPROFILE") then
+            DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: %s — overridden, wrote value=%s to global", key, tostring(value))
+        end
         return true
     end
     return false
@@ -2269,7 +2295,9 @@ function AutoProfilesUI:EvaluateAndApply()
     if SU then SU:Clear() end
 
     DF:Debug("AUTOPROFILE", "EvaluateAndApply: switching \"%s\" -> \"%s\"", oldName, newName)
-    DF:Debug("RAIDPOS", "AutoProfile SWITCH: \"%s\" -> \"%s\" (raid size=%d)", oldName, newName, GetNumGroupMembers())
+    if DF:DebugActive("RAIDPOS") then
+        DF:Debug("RAIDPOS", "AutoProfile SWITCH: \"%s\" -> \"%s\" (raid size=%d)", oldName, newName, GetNumGroupMembers())
+    end
 
     -- Capture whether an old profile was active before clearing state
     local oldWasActive = (self.activeRuntimeProfile ~= nil)
@@ -2312,7 +2340,9 @@ autoProfileThrottleFrame:SetScript("OnUpdate", function(self)
         DF._rosterThrottleFrame:Hide()
     end
 
-    DF:Debug("RAIDPOS", "AutoProfile throttle FIRE: rosterPending=%s combat=%s", tostring(rosterPending), tostring(InCombatLockdown()))
+    if DF:DebugActive("RAIDPOS") then
+        DF:Debug("RAIDPOS", "AutoProfile throttle FIRE: rosterPending=%s combat=%s", tostring(rosterPending), tostring(InCombatLockdown()))
+    end
 
     AutoProfilesUI:EvaluateAndApply()
 

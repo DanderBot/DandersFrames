@@ -1981,7 +1981,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local fn, err = loadstring(code)
             if not fn then
                 SetScriptStatus(format(L["Error: %s"], tostring(err)), "danger")
-                DF:DebugError("SCRIPT", "Compile error: %s", tostring(err))
+                if DF:DebugActive("SCRIPT") then
+                    DF:DebugError("SCRIPT", "Compile error: %s", tostring(err))
+                end
                 return
             end
             local ok, result = pcall(fn)
@@ -1993,7 +1995,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             else
                 SetScriptStatus(format(L["Runtime: %s"], tostring(result)), "danger")
-                DF:DebugError("SCRIPT", "Runtime error: %s", tostring(result))
+                if DF:DebugActive("SCRIPT") then
+                    DF:DebugError("SCRIPT", "Runtime error: %s", tostring(result))
+                end
             end
         end), 32, "both")
 

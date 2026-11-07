@@ -94,8 +94,10 @@ local function record(kind, unit, lane, detail)
         active[ep] = { since = GetTime(), at = date("%H:%M:%S") }
         local hb = heartbeat()
         hb.findings = hb.findings + 1
-        DF:DebugWarn("UNITSCAN", "START %s %s [%s] combat=%s enc=%s | %s", kind, tostring(unit),
-            tostring(lane), tostring(inCombat()), tostring(currentEncounter or "-"), tostring(detail))
+        if DF:DebugActive("UNITSCAN") then
+            DF:DebugWarn("UNITSCAN", "START %s %s [%s] combat=%s enc=%s | %s", kind, tostring(unit),
+                tostring(lane), tostring(inCombat()), tostring(currentEncounter or "-"), tostring(detail))
+        end
     end
 
     local log = store()
@@ -342,8 +344,10 @@ function DF:MarkAuraFault(note)
         note = note,
         rows = rows,
     }
-    DF:DebugWarn("UNITSCAN", "SNAPSHOT %d taken (%d frames%s) -- rows in DandersFramesDebugDB.unitsnaps",
-        #snaps, #rows, flagged and (", flagged " .. flagged) or "")
+    if DF:DebugActive("UNITSCAN") then
+        DF:DebugWarn("UNITSCAN", "SNAPSHOT %d taken (%d frames%s) -- rows in DandersFramesDebugDB.unitsnaps",
+            #snaps, #rows, flagged and (", flagged " .. flagged) or "")
+    end
     DEFAULT_CHAT_FRAME:AddMessage(format(
         "|cff33ff99DF unitscan|r |cffffcc00snapshot %d taken|r (%d frames%s)",
         #snaps, #rows, flagged and (", flagged " .. flagged) or ""))
