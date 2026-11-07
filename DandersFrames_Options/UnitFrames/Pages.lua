@@ -340,10 +340,18 @@ end
 
 -- Back to the unit's own defaults, for this page's keys. A linked page's shared
 -- settings are reset on the partner too: the reset propagates like any edit.
+-- ★ EXCEPT THE TEXT PAGE. Its keys only NAME a shared library template, so the
+-- text itself is reset in the template (UF:ResetTextTemplates), and a template the
+-- partner (or anything else) also draws is never reset under it.
 function UFO.ResetPage(kind, unit)
     local UF = DF.UnitFrames
     local stored = UF and UF:GetStoredUnit(unit)
     if not stored then return 0 end
+    if kind == "text" and UF.ResetTextTemplates then
+        local n = UF:ResetTextTemplates(unit)
+        UFO.PushLinks(unit)
+        return n
+    end
     local prefixes = UFO.Prefixes(kind)
     local keys = {}
     for k in pairs(stored) do
@@ -856,6 +864,16 @@ end
 -- settings are reset too (the reset propagates like any other edit).
 function UFO.ResetMessage(kind, unit, section)
     local partner = UFO.Partner(unit)
+    local UF = DF.UnitFrames
+    if kind == "text" and UF and UF.ResetTextTemplates then
+        -- The partner keeps its text; say so when this frame has to leave it.
+        local _, detach = UF:ResetTextTemplates(unit, true)
+        if detach and partner then
+            return format(L["Reset %s settings to defaults?\n\n%s keeps its text: this frame gets its own template, and its text look is no longer linked.\n\nThis cannot be undone."],
+                section, UFO.UnitLabel(partner))
+        end
+        return format(L["Reset %s settings to defaults?\n\nThis cannot be undone."], section)
+    end
     if partner and UFO.PageLinked(kind, unit) then
         return format(L["Reset %s settings to defaults?\n\nThe linked settings on %s are reset too.\n\nThis cannot be undone."],
             section, UFO.UnitLabel(partner))

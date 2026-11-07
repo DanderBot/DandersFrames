@@ -1934,6 +1934,7 @@ L["Replace Blizzard's color picker with the DandersFrames color picker for this 
 L["Reset %d %s settings to defaults."] = true
 L["Reset %s settings on %s mode to defaults. Other settings are not affected."] = true
 L["Reset %s settings to defaults. This cannot be undone."] = true
+L["Reset %s settings to defaults?\n\n%s keeps its text: this frame gets its own template, and its text look is no longer linked.\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\n%s\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis only affects %s settings on the current %s mode. This cannot be undone."] = true
