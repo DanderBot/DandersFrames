@@ -1007,20 +1007,38 @@ function UF:MakeOwnTemplate(unit, kind)
     local name = from and DF:DuplicateDesignerPreset(kind, from, base) or nil
     if not name then name = DF:CreateDesignerPreset(kind, base) end
     if not name then return nil end
-    -- ★ ONLY THIS UNIT MOVES (bug #1142). A link sharing this designer's look would
-    -- carry the new template straight to the partner on the next push (the
-    -- template bar pushes after every pick). The element's look turns own first;
-    -- its layout (a mirrored Text link's mirror) stays, and the Linked Frames
-    -- page shows the change.
-    local Lk = UF.Links
-    local root = Lk and Lk.LiveRoot()
-    local elemId = (kind == "text") and "text" or "auradesigner"
-    if root and Lk.Aspects then
-        local layout, look = Lk:Aspects(root, unit, elemId)
-        if look == "same" then Lk:SetElement(root, unit, elemId, layout, "own") end
-    end
+    -- ★ ONLY THIS UNIT MOVES (bug #1142): see UF:DetachTemplateLook.
+    local partner = UF:DetachTemplateLook(unit, kind, key, name)
     UF:GetUnitDB(unit)[key] = name
-    return name
+    return name, partner
+end
+
+-- ★ A TEMPLATE PICK MOVES ONLY THE FRAME IT WAS MADE ON (bug #1142). A link sharing
+-- this designer's look would carry the pick straight to the partner on the next
+-- push (the template bar pushes after every pick, a dropdown on the apply drain),
+-- and the partner's template would come back over it -- it read as the pick being
+-- undone. So before `unit`'s `key` takes `value`, the designer element's look turns
+-- own; its layout (a mirrored Text link's mirror) stays, and the Linked Frames page
+-- shows the change. Nothing changes when the partner already draws `value` (the
+-- push would move nothing) or the look is not shared. Call BEFORE the write.
+-- Returns the partner when the look was turned own (the caller says so), else nil.
+UF.DESIGNER_ELEMENTS = { text = "text", aura = "auradesigner" }
+function UF:DetachTemplateLook(unit, kind, key, value)
+    local Lk = UF.Links
+    local elemId = UF.DESIGNER_ELEMENTS[kind]
+    local root = Lk and Lk.LiveRoot and Lk.LiveRoot()
+    if not (root and elemId and key and Lk.Aspects) then return nil end
+    local layout, look = Lk:Aspects(root, unit, elemId)
+    if look ~= "same" then return nil end
+    local partner = Lk:Partner(root, unit)
+    if not partner then return nil end
+    -- What the push would land on the partner: the unit's value, or its default.
+    local want = value
+    if want == nil then want = UF:GetUnitDefault(unit, key) end
+    local pdb = UF:GetUnitDB(partner)
+    if pdb and pdb[key] == want then return nil end
+    Lk:SetElement(root, unit, elemId, layout, "own")
+    return partner
 end
 
 -- DandersFrames' rename / delete / import / "also used by" walks reach the unit

@@ -214,6 +214,8 @@ end
 function UFO.AddPageHead() end
 function UFO.RefreshTextStyleNote() end
 function UFO.ApplyTemplateRequests() end
+local detached = {}
+function UFO.TemplateDetached(u, kind, partner) detached[#detached + 1] = { u, kind, partner } end
 function UFO.PushLinks(u) pushes[#pushes + 1] = u end
 function UFO.LiveSlider(u, key, kind) return function() live[#live + 1] = { u, key, kind } end end
 
@@ -285,6 +287,8 @@ do
     eq(db.textDesignerPreset, nil, "...not the Bars key")
     bars.set("Default")
     eq(db.textDesignerPreset, "Default", "Bars writes the Bars key")
+    eq(#detached, 2, "each pick reports to the link note (bug #1142)")
+    eq(detached[1][2], "text", "...as a Text pick")
     local asked
     local apply = UFO.ApplyTemplateRequests
     UFO.ApplyTemplateRequests = function(u, n) asked = n end

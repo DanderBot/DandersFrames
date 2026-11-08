@@ -41,6 +41,7 @@
 - (Unit Frames) Reset Page on a Text page now resets the frame's text. A text template another frame also uses is left alone: the frame gets its own copy instead.
 - (Unit Frames) "Make Own Template" no longer moves a linked frame onto the new template too.
 - (Unit Frames) Turning a part on or off (portrait, power bar, auras, icons and so on) no longer changes a linked frame. Its look stays linked.
+- (Unit Frames) Picking a different text template on a linked frame no longer snaps back to the other frame's. That frame's text is unlinked, and a short note says so.
 - (Search) Fix search staying stuck on "Indexing settings..." after combat.
 - (Mover) Clicking now brings the mover controls back if they stayed faded after alt-tabbing.
 - (Test Mode) Turning off Color by Time Remaining now takes effect on test frames.

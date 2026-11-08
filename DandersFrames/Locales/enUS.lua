@@ -56,6 +56,7 @@ L["%s - %s half"] = true
 L["%s - %s quarter"] = true
 L["%s - Full ring"] = true
 L["%s is a mirror image of %s."] = true
+L["%s on %s is no longer linked to %s."] = true
 L["%s style: %s"] = true
 L["%s's settings for every linked part are copied to %s now."] = true
 L["%s: %s position"] = true
