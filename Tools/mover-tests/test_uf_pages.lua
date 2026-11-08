@@ -1586,6 +1586,13 @@ do
         check(size ~= nil, e.id .. ": says what its size & style covers")
         check((pos ~= nil) == (e.layout and true or false), e.id .. ": a position text exactly when it has a position")
     end
+    -- On/off switches stay per frame (bug #1142): the page never claims them as linked.
+    check(not select(2, UFO.LinkPartText("auradesigner")):find(" on", 1, true), "Aura Designer: its size & style is the template, not on/off")
+    eq(select(2, UFO.LinkPartText("icons")), "Size and style.", "Icons: its size & style no longer says which icons show")
+    local lsrc = options_file_source("UnitFrames/LinksPage.lua")
+    check(lsrc:find('if lk and lk.HasOnOff and lk.HasOnOff(e.id) then', 1, true) ~= nil
+        and lsrc:find('L["Turning it on or off stays separate on each frame."]', 1, true) ~= nil,
+        "a part with an on/off switch says in its tooltip that the switch stays per frame")
 
     -- ---- the groups --------------------------------------------------------------
     local linked, separate = UFO.LinkPageGroups("target", "player")

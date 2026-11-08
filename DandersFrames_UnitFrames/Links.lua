@@ -44,8 +44,54 @@ UF.Links = Links
 -- KEYS NO LINK EVER MOVES (who draws it, where it is on screen)
 -- ============================================================
 Links.NEVER = { source = true, position = true,
-                castbarPosition = true, classPowerPositionRecord = true,
-                castbarEnabled = true }
+                castbarPosition = true, classPowerPositionRecord = true }
+
+-- ============================================================
+-- ON/OFF SWITCHES STAY PER FRAME (bug #1142)
+-- A part's master switch (does this frame draw it at all) is the frame's own, so
+-- two linked frames can have it on in one and off in the other while its styling
+-- stays linked. key -> the element it would otherwise belong to (the Linked Frames
+-- page says so in that part's tooltip). Folded into NEVER below, so ownership,
+-- propagation, a new link's first copy and DeliberateDifferences all skip them.
+-- ⚠ AN EXPLICIT LIST, NOT A NAME RULE: "...Enabled" is also a border, shadow,
+-- texture-layer, duration-bar or pandemic toggle INSIDE a part -- styling, which
+-- stays linked. test_uf_links.lua pins every boolean "...Enabled" / "show..." key a
+-- link can carry to this list or to its styling list, so a new one needs a decision.
+-- ============================================================
+Links.ON_OFF = {
+    castbarEnabled = "castbar", classPowerEnabled = "classpower", portraitEnabled = "portrait",
+    resourceBarEnabled = "resource", healPredictionEnabled = "healpred",
+    showBuffs = "buffs", showDebuffs = "debuffs",
+    defensiveIconEnabled = "defensive", dispelOverlayEnabled = "dispel",
+    auraDesignerEnabled = "auradesigner",
+    frameShowBorder = "border", frameFadeEnabled = "frame",
+    -- Fading
+    oorEnabled = "fading", healthFadeEnabled = "fading", fadeDeadFrames = "fading",
+    -- Tooltips: whether each kind opens at all
+    tooltipFrameEnabled = "tooltips", tooltipBuffEnabled = "tooltips",
+    tooltipDebuffEnabled = "tooltips", tooltipDefensiveEnabled = "tooltips",
+    tooltipBindingEnabled = "tooltips", tooltipResurrectionEnabled = "tooltips",
+    tooltipADBarsEnabled = "tooltips", tooltipADGroupsEnabled = "tooltips",
+    tooltipADIndicatorsEnabled = "tooltips",
+    -- Status icons
+    afkIconEnabled = "icons", bgCarrierIconEnabled = "icons", combatIconEnabled = "icons",
+    leaderIconEnabled = "icons", phasedIconEnabled = "icons", raidRoleIconEnabled = "icons",
+    raidTargetIconEnabled = "icons", readyCheckIconEnabled = "icons",
+    resurrectionIconEnabled = "icons", summonIconEnabled = "icons", vehicleIconEnabled = "icons",
+    -- Unit icons
+    restingIconEnabled = "unitIcons", pvpIconEnabled = "unitIcons",
+    classificationEnabled = "unitIcons", classDragonEnabled = "unitIcons",
+    classBorderEnabled = "unitIcons",
+}
+for k in pairs(Links.ON_OFF) do Links.NEVER[k] = true end
+
+-- Does this part have an on/off switch a link leaves alone?
+function Links.HasOnOff(elemId)
+    for _, id in pairs(Links.ON_OFF) do
+        if id == elemId then return true end
+    end
+    return false
+end
 
 -- ============================================================
 -- PAGES -> KEY PREFIXES
@@ -703,8 +749,8 @@ Links.DEFAULT = {
 
 -- The keys of a link's shared aspects whose two DEFAULTS deliberately differ
 -- (after the mirror, for a mirrored layout): the follower keeps its own. For
--- Player/Target that is health colour mode, the enemy aura filters, showing
--- buffs at all, and the cast bar's detach and latency.
+-- Player/Target that is health colour mode, the enemy aura filters and the
+-- cast bar's detach and latency. (Show Buffs is an on/off: never linked at all.)
 function Links.DeliberateDifferences(follower, leader, elements)
     local out = {}
     for id, aspects in pairs(elements) do

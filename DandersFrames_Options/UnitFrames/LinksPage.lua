@@ -187,7 +187,7 @@ function UFO.LinkPartText(id)
     elseif id == "healpred" then
         return L["Where incoming heals sit on the bar."], L["Texture, colour."]
     elseif id == "icons" then
-        return L["Corner and offsets of each icon."], L["Icon size and which icons show."]
+        return L["Corner and offsets of each icon."], L["Size and style."]
     elseif id == "unitIcons" then
         return L["Corner and offsets of the PvP and elite/rare icons."], L["Size and style."]
     elseif id == "tooltips" then
@@ -203,7 +203,7 @@ function UFO.LinkPartText(id)
     elseif id == "highlights" then
         return nil, L["Selection, hover, aggro and threat highlights."]
     elseif id == "auradesigner" then
-        return nil, L["Whether the Aura Designer is on."]
+        return nil, L["The Aura Designer template."]
     elseif id == "classpower" or id == "defensive" or id == "dispel" or id == "bosslayout" then
         return L["Where it sits, offsets."], L["Size, colours and what it shows."]
     end
@@ -526,6 +526,11 @@ local function PartRow(card, e, ctx)
         }
         local lk, root = Lk(), Root()
         local lnk = lk and root and lk:LinkOf(root, ctx.follower)
+        -- On/off is each frame's own (Links.ON_OFF): said here, so the row never
+        -- reads as if linking it turns the part on or off on the other frame.
+        if lk and lk.HasOnOff and lk.HasOnOff(e.id) then
+            lines[#lines + 1] = { text = L["Turning it on or off stays separate on each frame."] }
+        end
         local except = UFO.LinkExceptText(lnk, e.id)
         if except then
             lines[#lines + 1] = { text = format("%s: %s", L["Always separate"], except), accent = true }
