@@ -116,7 +116,7 @@ do
     eq(table.concat(multi, ","), "", "every owned key belongs to exactly one element")
     for k in pairs(Links.NEVER) do eq(Links.OwnerOf(k), nil, "never linked: " .. k) end
     eq(Links.OwnerOf("frameBorderSize"), "border", "the Frame page's border keys are the Border element")
-    eq(Links.OwnerOf("frameShowBorder"), "border", "...the show-border switch too")
+    eq(Links.OwnerOf("frameShowBorder"), nil, "...but not the show-border switch: on/off stays per frame")
     eq(Links.OwnerOf("frameWidth"), "frame", "...and its size is the Frame element")
     eq(Links.OwnerOf("castbarSpellX"), "castbar", "a page new to unit frames owns its own prefix")
     eq(Links.OwnerOf("restingIconAnimate"), "unitIcons", "the resting ZZZ's Animate rides the Unit Icons link")
@@ -128,6 +128,62 @@ do
     eq(Links.Mirror("restingIconGlow", true), true, "a mirror never touches a boolean")
     eq(Links.Mirror("restingIconAnimate", false), false, "...either way")
     eq(Links.OwnerOf("debuffFilterMine"), "debuffs", "the longest-prefix rule decides between pages")
+
+    -- ON/OFF (bug #1142): each switch names the element it would belong to, is a
+    -- real key, and every boolean "...Enabled" / "show..." key a link can carry is
+    -- either an on/off switch or a styling toggle on the list below. A new one fails
+    -- here until someone decides which.
+    for k, id in pairs(Links.ON_OFF) do
+        check(Links.NEVER[k] == true, "on/off is never linked: " .. k)
+        check(Links.BY_ID[id] ~= nil, "on/off " .. k .. ": a real element")
+        Links.NEVER[k] = nil
+        Links.ResetCaches()
+        eq(Links.OwnerOf(k), id, "on/off " .. k .. ": the element whose page holds it")
+        Links.NEVER[k] = true
+        Links.ResetCaches()
+        local real = DF.PartyDefaults[k] ~= nil
+        for _, t in pairs(UF.UnitDefaults) do real = real or t[k] ~= nil end
+        check(real or k == "auraDesignerEnabled", "on/off " .. k .. ": a real setting")
+        check(Links.HasOnOff(id), "on/off: the page can tell " .. id .. " has one")
+    end
+    check(not Links.HasOnOff("health"), "the health bar has no on/off switch")
+    local STYLE_TOGGLES = {}
+    for _, k in ipairs({
+        "frameBorderGradientEnabled", "frameBorderShadowEnabled",
+        "healthTextureLayersEnabled", "reducedMaxHealthEnabled", "reducedMaxHealthLayer2Enabled",
+        "reducedMaxHealthLayer3Enabled", "reducedMaxHealthTextureLayersEnabled",
+        "resourceBarBackgroundEnabled", "resourceBarBorderEnabled", "resourceBarBorderShadowEnabled",
+        "resourceBarLayer2Enabled", "resourceBarLayer3Enabled", "resourceBarTextureLayersEnabled",
+        "absorbBarLayer2Enabled", "absorbBarLayer3Enabled", "absorbBarTextureLayersEnabled",
+        "healAbsorbBarLayer2Enabled", "healAbsorbBarLayer3Enabled", "healAbsorbBarTextureLayersEnabled",
+        "healPredictionLayer2Enabled", "healPredictionLayer3Enabled", "healPredictionTextureLayersEnabled",
+        "castbarBorderEnabled", "classPowerBorderEnabled", "portraitBorderEnabled",
+        "buffBorderShadowEnabled", "buffDurationBarEnabled", "buffDurationHideAboveEnabled",
+        "buffMaxDurationEnabled", "buffPandemicBorderShadowEnabled", "buffPandemicEnabled",
+        "buffPurgeableEnabled",
+        "debuffBorderShadowEnabled", "debuffDispelSymbolEnabled", "debuffDurationBarEnabled",
+        "debuffDurationHideAboveEnabled", "debuffMaxDurationEnabled",
+        "defensiveDurationBarEnabled", "defensiveIconBorderGradientEnabled", "defensiveIconBorderShadowEnabled",
+        "dispelGradientDarkenEnabled", "combatIconBorderEnabled",
+    }) do STYLE_TOGGLES[k] = true end
+    local unsorted, seenB = {}, {}
+    local function scan(t)
+        for k, v in pairs(t) do
+            if type(k) == "string" and type(v) == "boolean" and not seenB[k]
+                and (k:find("Enabled$") or k:find("^show%u"))
+                and (Links.OwnerOf(k) or Links.ON_OFF[k]) then
+                seenB[k] = true
+                if not (Links.ON_OFF[k] or STYLE_TOGGLES[k]) then unsorted[#unsorted + 1] = k end
+            end
+        end
+    end
+    scan(DF.PartyDefaults)
+    for _, t in pairs(UF.UnitDefaults) do scan(t) end
+    table.sort(unsorted)
+    eq(table.concat(unsorted, ","), "", "every linkable on/off-looking boolean is decided: switch or styling")
+    for k in pairs(STYLE_TOGGLES) do
+        check(Links.OwnerOf(k) ~= nil, "a styling toggle stays linked: " .. k)
+    end
 
     -- The layout flag says whether the element HAS a layout aspect.
     for _, e in ipairs(Links.ELEMENTS) do
@@ -213,11 +269,13 @@ do
     eq(Links.Mirror("resourceBarDetachedX", 12), -12, "mirror: ...and its x")
 
     -- The classification dragon / border: the Unit Icons element, layout = where it sits.
-    for _, k in ipairs({ "classDragonEnabled", "classDragonSize", "classDragonSide", "classDragonX",
+    for _, k in ipairs({ "classDragonSize", "classDragonSide", "classDragonX",
                          "classDragonY", "classDragonTailX", "classDragonElite", "classDragonBossColor",
-                         "classBorderEnabled", "classBorderSize" }) do
+                         "classBorderSize" }) do
         eq(Links.OwnerOf(k), "unitIcons", "Unit Icons owns " .. k)
     end
+    eq(Links.OwnerOf("classDragonEnabled"), nil, "...but not the dragon's on/off (per frame)")
+    eq(Links.OwnerOf("classBorderEnabled"), nil, "...nor the class border's")
     eq(Links.OwnerOf("classDragonAnchor"), "unitIcons", "Unit Icons owns classDragonAnchor")
     for _, k in ipairs({ "classDragonAnchor", "classDragonSide", "classDragonX", "classDragonY", "classDragonTailX" }) do
         eq(Links.Aspect(k), "layout", "layout: " .. k)
@@ -337,6 +395,44 @@ do
 
     -- NEVER keys and except keys
     check(Links.NEVER.castbarEnabled == true, "a cast bar's on/off stays per frame")
+
+    -- ON/OFF SWITCHES (bug #1142): never moved by a link, while the part's styling is.
+    Links:SetLink(root, "focus", "player", { portrait = { layout = "same", look = "same" },
+        buffs = { layout = "same", look = "same" }, icons = { layout = "same", look = "same" } })
+    U.player.portraitEnabled = true
+    U.player.portraitAlpha = 0.4
+    U.player.showBuffs = false
+    U.player.buffSize = 31
+    U.player.leaderIconEnabled = false
+    U.player.leaderIconScale = 1.7
+    U.focus.portraitEnabled = nil
+    U.focus.showBuffs = nil
+    U.focus.leaderIconEnabled = nil
+    Links:ApplyFrom(root, "player")
+    eq(U.focus.portraitAlpha, 0.4, "on/off: the portrait's style travels")
+    eq(U.focus.portraitEnabled, nil, "...its on/off does not")
+    eq(U.focus.buffSize, 31, "...a buff bar's size travels")
+    eq(U.focus.showBuffs, nil, "...Show Buffs does not")
+    eq(U.focus.leaderIconScale, 1.7, "...an icon's scale travels")
+    eq(U.focus.leaderIconEnabled, nil, "...its on/off does not")
+    eq(Links:PushKey(root, "player", "portraitEnabled"), nil, "a live toggle never pushes across")
+    U.player.portraitAlpha = 0.6
+    eq(Links:PushKey(root, "player", "portraitAlpha"), "focus", "...a live style edit does")
+    U.focus.portraitEnabled = false
+    Links:ApplyFrom(root, "focus")
+    eq(U.player.portraitEnabled, true, "two-way: the follower's switch stays its own too")
+    -- A new link's first copy skips them.
+    U.player.classPowerEnabled = true
+    U.focus.classPowerEnabled = nil
+    U.player.classPowerHeight = 13
+    Links:SetLink(root, "focus", "player", { classpower = { layout = "same", look = "same" } })
+    eq(U.focus.classPowerHeight, 13, "linking: the style is copied")
+    eq(U.focus.classPowerEnabled, nil, "...the on/off is not")
+    U.player.portraitEnabled, U.player.portraitAlpha, U.player.showBuffs, U.player.buffSize = nil, nil, nil, nil
+    U.player.leaderIconEnabled, U.player.leaderIconScale = nil, nil
+    U.player.classPowerEnabled, U.player.classPowerHeight = nil, nil
+    U.focus.portraitAlpha, U.focus.buffSize, U.focus.leaderIconScale, U.focus.portraitEnabled = nil, nil, nil, nil
+    U.focus.classPowerHeight = nil
     Links:SetLink(root, "focus", "player", { castbar = { layout = "same", look = "same" } }, { castbarLatency = true })
     U.player.castbarPosition = { point = "CENTER", x = 1, y = 2 }
     U.player.castbarLatency = false
@@ -469,8 +565,8 @@ do
     -- buffPurgeableEnabled: on for the enemy frames only (Target's default; Player never glows).
     eq(keys(link.except), "buffPurgeableEnabled,castbarDetached,castbarLatency,debuffFilterBoss,debuffFilterCrowdControl,"
         .. "debuffFilterDispellable,debuffFilterMine,debuffFilterPriority,debuffFilterRole,"
-        .. "directBuffOnlyMine,directBuffShowAll,healthColorMode,showBuffs",
-        "...keeping Target's deliberate own defaults (enemy aura filters, colour mode, cast bar detach)")
+        .. "directBuffOnlyMine,directBuffShowAll,healthColorMode",
+        "...keeping Target's deliberate own defaults (enemy aura filters, colour mode, cast bar detach; Show Buffs is an on/off, never linked at all)")
     eq(keys(root.units.target), "", "a fresh profile: the initial apply stores nothing on Target")
     eq(keys(root.units.player), "", "...nor on Player")
     eq(Links:IsTextMirrored(root, "target"), true, "Target draws the shared text template mirrored")
@@ -862,7 +958,7 @@ do
     Links:Ensure(old)
     eq(link.except.buffOffsetY, nil, "the buff row offset is shared again")
     eq(link.except.debuffOffsetY, nil, "...and the debuff row's")
-    check(link.except.healthColorMode and link.except.showBuffs, "...its other kept keys stay")
+    check(link.except.healthColorMode and link.except.castbarLatency, "...its other kept keys stay")
     eq(old.global.unitLinksVersion, Links.VERSION, "...and the profile is at the current version")
     eq(keys(old.units.target), "", "...nothing copied")
     Links:Ensure(old)

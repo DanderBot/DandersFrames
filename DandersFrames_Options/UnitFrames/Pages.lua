@@ -1293,10 +1293,50 @@ function UFO.SetTemplate(db, kind, name)
     end
 end
 
+-- ★ A TEMPLATE PICK ON A LINKED FRAME (bug #1142): UF:DetachTemplateLook turned
+-- the designer's look own (`partner`: the frame it was shared with), so only this
+-- frame moved. The partner's pages, the link marks and an open Linked Frames page
+-- catch up -- never this unit's own pages: the designer rebuilds its own island,
+-- and a page rebuild underneath it would hand that rebuild a retired frame -- and a
+-- toast says so, without stopping anything.
+function UFO.TemplateDetached(unit, kind, partner)
+    if not partner then return end
+    UFO.InvalidateUnitPages(partner)
+    UFO.RefreshLinkMarks()
+    local page = UFO.LinksPage and UFO.LinksPage()
+    if page and GUI.CurrentPageName == UFO.LINKS_PAGE and page.RefreshStates then page:RefreshStates() end
+    local parent = DF.GUIFrame
+    if parent and parent:IsShown() and GUI.ShowToast then
+        GUI:ShowToast({ parent = parent, text = format(L["%s on %s is no longer linked to %s."],
+            (kind == "aura") and L["Aura Designer"] or L["Text"], UFO.UnitLabel(unit), UFO.UnitLabel(partner)) })
+    end
+end
+
+-- Point `unit` at template `name` (the template bar, Same as Party Frames): a
+-- linked frame sharing the designer's look unlinks it first, unless the partner
+-- already draws `name`.
+function UFO.PickTemplate(unit, kind, name)
+    local UF = DF.UnitFrames
+    local db = UF and UF:GetUnitDB(unit)
+    if not db then return end
+    local key, value
+    if kind == "aura" then
+        key, value = "auraDesignerPreset", (name ~= UFO.FOLLOW_PARTY) and name or nil
+    else
+        key, value = UF.TextTemplateKey(db), name
+    end
+    local partner = UF.DetachTemplateLook and UF:DetachTemplateLook(unit, kind, key, value) or nil
+    UFO.SetTemplate(db, kind, name)
+    UFO.TemplateDetached(unit, kind, partner)
+end
+
 -- Make Own Template: the unit's copy of its current template, picked at once.
 function UFO.MakeOwnTemplate(unit, kind)
     local UF = DF.UnitFrames
-    return UF and UF.MakeOwnTemplate and UF:MakeOwnTemplate(unit, kind) or nil
+    if not (UF and UF.MakeOwnTemplate) then return nil end
+    local name, partner = UF:MakeOwnTemplate(unit, kind)
+    UFO.TemplateDetached(unit, kind, partner)
+    return name
 end
 
 -- What the designer edits on a unit's page. `kind` is "text" or "aura".
@@ -1316,7 +1356,7 @@ function UFO.DesignerTarget(unit, kind)
     local bar = {
         registryKey = "unit:" .. tostring(unit) .. ":" .. kind,
         getRef = name,
-        setRef = function(n) UFO.SetTemplate(live(), kind, n) end,
+        setRef = function(n) UFO.PickTemplate(unit, kind, n) end,
         tailItems = {
             { label = L["Make Own Template"], onClick = function() UFO.MakeOwnTemplate(unit, kind) end },
         },
@@ -1336,7 +1376,7 @@ function UFO.DesignerTarget(unit, kind)
             return nil
         end
         bar.leadItems = {
-            { label = L["Same as Party Frames"], onClick = function() UFO.SetTemplate(live(), "aura", UFO.FOLLOW_PARTY) end },
+            { label = L["Same as Party Frames"], onClick = function() UFO.PickTemplate(unit, "aura", UFO.FOLLOW_PARTY) end },
         }
     end
     local target = {
@@ -2267,11 +2307,18 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
     end
     -- One Text Designer template per style. The list is read each time the menu
     -- opens, so it follows templates added, renamed or deleted on the designer's page.
+    -- A pick on a linked frame unlinks its Text look first (UF:DetachTemplateLook).
     local function textTemplate(label, key)
+        local function set(v)
+            local UF = DF.UnitFrames
+            local partner = UF and UF.DetachTemplateLook and UF:DetachTemplateLook(unit, "text", key, v) or nil
+            db[key] = v
+            UFO.TemplateDetached(unit, "text", partner)
+        end
         return band:AddWidget(GUI:CreateDropdown(self.child, label, UFO.TextTemplateOptions(), db, key, function()
             UFO.ApplyTemplateRequests(unit, db[key])
             changed()
-        end, nil, nil, { optionsFunc = UFO.TextTemplateOptions }), 55)
+        end, nil, set, { optionsFunc = UFO.TextTemplateOptions }), 55)
     end
     textTemplate(L["Bars Text Template"], "textDesignerPreset")
     textTemplate(L["Ring Text Template"], "ringTextDesignerPreset")

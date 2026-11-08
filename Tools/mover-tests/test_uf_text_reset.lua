@@ -146,9 +146,54 @@ eq(hk, "same", "the rest of the link is untouched")
 eq(UF:MakeOwnTemplate("focus", "text"), "Focus", "an unlinked unit")
 eq(UF.Links:LinkOf(UF.Links.LiveRoot(), "focus"), nil, "...stays unlinked")
 
+eq(select(2, UF:MakeOwnTemplate("player", "text")), nil, "...and a frame whose look is already own names no partner")
+
+print("-- Picking another template on a linked frame unlinks only its text (bug #1142)")
+fresh()
+local root = UF.Links.LiveRoot()
+lib["Other"] = { elements = {} }
+-- The partner already draws it: nothing to unlink, the link stays shared.
+eq(UF:DetachTemplateLook("target", "text", "textDesignerPreset", UF.TEXT_PRESET), nil,
+   "the partner's own template: no change")
+layout, look = aspects("target")
+eq(look, "same", "...the Text look stays shared")
+-- Another template: the look turns own BEFORE the write, so the push moves nothing.
+local partner = UF:DetachTemplateLook("target", "text", "textDesignerPreset", "Other")
+eq(partner, "player", "a different template: names the partner (for the note)")
+UF:GetUnitDB("target").textDesignerPreset = "Other"
+UF.Links:ApplyFrom(root, "target")     -- the template bar's onChange / the apply drain
+eq(UF:GetUnitDB("target").textDesignerPreset, "Other", "...Target keeps the pick")
+eq(UF:GetUnitDB("player").textDesignerPreset, UF.TEXT_PRESET, "...Player is unchanged")
+layout, look = aspects("player")
+eq(look, "own", "...the Text look is own, seen from either side")
+eq(layout, "mirror", "...its mirror stays")
+local _, hk2 = UF.Links:Aspects(root, "target", "health")
+eq(hk2, "same", "...the rest of the link is untouched")
+UF.Links:ApplyFrom(root, "player")
+eq(UF:GetUnitDB("target").textDesignerPreset, "Other", "...and a push from Player no longer reverts it")
+-- Already own: nothing more to do.
+eq(UF:DetachTemplateLook("target", "text", "textDesignerPreset", UF.TEXT_PRESET), nil, "a look already own: nothing")
+-- An unlinked unit, and the Aura Designer the same way.
+eq(UF:DetachTemplateLook("focus", "text", "textDesignerPreset", "Other"), nil, "an unlinked unit: nothing")
+fresh()
+root = UF.Links.LiveRoot()
+UF.Links:SetLink(root, "pet", "player", { auradesigner = { layout = "own", look = "same" } })
+eq(UF:DetachTemplateLook("pet", "aura", "auraDesignerPreset", UF:GetUnitDB("player").auraDesignerPreset), nil,
+   "Aura Designer: the partner's own template, no change")
+eq(UF:DetachTemplateLook("pet", "aura", "auraDesignerPreset", "Raid"), "player", "Aura Designer: another template unlinks")
+eq(select(2, UF.Links:Aspects(root, "pet", "auradesigner")), "own", "...its look is own")
+
 print("-- The page")
 local src = options_file_source("UnitFrames/Pages.lua")
 check(src:find('if kind == "text" and UF.ResetTextTemplates then', 1, true) ~= nil, "Reset Page on Text resets the template")
 check(src:find("local _, detach = UF:ResetTextTemplates(unit, true)", 1, true) ~= nil, "...and the confirmation says when the link changes")
+check(src:find("setRef = function(n) UFO.PickTemplate(unit, kind, n) end,", 1, true) ~= nil, "the template bar picks through UFO.PickTemplate")
+check(src:find('onClick = function() UFO.PickTemplate(unit, "aura", UFO.FOLLOW_PARTY) end', 1, true) ~= nil, "...so does Same as Party Frames")
+check(src:find('UF:DetachTemplateLook(unit, "text", key, v)', 1, true) ~= nil, "...and the Frame Style page's text template dropdowns")
+check(src:find("local partner = UF.DetachTemplateLook and UF:DetachTemplateLook(unit, kind, key, value) or nil", 1, true) ~= nil
+    and src:find("UFO.SetTemplate(db, kind, name)", 1, true) ~= nil, "PickTemplate unlinks before it writes")
+check(src:find('GUI:ShowToast({ parent = parent, text = format(L["%s on %s is no longer linked to %s."]', 1, true) ~= nil,
+    "the note is a toast (non-blocking)")
+check(src:find("UFO.TemplateDetached(unit, kind, partner)", 1, true) ~= nil, "Make Own Template shows the note too")
 
 DandersFrames, CreateFrame = saved.DandersFrames, saved.CreateFrame
