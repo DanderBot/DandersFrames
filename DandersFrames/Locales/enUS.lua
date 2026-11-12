@@ -51,11 +51,15 @@ end
 --@do-not-package@
 
 -- Search system strings
+L["%d linked"] = true
+L["%d mirrored"] = true
 L["%d of %d parts linked"] = true
+L["%d separate"] = true
 L["%s - %s half"] = true
 L["%s - %s quarter"] = true
 L["%s - Full ring"] = true
 L["%s is a mirror image of %s."] = true
+L["%s linked with %s"] = true
 L["%s on %s is no longer linked to %s."] = true
 L["%s style: %s"] = true
 L["%s's settings for every linked part are copied to %s now."] = true
