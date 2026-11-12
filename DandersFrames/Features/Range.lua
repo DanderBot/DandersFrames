@@ -666,6 +666,24 @@ function DF:UpdateRange(frame)
     
     local unit = frame.unit
 
+    -- A standalone frame whose own settings say "never fade when out of range"
+    -- (the unit frames' Fade When Out of Range switch, rangeFadeEnabled) is always
+    -- in range, so the frame alpha and every per-element alpha resolve to full.
+    -- Only an explicit false turns it off: group frames never carry the key.
+    -- Turning it back on needs nothing here: the next tick reads the real range
+    -- and differs from the forced true, so the frame repaints.
+    local sdb = frame.dfStandalone and frame.dfDB
+    if sdb and sdb.rangeFadeEnabled == false then
+        local dfSecret = issecretvalue and issecretvalue(frame.dfInRange)
+        if dfSecret or frame.dfInRange ~= true then
+            frame.dfInRange = true
+            if DF.UpdateRangeAppearance then
+                DF:UpdateRangeAppearance(frame)
+            end
+        end
+        return
+    end
+
     -- Player is always in range — skip all checks and cache logic.
     -- dfInRange may hold a secret boolean from a previous UnitInRange
     -- fallback (Midnight+), so check issecretvalue before boolean-testing

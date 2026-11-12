@@ -1312,6 +1312,7 @@ L["Externals First: defensives cast on this player by others show first, their o
 L["FD"] = true
 L["Faction"] = true
 L["Fade Out Duration"] = true
+L["Fade When Out of Range"] = true
 L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."] = true
 L["Fade the Zs in and out. Off shows them still."] = true
 L["Fading"] = true
@@ -1645,6 +1646,7 @@ L["This category can fill the log very quickly, burying the entries you are look
 L["Turn it on only while reproducing the bug it relates to."] = true
 L["Turn modules on or off on the %s."] = true
 L["Turn Off"] = true
+L["Turn off to keep this frame fully visible when the unit is out of range."] = true
 L["Turn off what you don't use. A module that is off is not set up, and its icon leaves the rail."] = true
 L["Lunar Power"] = true
 L["Maelstrom"] = true

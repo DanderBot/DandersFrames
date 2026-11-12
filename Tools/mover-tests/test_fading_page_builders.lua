@@ -142,7 +142,9 @@ do
                   "helpers: " .. b .. " is declared after " .. h .. ", so it closes over the real function")
         end
     end
-    check(PAGE:find("local function HideOOROptions(d)", 1, true) ~= nil
+    -- A unit frame page swaps the element grey for its own (Fade When Out of
+    -- Range off greys them too); party / raid keep the plain oorEnabled test.
+    check(PAGE:find("local HideOOROptions = ufRangeFade and ufRangeFade.elementGate or function(d)", 1, true) ~= nil
       and PAGE:find("local function HideFrameLevelAlpha(d)", 1, true) ~= nil,
           "helpers: the element grey and the frame-alpha hide predicates are still page scope")
 end
@@ -199,13 +201,13 @@ do
           "out of range: the range half has no toggle and no group gate")
 
     local block, call = sectionBlock("Out of Range", "BuildRangeCheckGroup")
-    check(call:find('OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)', 1, true) ~= nil,
-          "out of range: a card keyed fading_range in column 1 -- no tick, no pin")
+    check(call:find('OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary, RangeFadeOff)', 1, true) ~= nil,
+          "out of range: a card keyed fading_range in column 1 -- no tick, no pin (dimmed only by a unit frame's range switch)")
     check(block:find("BuildRangeCheckGroup({ group = rangeBand, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
           "out of range: mounts the range half into its card's band")
 
     local block2, call2 = sectionBlock("Element-Specific Alpha", "BuildElementAlphaGroup")
-    check(call2:find('OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil, BuildElementAlphaGroup, {', 1, true) ~= nil,
+    check(call2:find('OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, RangeFadeOff, nil, BuildElementAlphaGroup, {', 1, true) ~= nil,
           "element alpha: a card keyed fading_elements in column 1, pinnable from its own builder")
     check(call2:find('db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"]', 1, true) ~= nil,
           "element alpha: the header tick is bound to oorEnabled under the checkbox's own name")

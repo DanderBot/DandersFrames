@@ -1139,7 +1139,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "Enable Element-Specific Alpha" toggle is off. The frame-level alpha
         -- slider is the alternate variant (shown only when element-specific is
         -- off) so it keeps a hideOn, not a grey.
-        local function HideOOROptions(d)
+        -- ★ UNIT FRAMES ONLY: Fade When Out of Range (rangeFadeEnabled). The unit frame
+        -- page leaves its switch here (page.dfRangeFade, read with rawget so a party /
+        -- raid build never finds one -- see UFO.RangeFadeSwitch): `gate` is true while
+        -- the switch is off, `elementGate` is that or element alpha off. With no switch,
+        -- both stay what they always were.
+        local ufRangeFade = rawget(self, "dfRangeFade")
+        local RangeFadeOff = ufRangeFade and ufRangeFade.gate or nil
+        local HideOOROptions = ufRangeFade and ufRangeFade.elementGate or function(d)
             return not d.oorEnabled
         end
 
@@ -1343,6 +1350,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Frame-level alpha (shown when element-specific is disabled)
             local frameLevelAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Out of Range)"], 0.1, 1.0, 0.05, db, "rangeFadeAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             frameLevelAlpha.hideOn = HideFrameLevelAlpha
+            frameLevelAlpha.disableOn = RangeFadeOff
         end
 
         -- ===== ELEMENT-SPECIFIC ALPHA =====
@@ -1446,7 +1454,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- and the builder stamps self.rangeSpellInput / rangeSpellInfoLabel
         -- for the range helpers -- a pinned second copy would re-point them.
         Add(GUI:CreateHeader(self.child, L["Range"]), 40, 1)
-        local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)
+        if ufRangeFade then ufRangeFade.build(self, db, Add) end
+        local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary, RangeFadeOff)
         BuildRangeCheckGroup({
             group = rangeBand, parent = self.child,
             refreshStates = function() self:RefreshStates() end,
@@ -1459,7 +1468,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the in-body checkbox ran: it greys the twelve here and swaps the
         -- frame-level slider in the card above in or out. How faded each
         -- element is is how it LOOKS, so it is pinnable.
-        local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil,
+        local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, RangeFadeOff, nil,
             BuildElementAlphaGroup, {
                 db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
                 onChanged = function()

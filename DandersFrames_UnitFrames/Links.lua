@@ -67,6 +67,7 @@ Links.ON_OFF = {
     frameShowBorder = "border", frameFadeEnabled = "frame",
     -- Fading
     oorEnabled = "fading", healthFadeEnabled = "fading", fadeDeadFrames = "fading",
+    rangeFadeEnabled = "fading",
     -- Tooltips: whether each kind opens at all
     tooltipFrameEnabled = "tooltips", tooltipBuffEnabled = "tooltips",
     tooltipDebuffEnabled = "tooltips", tooltipDefensiveEnabled = "tooltips",
