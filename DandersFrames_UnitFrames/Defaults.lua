@@ -466,6 +466,7 @@ local PER_UNIT = {
         -- left edge growing right: Player's rows mirrored, by Links.MirrorDefaults below.
         directDebuffShowAll = true,
         oorEnabled = true,
+        rangeFadeEnabled = true,     -- Fading page: Fade When Out of Range (Range.lua)
         -- It IS the target, always: a selection outline would never turn off.
         selectionHighlightMode = "NONE",
         textDesignerPreset = UF.TEXT_PRESET,
@@ -487,6 +488,7 @@ local PER_UNIT = {
         resourceBarEnabled = false,
         showBuffs = false, showDebuffs = false,
         oorEnabled = true,
+        rangeFadeEnabled = true,     -- Fading page: Fade When Out of Range (Range.lua)
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
         -- Beside the target's right edge, past its portrait (Target's sits outside on
         -- the right): anchored to the target's OUTER rect, which takes the portrait in
@@ -506,6 +508,7 @@ local PER_UNIT = {
         buffAnchor = "TOPLEFT", buffGrowth = "RIGHT_UP", buffWrap = 7,
         debuffAnchor = "BOTTOMLEFT", debuffGrowth = "RIGHT_DOWN",
         oorEnabled = true,
+        rangeFadeEnabled = true,     -- Fading page: Fade When Out of Range (Range.lua)
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = -280, y = -300 },
         castbarEnabled = true,
@@ -529,6 +532,7 @@ local PER_UNIT = {
         resourceBarEnabled = false,
         showBuffs = false, showDebuffs = false,
         oorEnabled = true,
+        rangeFadeEnabled = true,     -- Fading page: Fade When Out of Range (Range.lua)
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
         position = BesideOuter("focus", -131, -294, 0),
     },
@@ -545,6 +549,7 @@ local PER_UNIT = {
         debuffAnchor = "BOTTOMLEFT", debuffGrowth = "RIGHT_DOWN",
         debuffOffsetX = 0, debuffOffsetY = -AURA_GAP,
         oorEnabled = false,
+        rangeFadeEnabled = true,     -- Fading page: Fade When Out of Range (Range.lua)
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
         castbarHeight = 12,
         castbarPosition = Detached("pet", "bottom", -365, -265),
@@ -572,6 +577,7 @@ local PER_UNIT = {
         -- ⚠ Both rows are anchored to a TOP corner, so the attached cast bar under
         -- each boss never pushes them (CastBar.lua, AURA ROW RESERVE).
         oorEnabled = true,
+        rangeFadeEnabled = true,     -- Fading page: Fade When Out of Range (Range.lua)
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = 480, y = 120 },
         castbarEnabled = true,

@@ -1039,7 +1039,10 @@ function UFO.BuildFromDF(self, db, Add, AddSpace, AddSyncPoint, rec, unit)
     self.sectionFilter = function(key) return UFO.CardAllowed(rec, unit, key) end
     -- Unit-frame-only controls inside a DF card (Modules.lua reads it per card).
     if rec.kind == "icons" then self.dfIconCardExtras = UFO.IconCardExtras(self) end
-    if rec.kind == "fading" then self.dfOORExtras = UFO.OORExtras(unit) end
+    if rec.kind == "fading" then
+        self.dfOORExtras = UFO.OORExtras(unit)
+        self.dfRangeFade = UFO.RangeFadeSwitch(unit)
+    end
     -- Whole cards of ours the party builder draws through its card door (UFO.ExtraCards).
     self.dfExtraCards = UFO.ExtraCards(self, rec, unit)
 
@@ -1173,6 +1176,33 @@ function UFO.OORExtras(unit)
         if hasPortrait then Slider(L["Portrait Alpha"], "oorPortraitAlpha") end
         if hasCast then Slider(L["Cast Bar Alpha"], "oorCastBarAlpha") end
     end
+end
+
+-- Fade When Out of Range (rangeFadeEnabled): the Fading page's own switch, on the
+-- units DF's range tick fades (Units.RANGED; Player never fades). Off, the frame is
+-- always drawn as in range (Features/Range.lua). The party builder draws it under
+-- its Range header and greys its range alphas with `gate` / `elementGate`; party
+-- and raid pages never get one, as group frames always fade.
+function UFO.RangeFadeSwitch(unit)
+    local UF = DF.UnitFrames
+    local ranged = UF and UF.Units and UF.Units.RANGED
+    if not (ranged and ranged[unit]) then return nil end
+    local label = L["Fade When Out of Range"]
+    local gate = UFO.Gate(label, function(d) return d and d.rangeFadeEnabled == false end)
+    local elementGate = UFO.Gate(L["Enable Element-Specific Alpha"],
+        function(d) return not (d and d.oorEnabled) end, gate)
+    return {
+        gate = gate,
+        elementGate = elementGate,
+        build = function(page, db, Add)
+            local cb = GUI:CreateCheckbox(page.child, label, db, "rangeFadeEnabled", function()
+                page:RefreshStates()
+                RefreshFrames()
+            end)
+            cb.tooltip = L["Turn off to keep this frame fully visible when the unit is out of range."]
+            Add(cb, 30, 1)
+        end,
+    }
 end
 
 -- A party builder draws the page. Where it leaves a door (page.dfExtraCards, read
