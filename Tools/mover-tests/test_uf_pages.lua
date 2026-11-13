@@ -1623,9 +1623,14 @@ do
     eq(UFO.LinkHeaderLines(stackedNeed, m) >= 2, true, "...never one line at the stacked minimum")
     local fitsBoth = 2 * m.pad + m.pickersW + m.gap + m.summaryW + m.gap + m.buttonsW
     eq(UFO.LinkHeaderLines(fitsBoth, m), 1, "header: one line exactly at its width")
-    eq(UFO.LinkHeaderLines(fitsBoth, m, 140), 2, "...the add button on the line pushes the buttons below")
-    eq(UFO.LinkHeaderLines(2 * m.pad + m.pickersW + m.gap + m.summaryW, m, 140), 3,
-       "...and a line too narrow for summary plus add button breaks again")
+    eq(UFO.LinkHeaderLines(fitsBoth - 1, m), 2, "...a pixel under it, the buttons go below")
+    -- "+ Link Two Frames" moved off the head line onto the first card's fold
+    -- header (bug #1147): the narrow minimum still holds it beside a cut title.
+    local mAdd = {}
+    for k, v in pairs(m) do mAdd[k] = v end
+    mAdd.addW = 600
+    local _, stackedAdd = UFO.LinkCardNeeds(mAdd)
+    check(stackedAdd >= 2 * m.pad + 600 + 120, "a card whose fold header carries the add button is never narrower than button + a title")
     check(stackedNeed >= 2 * m.pad + m.buttonsW and stackedNeed >= 2 * m.pad + m.pickersW,
           "the stacked minimum holds the buttons and the pickers on their own lines")
     eq(UFO.LinksMinWindowWidth(m, 281), 281 + UFO.LinksMinUsableWidth(m), "min window = chrome + the narrow layout's need")
@@ -1641,7 +1646,27 @@ do
     local segs, dds = {}, {}
     local saved3 = { G.CreateLabelNative, G.CreateElementBackdrop, G.StyleButton, G.CreateSegmentToggle,
                      G.CreateDropdown, G.SetSettingsFont, G.ShowTooltip, G.HideTooltip, G.GetAccent }
-    function G:CreateLabelNative(_, o) local l = FakeUIFrame(); l:SetText(o and o.text or ""); return l end
+    local saved4 = { G.CreateCardChrome, G.CreateHeader, G.GetCollapsedGroups, G.SectionCard }
+    function G:CreateLabelNative(_, o) local l = FakeUIFrame(); l:SetText(o and o.text or ""); l._opts = o; return l end
+    -- The kit's card chrome (SettingsWidgets.lua, pinned by test_designer_cards.lua):
+    -- what this page asks of it, recorded.
+    G.SectionCard = { header = 40, edge = 12, chevron = 10, titleGap = 8, borderAlpha = 0.6, lineAlpha = 0.4, headerAlpha = 0.35 }
+    local folds = {}
+    function G:GetCollapsedGroups() return folds end
+    function G:CreateCardChrome(card, header, o)
+        local ch = { expanded = o and o.expanded and true or false, summaryText = "",
+                     title = FakeUIFrame(), summary = FakeUIFrame(), card = card, header = header }
+        function ch:FitSummary() self.summary:SetText(self.expanded and "" or self.summaryText) end
+        function ch:SetSummary(t) self.summaryText = t or ""; self:FitSummary() end
+        function ch:SetExpanded(open, body) self.expanded = open and true or false; self.body = body; self:FitSummary() end
+        function ch:LayoutText(after, gap, inset) self.rightInset = inset end
+        return ch
+    end
+    function G:CreateHeader(_, text, o)
+        local h = FakeUIFrame(); h.label = text; h.isSectionHeader = true; h.opts = o
+        h.text = FakeUIFrame(); h.text:SetText(text)
+        return h
+    end
     function G:CreateElementBackdrop(f) return f end
     function G:StyleButton(b, o) b.Text = FakeUIFrame(); b.Text:SetText(o.text or ""); b._opts = o; b:SetWidth(o.width or 60); b:SetHeight(o.height or 24) end
     function G:CreateSegmentToggle(parent, segments, _, _, _, o)
@@ -1726,6 +1751,52 @@ do
     check(lx + lookSeg:GetWidth() <= minUsable - UFO.LINK_METRICS.pad,
           "at the minimum: the last segment ends inside the card")
     eq(UFO.LinksMinWindowWidth(nil, 281), 281 + minUsable, "the page's minimum window width is the narrow layout's")
+
+    -- ---- headings and captions (bug #1147 item 3) ----------------------------------
+    eq(card.groupLinked.label, "Linked by default", "the linked group's heading is a kit section header")
+    eq(card.groupSeparate.label, "Separate by default", "...and so is the separate group's")
+    check(card.groupLinked.isSectionHeader and card.groupLinked.opts and card.groupLinked.opts.keepSearchSection,
+          "...built by GUI:CreateHeader, without moving the search section")
+    local nameOpts = byId.health.name._opts
+    for _, key in ipairs({ "capPart", "capPos", "capLook", "capResult" }) do
+        local o = card[key]._opts
+        check(o.size >= nameOpts.size, key .. ": a column caption is no smaller than the row names")
+        check(o.color.r == nameOpts.color.r and o.color.g == nameOpts.color.g and o.color.b == nameOpts.color.b,
+              key .. ": ...and in the full text colour, not the dim one")
+    end
+    eq(card.capPos:GetText() .. "|" .. card.capLook:GetText(), "Position & Direction|Size & Style",
+       "the segment columns' captions use the words the tooltips use")
+
+    -- ---- the fold (bug #1147 item 2) ------------------------------------------------
+    eq(card.expanded, true, "one link on the page: its card starts open")
+    eq(card.chrome.title:GetText(), "Player linked with Target", "the fold header names the pair, leader first")
+    local cl, cm, cs = UFO.LinkModeCounts("target", "player")
+    eq(cl + cm + cs, 18, "the summary's three counts cover every shared part")
+    eq(cs, 9, "...nine separate (the default link's separate group)")
+    check(cm > 0, "...the mirrored parts counted apart from the plainly linked ones")
+    eq(UFO.LinkFoldSummary("target", "player"), string.format("%d linked, %d mirrored, %d separate", cl, cm, cs),
+       "the folded summary: linked, mirrored, separate")
+    eq(card.chrome.summary:GetText(), "", "...not drawn while the card is open")
+    local apt, arel = card.addButton:GetPoint(1)
+    check(apt == "RIGHT" and arel == card.header, "+ Link Two Frames sits at the right end of the fold header")
+    check((card.chrome.rightInset or 0) >= card.addButton:GetWidth(), "...and the folded summary stops short of it")
+    card:SetOpen(false)
+    eq(folds.uf_link_target, true, "folding is remembered for this link")
+    eq(card.body:IsShown(), false, "...its body hides")
+    eq(card:Layout(wideW + 40), 40, "...and the card is its header alone")
+    eq(card.chrome.summary:GetText(), UFO.LinkFoldSummary("target", "player"), "...which shows the summary")
+    blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
+    eq(blocks[3].w.expanded, false, "a rebuilt page keeps the card folded")
+    blocks[3].w:SetOpen(true)
+    eq(folds.uf_link_target, false, "unfolding is remembered too")
+    eq(UFO.LinkCardOpen("target", 3), true, "...and wins over the several-links default")
+    folds.uf_link_target = nil
+    eq(UFO.LinkCardOpen("target", 1), true, "default: open while it is the only link")
+    eq(UFO.LinkCardOpen("target", 2), false, "default: folded once there are more")
+    card:SetOpen(true)
+    folds.uf_link_target = nil
+    card:Layout(wideW + 40)
 
     -- ---- the actions ---------------------------------------------------------------
     local function click(cfg, label)
@@ -1822,6 +1893,28 @@ do
     eq(select(2, Lk:Aspects(root, "focus", "absorbs")), "same", "...and the parts came along")
     Lk:Unlink(root, "focus")
 
+    -- Two links: both cards start folded; a link just made opens.
+    folds.uf_link_target, folds.uf_link_focus = nil, nil
+    root.global.unitLinks = nil
+    Lk:Ensure(root)
+    Lk:SetLink(root, "focus", "focustarget", { health = { layout = "same", look = "same" } })
+    blocks = {}
+    page.builder(page, UF:GetGlobalDB(), function(wg, h, col) blocks[#blocks + 1] = { w = wg }; return wg end)
+    eq(#blocks, 4, "two links: two cards")
+    eq(tostring(blocks[3].w.expanded) .. "," .. tostring(blocks[4].w.expanded), "false,false",
+       "two links: both cards start folded")
+    eq(blocks[3].w.chrome.summary:GetText() ~= "", true, "...each showing its summary")
+    check(blocks[3].w.addButton ~= nil and rawget(blocks[4].w, "addButton") == nil,
+          "...the add button stays on the first card's header, in reach while it is folded")
+    Lk:Unlink(root, "focus")
+    popups = {}
+    UFO.ConfirmLinkPair("focus", "focustarget", nil)
+    click(popups[1], "Link")
+    eq(folds.uf_link_focus, false, "a link just made opens, whatever the default")
+    Lk:Unlink(root, "focus")
+    Lk:Unlink(root, "target")
+    folds.uf_link_target, folds.uf_link_focus = nil, nil
+
     -- No link and no draft: the page head is the only place left for the button.
     eq(#UFO.AllLinks(), 0, "(no links left)")
     blocks = {}
@@ -1832,6 +1925,7 @@ do
     G.CreateLabelNative, G.CreateElementBackdrop, G.StyleButton, G.CreateSegmentToggle, G.CreateDropdown,
         G.SetSettingsFont, G.ShowTooltip, G.HideTooltip, G.GetAccent =
         saved3[1], saved3[2], saved3[3], saved3[4], saved3[5], saved3[6], saved3[7], saved3[8], saved3[9]
+    G.CreateCardChrome, G.CreateHeader, G.GetCollapsedGroups, G.SectionCard = saved4[1], saved4[2], saved4[3], saved4[4]
     G.contentFrame = nil
 end
 

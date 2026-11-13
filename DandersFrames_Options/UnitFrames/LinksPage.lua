@@ -16,7 +16,9 @@ local function CreateFrame(...) return _G.CreateFrame(...) end
 
 -- ============================================================
 -- THE LINKED FRAMES PAGE (uf_links, under Unit Frames, below Settings)
--- One card per link: the two frames ("linked with"), how many parts are linked,
+-- One card per link, folding to its header (the pair, and folded, how its parts
+-- split: "2 linked, 7 mirrored, 9 separate"; see FOLDING A LINK'S CARD).
+-- Open: the two frames ("linked with"), how many parts are linked,
 -- Mirror All / Copy All / Separate All / Unlink, then one row per part both
 -- frames have -- its name, a Position & Direction segment (Same / Mirrored /
 -- Separate, or Same / Separate for a part that cannot mirror), a Size & Style
@@ -52,6 +54,7 @@ local M = {               -- the card's fixed metrics
     rowMin = 34,          -- a wide row's minimum height
     capBand = 24,         -- the column-caption band's height
     headingGap = 14,      -- space above a group heading
+    headingH = 22,        -- a group heading's box (GUI:CreateHeader, text on its bottom edge)
     resultMin = 130,      -- a wide row's result column, at least
     resultMinStacked = 110,
     nameMin = 100, nameMax = 170,
@@ -266,6 +269,14 @@ local function LookTip(value)
     return L["Each frame keeps its own size and style."]
 end
 
+-- The fold header's lead, before its title: the chevron's inset, the chevron
+-- and its gap (GUI.SectionCard), less the card's own pad (LinkCardNeeds adds it).
+local function FoldLead(m)
+    local CARD = GUI.SectionCard
+    local lead = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 30
+    return max(0, lead - m.pad)
+end
+
 -- ============================================================
 -- LAYOUT DECISIONS (pure)
 -- m: { pad, gap, nameW, posW, lookW, resultMin, resultMinStacked,
@@ -274,9 +285,10 @@ end
 function UFO.LinkCardNeeds(m)
     local inner = function(w) return w + 2 * m.pad end
     local wide = inner(m.nameW + m.gap + m.posW + m.gap + m.lookW + m.gap + m.resultMin)
-    -- The summary line also carries "+ Link Two Frames" on the first card.
-    local summaryLine = (m.summaryW or 0) + (m.addW and (m.gap + m.addW) or 0)
-    local header = max(m.pickersW or 0, summaryLine, m.buttonsW or 0)
+    -- The first card's fold header also carries "+ Link Two Frames": the
+    -- chevron, a title cut no shorter than foldTitleMin, then the button.
+    local foldHead = m.addW and (FoldLead(m) + (m.foldTitleMin or 120) + m.gap + m.addW) or 0
+    local header = max(m.pickersW or 0, m.summaryW or 0, m.buttonsW or 0, foldHead)
     local stacked = inner(max(m.posW + m.gap + m.lookW, m.nameW + m.gap + m.resultMinStacked, header))
     return wide, stacked
 end
@@ -297,14 +309,12 @@ function UFO.LinkCardLayout(width, m)
              pos = x0, look = x0 + m.posW + m.gap }
 end
 
--- How a card header breaks: one line, two (buttons below) or three (summary,
--- then buttons, each on its own line). `addW`: the width of the card's
--- "+ Link Two Frames" button, which ends the first line (nil: none).
-function UFO.LinkHeaderLines(width, m, addW)
+-- How a card's head line (pickers, summary, buttons) breaks: one line, two
+-- (buttons below) or three (summary, then buttons, each on its own line).
+function UFO.LinkHeaderLines(width, m)
     local inner = width - 2 * m.pad
-    local add = addW and (m.gap + addW) or 0
-    if m.pickersW + m.gap + m.summaryW + m.gap + m.buttonsW + add <= inner then return 1 end
-    if m.pickersW + m.gap + m.summaryW + add <= inner then return 2 end
+    if m.pickersW + m.gap + m.summaryW + m.gap + m.buttonsW <= inner then return 1 end
+    if m.pickersW + m.gap + m.summaryW <= inner then return 2 end
     return 3
 end
 
@@ -412,6 +422,8 @@ function UFO.ConfirmLinkPair(follower, leader, elements, done)
             els, except = lk.StartingElements(follower, leader)
         end
         lk:SetLink(root, follower, leader, els, except)
+        -- A link just made (or turned round) opens, whatever the default.
+        UFO.SetLinkCardOpen(follower, true)
         UFO.linkDraft = nil
         AfterLinks(follower, leader, oldF, oldL)
         done()
@@ -506,10 +518,62 @@ function UFO.LinkedPartCount(follower, leader)
     return n, total
 end
 
+-- How the pair's parts split, from the link's real aspects: mirrored (its
+-- position is mirrored), linked (something shared, nothing mirrored) and
+-- separate (nothing shared). The three add up to the shared parts.
+function UFO.LinkModeCounts(follower, leader)
+    local lk, root = Lk(), Root()
+    local linked, mirrored, separate = 0, 0, 0
+    for _, e in ipairs(UFO.SharedElements(follower, leader)) do
+        local layout, look = "own", "own"
+        if lk and root then layout, look = lk:Aspects(root, follower, e.id) end
+        if layout == "own" and look == "own" then separate = separate + 1
+        elseif e.layout and layout == "mirror" then mirrored = mirrored + 1
+        else linked = linked + 1 end
+    end
+    return linked, mirrored, separate
+end
+
+-- A folded card's one-line summary: "2 linked, 7 mirrored, 9 separate" (a
+-- count of nothing is left out).
+function UFO.LinkFoldSummary(follower, leader)
+    local linked, mirrored, separate = UFO.LinkModeCounts(follower, leader)
+    local parts = {}
+    if linked > 0 then parts[#parts + 1] = format(L["%d linked"], linked) end
+    if mirrored > 0 then parts[#parts + 1] = format(L["%d mirrored"], mirrored) end
+    if separate > 0 then parts[#parts + 1] = format(L["%d separate"], separate) end
+    return concat(parts, ", ")
+end
+
+-- ============================================================
+-- FOLDING A LINK'S CARD
+-- Each link's card folds to its header (the kit's card chrome). The choice is
+-- kept per link, keyed by its follower (a frame follows one other at most), in
+-- the settings panel's shared fold store. Stored as true (folded) / false (open)
+-- so nothing stored means the default: open while it is the only link, folded
+-- once there are more.
+-- ============================================================
+function UFO.LinkFoldKey(follower) return "uf_link_" .. tostring(follower) end
+
+local function FoldStore()
+    return (GUI.GetCollapsedGroups and GUI:GetCollapsedGroups()) or {}
+end
+
+function UFO.LinkCardOpen(follower, linkCount)
+    local saved = FoldStore()[UFO.LinkFoldKey(follower)]
+    if saved ~= nil then return not saved end
+    return (linkCount or 1) <= 1
+end
+
+function UFO.SetLinkCardOpen(follower, open)
+    FoldStore()[UFO.LinkFoldKey(follower)] = not open
+end
+
 -- ============================================================
 -- ONE PART'S ROW
 -- ============================================================
 local SEG_FONT = 10
+local CAPTION_FONT = 12   -- the column captions: the row names' size
 
 local function PartRow(card, e, ctx)
     local row = CreateFrame("Frame", nil, card)
@@ -670,11 +734,68 @@ local function Picker(card, label, get, set, optionsFn)
     return dd
 end
 
-function UFO.CreateLinkCard(parent, follower, leader, m, draft)
+-- `open`: whether a link's card starts unfolded (nil: UFO.LinkCardOpen's
+-- default for a page with one link). A draft card never folds.
+function UFO.CreateLinkCard(parent, follower, leader, m, draft, open)
     local card = CreateFrame("Frame", nil, parent)
-    CardSurface(card)
     local ctx = { follower = follower, leader = leader, m = m, draft = draft }
     card.ctx = ctx
+
+    -- ---- the fold: a link's card is the kit's card chrome (GUI:CreateCardChrome,
+    -- the designers' hand-built cards' look): a 40px header with the accent
+    -- chevron, the pair as its title and, folded, the parts summary on the right.
+    -- Everything else lives in `body`, which the fold hides. The draft card has
+    -- no header; its body is the card itself, on the plain card surface.
+    local body = card
+    if draft then
+        CardSurface(card)
+        card.expanded = true
+    else
+        if open == nil then open = UFO.LinkCardOpen(follower, 1) end
+        card.expanded = open and true or false
+        local header = CreateFrame("Button", nil, card)
+        header:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+        header:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
+        card.header = header
+        body = CreateFrame("Frame", nil, card)
+        body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+        body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
+        card.chrome = GUI:CreateCardChrome(card, header, { expanded = card.expanded })
+        card.chrome:SetExpanded(card.expanded, card.expanded and body or nil)
+        body:SetShown(card.expanded)
+        header:RegisterForClicks("LeftButtonUp")
+        header:SetScript("OnClick", function()
+            card:SetOpen(not card.expanded)
+            if PlaySound and SOUNDKIT then PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
+        end)
+    end
+    card.body = body
+
+    -- Fold or unfold: remembered for this link, then the page re-lays out (the
+    -- card's refreshContent hands the page its new height).
+    function card:SetOpen(want)
+        if ctx.draft then return end
+        self.expanded = want and true or false
+        UFO.SetLinkCardOpen(ctx.follower, self.expanded)
+        self.body:SetShown(self.expanded)
+        self.chrome:SetExpanded(self.expanded, self.expanded and self.body or nil)
+        local page = UFO.LinksPage()
+        if page and page.RefreshStates then page:RefreshStates() end
+    end
+
+    -- "+ Link Two Frames" on this card's header, at its right end (it stays in
+    -- reach while the card is folded). The folded summary stops short of it.
+    function card:SetAddButton(b)
+        self.addButton = b
+        local CARD = GUI.SectionCard
+        local edge = CARD and CARD.edge or 12
+        b:ClearAllPoints()
+        b:SetPoint("RIGHT", self.header, "RIGHT", -edge, 0)
+        if b.SetFrameLevel and self.header.GetFrameLevel then
+            b:SetFrameLevel((self.header:GetFrameLevel() or 0) + 2)
+        end
+        self.chrome:LayoutText(nil, nil, edge + (b:GetWidth() or 140) + 8)
+    end
 
     -- ---- header: [leader] linked with [follower]   N of M   buttons ----------
     -- ★ THE FIRST PICKER IS THE LEADER: the card reads "<leader> linked with
@@ -714,27 +835,27 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
             UFO.ConfirmLinkPair(v, ctx.leader, Elements())
         end
     end
-    card.leaderDD = Picker(card, L["First frame"],
+    card.leaderDD = Picker(body, L["First frame"],
         function() return ctx.leader end,
         function(v) Pick(true, v) end,
         function() return UnitOptions(nil) end)
-    card.linkIcon = card:CreateTexture(nil, "OVERLAY")
+    card.linkIcon = body:CreateTexture(nil, "OVERLAY")
     card.linkIcon:SetTexture(UFO.LINK_ICON)
     card.linkIcon:SetSize(14, 14)
     local acc = Accent()
     card.linkIcon:SetVertexColor(acc.r, acc.g, acc.b)
-    card.linkedWith = Label(card, L["linked with"], 11, acc)
-    card.followerDD = Picker(card, L["Second frame"],
+    card.linkedWith = Label(body, L["linked with"], 11, acc)
+    card.followerDD = Picker(body, L["Second frame"],
         function() return ctx.follower end,
         function(v) Pick(false, v) end,
         function() return UnitOptions(nil) end)
-    card.summary = Label(card, "", 11, C("textDim"))
+    card.summary = Label(body, "", 11, C("textDim"))
 
     card.buttons = {}
     local function AddButton(text, opts, onClick, tip)
-        local b = Button(card, text, opts)
+        local b = Button(body, text, opts)
         b:SetScript("OnClick", onClick)
-        if tip then TipButton(card, b, tip) end
+        if tip then TipButton(body, b, tip) end
         card.buttons[#card.buttons + 1] = b
         return b
     end
@@ -762,14 +883,16 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
     card.rows = {}
     if not draft then
         -- ---- column captions --------------------------------------------------
-        card.capPart = Label(card, L["Part"], 10, C("textDim"))
-        card.capPos = Label(card, L["Position & Direction"], 10, C("textDim"))
-        card.capLook = Label(card, L["Size & Style"], 10, C("textDim"))
-        card.capResult = Label(card, L["Result"], 10, C("textDim"))
+        -- Full text colour at the row names' size, so they read as the table's
+        -- column heads rather than as notes under it (bug #1147).
+        card.capPart = Label(body, L["Part"], CAPTION_FONT, C("text"))
+        card.capPos = Label(body, L["Position & Direction"], CAPTION_FONT, C("text"))
+        card.capLook = Label(body, L["Size & Style"], CAPTION_FONT, C("text"))
+        card.capResult = Label(body, L["Result"], CAPTION_FONT, C("text"))
         -- The two captions that explain something carry an info glyph, and the
         -- hover covers caption and glyph together.
         local function InfoGlyph(after)
-            local t = card:CreateTexture(nil, "OVERLAY")
+            local t = body:CreateTexture(nil, "OVERLAY")
             t:SetTexture(ICONS .. "info.png")
             t:SetSize(11, 11)
             local d = C("textDim")
@@ -779,31 +902,34 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
         end
         card.capPosInfo = InfoGlyph(card.capPos)
         card.capLookInfo = InfoGlyph(card.capLook)
-        card.capPosTip = HoverTip(card, card.capPos, { title = L["Position & Direction"],
+        card.capPosTip = HoverTip(body, card.capPos, { title = L["Position & Direction"],
             lines = { L["Where things sit on the frame: which side, which corner, offsets, and which way icons grow."] } },
             card.capPosInfo)
-        card.capLookTip = HoverTip(card, card.capLook, { title = L["Size & Style"],
+        card.capLookTip = HoverTip(body, card.capLook, { title = L["Size & Style"],
             lines = { L["Everything else: sizes, colours, textures, fonts, borders, counts and timers."] } },
             card.capLookInfo)
-        card.headLine = Line(card)
-        card.capBand = Band(card)
-        card.bandLine = Line(card)
+        card.headLine = Line(body)
+        card.capBand = Band(body)
+        card.bandLine = Line(body)
 
         local linked, separate = UFO.LinkPageGroups(ctx.follower, ctx.leader)
-        card.groupLinked = Label(card, L["Linked by default"], 12, C("text"))
-        for _, e in ipairs(linked) do card.rows[#card.rows + 1] = PartRow(card, e, ctx) end
+        -- The two group headings are the settings pages' section headers
+        -- (GUI:CreateHeader: the header font in the accent), not row-sized text.
+        -- keepSearchSection: this page registers no search entries of its own.
+        card.groupLinked = GUI:CreateHeader(body, L["Linked by default"], { keepSearchSection = true })
+        for _, e in ipairs(linked) do card.rows[#card.rows + 1] = PartRow(body, e, ctx) end
         card.firstSeparate = #card.rows + 1
-        card.groupSeparate = Label(card, L["Separate by default"], 12, C("text"))
-        card.groupSeparateSub = Label(card, L["These usually differ between the two frames. You can still link them."], 11, C("textDim"), true)
-        for _, e in ipairs(separate) do card.rows[#card.rows + 1] = PartRow(card, e, ctx) end
+        card.groupSeparate = GUI:CreateHeader(body, L["Separate by default"], { keepSearchSection = true })
+        card.groupSeparateSub = Label(body, L["These usually differ between the two frames. You can still link them."], 11, C("textDim"), true)
+        for _, e in ipairs(separate) do card.rows[#card.rows + 1] = PartRow(body, e, ctx) end
         card.hasLinkedGroup, card.hasSeparateGroup = #linked > 0, #separate > 0
-        card.footLine = Line(card)
-        card.footIcon = card:CreateTexture(nil, "OVERLAY")
+        card.footLine = Line(body)
+        card.footIcon = body:CreateTexture(nil, "OVERLAY")
         card.footIcon:SetTexture(ICONS .. "info.png")
         card.footIcon:SetSize(12, 12)
         local d = C("textDim")
         card.footIcon:SetVertexColor(d.r, d.g, d.b)
-        card.foot = Label(card, L["Never linked: where each frame sits on screen, and whether it uses DandersFrames or Blizzard's frame."], 11, d, true)
+        card.foot = Label(body, L["Never linked: where each frame sits on screen, and whether it uses DandersFrames or Blizzard's frame."], 11, d, true)
     end
 
     function card:Refresh()
@@ -815,6 +941,9 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
         if not ctx.draft then
             local n, total = UFO.LinkedPartCount(ctx.follower, ctx.leader)
             self.summary:SetText(format(L["%d of %d parts linked"], n, total))
+            -- The header: the pair, and (drawn only while folded) how its parts split.
+            self.chrome.title:SetText(format(L["%s linked with %s"], U(ctx.leader), U(ctx.follower)))
+            self.chrome:SetSummary(UFO.LinkFoldSummary(ctx.follower, ctx.leader))
         end
         for _, r in ipairs(self.rows) do r:Refresh() end
         if self.leaderDD.UpdateText then self.leaderDD:UpdateText() end
@@ -822,16 +951,30 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
     end
 
     -- Lay the card out at `width`; returns its height.
+    -- Folded, a link's card is its header alone. Open, the body is laid out
+    -- below the header; everything in it is placed against the body (B).
     function card:Layout(width)
         self:SetWidth(width)
+        local B = self.body
+        local headH = 0
+        if not ctx.draft then
+            local CARD = GUI.SectionCard
+            headH = CARD and CARD.header or 40
+            self.header:SetHeight(headH)
+            B:SetShown(self.expanded)
+            if not self.expanded then
+                self:SetHeight(headH)
+                return headH
+            end
+            B:SetWidth(width)
+        end
         local pad, gap = M.pad, M.gap
         local y = pad
-        -- header
-        local add = rawget(self, "addButton")
-        local addW = add and (add:GetWidth() or 140) or nil
-        local lines = UFO.LinkHeaderLines(width, m, addW)
+        -- the body's head line: pickers, summary, buttons ("+ Link Two Frames"
+        -- is on the card's header, not here)
+        local lines = UFO.LinkHeaderLines(width, m)
         self.leaderDD:ClearAllPoints()
-        self.leaderDD:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
+        self.leaderDD:SetPoint("TOPLEFT", B, "TOPLEFT", pad, -y)
         self.linkIcon:ClearAllPoints()
         self.linkIcon:SetPoint("LEFT", self.leaderDD, "RIGHT", 8, 0)
         self.linkedWith:ClearAllPoints()
@@ -848,27 +991,17 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
             self.summary:SetPoint("LEFT", self.followerDD, "RIGHT", gap, 0)
             buttonsY = y + lineH + 8
         else
-            self.summary:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -(y + lineH + 6))
-            buttonsY = y + lineH + 6 + (add and max(14, M.btnH) or 14) + 8
+            self.summary:SetPoint("TOPLEFT", B, "TOPLEFT", pad, -(y + lineH + 6))
+            buttonsY = y + lineH + 6 + 14 + 8
         end
-        -- "+ Link Two Frames" ends the summary's line, right-aligned.
-        if add then
-            add:ClearAllPoints()
-            if lines == 3 then
-                add:SetPoint("RIGHT", self, "TOPRIGHT", -pad, -(y + lineH + 6 + max(14, M.btnH) / 2))
-            else
-                add:SetPoint("TOPRIGHT", self, "TOPRIGHT", -pad, -y)
-            end
-        end
-        -- buttons: right-aligned on the header line (left of the add button),
-        -- else left-aligned below
-        local prev = (lines == 1) and add or nil
+        -- buttons: right-aligned on the head line, else left-aligned below
+        local prev = nil
         for i = #self.buttons, 1, -1 do
             local b = self.buttons[i]
             b:ClearAllPoints()
             if lines == 1 then
                 if prev then b:SetPoint("RIGHT", prev, "LEFT", -M.btnGap, 0)
-                else b:SetPoint("TOPRIGHT", self, "TOPRIGHT", -pad, -y) end
+                else b:SetPoint("TOPRIGHT", B, "TOPRIGHT", -pad, -y) end
                 prev = b
             end
         end
@@ -876,7 +1009,7 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
             prev = nil
             for _, b in ipairs(self.buttons) do
                 if prev then b:SetPoint("LEFT", prev, "RIGHT", M.btnGap, 0)
-                else b:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -buttonsY) end
+                else b:SetPoint("TOPLEFT", B, "TOPLEFT", pad, -buttonsY) end
                 prev = b
             end
         end
@@ -892,19 +1025,19 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
         local cols = UFO.LinkCardLayout(width, m)
         self.mode = cols.mode
         self.headLine:ClearAllPoints()
-        self.headLine:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -y)
-        self.headLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -y)
+        self.headLine:SetPoint("TOPLEFT", B, "TOPLEFT", 1, -y)
+        self.headLine:SetPoint("TOPRIGHT", B, "TOPRIGHT", -1, -y)
         self.capBand:ClearAllPoints()
-        self.capBand:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -(y + 1))
-        self.capBand:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -(y + 1))
+        self.capBand:SetPoint("TOPLEFT", B, "TOPLEFT", 1, -(y + 1))
+        self.capBand:SetPoint("TOPRIGHT", B, "TOPRIGHT", -1, -(y + 1))
         self.capBand:SetHeight(M.capBand)
         local capY = y + 1 + M.capBand / 2
         for _, fs in ipairs({ self.capPart, self.capPos, self.capLook, self.capResult }) do fs:ClearAllPoints() end
-        self.capPos:SetPoint("LEFT", self, "TOPLEFT", cols.pos, -capY)
-        self.capLook:SetPoint("LEFT", self, "TOPLEFT", cols.look, -capY)
+        self.capPos:SetPoint("LEFT", B, "TOPLEFT", cols.pos, -capY)
+        self.capLook:SetPoint("LEFT", B, "TOPLEFT", cols.look, -capY)
         if cols.mode == "wide" then
-            self.capPart:SetPoint("LEFT", self, "TOPLEFT", cols.name, -capY)
-            self.capResult:SetPoint("LEFT", self, "TOPLEFT", cols.result, -capY)
+            self.capPart:SetPoint("LEFT", B, "TOPLEFT", cols.name, -capY)
+            self.capResult:SetPoint("LEFT", B, "TOPLEFT", cols.result, -capY)
             self.capPart:Show(); self.capResult:Show()
         else
             -- Stacked: one caption line, aligned to the segments on each row's
@@ -913,18 +1046,20 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
         end
         y = y + 1 + M.capBand
         self.bandLine:ClearAllPoints()
-        self.bandLine:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -y)
-        self.bandLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -y)
+        self.bandLine:SetPoint("TOPLEFT", B, "TOPLEFT", 1, -y)
+        self.bandLine:SetPoint("TOPRIGHT", B, "TOPRIGHT", -1, -y)
 
         local function Group(fs, sub)
             y = y + M.headingGap
             fs:ClearAllPoints()
-            fs:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
-            y = y + 18
+            fs:SetPoint("TOPLEFT", B, "TOPLEFT", pad, -y)
+            -- A kit header: its text sits on the box's bottom edge.
+            fs:SetSize(width - 2 * pad, M.headingH)
+            y = y + M.headingH + 4
             if sub then
                 sub:ClearAllPoints()
                 local h = WrappedH(sub, width - 2 * pad)
-                sub:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -y)
+                sub:SetPoint("TOPLEFT", B, "TOPLEFT", pad, -y)
                 y = y + h + 4
             end
         end
@@ -936,22 +1071,23 @@ function UFO.CreateLinkCard(parent, follower, leader, m, draft)
             if i == 1 and self.hasLinkedGroup then Group(self.groupLinked); first = true end
             if i == self.firstSeparate then Group(self.groupSeparate, self.groupSeparateSub); first = true end
             r:ClearAllPoints()
-            r:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -y)
+            r:SetPoint("TOPLEFT", B, "TOPLEFT", 0, -y)
             y = y + r:Layout(cols, width, first)
         end
         y = y + 8
         self.footLine:ClearAllPoints()
-        self.footLine:SetPoint("TOPLEFT", self, "TOPLEFT", 1, -y)
-        self.footLine:SetPoint("TOPRIGHT", self, "TOPRIGHT", -1, -y)
+        self.footLine:SetPoint("TOPLEFT", B, "TOPLEFT", 1, -y)
+        self.footLine:SetPoint("TOPRIGHT", B, "TOPRIGHT", -1, -y)
         y = y + 12
         self.footIcon:ClearAllPoints()
-        self.footIcon:SetPoint("TOPLEFT", self, "TOPLEFT", pad, -(y + 1))
+        self.footIcon:SetPoint("TOPLEFT", B, "TOPLEFT", pad, -(y + 1))
         self.foot:ClearAllPoints()
         local fh = WrappedH(self.foot, width - 2 * pad - 18)
-        self.foot:SetPoint("TOPLEFT", self, "TOPLEFT", pad + 18, -y)
+        self.foot:SetPoint("TOPLEFT", B, "TOPLEFT", pad + 18, -y)
         y = y + fh + pad
-        self:SetHeight(y)
-        return y
+        B:SetHeight(y)
+        self:SetHeight(headH + y)
+        return headH + y
     end
 
     card:Refresh()
@@ -961,8 +1097,9 @@ end
 -- ============================================================
 -- THE PAGE'S HEAD AND THE THREE EXPLAINERS
 -- ============================================================
--- "+ Link Two Frames". It sits on the first link card's header line (by its
--- "parts linked" count); only with no card on the page does the head carry it.
+-- "+ Link Two Frames". It sits at the right end of the first link card's fold
+-- header (so it stays in reach while that card is folded); only with no card on
+-- the page does the head carry it.
 -- While a draft card is open there is none: the pair is being picked already.
 local function AddLinkButton(parent)
     local b = Button(parent, L["Link Two Frames"], { primary = true, width = 140,
@@ -1170,10 +1307,11 @@ function UFO.BuildLinksPage(self, db, Add)
         Block(card, Add)
     end
     for i, l in ipairs(links) do
-        local card = UFO.CreateLinkCard(self.child, l.follower, l.leader, m, false)
+        local card = UFO.CreateLinkCard(self.child, l.follower, l.leader, m, false,
+            UFO.LinkCardOpen(l.follower, #links))
         MeasureButtons(card, m)
         if i == 1 and not UFO.linkDraft then
-            card.addButton = AddLinkButton(card)
+            card:SetAddButton(AddLinkButton(card.header))
             m.addW = ceil(card.addButton:GetWidth() or 140)
         end
         cards[#cards + 1] = card

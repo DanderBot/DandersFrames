@@ -25,6 +25,7 @@
 
 ### Improvements
 
+- (Unit Frames) The **Linked Frames** page is easier to read: each linked pair folds away to one line showing how many parts are linked, mirrored or separate, and its group and column headings stand out.
 - (Performance) Debug logging now costs nothing while it is off: diagnostics and log messages are skipped entirely instead of being built and thrown away, and turning logging off stops them at once. (by Krathe)
 - (Absorbs) The absorb and heal absorb Display Mode options have clearer names: Overlay on Health, Attached (overflows), Attached (wraps back) (was Attached + Overflow) and, for heal absorbs, Attached (into health). The dropdowns now have a tooltip that explains each mode. Saved settings are unchanged. (by Krathe)
 
