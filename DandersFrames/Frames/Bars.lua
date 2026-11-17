@@ -285,6 +285,19 @@ function DF:LayoutResourceBar(frame, db)
     if db.resourceBarMatchAdjustFrameBorder and db.frameShowBorder ~= false then
         edgeInset = math.max(padding, bInset)
     end
+    -- ★ SHRINK HEALTH BAR TO FIT OVERRIDES ADJUST-OFF (field report, 2026-11-17: "the
+    -- frame border no longer covers the edges of the resource bar"). Adjust OFF lets
+    -- the bar's ends run over the border band (bar +20 above border +14). Without the
+    -- shrink that read as one block: the bar sat on the health bar and the border ran
+    -- down beside both. With the shrink the bar is its own strip BELOW the health bar,
+    -- so its ends cutting through the border reads as the border stopping at the bar.
+    -- While the shrink is wanted, the border has to frame health AND power, so the ends
+    -- always tuck inside the band. Shrink off is untouched. The anchored axis keeps
+    -- the user's offset (the shrink measures from it, HealthRect.lua).
+    if db.frameShowBorder ~= false and not frame.dfStandalone
+        and DF.IsHealthShrinkWanted and DF:IsHealthShrinkWanted(frame, db) then
+        edgeInset = math.max(padding, bInset)
+    end
 
     if DF:IsResourceBarDetached(frame, db) then
         -- ★ DETACHED (a standalone frame only -- see DF:IsResourceBarDetached): the

@@ -46,12 +46,24 @@ function DF:CanShrinkHealthForPowerBar(db)
     return DF:GetPowerBarShrinkSide(db) ~= nil
 end
 
+-- Settings + frame half of the gate, WITHOUT the bar's shown state: would this
+-- frame's health bar stop at its power bar while the bar is up? Bars.lua asks this
+-- while laying the bar out (the bar is being shown at that moment), to keep the
+-- bar's ends inside the frame border band -- see LayoutResourceBar's edgeInset.
+function DF:IsHealthShrinkWanted(frame, db)
+    if not (db and db.resourceBarShrinkHealth) then return false end
+    if not frame or not DF:CanShrinkHealthForPowerBar(db) then return false end
+    if DF.IsResourceBarDetached and DF:IsResourceBarDetached(frame, db) then return false end
+    return true
+end
+
 -- How far the power bar's INNER edge sits from the frame edge it is attached to.
 -- Thickness plus the offset that pushes it inward (a positive Y for a bottom bar,
 -- a negative Y for a top bar, and the same with X for left / right). An outward
--- offset is negative and reduces it. Snapped with pixelPerfect the way Bars.lua
--- snaps the bar's thickness and border inset, so the health bar's edge lands on
--- the same physical pixel as the bar's.
+-- offset is negative and reduces it.
+-- ☠ SNAP EXACTLY WHAT Bars.lua SNAPS, NO MORE: the bar is ppThickness tall, placed
+-- at the RAW offset from the frame edge. Snapping the total as well put the health
+-- bar's edge one pixel off the bar's whenever the offset was not a whole pixel.
 local function PowerBarInnerEdge(db, side)
     local thickness = tonumber(db.resourceBarHeight) or 4
     if db.pixelPerfect and DF.PixelPerfect then thickness = DF:PixelPerfect(thickness) end
@@ -60,9 +72,7 @@ local function PowerBarInnerEdge(db, side)
     elseif side == "TOP" then inward = -(tonumber(db.resourceBarY) or 0)
     elseif side == "LEFT" then inward = tonumber(db.resourceBarX) or 0
     else inward = -(tonumber(db.resourceBarX) or 0) end
-    local edge = thickness + inward
-    if db.pixelPerfect and DF.PixelPerfect then edge = DF:PixelPerfect(edge) end
-    return edge
+    return thickness + inward
 end
 
 -- The health bar's insets from the frame's LEFT, RIGHT, TOP and BOTTOM edges.

@@ -181,11 +181,10 @@ do
     f.dfPowerBar:Show()
     local t = insets(f, baseDB({ pixelPerfect = true, resourceBarHeight = 4, resourceBarY = 1 }))
     local b = t[4]
-    local steps = b / scale
-    check(math.abs(steps - math.floor(steps + 0.5)) < 1e-9, "pixel perfect: the stop lands on a whole physical pixel")
-    -- thickness snaps first (as Bars.lua's ppThickness does), then the total
-    local expect = DF:PixelPerfect(DF:PixelPerfect(4) + 1)
-    check(math.abs(b - expect) < 1e-9, "pixel perfect: thickness snapped like the bar's, then the edge")
+    -- thickness snaps (as Bars.lua's ppThickness does); the offset stays raw, as the
+    -- bar's anchor offset does, so the two edges are the same number
+    local expect = DF:PixelPerfect(4) + 1
+    check(math.abs(b - expect) < 1e-9, "pixel perfect: thickness snapped like the bar's, offset raw like the bar's")
     t = insets(f, baseDB({ pixelPerfect = false, resourceBarHeight = 4, resourceBarY = 1 }))
     eq(t[4], 5, "pixel perfect off: raw numbers, no snapping")
     DF.PixelPerfect = nil
