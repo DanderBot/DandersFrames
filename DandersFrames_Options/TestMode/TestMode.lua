@@ -39,7 +39,7 @@ DF.TestData = {
         -- ⚠ THE LIVE COLLISION IS UNFIXED — a real unit that is AFK during a real ready
         -- check still gets both at the same point, draw order by creation order. That is
         -- a defaults/precedence decision; this only moves the preview.
-        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = true, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20, showDefensive = false, showMissingBuff = false, showReadyCheck = false, showImportantDebuff = false},  -- AFK timer, skull marker, leader, main tank, has HoT, in combat (BG carrier lives on Xx — this frame's centre belongs to the AFK countdown)
+        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, power = 1.0, isAFK = true, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20, showDefensive = false, showMissingBuff = false, showReadyCheck = false, showImportantDebuff = false},  -- AFK timer, skull marker, leader, main tank, has HoT, in combat (BG carrier lives on Xx — this frame's centre belongs to the AFK countdown)
         -- The DEFENSIVE ICON + summon frame (HEALER, so the defensive row shows by the
         -- role rule — no override needed). The missing-buff strip is off: with both, this
         -- became the busiest frame of the five and the two strips sat in the same region.
@@ -575,7 +575,9 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         healthPercent = data.health,
         maxHealth = data.maxHealth,
         currentHealth = math.floor(data.health * data.maxHealth),
-        powerPercent = 0.8,  -- Default power for party
+        -- A unit's own `power`, else 0.8: one full bar (Tankerino) beside partly filled ones, so
+        -- the preview shows the resource bar both with and without its empty background.
+        powerPercent = data.power or 0.8,
         absorbPercent = data.absorb,
         reducedMaxPct = data.reducedMaxPct or 0,
         healAbsorbPercent = data.healAbsorb,
