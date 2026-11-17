@@ -156,10 +156,42 @@ function DF:IsResourceBarDetached(frame, db)
     return (frame and frame.dfStandalone and db and db.resourceBarDetached) and true or false
 end
 
+-- ============================================================
+-- SHRINK HEALTH BAR: THE POWER BAR'S VISIBILITY WATCH
+-- With resourceBarShrinkHealth on, the health bar stops at an edge-attached power
+-- bar (Frames/HealthRect.lua). That rect depends on whether THIS frame's bar is
+-- shown, and the bar is shown and hidden from a dozen places: this file's layout and
+-- update paths, the live full update, the test-mode render, role / class / solo
+-- gates. Hooking the bar's own Show / Hide / SetShown catches every one of them
+-- without touching each call site -- and catches a hide made while the parent frame
+-- is hidden, which an OnHide script would miss (OnHide only fires on a VISIBLE change).
+-- ☠ NOT A PER-TICK COST: DF:SyncHealthBarRect is four number compares when nothing
+-- moved, and only a real change re-anchors. The bar is a plain StatusBar, not
+-- secure, and the regions it moves are plain too, so this is combat-safe.
+-- ============================================================
+local function PowerBarVisibilityChanged(bar)
+    local frame = bar.dfOwnerFrame
+    if frame and DF.SyncHealthBarRect then DF:SyncHealthBarRect(frame) end
+end
+
+function DF:WatchPowerBarForHealthRect(frame)
+    local bar = frame and frame.dfPowerBar
+    if not bar or bar.dfHealthRectWatched then return end
+    if frame.dfStandalone then return end   -- unit frames companion: never shrinks
+    bar.dfHealthRectWatched = true
+    bar.dfOwnerFrame = frame
+    hooksecurefunc(bar, "Show", PowerBarVisibilityChanged)
+    hooksecurefunc(bar, "Hide", PowerBarVisibilityChanged)
+    hooksecurefunc(bar, "SetShown", PowerBarVisibilityChanged)
+end
+
 function DF:LayoutResourceBar(frame, db)
     local bar = frame and frame.dfPowerBar
     if not bar then return end
 
+    if not bar.dfHealthRectWatched and DF.WatchPowerBarForHealthRect then
+        DF:WatchPowerBarForHealthRect(frame)
+    end
     bar:Show()
     bar:ClearAllPoints()
 
@@ -325,6 +357,13 @@ function DF:LayoutResourceBar(frame, db)
             unit  = frame.unit,
             frame = frame,
         }))
+    end
+
+    -- Thickness / anchor / offset may have changed without the bar's visibility
+    -- changing (a slider drag runs only this function): let the health rect follow.
+    -- A no-op unless the rect actually moved.
+    if DF.SyncHealthBarRect and not frame.dfStandalone then
+        DF:SyncHealthBarRect(frame, db)
     end
 end
 

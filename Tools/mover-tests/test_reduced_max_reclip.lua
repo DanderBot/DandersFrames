@@ -1,9 +1,9 @@
 -- ============================================================
--- REDUCED MAX HEALTH RE-CLIP (Frames/ReducedMaxHealth.lua + Update.lua)
+-- REDUCED MAX HEALTH RE-CLIP (Frames/ReducedMaxHealth.lua + HealthRect.lua)
 -- A layout pass re-anchors the health bar to the full frame. The reduced-max clip
 -- re-runs only when its geometry changes, so the re-anchor has to forget the clip
--- or the health fill runs under the reduced band. ReducedMaxHealth.lua is loaded
--- REAL; DF:AnchorHealthBarsToPadding is lifted from Update.lua by its source text.
+-- or the health fill runs under the reduced band. ReducedMaxHealth.lua and
+-- HealthRect.lua (DF:AnchorHealthBarsToPadding) are both loaded REAL.
 -- ============================================================
 
 local saved = {}
@@ -55,13 +55,10 @@ local DF = {
     DebugWarn = function() end,
     DebugActive = function() return true end,
 }
+-- DF:AnchorHealthBarsToPadding lives in Frames/HealthRect.lua, the one file that
+-- owns the health bar's rect; loaded REAL as well.
+load_df_file_into("Frames/HealthRect.lua", DF)
 load_df_file_into("Frames/ReducedMaxHealth.lua", DF)
-
-local src = df_file_source("Frames/Update.lua")
-local a = src:find("function DF:AnchorHealthBarsToPadding(frame, db)", 1, true)
-local e = a and src:find("\nend\r?\n", a)
-check(a and e, "setup: lifted AnchorHealthBarsToPadding")
-assert(loadstring("local DF = ...\n" .. src:sub(a, e + 4), "@anchor"))(DF)
 
 local frame = { dfIsTestFrame = true, dfTestReducedMaxPct = 0.25, healthBar = Bar() }
 DF:CreateReducedMaxHealthBar(frame, db)

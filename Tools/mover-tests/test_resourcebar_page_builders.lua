@@ -198,6 +198,7 @@ local RESOURCE_POSITION = {
     { "dropdown", "Anchor",   "resourceBarAnchor", 55 },
     { "slider",   "Offset X", "resourceBarX",      55 },
     { "slider",   "Offset Y", "resourceBarY",      55 },
+    { "checkbox", "Shrink Health Bar To Fit", "resourceBarShrinkHealth", 30 },
 }
 local RESOURCE_APPEARANCE = {
     { "texturedropdown", "Texture",                "resourceBarTexture",     55 },
