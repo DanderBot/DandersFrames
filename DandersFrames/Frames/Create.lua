@@ -1858,7 +1858,7 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- happens to match the default just hides the split again.
     local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
-        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
+        + DF:ResolveResourceBarLevelOffset(frame, powerDB))
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
@@ -2168,7 +2168,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- happens to match the default just hides the split again.
     local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
-        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
+        + DF:ResolveResourceBarLevelOffset(frame, powerDB))
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")

@@ -19,18 +19,19 @@ local DEFAULT_BAR_COLOR = { r = 0.2, g = 0.2, b = 0.2, a = 0.85 }
 function DF:CreateReducedMaxHealthBar(frame, db)
     if not frame or not frame.healthBar or frame.dfReducedMaxHealthBar then return end
 
-    local padding = (db and db.framePadding) or 0
+    local l, t, r, b = DF:GetHealthBarInsets(frame, db)
 
     local bar = CreateFrame("StatusBar", nil, frame)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
-    bar:SetPoint("TOPLEFT", padding, -padding)
-    bar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    bar:SetPoint("TOPLEFT", l, -t)
+    bar:SetPoint("BOTTOMRIGHT", -r, b)
     bar:SetReverseFill(true)
     bar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 6)
     bar:Hide()
 
     frame.dfReducedMaxHealthBar = bar
+    if DF.HoleBarToResourceBar then DF:HoleBarToResourceBar(frame, bar) end
 end
 
 function DF:RestoreHealthBarFromReducedMax(frame)
@@ -40,10 +41,10 @@ function DF:RestoreHealthBarFromReducedMax(frame)
         return
     end
     local db = DF:GetFrameDB(frame)
-    local padding = (db and db.framePadding) or 0
+    local l, t, r, b = DF:GetHealthBarInsets(frame, db)
     frame.healthBar:ClearAllPoints()
-    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    frame.healthBar:SetPoint("TOPLEFT", l, -t)
+    frame.healthBar:SetPoint("BOTTOMRIGHT", -r, b)
     frame.dfReducedMaxHealthClipping = nil
     -- Same reason as the clip path: this restores the health bar's full rect, and the
     -- absorb layout cache detects a resize by MEASURING that rect — which will not have
@@ -125,15 +126,15 @@ function DF:UpdateReducedMaxHealth(frame)
             bar, isVertical, c, db.reducedMaxHealthBlendMode or "BLEND"))
     end
 
-    -- Re-anchor the bar to the current padding. It is otherwise positioned only
-    -- at creation (CreateReducedMaxHealthBar), so a padding change left it — and
+    -- Re-anchor the bar to the health bar's current insets. It is otherwise positioned
+    -- only at creation (CreateReducedMaxHealthBar), so a padding change left it — and
     -- the clipped health bar's right edge, which anchors to this bar's texture —
     -- at the old inset, producing asymmetric padding (new on the left, old on
     -- the right).
-    local padding = db.framePadding or 0
+    local l, t, r, b = DF:GetHealthBarInsets(frame, db)
     bar:ClearAllPoints()
-    bar:SetPoint("TOPLEFT", padding, -padding)
-    bar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    bar:SetPoint("TOPLEFT", l, -t)
+    bar:SetPoint("BOTTOMRIGHT", -r, b)
 
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(pct)
@@ -167,29 +168,30 @@ function DF:UpdateReducedMaxHealth(frame)
         -- on the next pass through here.
         local needClip = not (frame.dfReducedMaxHealthClipping
             and frame.dfRMClipOrient == orientation
-            and frame.dfRMClipPad == padding
+            and frame.dfRMClipL == l and frame.dfRMClipT == t
+            and frame.dfRMClipR == r and frame.dfRMClipB == b
             and frame.dfRMClipTex == tex)
         if needClip then
             local clipped = pcall(function()
                 frame.healthBar:ClearAllPoints()
                 if orientation == "HORIZONTAL_INV" then          -- reduced on left
-                    frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
-                    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+                    frame.healthBar:SetPoint("TOPRIGHT", -r, -t)
+                    frame.healthBar:SetPoint("BOTTOMRIGHT", -r, b)
                     frame.healthBar:SetPoint("TOPLEFT", tex, "TOPRIGHT")
                     frame.healthBar:SetPoint("BOTTOMLEFT", tex, "BOTTOMRIGHT")
                 elseif orientation == "VERTICAL" then            -- reduced on top
-                    frame.healthBar:SetPoint("BOTTOMLEFT", padding, padding)
-                    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+                    frame.healthBar:SetPoint("BOTTOMLEFT", l, b)
+                    frame.healthBar:SetPoint("BOTTOMRIGHT", -r, b)
                     frame.healthBar:SetPoint("TOPLEFT", tex, "BOTTOMLEFT")
                     frame.healthBar:SetPoint("TOPRIGHT", tex, "BOTTOMRIGHT")
                 elseif orientation == "VERTICAL_INV" then        -- reduced on bottom
-                    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-                    frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
+                    frame.healthBar:SetPoint("TOPLEFT", l, -t)
+                    frame.healthBar:SetPoint("TOPRIGHT", -r, -t)
                     frame.healthBar:SetPoint("BOTTOMLEFT", tex, "TOPLEFT")
                     frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "TOPRIGHT")
                 else                                             -- HORIZONTAL: reduced on right
-                    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-                    frame.healthBar:SetPoint("BOTTOMLEFT", padding, padding)
+                    frame.healthBar:SetPoint("TOPLEFT", l, -t)
+                    frame.healthBar:SetPoint("BOTTOMLEFT", l, b)
                     frame.healthBar:SetPoint("TOPRIGHT", tex, "TOPLEFT")
                     frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "BOTTOMLEFT")
                 end
@@ -203,10 +205,11 @@ function DF:UpdateReducedMaxHealth(frame)
                         .. "falling back to the unclipped rect", tostring(unit or "(test)"))
                 end
                 frame.healthBar:ClearAllPoints()
-                frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-                frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+                frame.healthBar:SetPoint("TOPLEFT", l, -t)
+                frame.healthBar:SetPoint("BOTTOMRIGHT", -r, b)
                 frame.dfReducedMaxHealthClipping = nil
-                frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = nil, nil, nil
+                frame.dfRMClipOrient, frame.dfRMClipTex = nil, nil
+                frame.dfRMClipL, frame.dfRMClipT, frame.dfRMClipR, frame.dfRMClipB = nil, nil, nil, nil
                 frame.dfAbsorbState = nil
                 return
             end
@@ -226,7 +229,8 @@ function DF:UpdateReducedMaxHealth(frame)
             -- that depends on it, so the next pass re-derives instead of measuring a rect
             -- that has not caught up.
             frame.dfAbsorbState = nil
-            frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = orientation, padding, tex
+            frame.dfRMClipOrient, frame.dfRMClipTex = orientation, tex
+            frame.dfRMClipL, frame.dfRMClipT, frame.dfRMClipR, frame.dfRMClipB = l, t, r, b
         end
     else
         DF:RestoreHealthBarFromReducedMax(frame)

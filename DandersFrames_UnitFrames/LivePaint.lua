@@ -68,9 +68,12 @@ end
 
 local function ReducedMax(f) DF:UpdateReducedMaxHealth(f) end
 
--- The absorb bars inset by the border, so they follow it.
+-- The absorb bars inset by the border, so they follow it; so do a health bar kept inside
+-- the border and a resource bar kept inside it (as DF:LightweightUpdateBorder does).
 local function Border(f, db)
     DF:ApplyFrameBorder(f, db)
+    if f.dfPowerBar and f.dfPowerBar:IsShown() then DF:LayoutResourceBar(f, db) end
+    DF:SyncHealthBarRect(f, db)
     DF:UpdateAbsorb(f)
     DF:UpdateHealAbsorb(f)
 end

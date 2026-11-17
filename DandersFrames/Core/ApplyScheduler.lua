@@ -28,8 +28,8 @@ local addonName, DF = ...
 --   headers -> raidLayout -> frames -> visible -> all
 -- chosen to preserve the two load-bearing orderings in the Frames page's local
 -- UpdateFrames() (DandersFrames_Options/GUI/Pages/Options.lua):
---   (a) LightweightUpdateFrameSize(true) must run BEFORE ApplyHeaderSettings -- it is the
---       only path that re-anchors the health bar to framePadding, and ApplyHeaderSettings
+--   (a) LightweightUpdateFrameSize(true) must run BEFORE ApplyHeaderSettings -- it resizes
+--       frames and re-anchors the health bar to framePadding, and ApplyHeaderSettings
 --       then re-applies frame width/height through the secure header. That pre-work is a
 --       direct synchronous call at the site, outside this sink, so no drain order can
 --       reorder it.

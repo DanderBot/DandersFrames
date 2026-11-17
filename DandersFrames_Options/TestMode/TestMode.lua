@@ -899,6 +899,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
 
     -- ★ LIVE'S INSET, not a restatement of it. UpdateReducedMaxHealth below may re-clip
     -- the right edge after.
+    DF:NoteResourceBarWanted(frame, DF:TestResourceBarWanted(frame, db, testData))
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if db.testShowReducedMaxHealth ~= false then
@@ -1675,18 +1676,10 @@ local function TestPowerTokenFor(class, role)
     return TEST_POWER_TOKEN[class or ""] or "MANA"
 end
 
--- Update test power bar (unified for party and raid)
-function DF:UpdateTestPowerBar(frame, testData)
-    if not frame then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Check if resource bar should be shown
-    if not db.resourceBarEnabled then
-        if frame.dfPowerBar then frame.dfPowerBar:Hide() end
-        return
-    end
-    
+-- Whether a preview frame carries a resource bar. The test update asks before placing the
+-- health bar (a Placement strip keys on it) and again to draw the bar.
+function DF:TestResourceBarWanted(frame, db, testData)
+    if not (db.resourceBarEnabled and testData) then return false end
     -- ★ THE LIVE GATE, fed test DATA. DF:ShouldShowResourceBar takes an optional role
     -- override precisely so the preview can drive it without a real unit -- a test path
     -- that is a PARAMETER of the live function, not a copy of it.
@@ -1705,7 +1698,22 @@ function DF:UpdateTestPowerBar(frame, testData)
     -- carries a real token belonging to somebody else, so it must answer as DATA.
     local selfIndex = frame.isRaidFrame and 1 or 0
     local soloScoped = (frame.isPinnedFrame and true) or (testData.index == selfIndex)
-    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, soloScoped)
+    return DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, soloScoped)
+end
+
+-- Update test power bar (unified for party and raid)
+function DF:UpdateTestPowerBar(frame, testData)
+    if not frame then return end
+
+    local db = DF:GetFrameDB(frame)
+
+    -- Check if resource bar should be shown
+    if not db.resourceBarEnabled then
+        if frame.dfPowerBar then frame.dfPowerBar:Hide() end
+        return
+    end
+
+    local showBar = DF:TestResourceBarWanted(frame, db, testData)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end

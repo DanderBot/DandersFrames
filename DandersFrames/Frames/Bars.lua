@@ -156,6 +156,22 @@ function DF:IsResourceBarDetached(frame, db)
     return (frame and frame.dfStandalone and db and db.resourceBarDetached) and true or false
 end
 
+-- The resource bar's frame level, as an offset from its unit frame. Every writer of that
+-- level asks here, so creation, layout and the Frame Level slider's live reapply agree.
+-- On top of the health bar: the user's Frame Level (default +20, above the frame border at
+-- +14). Along a Placement side: its own Frame Level, default +12 -- under the frame border,
+-- so with Adjust For Frame Border off the border draws over the strip as it does over the
+-- health bar. Its own key, as the strip's offsets are, so neither placement's default moves
+-- the other. Nothing from the health bar draws in its rect (DF:SyncResourceBarHole), so any
+-- level shows the bar; the level only orders it against the border, dispel and text.
+DF.RESOURCE_BAR_ROOM_LEVEL = 12
+function DF:ResolveResourceBarLevelOffset(frame, db)
+    if DF:GetResourceBarRoomEdge(db, frame) then
+        return tonumber(db.resourceBarStripFrameLevel) or DF.RESOURCE_BAR_ROOM_LEVEL
+    end
+    return (db and db.resourceBarFrameLevel) or 20
+end
+
 function DF:LayoutResourceBar(frame, db)
     local bar = frame and frame.dfPowerBar
     if not bar then return end
@@ -249,10 +265,14 @@ function DF:LayoutResourceBar(frame, db)
     -- so no upgrading profile changes look — see the key's note in Config.lua. Aphoex
     -- 5's resolution is the OFF position being one click away, not the default:
     -- continuity for every existing profile won over the new ideal.
+    -- Keep Health Bar Inside Border puts the health bar's ends at the border's inner edge,
+    -- so a bar matching it ends there too, whichever way Adjust is set.
     local edgeInset = padding
-    if db.resourceBarMatchAdjustFrameBorder and db.frameShowBorder ~= false then
+    if (db.resourceBarMatchAdjustFrameBorder or DF:BarsInsideFrameBorder(db)) and db.frameShowBorder ~= false then
         edgeInset = math.max(padding, bInset)
     end
+
+    local roomEdge = DF:GetResourceBarRoomEdge(db, frame)
 
     if DF:IsResourceBarDetached(frame, db) then
         -- ★ DETACHED (a standalone frame only -- see DF:IsResourceBarDetached): the
@@ -269,6 +289,40 @@ function DF:LayoutResourceBar(frame, db)
         if not DF.DETACHED_BAR_POINT[point] then point = "BOTTOM" end
         bar:SetPoint(DF.DETACHED_BAR_POINT[point], frame, point,
             tonumber(db.resourceBarDetachedX) or 0, tonumber(db.resourceBarDetachedY) or 0)
+    elseif roomEdge then
+        -- ★ PLACEMENT STRIP: the bar sits along its side, inset from every frame edge by the
+        -- same amount -- the padding, or the border band with Adjust For Frame Border on. The
+        -- health bar is cut out under it (DF:SyncResourceBarHole), which follows this rect
+        -- wherever the settings below move it.
+        -- The side fixes one axis, so Anchor only says where along the side a shorter bar
+        -- (Match off) sits: its left / centre / right part on a top or bottom strip, its top /
+        -- middle / bottom part on a left or right one. The side, not the Orientation, decides
+        -- which way the strip runs. The strip's offsets are its own keys: On Top's offsets
+        -- measure from the frame edge (and default to a 1 px lift), so sharing them would move
+        -- every strip off its edge.
+        local p = DF:GetResourceBarStripInset(db)
+        local sx = tonumber(db.resourceBarStripX) or 0
+        local sy = tonumber(db.resourceBarStripY) or 0
+        local across = roomEdge == "BOTTOM" or roomEdge == "TOP"
+        local function seat(point)
+            local x = point:find("LEFT") and p or (point:find("RIGHT") and -p or 0)
+            local y = point:find("BOTTOM") and p or (point:find("TOP") and -p or 0)
+            bar:SetPoint(point, frame, point, x + sx, y + sy)
+        end
+        if across then bar:SetHeight(ppThickness) else bar:SetWidth(ppThickness) end
+        if db.resourceBarMatchWidth then
+            if across then
+                seat(roomEdge .. "LEFT"); seat(roomEdge .. "RIGHT")
+            else
+                seat("TOP" .. roomEdge); seat("BOTTOM" .. roomEdge)
+            end
+        elseif across then
+            bar:SetWidth(ppLength)
+            seat(roomEdge .. (anchor:find("LEFT") and "LEFT" or (anchor:find("RIGHT") and "RIGHT" or "")))
+        else
+            bar:SetHeight(ppLength)
+            seat((anchor:find("TOP") and "TOP" or (anchor:find("BOTTOM") and "BOTTOM" or "")) .. roomEdge)
+        end
     elseif isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
         bar:SetWidth(ppThickness)
@@ -298,10 +352,7 @@ function DF:LayoutResourceBar(frame, db)
         end
     end
 
-    -- Frame level - relative to the main frame. The default 20 puts it ABOVE the frame
-    -- border (+14, see Frames/Create.lua CreateFrameBorder); below 14 renders under it.
-    local frameLevelOffset = db.resourceBarFrameLevel or 20
-    bar:SetFrameLevel(frame:GetFrameLevel() + frameLevelOffset)
+    bar:SetFrameLevel(frame:GetFrameLevel() + DF:ResolveResourceBarLevelOffset(frame, db))
     if bar.border then
         bar.border:SetFrameLevel(bar:GetFrameLevel() + 1)
     end
@@ -338,11 +389,19 @@ function DF:ApplyResourceBarLayout(frame)
     if not frame.dfPowerBar then return end
     local bar = frame.dfPowerBar
 
-    -- Enabled + unit + role gates
-    if not db.resourceBarEnabled then bar:Hide() return end
+    -- Enabled + unit + role gates. The decision also tells a Placement strip whether this
+    -- frame keeps a strip for the bar, and the sync cuts or restores the health bar's hole.
+    if not db.resourceBarEnabled then
+        DF:NoteResourceBarWanted(frame, false)
+        DF:SyncHealthBarRect(frame, db)
+        bar:Hide() return
+    end
     if not frame.unit then bar:Hide() return end
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
-    if not DF:ShouldShowResourceBar(frame.unit, db, nil, nil, nil, frame) then bar:Hide() return end
+    local wanted = DF:ShouldShowResourceBar(frame.unit, db, nil, nil, nil, frame)
+    DF:NoteResourceBarWanted(frame, wanted)
+    DF:SyncHealthBarRect(frame, db)
+    if not wanted then bar:Hide() return end
 
     -- Shared geometry/appearance (size, anchor, level, background, border).
     DF:LayoutResourceBar(frame, db)
@@ -491,6 +550,7 @@ local function AbsorbLayoutStateChanged(frame, db)
     if s.frameShowBorder ~= (db.frameShowBorder ~= false)                 then return true end
     if s.frameBorderSize ~= (db.frameBorderSize or 1)                     then return true end
     if s.frameBorderAlpha ~= ((db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1) then return true end
+    if s.barsInsideBorder ~= DF:BarsInsideFrameBorder(db)                 then return true end
 
     -- Floating-mode specific
     if s.orientation     ~= (db.absorbBarOrientation or "HORIZONTAL")     then return true end
@@ -564,6 +624,7 @@ local function CacheAbsorbLayoutState(frame, db)
     s.frameShowBorder = db.frameShowBorder ~= false
     s.frameBorderSize = db.frameBorderSize or 1
     s.frameBorderAlpha = (db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1
+    s.barsInsideBorder = DF:BarsInsideFrameBorder(db)
     s.orientation     = db.absorbBarOrientation or "HORIZONTAL"
     s.width           = db.absorbBarWidth or 50
     s.height          = db.absorbBarHeight or 6
@@ -606,7 +667,18 @@ function DF:GetAbsorbEdgeInset(frame, db)
     local bc = db.frameBorderColor
     local alpha = (bc and (bc.a or bc[4])) or 1
     if alpha >= 1 then return 0 end
-    local inset = (frame and frame.dfReducedMaxHealthClipping) and 0 or (db.frameBorderSize or 1)
+    return DF:GetHealthBarBorderOverlap(frame, db)
+end
+
+-- How far the frame border lies over the health bar on each side: the border size, snapped
+-- as the border is, or 0 when none of it does -- no border, a reduced-max clip edge (internal,
+-- no border there), or Keep Health Bar Inside Border, which stops the bar at the border's
+-- inner edge. The bars tied to the health bar size and inset themselves by it; counting a
+-- border the bar is already clear of shrank them twice.
+function DF:GetHealthBarBorderOverlap(frame, db)
+    if not db or db.frameShowBorder == false then return 0 end
+    if (frame and frame.dfReducedMaxHealthClipping) or DF:BarsInsideFrameBorder(db) then return 0 end
+    local inset = db.frameBorderSize or 1
     if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
     return inset
 end
@@ -754,6 +826,87 @@ local function SetTextureMask(tex, mask)
 end
 DF.SetTextureMask = SetTextureMask
 
+-- ★ THE RESOURCE BAR'S HOLE. A Placement strip lays the resource bar along an edge of the
+-- health bar without shrinking it: every health-family texture is masked out inside the
+-- resource bar's rect instead. A frame fade dims each bar on its own, so anything left
+-- under the resource bar shows through it when faded; cut out, only the frame background
+-- does. The health bar keeps its full rect, so a see-through frame border lies over health
+-- on every side and tints it evenly.
+-- It is the inverse of the health-rect mask: a fully clear texture that clamps to WHITE, so
+-- it hides only inside its own rect. A second slot (dfHole) beside dfMask, because a texture
+-- can be in the health rect and the hole at once.
+-- ☠ ONE MASK PER BAR, MADE ON THE BAR ITSELF, as the health-rect mask is -- never one shared
+-- mask on the unit frame. The absorb and heal absorb bars move between the unit frame and
+-- the health bar on every update (SetParent per mode); a mask owned by the bar moves with
+-- it, where a shared one would rely on the engine keeping it through each reparent.
+local RESOURCE_HOLE_TEX = "Interface\\AddOns\\DandersFrames\\Media\\DF_HoleMask"
+
+local function SetTextureHole(tex, hole)
+    if tex.dfHole == hole then return end
+    if tex.dfHole then tex:RemoveMaskTexture(tex.dfHole) end
+    if hole then tex:AddMaskTexture(hole) end
+    tex.dfHole = hole
+end
+DF.SetTextureHole = SetTextureHole
+
+local function HoleRegions(hole, ...)
+    for i = 1, select("#", ...) do
+        local r = select(i, ...)
+        if r:GetObjectType() == "Texture" then SetTextureHole(r, hole) end
+    end
+end
+
+-- Cuts (or restores) one bar or host: its own textures, its fill and its texture layers.
+-- Cached per bar, so the callers that run on every update cost a compare. `force` re-walks
+-- after a texture was added to a bar that was already cut.
+function DF:HoleBarToResourceBar(frame, bar, force)
+    if not bar then return end
+    -- No strip and nothing cut on this bar: nothing to do. Keeps On Top of Health Bar (the
+    -- default) at one field read on the absorb and heal paths that call this every update.
+    if not frame.dfResourceHoleOn and not bar.dfHoleMask then return end
+    local hole = nil
+    if frame.dfResourceHoleOn and frame.dfPowerBar then
+        hole = bar.dfResourceHoleTex
+        if not hole then
+            hole = bar:CreateMaskTexture()
+            -- NEAREST: the 8x8 is stretched over the bar, and filtering would soften its edge.
+            hole:SetTexture(RESOURCE_HOLE_TEX, "CLAMPTOWHITE", "CLAMPTOWHITE", "NEAREST")
+            hole:SetAllPoints(frame.dfPowerBar)
+            bar.dfResourceHoleTex = hole
+        end
+    end
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture() or nil
+    if not force and bar.dfHoleWalked and bar.dfHoleMask == hole and bar.dfHoleFill == fill then return end
+    bar.dfHoleWalked, bar.dfHoleMask, bar.dfHoleFill = true, hole, fill
+    HoleRegions(hole, bar:GetRegions())
+    if fill then SetTextureHole(fill, hole) end
+    local layers = bar.dfTextureLayers
+    if layers then
+        for _, tex in pairs(layers.textures) do SetTextureHole(tex, hole) end
+    end
+end
+
+-- Every bar drawn in the health bar's rect. Bars made later are cut when they are first
+-- masked or created (MaskBarToHealthBar, the glow and spark hosts, the reduced-max bar).
+local HOLE_ROOTS = {
+    "healthBar", "missingHealthBar", "dfAbsorbBar", "dfHealAbsorbBar", "absorbOverflowBar",
+    "dfHealPredictionBar", "dfHealPredictionBar2", "dfReducedMaxHealthBar",
+    "dfOvershieldHost", "dfOverhealHost",
+}
+
+-- ★ KEYED ON WHETHER THE FRAME IS MEANT TO HAVE A BAR (DF:NoteResourceBarWanted), not on
+-- the bar being shown, as the strip itself is: death, disconnects and secret power hide the
+-- bar, and following those would flash health into the strip on every death and rez.
+function DF:SyncResourceBarHole(frame, db)
+    local power = frame and frame.dfPowerBar
+    if not (power and frame.healthBar) then return end
+    frame.dfResourceHoleOn = (frame.dfResourceBarWanted and DF:GetResourceBarRoomEdge(db, frame)) and true or false
+    for i = 1, #HOLE_ROOTS do
+        local bar = frame[HOLE_ROOTS[i]]
+        if bar then DF:HoleBarToResourceBar(frame, bar) end
+    end
+end
+
 function DF:MaskBarToHealthBar(frame, bar, on)
     if not (bar and frame.healthBar) then return end
     local mask
@@ -782,6 +935,7 @@ function DF:MaskBarToHealthBar(frame, bar, on)
         -- Layers are built after the fill hold starts on a new bar (see HoldFillUntilPlaced).
         layers.canvas:SetAlpha(bar.dfFillHeld and 0 or 1)
     end
+    DF:HoleBarToResourceBar(frame, bar)
 end
 
 -- ☠ A FRESHLY SET FILL COVERS THE WHOLE BAR UNTIL THE ENGINE PLACES IT. SetStatusBarTexture
@@ -1027,11 +1181,7 @@ local function UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxH
         end
         local orient = db.healthOrientation or "HORIZONTAL"
         local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         local anchorTex = ResolveAbsorbBreakoutAnchor(frame, db)
         if not anchorTex then return HideBreakout(bo) end
         AnchorHealPredSegment(bo, anchorTex, orient,
@@ -1545,6 +1695,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             frame.dfOvershieldHost:Show()
             if not frame.absorbOvershieldGlow then
                 frame.absorbOvershieldGlow = frame.dfOvershieldHost:CreateTexture(nil, "OVERLAY", nil, 7)
+                DF:HoleBarToResourceBar(frame, frame.dfOvershieldHost, true)
             end
             
             local glow = frame.absorbOvershieldGlow
@@ -1676,11 +1827,7 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
         
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -1839,11 +1986,7 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
 
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2393,11 +2536,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         end
         
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2567,6 +2706,7 @@ local function UpdateOverhealSpark(frame, db, color, overhealing, known)
         spark = host:CreateTexture(nil, "OVERLAY", nil, 6)
         spark:SetBlendMode("ADD")
         frame.dfOverhealSpark = spark
+        DF:HoleBarToResourceBar(frame, host, true)
     end
     -- At the max-health end, whichever way the bar fills.
     local orient = db.healthOrientation or "HORIZONTAL"
@@ -3051,11 +3191,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         end
         
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         -- ★ ONE PATH, TEST AND LIVE. Anchoring to the health FILL TEXTURE is what
         -- makes the prediction start exactly where health ends, at any health value

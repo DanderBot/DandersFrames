@@ -63,26 +63,114 @@ local issecretvalue = issecretvalue
 -- (ReducedMaxHealth.lua insets its own bar by the same padding and then re-clips the
 -- right edge — that one is a different widget with an extra step, deliberately not
 -- folded in here.)
+-- The frame edge the resource bar's Placement gives it a strip along, or nil while it is
+-- drawn on top of the health bar. A detached bar sits outside the frame and has no strip.
+-- Without a frame it answers for the settings alone, which is what the options page greys
+-- its controls by. The one test both the health bar's cut-out and the resource bar layout
+-- ask, so the two can never disagree about whether the strip exists.
+-- The edge is the Placement itself, whatever the bar's Orientation: the strip's shape
+-- comes from its side, the fill direction from the Orientation.
+function DF:GetResourceBarRoomEdge(db, frame)
+    if not (db and db.resourceBarEnabled) then return nil end
+    local p = db.resourceBarPlacement
+    if p ~= "BOTTOM" and p ~= "TOP" and p ~= "LEFT" and p ~= "RIGHT" then return nil end
+    if frame and DF:IsResourceBarDetached(frame, db) then return nil end
+    return p
+end
+
+-- "Keep Health Bar Inside Border": the health bar stops at the frame border's inner edge
+-- on every side instead of running under it, so a see-through border -- which has no
+-- colour of its own and tints whatever is under it -- sits over the frame background
+-- rather than over health. The resource bar follows (strip and matched ends), since a
+-- bar inside a border the health bar sits inside of would otherwise poke under it.
+function DF:BarsInsideFrameBorder(db)
+    return (db and db.healthInsideFrameBorder and db.frameShowBorder ~= false) and true or false
+end
+
+-- The frame border band's depth, max'd with the padding -- max, not sum, as for a matched
+-- bar's ends (DF:LayoutResourceBar's sliver note) -- pixel-perfect snapped like the border.
+function DF:GetFrameBorderBandInset(db)
+    local pad = db.framePadding or 0
+    local border = db.frameBorderSize or 1
+    if db.pixelPerfect and DF.PixelPerfect then
+        pad = DF:PixelPerfect(pad)
+        border = DF:PixelPerfect(border)
+    end
+    return math.max(pad, border)
+end
+
+-- How far a Placement strip sits in from its frame edge: the frame padding, or the frame
+-- border band when the bar is kept inside the border (Adjust For Frame Border, or the
+-- health bar's Keep Inside Border). Pixel-perfect snapped, the numbers the bar is placed with.
+function DF:GetResourceBarStripInset(db)
+    local showBorder = db.frameShowBorder ~= false
+    if showBorder and (db.resourceBarMatchAdjustFrameBorder or DF:BarsInsideFrameBorder(db)) then
+        return DF:GetFrameBorderBandInset(db)
+    end
+    local pad = db.framePadding or 0
+    if db.pixelPerfect and DF.PixelPerfect then pad = DF:PixelPerfect(pad) end
+    return pad
+end
+
+-- The health bar's inset from each frame edge: the frame padding, or the border band with
+-- Keep Health Bar Inside Border. A Placement strip does NOT shrink it: the resource bar is
+-- cut out of every health-family layer instead (DF:SyncResourceBarHole), so the health bar
+-- keeps its full rect and a see-through frame border lies over health on every side.
+function DF:GetHealthBarInsets(frame, db)
+    local pad = (db and db.framePadding) or 0
+    if DF:BarsInsideFrameBorder(db) then pad = DF:GetFrameBorderBandInset(db) end
+    return pad, pad, pad, pad
+end
+
+-- Whether the frame is meant to carry a resource bar, recorded wherever DF decides it.
+function DF:NoteResourceBarWanted(frame, wanted)
+    if frame then frame.dfResourceBarWanted = wanted and true or false end
+end
+
+-- Re-places the health bar when its insets moved since it was last placed, and cuts or
+-- restores the resource bar's hole. The resource bar layout runs this because a settings
+-- change re-lays frames out (ApplyFrameLayout) without UpdateUnitFrame, the pass that
+-- otherwise places the health bar -- so a Placement or border change would have waited for
+-- each unit's next refresh. A frame never placed yet is left to that first refresh.
+function DF:SyncHealthBarRect(frame, db)
+    if DF.SyncResourceBarHole then DF:SyncResourceBarHole(frame, db) end
+    if not (frame and frame.healthBar) or frame.dfHBInsL == nil then return end
+    local l, t, r, b = DF:GetHealthBarInsets(frame, db)
+    if l == frame.dfHBInsL and t == frame.dfHBInsT and r == frame.dfHBInsR and b == frame.dfHBInsB then
+        return
+    end
+    DF:AnchorHealthBarsToPadding(frame, db)
+    -- The re-anchor un-clips a reduced-max clip (see AnchorHealthBarsToPadding) and moves
+    -- the rect the absorb layout cache measured, so both re-derive now rather than on the
+    -- unit's next health or absorb event.
+    frame.dfAbsorbState = nil
+    if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
+    if frame.unit and not frame.dfIsTestFrame and DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
+end
+
 function DF:AnchorHealthBarsToPadding(frame, db)
     if not (frame and frame.healthBar) then return end
     db = db or DF:GetFrameDB(frame)
-    local padding = (db and db.framePadding) or 0
+    local l, t, r, b = DF:GetHealthBarInsets(frame, db)
     frame.healthBar:ClearAllPoints()
-    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
+    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", l, -t)
+    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -r, b)
+    frame.dfHBInsL, frame.dfHBInsT, frame.dfHBInsR, frame.dfHBInsB = l, t, r, b
+    if DF.SyncResourceBarHole then DF:SyncResourceBarHole(frame, db) end
     -- ☠ THIS UN-CLIPS A REDUCED-MAX-HEALTH CLIP, so it forgets that clip. The clip only
     -- re-runs when its geometry changes (ReducedMaxHealth.lua's needClip); left set, the
     -- flag said "still clipped" and the health fill ran under the reduced band until
     -- orientation, padding or texture next changed. Cleared, the next reduced-max pass
     -- (right after this in the live and test updates) clips again.
     frame.dfReducedMaxHealthClipping = nil
-    frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = nil, nil, nil
-    -- Keep the missing-health overlay inside the padding too (anchored once
+    frame.dfRMClipOrient, frame.dfRMClipTex = nil, nil
+    frame.dfRMClipL, frame.dfRMClipT, frame.dfRMClipR, frame.dfRMClipB = nil, nil, nil, nil
+    -- Keep the missing-health overlay on the health bar's rect too (anchored once
     -- at creation, so it would otherwise sit over the padding after a change).
     if frame.missingHealthBar then
         frame.missingHealthBar:ClearAllPoints()
-        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
+        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", l, -t)
+        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -r, b)
     end
 end
 
@@ -832,7 +920,8 @@ function DF:UpdateUnitFrame(frame, source)
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
     local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
-    -- Health bar positioning (resource bar is floating, doesn't affect health bar size)
+    -- The resource bar floats over the health bar unless its Placement gives it a strip.
+    DF:NoteResourceBarWanted(frame, showPower)
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if frame.dfPowerBar then
@@ -1197,6 +1286,11 @@ function DF:UpdatePower(frame)
     -- Check if power bar should be shown (uses centralized role filter).
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
     local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
+    -- Runs on power events, so only a change of answer re-syncs the strip's cut-out.
+    if frame.dfResourceBarWanted ~= (showPower and true or false) then
+        DF:NoteResourceBarWanted(frame, showPower)
+        DF:SyncHealthBarRect(frame, db)
+    end
 
     if not showPower then
         frame.dfPowerBar:Hide()

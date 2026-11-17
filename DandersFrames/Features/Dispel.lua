@@ -248,6 +248,7 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     --   +0..+8   background, health/missing +3, power +5, heal-absorb +8
     --   +10      heal prediction    (healPredictionFrameLevel)
     --   +11      absorb bar         (absorbBarFrameLevel)
+    --   +12      resource bar in a Placement strip
     --   +13      overshield host,   +14 frame border
     --   +16/+17  dispel overlay / gradient + ring   <- HERE
     --   +20      resource bar       (resourceBarFrameLevel)
