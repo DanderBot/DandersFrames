@@ -177,7 +177,6 @@ end
 function DF:WatchPowerBarForHealthRect(frame)
     local bar = frame and frame.dfPowerBar
     if not bar or bar.dfHealthRectWatched then return end
-    if frame.dfStandalone then return end   -- unit frames companion: never shrinks
     bar.dfHealthRectWatched = true
     bar.dfOwnerFrame = frame
     hooksecurefunc(bar, "Show", PowerBarVisibilityChanged)
@@ -294,7 +293,7 @@ function DF:LayoutResourceBar(frame, db)
     -- While the shrink is wanted, the border has to frame health AND power, so the ends
     -- always tuck inside the band. Shrink off is untouched. The anchored axis keeps
     -- the user's offset (the shrink measures from it, HealthRect.lua).
-    if db.frameShowBorder ~= false and not frame.dfStandalone
+    if db.frameShowBorder ~= false
         and DF.IsHealthShrinkWanted and DF:IsHealthShrinkWanted(frame, db) then
         edgeInset = math.max(padding, bInset)
     end
@@ -375,7 +374,7 @@ function DF:LayoutResourceBar(frame, db)
     -- Thickness / anchor / offset may have changed without the bar's visibility
     -- changing (a slider drag runs only this function): let the health rect follow.
     -- A no-op unless the rect actually moved.
-    if DF.SyncHealthBarRect and not frame.dfStandalone then
+    if DF.SyncHealthBarRect then
         DF:SyncHealthBarRect(frame, db)
     end
 end

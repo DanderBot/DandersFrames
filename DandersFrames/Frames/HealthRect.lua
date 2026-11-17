@@ -37,12 +37,16 @@ function DF:GetPowerBarShrinkSide(db)
 end
 
 -- Settings-only half of the gate: can the option do anything with this layout?
--- The settings page greys the checkbox on this. Party/raid only -- standalone
--- (unit frames companion) frames are refused per frame in GetHealthBarInsets.
+-- The settings page greys the checkbox on this. Party, raid AND the unit frames
+-- companion (standalone frames read the same keys off frame.dfDB); a DETACHED bar
+-- (unit frames only) owns no edge and is refused per frame in GetHealthBarInsets.
 function DF:CanShrinkHealthForPowerBar(db)
     if not db then return false end
     if not db.resourceBarEnabled then return false end
     if not db.resourceBarMatchWidth then return false end
+    -- Only a unit frame's table carries this key (the Detach card); a party / raid
+    -- table never does, so this greys the checkbox on a unit page alone.
+    if db.resourceBarDetached then return false end
     return DF:GetPowerBarShrinkSide(db) ~= nil
 end
 
@@ -92,7 +96,7 @@ function DF:GetHealthBarInsets(frame, db)
     local padding = (db and db.framePadding) or 0
     local l, r, t, b = padding, padding, padding, padding
     if not (db and db.resourceBarShrinkHealth) then return l, r, t, b end
-    if not frame or frame.dfStandalone then return l, r, t, b end
+    if not frame then return l, r, t, b end
     if not db.resourceBarMatchWidth then return l, r, t, b end
     if DF.IsResourceBarDetached and DF:IsResourceBarDetached(frame, db) then return l, r, t, b end
     local bar = frame.dfPowerBar
@@ -154,8 +158,11 @@ local function RefreshMeasuredBars()
         pendingRefresh[frame] = nil
         frame.dfAbsorbState = nil
         if frame.dfIsTestFrame then
-            if frame.dfTestIndex and DF.UpdateTestFrameHealthOnly and frame:IsShown() then
-                DF:UpdateTestFrameHealthOnly(frame, frame.dfTestIndex)
+            -- Group test frames carry dfTestIndex; a unit frames preview (dfUFPreview)
+            -- repaints with its own f.index, as Preview.lua's own health pass does.
+            if DF.UpdateTestFrameHealthOnly and frame:IsShown()
+                and (frame.dfTestIndex or frame.dfUFPreview) then
+                DF:UpdateTestFrameHealthOnly(frame, frame.dfTestIndex or frame.index)
             end
         elseif frame.unit then
             if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end

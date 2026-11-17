@@ -158,6 +158,23 @@ do
 end
 
 -- ============================================================
+print("-- Unit frames (standalone): same geometry; a detached bar is left alone")
+-- ============================================================
+do
+    local db = baseDB({ frameBorderSize = 2 })
+    local fr, bar = layout(db, { dfStandalone = true })
+    check(near(bar.l, 2) and near(bar.r, W - 2), "standalone: ends clear the border band")
+    local h = healthRect(fr)
+    check(near(h.b, bar.t), "standalone: health bottom = bar top")
+    db = baseDB({ frameBorderSize = 2, resourceBarDetached = true })
+    fr = Frame(db, { dfStandalone = true })
+    DF:LayoutResourceBar(fr, db)
+    eq(#fr.dfPowerBar.points, 1, "standalone detached: the bar keeps its own one-point layout")
+    h = healthRect(fr)
+    check(near(h.b, 0) and near(h.t, H), "standalone detached: health keeps the full rect")
+end
+
+-- ============================================================
 print("-- Shrink ON: the health bar meets the bar exactly (no gap, no overlap)")
 -- ============================================================
 for _, pad in ipairs({ 0, 2 }) do
