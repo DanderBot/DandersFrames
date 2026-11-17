@@ -2604,6 +2604,10 @@ DF.PartyDefaults = {
     resourceBarShowHealer = true,
     resourceBarShowInSoloMode = true,
     resourceBarShowTank = false,
+    -- Opt-in: while an edge-attached, matched power bar is SHOWN on a frame, that
+    -- frame's health bar stops at the bar's inner edge instead of running under it
+    -- (Frames/HealthRect.lua). Default false so no existing profile changes look.
+    resourceBarShrinkHealth = false,
     resourceBarSmooth = true,
     resourceBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     resourceBarWidth = 60,

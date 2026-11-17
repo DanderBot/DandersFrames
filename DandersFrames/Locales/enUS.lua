@@ -1273,6 +1273,7 @@ L["Enabling or disabling a frame mode requires a UI reload to take effect.\n\nRe
 L["End"] = true
 L["END"] = true
 L["End of Group"] = true
+L["Ends the health bar at the edge of the resource bar instead of drawing it underneath. Only works while Match Health Bar Width is on and the bar is anchored to Top or Bottom (Left or Right for a vertical bar); greyed out otherwise. A frame whose resource bar is hidden keeps its full health bar."] = true
 L["Energy"] = true
 L["Enter a layout name"] = true
 L["Enter a profile name"] = true
@@ -3381,6 +3382,7 @@ L["Set up its Triggers, then add effects the same way as any other pool."] = tru
 -- The sentence under the tick — the only place the feature explains itself, and it stays on
 -- screen while the tick is OFF, which is exactly when someone needs to read it.
 L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true
+L["Shrink Health Bar To Fit"] = true
 -- ⚠ The helper's surface menu reuses the addon's existing L["Square"] and the frame-level
 -- labels; it needs no names of its own. It briefly had a "Power Infusion icon" string when
 -- Icon was the surviving placed surface -- that was reversed the same afternoon (the helper

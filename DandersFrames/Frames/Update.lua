@@ -53,38 +53,11 @@ local issecretvalue = issecretvalue
 -- tables under it -- whatever it introduced is long gone, and it read as a promise
 -- the file does not keep.
 
--- ★ THE ONE PLACE THE HEALTH BARS ARE INSET BY THE FRAME PADDING.
--- The rule ("both bars sit `framePadding` inside the frame rect, re-applied on every
--- update because a padding change must move them") was written out longhand in three
--- places: here, the resize path in Core.lua, and the TEST-mode update — whose comment
--- said it was "matching what UpdateUnitFrame does unconditionally for live frames",
--- which is the tell. A preview restating live's geometry is the divergence class this
--- addon keeps paying for; it differs in DATA, never in rendering.
--- (ReducedMaxHealth.lua insets its own bar by the same padding and then re-clips the
--- right edge — that one is a different widget with an extra step, deliberately not
--- folded in here.)
-function DF:AnchorHealthBarsToPadding(frame, db)
-    if not (frame and frame.healthBar) then return end
-    db = db or DF:GetFrameDB(frame)
-    local padding = (db and db.framePadding) or 0
-    frame.healthBar:ClearAllPoints()
-    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    -- ☠ THIS UN-CLIPS A REDUCED-MAX-HEALTH CLIP, so it forgets that clip. The clip only
-    -- re-runs when its geometry changes (ReducedMaxHealth.lua's needClip); left set, the
-    -- flag said "still clipped" and the health fill ran under the reduced band until
-    -- orientation, padding or texture next changed. Cleared, the next reduced-max pass
-    -- (right after this in the live and test updates) clips again.
-    frame.dfReducedMaxHealthClipping = nil
-    frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = nil, nil, nil
-    -- Keep the missing-health overlay inside the padding too (anchored once
-    -- at creation, so it would otherwise sit over the padding after a change).
-    if frame.missingHealthBar then
-        frame.missingHealthBar:ClearAllPoints()
-        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    end
-end
+-- ★ THE HEALTH BAR RECT lives in Frames/HealthRect.lua: DF:AnchorHealthBarsToPadding
+-- (framePadding inset, plus room for an edge-attached power bar when Shrink Health
+-- Bar is on). It used to be written out longhand here, in the resize path in Core.lua
+-- and in the TEST-mode update; a preview restating live's geometry is the divergence
+-- class this addon keeps paying for. Every anchor site now calls that one function.
 
 function DF:ApplyFrameLayout(frame)
     if not frame then return end

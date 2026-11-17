@@ -235,6 +235,7 @@ DF.ExportCategories = {
         "resourceBarShowHealer",
         "resourceBarShowInSoloMode",
         "resourceBarShowTank",
+        "resourceBarShrinkHealth",
         "resourceBarSmooth",
         "resourceBarTexture",
         "resourceBarWidth",

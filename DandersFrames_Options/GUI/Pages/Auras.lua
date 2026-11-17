@@ -2267,8 +2267,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
             local rbMatch = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Health Bar Width"], db, "resourceBarMatchWidth", function()
-                -- RefreshStates so the Adjust For Frame Border row appears/disappears with the tick.
+                -- RefreshStates so the Adjust For Frame Border row appears/disappears with the tick,
+                -- and ReflowMounted so a pinned Position panel re-greys Shrink Health Bar To Fit.
                 tools2.refreshStates()
+                tools.ReflowMounted()
                 DF:UpdateAllFrames()
             end), 30)
             -- ☠ THE SECOND SENTENCE IS THE ONE THAT WAS MISSING, AND IT COST A BUG REPORT.
@@ -2335,9 +2337,26 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function()
+                -- Re-gate Shrink Health Bar To Fit (below), on the page and in a pin.
+                tools2.refreshStates()
+                tools.ReflowMounted()
+                DF:UpdateAllFrames()
+            end), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+
+            -- Shrink Health Bar To Fit: the health bar stops at the power bar's inner edge
+            -- instead of drawing under it (Frames/HealthRect.lua). It sits under the
+            -- position controls because the anchor and offsets are what decide whether it
+            -- can do anything. GREYED, not hidden, when the layout gives it nothing to do
+            -- (centre / corner anchor, wrong axis for the orientation, Match off) -- the
+            -- tooltip says which layouts it needs. The anchor dropdown, the Match switch and
+            -- the Orientation pick all re-gate it (RefreshStates + ReflowMounted), so the grey
+            -- follows them live, pinned or not.
+            local rbShrink = group:AddWidget(GUI:CreateCheckbox(parent, L["Shrink Health Bar To Fit"], db, "resourceBarShrinkHealth", function() DF:UpdateAllFrames() end), 30)
+            rbShrink.tooltip = L["Ends the health bar at the edge of the resource bar instead of drawing it underneath. Only works while Match Health Bar Width is on and the bar is anchored to Top or Bottom (Left or Right for a vertical bar); greyed out otherwise. A frame whose resource bar is hidden keeps its full health bar."]
+            rbShrink.disableOn = function(d) return not DF:CanShrinkHealthForPowerBar(d) end
         end
 
         -- ☠ THE POSITION CARD: the builder above, then Frame Level (see the page

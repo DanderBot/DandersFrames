@@ -1666,9 +1666,7 @@ function DF:CreateFrameElements(frame, isRaid)
     -- MISSING HEALTH BAR (shows where health is missing)
     -- ========================================
     frame.missingHealthBar = CreateFrame("StatusBar", nil, frame)
-    local padding = db.framePadding or 0
-    frame.missingHealthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.missingHealthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- Anchored with the health bar below (DF:AnchorHealthBarsToPadding).
     DF:SafeSetStatusBarTexture(frame.missingHealthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.missingHealthBar:SetMinMaxValues(0, 1)
     frame.missingHealthBar:SetValue(0)
@@ -1683,8 +1681,8 @@ function DF:CreateFrameElements(frame, isRaid)
     -- HEALTH BAR
     -- ========================================
     frame.healthBar = CreateFrame("StatusBar", nil, frame)
-    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- The one health-rect function (Frames/HealthRect.lua); also places the missing-health bar.
+    DF:AnchorHealthBarsToPadding(frame, db)
     DF:SafeSetStatusBarTexture(frame.healthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(1)
@@ -1860,6 +1858,8 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
         + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
     frame.dfPowerBar:Hide()
+    -- Shrink Health Bar follows this bar's visibility (Frames/Bars.lua).
+    DF:WatchPowerBarForHealthRect(frame)
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
     powerBg:SetAllPoints()
@@ -1989,9 +1989,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- MISSING HEALTH BAR (shows where health is missing)
     -- ========================================
     frame.missingHealthBar = CreateFrame("StatusBar", nil, frame)
-    local padding = db.framePadding or 0
-    frame.missingHealthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.missingHealthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- Anchored with the health bar below (DF:AnchorHealthBarsToPadding).
     DF:SafeSetStatusBarTexture(frame.missingHealthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.missingHealthBar:SetMinMaxValues(0, 1)  -- Will be updated dynamically with UnitHealthMax
     frame.missingHealthBar:SetValue(0)
@@ -2007,8 +2005,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- HEALTH BAR
     -- ========================================
     frame.healthBar = CreateFrame("StatusBar", nil, frame)
-    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- The one health-rect function (Frames/HealthRect.lua); also places the missing-health bar.
+    DF:AnchorHealthBarsToPadding(frame, db)
     DF:SafeSetStatusBarTexture(frame.healthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(1)
@@ -2170,6 +2168,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
         + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
     frame.dfPowerBar:Hide()
+    -- Shrink Health Bar follows this bar's visibility (Frames/Bars.lua).
+    DF:WatchPowerBarForHealthRect(frame)
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
     powerBg:SetAllPoints()

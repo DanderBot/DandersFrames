@@ -107,6 +107,7 @@ Frames\Colors.lua
 Frames\Border.lua
 Frames\TextStyle.lua
 Frames\AuraContainer.lua
+Frames\HealthRect.lua
 Frames\Create.lua
 Frames\Headers.lua
 Frames\Update.lua

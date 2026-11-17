@@ -22,6 +22,7 @@
 - (DandersMover) Frames anchored to another addon's frames now follow them automatically.
 - (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
 - (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction: the shield and incoming heals can run past the end of the health bar again, up to a full bar's length. Off (0%) by default. (by Krathe)
+- (Resource Bar) New **Shrink Health Bar To Fit** option under the resource bar's Position settings: the health bar stops at the resource bar instead of drawing behind it. It works when the bar is matched to the health bar and anchored to an edge, and only on frames that are showing a resource bar. Off by default.
 
 ### Improvements
 
