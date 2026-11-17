@@ -190,7 +190,6 @@ DF.UnitFramePageData = {
                 resourceBarShowHealer = { player = true, target = true, focus = true, pet = true, boss = true },
                 resourceBarShowInSoloMode = { player = true, target = true, focus = true, pet = true, boss = true },
                 resourceBarShowTank = { player = true, target = true, focus = true, pet = true, boss = true },
-                resourceBarShrinkHealth = { player = true, target = true, focus = true, pet = true, boss = true },
             },
             laterCards = { "Cost Prediction" },
             cardKeys = {

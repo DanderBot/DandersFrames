@@ -156,10 +156,19 @@ do
     for _, c in ipairs(cases) do
         same(insets(f, baseDB(c[2])), 0, 0, 0, 0, c[1] .. ": plain padding rect")
     end
+    -- Unit frames (standalone frames, reading frame.dfDB) shrink like a group frame;
+    -- a DETACHED bar (unit frames only) hangs outside the frame and owns no edge.
     local sa = Frame("sa", nil, { dfStandalone = true })
     sa.dfPowerBar:Show()
-    same(insets(sa, baseDB()), 0, 0, 0, 0, "standalone (unit frames) frame: never shrinks")
-    same(insets(sa, baseDB({ resourceBarDetached = true })), 0, 0, 0, 0, "detached bar: never shrinks")
+    same(insets(sa, baseDB()), 0, 0, 0, 5, "standalone (unit frames) frame: shrinks like a group frame")
+    same(insets(sa, baseDB({ resourceBarDetached = true })), 0, 0, 0, 0, "standalone, detached bar: never shrinks")
+    sa.dfPowerBar:Hide()
+    same(insets(sa, baseDB()), 0, 0, 0, 0, "standalone, bar hidden: full rect")
+    local grp = Frame("grp", nil); grp.dfPowerBar:Show()
+    same(insets(grp, baseDB({ resourceBarDetached = true })), 0, 0, 0, 5,
+        "a group frame ignores a stray resourceBarDetached (detach is standalone only)")
+    eq(DF:CanShrinkHealthForPowerBar(baseDB({ resourceBarDetached = true })), false,
+        "settings gate: a detached unit-frame bar greys the checkbox")
     local nobar = Frame("nb", nil); nobar.dfPowerBar = nil
     same(insets(nobar, baseDB()), 0, 0, 0, 0, "frame with no power bar: plain rect")
 
@@ -181,11 +190,10 @@ do
     f.dfPowerBar:Show()
     local t = insets(f, baseDB({ pixelPerfect = true, resourceBarHeight = 4, resourceBarY = 1 }))
     local b = t[4]
-    local steps = b / scale
-    check(math.abs(steps - math.floor(steps + 0.5)) < 1e-9, "pixel perfect: the stop lands on a whole physical pixel")
-    -- thickness snaps first (as Bars.lua's ppThickness does), then the total
-    local expect = DF:PixelPerfect(DF:PixelPerfect(4) + 1)
-    check(math.abs(b - expect) < 1e-9, "pixel perfect: thickness snapped like the bar's, then the edge")
+    -- thickness snaps (as Bars.lua's ppThickness does); the offset stays raw, as the
+    -- bar's anchor offset does, so the two edges are the same number
+    local expect = DF:PixelPerfect(4) + 1
+    check(math.abs(b - expect) < 1e-9, "pixel perfect: thickness snapped like the bar's, offset raw like the bar's")
     t = insets(f, baseDB({ pixelPerfect = false, resourceBarHeight = 4, resourceBarY = 1 }))
     eq(t[4], 5, "pixel perfect off: raw numbers, no snapping")
     DF.PixelPerfect = nil
@@ -244,9 +252,31 @@ do
     eq(healer.healthBar.points.BOTTOMRIGHT.y, 0, "option off: full size even with the bar shown")
     currentDB.resourceBarShrinkHealth = true
 
-    local sa = Frame("sa", currentDB, { dfStandalone = true })
+    -- Unit frames: the same watch, the same per-frame rect.
+    local sa = Frame("sa", currentDB, { dfStandalone = true, unit = "player" })
+    DF:AnchorHealthBarsToPadding(sa, currentDB)
     DF:WatchPowerBarForHealthRect(sa)
-    eq(sa.dfPowerBar.dfHealthRectWatched, nil, "standalone frame: the bar is never watched")
+    eq(sa.dfPowerBar.dfHealthRectWatched, true, "standalone frame: its bar is watched too")
+    sa.dfPowerBar:Show()
+    eq(sa.healthBar.points.BOTTOMRIGHT.y, 5, "standalone: bar shown -> the health bar stops at it")
+    sa.dfPowerBar:Hide()
+    eq(sa.healthBar.points.BOTTOMRIGHT.y, 0, "standalone: bar hidden -> full size again")
+    currentDB.resourceBarDetached = true
+    sa.dfPowerBar:Show()
+    eq(sa.healthBar.points.BOTTOMRIGHT.y, 0, "standalone: a detached bar never shrinks it")
+    currentDB.resourceBarDetached = nil
+    sa.dfPowerBar:Hide()
+    flushTimers()
+
+    -- A unit frames preview (a test frame with no dfTestIndex) repaints with its own index.
+    testRefreshCalls = {}
+    local pv = Frame("pv", currentDB, { dfStandalone = true, dfIsTestFrame = true, dfUFPreview = true, index = 7 })
+    DF:AnchorHealthBarsToPadding(pv, currentDB)
+    DF:WatchPowerBarForHealthRect(pv)
+    pv.dfPowerBar:Show()
+    flushTimers()
+    eq(testRefreshCalls[1], 7, "unit frames preview: the deferred refresh repaints it with f.index")
+    pv.dfPowerBar:Hide()
     flushTimers()
 end
 

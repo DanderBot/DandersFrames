@@ -177,7 +177,6 @@ end
 function DF:WatchPowerBarForHealthRect(frame)
     local bar = frame and frame.dfPowerBar
     if not bar or bar.dfHealthRectWatched then return end
-    if frame.dfStandalone then return end   -- unit frames companion: never shrinks
     bar.dfHealthRectWatched = true
     bar.dfOwnerFrame = frame
     hooksecurefunc(bar, "Show", PowerBarVisibilityChanged)
@@ -285,6 +284,19 @@ function DF:LayoutResourceBar(frame, db)
     if db.resourceBarMatchAdjustFrameBorder and db.frameShowBorder ~= false then
         edgeInset = math.max(padding, bInset)
     end
+    -- ★ SHRINK HEALTH BAR TO FIT OVERRIDES ADJUST-OFF (field report, 2026-11-17: "the
+    -- frame border no longer covers the edges of the resource bar"). Adjust OFF lets
+    -- the bar's ends run over the border band (bar +20 above border +14). Without the
+    -- shrink that read as one block: the bar sat on the health bar and the border ran
+    -- down beside both. With the shrink the bar is its own strip BELOW the health bar,
+    -- so its ends cutting through the border reads as the border stopping at the bar.
+    -- While the shrink is wanted, the border has to frame health AND power, so the ends
+    -- always tuck inside the band. Shrink off is untouched. The anchored axis keeps
+    -- the user's offset (the shrink measures from it, HealthRect.lua).
+    if db.frameShowBorder ~= false
+        and DF.IsHealthShrinkWanted and DF:IsHealthShrinkWanted(frame, db) then
+        edgeInset = math.max(padding, bInset)
+    end
 
     if DF:IsResourceBarDetached(frame, db) then
         -- ★ DETACHED (a standalone frame only -- see DF:IsResourceBarDetached): the
@@ -362,7 +374,7 @@ function DF:LayoutResourceBar(frame, db)
     -- Thickness / anchor / offset may have changed without the bar's visibility
     -- changing (a slider drag runs only this function): let the health rect follow.
     -- A no-op unless the rect actually moved.
-    if DF.SyncHealthBarRect and not frame.dfStandalone then
+    if DF.SyncHealthBarRect then
         DF:SyncHealthBarRect(frame, db)
     end
 end
