@@ -2144,6 +2144,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
 
+        -- Where the bar sits against the health bar: over it, or a strip of its own on one
+        -- side (DF:GetResourceBarRoomEdge). The strip keys are frame edges.
+        local placementOptions = {
+            OVER = L["On Top of Health Bar"], BOTTOM = L["Below Health Bar"], TOP = L["Above Health Bar"],
+            LEFT = L["Left of Health Bar"], RIGHT = L["Right of Health Bar"],
+            _order = { "OVER", "BOTTOM", "TOP", "LEFT", "RIGHT" },
+        }
+
         -- Keep Orientation (Horizontal/Vertical) and Reverse Fill as two explicit
         -- controls — clearer than a combined "Fill Direction" dropdown, where an
         -- option like "Bottom to Top" silently changes the orientation too.
@@ -2244,6 +2252,23 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return format("%d/%d", on, #RB_CLASS_LIST)
         end
 
+        -- ★ PLACEMENT: on top of the health bar (the bar goes wherever Anchor and the offsets
+        -- put it), or along one side of the frame with the health bar cut out under it
+        -- (DF:GetResourceBarRoomEdge). The side fixes one axis, so Anchor, Match and the length
+        -- still place the bar along it. The offsets and Frame Level swap to the strip's own
+        -- keys (DF:LayoutResourceBar, DF:ResolveResourceBarLevelOffset), so each placement keeps
+        -- its own and neither default moves the other.
+        -- StripOn is the same test the layout runs. The Placement dropdown renames controls in
+        -- the Size card too, so it re-flows every mounted panel, not just its own group.
+        local function StripOn(d) return DF:GetResourceBarRoomEdge(d) ~= nil end
+        -- Whether the bar's LENGTH runs up and down: a left or right strip, whatever the
+        -- Orientation; otherwise the Orientation. The Size card's words follow it.
+        local function LengthVertical(d)
+            local edge = DF:GetResourceBarRoomEdge(d)
+            if edge then return edge == "LEFT" or edge == "RIGHT" end
+            return d.resourceBarOrientation == "VERTICAL"
+        end
+
         -- ===== SIZE (the first card under "Layout") =====
         -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION. resourceBarWidth and resourceBarHeight
         -- are ORIENTATION-RELATIVE keys: Width is the bar's LENGTH along its fill axis, Height its
@@ -2282,29 +2307,37 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             rbMatch.tooltip = L["Keeps the resource bar exactly as long as the health bar, following the frame when it resizes. The matched size slider greys out while this is on; Thickness stays yours. Because the bar is pinned by its ends, the Anchor only takes effect along the other axis."]
             rbMatch.refreshContent = function(w, d)
                 if w.label then
-                    w.label:SetText((d.resourceBarOrientation == "VERTICAL")
+                    w.label:SetText(LengthVertical(d)
                         and L["Match Health Bar Height"] or L["Match Health Bar Width"])
                 end
             end
 
-            -- Only meaningful while Match is on, so it sits directly under the switch it
-            -- modifies and hides with it. DETERMINISTIC: on (default — matches what
-            -- stable 5.2.0 renders; see the key's note in Config.lua) = tuck inside the
-            -- frame border band, off = full health-bar length. The first cut gated
-            -- an alpha-based auto rule instead and read as doing nothing with an opaque
-            -- border -- an option whose two states can render the
+            -- Only meaningful while the bar is pinned by its ends (Match) or sits along a side
+            -- (Placement), where it sets how far in from that side the bar sits -- so it sits
+            -- directly under the switch and hides without either. DETERMINISTIC: on (default — matches what stable 5.2.0
+            -- renders; see the key's note in Config.lua) = tuck inside the frame border band,
+            -- off = run under it. The first cut gated an alpha-based auto rule instead and read
+            -- as doing nothing with an opaque border -- an option whose two states can render the
             -- same pixels is broken as a control, whatever the tooltip says. "Frame
             -- Border" in the name because the resource bar has a border of its OWN on
             -- this page, and a bare "Border" could be either.
             local rbAdjust = group:AddWidget(GUI:CreateCheckbox(parent, L["Adjust For Frame Border"], db, "resourceBarMatchAdjustFrameBorder", function() DF:UpdateAllFrames() end), 30)
-            rbAdjust.tooltip = L["Shortens the bar so it sits inside the frame border instead of spanning its full length. Leave off to keep the bar exactly as long as the health bar, with the frame border overlapping its ends."]
-            rbAdjust.hideOn = function(d) return not d.resourceBarMatchWidth end
+            rbAdjust.tooltip = L["Keeps the bar inside the frame border. Leave off to keep the bar as long as the health bar, overlapping the frame border where the two meet."]
+            rbAdjust.hideOn = function(d) return not (d.resourceBarMatchWidth or StripOn(d)) end
+            -- With the health bar kept inside the border the bar is too, so both positions
+            -- would draw the same pixels (DF:LayoutResourceBar, DF:GetResourceBarStripInset).
+            rbAdjust.disableOn = function(d) return DF:BarsInsideFrameBorder(d) end
+            rbAdjust.disableReason = function(d)
+                return DF:BarsInsideFrameBorder(d)
+                    and L["Keep Health Bar Inside Border is on (Frame page), so the resource bar keeps inside the border too"]
+                    or nil
+            end
 
             local widthSlider = group:AddWidget(GUI:CreateSlider(parent, L["Width"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
             widthSlider.disableOn = function(d) return d.resourceBarMatchWidth end
             widthSlider.refreshContent = function(w, d)
                 if w.label then
-                    w.label:SetText((d.resourceBarOrientation == "VERTICAL") and L["Height"] or L["Width"])
+                    w.label:SetText(LengthVertical(d) and L["Height"] or L["Width"])
                 end
             end
             group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
@@ -2317,7 +2350,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- that reads "Height".
         local function ResourceSizeSummary(d)
             if not d then return "" end
-            local vertical = d.resourceBarOrientation == "VERTICAL"
+            local vertical = LengthVertical(d)
             local parts = {}
             if d.resourceBarMatchWidth then
                 parts[#parts + 1] = vertical and L["Match Health Bar Height"] or L["Match Health Bar Width"]
@@ -2335,9 +2368,33 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function() DF:UpdateAllFrames() end), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            local placement = group:AddWidget(GUI:CreateDropdown(parent, L["Placement"], placementOptions, db, "resourceBarPlacement", function()
+                tools2.refreshStates()
+                tools.ReflowMounted()
+                DF:UpdateAllFrames()
+            end), 55)
+            placement.tooltip = L["On Top of Health Bar draws the resource bar over the health bar, wherever Anchor and the offsets put it. The other choices run it along that side of the frame and hide the health bar behind it, so the health bar can't show through when the frame fades. Frames that don't show a resource bar keep the whole health bar."]
+
+            local anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function() DF:UpdateAllFrames() end), 55)
+            -- Along a side only the anchor's part along that side counts, and only for a bar
+            -- shorter than the side, so the tooltip says which.
+            anchor.tooltip = L["Where the bar sits on the frame. Along a side (Placement), only the Anchor's part along that side counts, and only for a bar shorter than the side: left, centre or right on a top or bottom side; top, middle or bottom on a left or right side."]
+            anchor.disableOn = function(d) return StripOn(d) and d.resourceBarMatchWidth end
+            anchor.disableReason = function(d)
+                return (StripOn(d) and d.resourceBarMatchWidth)
+                    and L["The bar runs the whole side while it matches the health bar"] or nil
+            end
+            -- Two pairs, one shown at a time: On Top's offsets measure from the frame edge,
+            -- the strip's from its seat on its side, and each placement keeps its own.
+            local offX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            offX.hideOn = StripOn
+            local offY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            offY.hideOn = StripOn
+            local function NotStrip(d) return not StripOn(d) end
+            local stripX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarStripX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            stripX.hideOn = NotStrip
+            local stripY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarStripY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            stripY.hideOn = NotStrip
         end
 
         -- ☠ THE POSITION CARD: the builder above, then Frame Level (see the page
@@ -2347,20 +2404,27 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- builder's group gate greys it with the rest of Position.
         local function BuildResourcePositionCardGroup(tools2)
             BuildResourcePositionGroup(tools2)
-            tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            -- Two sliders, one shown at a time, as for the offsets.
+            local level = tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            level.hideOn = StripOn
+            local stripLevel = tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarStripFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            stripLevel.hideOn = function(d) return not StripOn(d) end
         end
 
-        -- The anchor in the dropdown's own words, and the offsets only when they
-        -- are doing something -- a card reading "0, 1" on every default profile is
-        -- noise (the Border row's rule). Both numbers go in together: an X with no
-        -- Y beside it reads as a coordinate with a missing half.
+        -- A strip leads with its side; the anchor only when it places the bar (a strip that
+        -- matches the health bar runs the whole side). Then the offsets in force, only when
+        -- they are doing something -- a card reading "0, 1" on every default profile is noise
+        -- (the Border row's rule). Both numbers go in together: an X with no Y beside it reads
+        -- as a coordinate with a missing half.
         local function ResourcePositionSummary(d)
             if not d then return "" end
+            local strip = StripOn(d)
             local parts = {}
+            if strip then parts[#parts + 1] = placementOptions[d.resourceBarPlacement] end
             local anchor = anchorOptions[d.resourceBarAnchor]
-            if anchor then parts[#parts + 1] = anchor end
-            local x = math.floor(tonumber(d.resourceBarX) or 0)
-            local y = math.floor(tonumber(d.resourceBarY) or 0)
+            if anchor and not (strip and d.resourceBarMatchWidth) then parts[#parts + 1] = anchor end
+            local x = math.floor(tonumber(d[strip and "resourceBarStripX" or "resourceBarX"]) or 0)
+            local y = math.floor(tonumber(d[strip and "resourceBarStripY" or "resourceBarY"]) or 0)
             if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
             return table.concat(parts, " \194\183 ")
         end

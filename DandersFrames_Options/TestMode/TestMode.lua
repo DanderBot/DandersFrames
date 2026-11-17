@@ -39,7 +39,7 @@ DF.TestData = {
         -- ⚠ THE LIVE COLLISION IS UNFIXED — a real unit that is AFK during a real ready
         -- check still gets both at the same point, draw order by creation order. That is
         -- a defaults/precedence decision; this only moves the preview.
-        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = true, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20, showDefensive = false, showMissingBuff = false, showReadyCheck = false, showImportantDebuff = false},  -- AFK timer, skull marker, leader, main tank, has HoT, in combat (BG carrier lives on Xx — this frame's centre belongs to the AFK countdown)
+        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, power = 1.0, isAFK = true, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20, showDefensive = false, showMissingBuff = false, showReadyCheck = false, showImportantDebuff = false},  -- AFK timer, skull marker, leader, main tank, has HoT, in combat (BG carrier lives on Xx — this frame's centre belongs to the AFK countdown)
         -- The DEFENSIVE ICON + summon frame (HEALER, so the defensive row shows by the
         -- role rule — no override needed). The missing-buff strip is off: with both, this
         -- became the busiest frame of the five and the two strips sat in the same region.
@@ -575,7 +575,9 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         healthPercent = data.health,
         maxHealth = data.maxHealth,
         currentHealth = math.floor(data.health * data.maxHealth),
-        powerPercent = 0.8,  -- Default power for party
+        -- A unit's own `power`, else 0.8: one full bar (Tankerino) beside partly filled ones, so
+        -- the preview shows the resource bar both with and without its empty background.
+        powerPercent = data.power or 0.8,
         absorbPercent = data.absorb,
         reducedMaxPct = data.reducedMaxPct or 0,
         healAbsorbPercent = data.healAbsorb,
@@ -899,6 +901,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
 
     -- ★ LIVE'S INSET, not a restatement of it. UpdateReducedMaxHealth below may re-clip
     -- the right edge after.
+    DF:NoteResourceBarWanted(frame, DF:TestResourceBarWanted(frame, db, testData))
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if db.testShowReducedMaxHealth ~= false then
@@ -1675,18 +1678,10 @@ local function TestPowerTokenFor(class, role)
     return TEST_POWER_TOKEN[class or ""] or "MANA"
 end
 
--- Update test power bar (unified for party and raid)
-function DF:UpdateTestPowerBar(frame, testData)
-    if not frame then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Check if resource bar should be shown
-    if not db.resourceBarEnabled then
-        if frame.dfPowerBar then frame.dfPowerBar:Hide() end
-        return
-    end
-    
+-- Whether a preview frame carries a resource bar. The test update asks before placing the
+-- health bar (a Placement strip keys on it) and again to draw the bar.
+function DF:TestResourceBarWanted(frame, db, testData)
+    if not (db.resourceBarEnabled and testData) then return false end
     -- ★ THE LIVE GATE, fed test DATA. DF:ShouldShowResourceBar takes an optional role
     -- override precisely so the preview can drive it without a real unit -- a test path
     -- that is a PARAMETER of the live function, not a copy of it.
@@ -1705,7 +1700,22 @@ function DF:UpdateTestPowerBar(frame, testData)
     -- carries a real token belonging to somebody else, so it must answer as DATA.
     local selfIndex = frame.isRaidFrame and 1 or 0
     local soloScoped = (frame.isPinnedFrame and true) or (testData.index == selfIndex)
-    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, soloScoped)
+    return DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, soloScoped)
+end
+
+-- Update test power bar (unified for party and raid)
+function DF:UpdateTestPowerBar(frame, testData)
+    if not frame then return end
+
+    local db = DF:GetFrameDB(frame)
+
+    -- Check if resource bar should be shown
+    if not db.resourceBarEnabled then
+        if frame.dfPowerBar then frame.dfPowerBar:Hide() end
+        return
+    end
+
+    local showBar = DF:TestResourceBarWanted(frame, db, testData)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end

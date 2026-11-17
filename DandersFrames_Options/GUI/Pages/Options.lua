@@ -3410,6 +3410,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 sizeMin = 1, sizeMax = 16, sizeStep = 1,
                 noShowToggle = tools2.hoistToggles or nil,
             })
+            -- In the Border card because what it changes is how a see-through border looks:
+            -- the border tints whatever is under it, and this makes that the frame
+            -- background on every side (DF:BarsInsideFrameBorder). The border pass after
+            -- the full update re-places the health bar and a kept-inside resource bar in
+            -- raid mode too, which the raid branch of UpdateFrames does not reach.
+            local inside = tools2.group:AddWidget(GUI:CreateCheckbox(tools2.parent, L["Keep Health Bar Inside Border"], db, "healthInsideFrameBorder", function()
+                UpdateFrames()
+                DF:LightweightUpdateBorder()
+            end), 30)
+            inside.tooltip = L["Stops the health bar at the inner edge of the frame border instead of running under it, so the border sits over the frame background rather than over health. The resource bar keeps inside the border too."]
+            inside.disableOn = function(d) return d.frameShowBorder == false end
+            inside.disableReason = L["Turn on Show Border to use this"]
         end
         local function BuildBorderShadowGroup(tools2)
             GUI:CreateBorderShadowControls(tools2.group, db, "frame", {

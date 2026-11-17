@@ -31,6 +31,20 @@ if not f then return end
 setfenv(f, setmetatable({ DF = DFs }, { __index = _G }))
 f()
 
+-- The Placement helpers the layout asks live in Update.lua.
+do
+    local USRC = norm(df_file_source("Frames/Update.lua"))
+    for _, sig in ipairs({ "function DF:GetResourceBarRoomEdge(db, frame)", "function DF:GetResourceBarStripInset(db)",
+                         "function DF:BarsInsideFrameBorder(db)", "function DF:GetFrameBorderBandInset(db)" }) do
+        local ua = USRC:find("\n" .. sig, 1, true)
+        local ub = ua and USRC:find("\nend\n", ua + 1, true)
+        check(ua ~= nil and ub ~= nil, "lift: " .. sig)
+        local g = assert(loadstring(USRC:sub(ua + 1, ub + 4), "=" .. sig))
+        setfenv(g, setmetatable({ DF = DFs }, { __index = _G }))
+        g()
+    end
+end
+
 local function Bar()
     local t = { points = {} }
     function t:Show() self.shown = true end
@@ -110,4 +124,72 @@ do
     db.resourceBarDetached = false
     DFs:LayoutResourceBar(fr, db)
     eq(#bar.points, 2, "re-attached: back to the anchor layout, its own settings untouched")
+end
+
+print("-- Placement strip: the bar runs along its edge")
+do
+    local db = base()
+    db.resourceBarEnabled, db.resourceBarPlacement = true, "BOTTOM"
+    db.resourceBarAnchor, db.resourceBarMatchWidth = "CENTER", true
+    db.framePadding, db.resourceBarX, db.resourceBarY = 2, 7, 14
+    db.frameShowBorder, db.resourceBarMatchAdjustFrameBorder, db.frameBorderSize = true, true, 3
+    db.resourceBarFrameLevel = 40
+    local fr = Frame(db, false)
+    DFs:LayoutResourceBar(fr, db)
+    local bar = fr.dfPowerBar
+    local function pts()
+        local out = {}
+        for i, p in ipairs(bar.points) do out[i] = p[1] .. ">" .. p[3] .. "(" .. p[4] .. "," .. p[5] .. ")" end
+        return table.concat(out, " ")
+    end
+    eq(pts(), "BOTTOMLEFT>BOTTOMLEFT(3,3) BOTTOMRIGHT>BOTTOMRIGHT(-3,3)",
+       "below, matched: the whole side inside the frame border with Adjust on; On Top's offsets not read")
+    eq(bar.h, 6, "...its thickness")
+    eq(bar.level, 22, "under the frame border (10 + 12), whatever Frame Level says")
+    db.resourceBarMatchAdjustFrameBorder = false
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "BOTTOMLEFT>BOTTOMLEFT(2,2) BOTTOMRIGHT>BOTTOMRIGHT(-2,2)", "Adjust off: at the padding, under the border")
+    db.resourceBarMatchAdjustFrameBorder = true
+    db.resourceBarStripX, db.resourceBarStripY = 4, -1
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "BOTTOMLEFT>BOTTOMLEFT(7,2) BOTTOMRIGHT>BOTTOMRIGHT(1,2)", "the strip's own offsets move it from its seat")
+    db.resourceBarStripX, db.resourceBarStripY = nil, nil
+    db.resourceBarPlacement = "TOP"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "TOPLEFT>TOPLEFT(3,-3) TOPRIGHT>TOPRIGHT(-3,-3)", "above")
+    db.resourceBarPlacement = "RIGHT"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "TOPRIGHT>TOPRIGHT(-3,-3) BOTTOMRIGHT>BOTTOMRIGHT(-3,3)", "right of: the side decides the strip's shape")
+    eq(bar.w, 6, "...its thickness across, whatever the Orientation")
+    db.resourceBarOrientation, db.resourceBarPlacement = "VERTICAL", "LEFT"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "TOPLEFT>TOPLEFT(3,-3) BOTTOMLEFT>BOTTOMLEFT(3,3)", "left of")
+    db.resourceBarOrientation = "HORIZONTAL"
+
+    -- Match off: a bar shorter than its side, placed along it by the Anchor.
+    db.resourceBarMatchWidth, db.resourceBarWidth = false, 40
+    db.resourceBarPlacement, db.resourceBarAnchor = "BOTTOM", "TOPLEFT"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "BOTTOMLEFT>BOTTOMLEFT(3,3)", "below, short: Anchor's left part puts it at the left end")
+    eq(bar.w .. "x" .. bar.h, "40x6", "...its length and thickness")
+    db.resourceBarAnchor = "BOTTOM"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "BOTTOM>BOTTOM(0,3)", "...centred")
+    db.resourceBarAnchor = "RIGHT"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "BOTTOMRIGHT>BOTTOMRIGHT(-3,3)", "...at the right end")
+    db.resourceBarPlacement, db.resourceBarAnchor = "LEFT", "BOTTOMRIGHT"
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "BOTTOMLEFT>BOTTOMLEFT(3,3)", "left of, short: Anchor's bottom part puts it at the bottom")
+    eq(bar.w .. "x" .. bar.h, "6x40", "...running up the side")
+    db.resourceBarAnchor = "CENTER"
+    db.resourceBarStripX, db.resourceBarStripY = 1, 5
+    DFs:LayoutResourceBar(fr, db)
+    eq(pts(), "LEFT>LEFT(4,5)", "...middle, with the strip's offsets")
+
+    db.resourceBarPlacement, db.resourceBarMatchWidth = "OVER", true
+    db.resourceBarStripX, db.resourceBarStripY = 9, 9
+    DFs:LayoutResourceBar(fr, db)
+    eq(bar.points[1][4] .. "," .. bar.points[1][5], "10,14", "on top of the health bar: Anchor and its own offsets apply")
+    eq(bar.level, 50, "...and the user's Frame Level")
 end

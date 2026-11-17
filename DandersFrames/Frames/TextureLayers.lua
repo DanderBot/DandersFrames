@@ -252,6 +252,8 @@ local function GetTexture(state, slot)
         state.textures[slot] = tex
         -- A bar held inside the health bar (DF:MaskBarToHealthBar) holds its layers there too.
         if state.bar.dfHealthMask then DF.SetTextureMask(tex, state.bar.dfHealthMask) end
+        -- And a bar cut under a resource bar strip (DF:SyncResourceBarHole) is cut there too.
+        if state.bar.dfHoleMask then DF.SetTextureHole(tex, state.bar.dfHoleMask) end
     end
     return tex
 end

@@ -58,10 +58,16 @@ local DF = {
 load_df_file_into("Frames/ReducedMaxHealth.lua", DF)
 
 local src = df_file_source("Frames/Update.lua")
-local a = src:find("function DF:AnchorHealthBarsToPadding(frame, db)", 1, true)
-local e = a and src:find("\nend\r?\n", a)
-check(a and e, "setup: lifted AnchorHealthBarsToPadding")
-assert(loadstring("local DF = ...\n" .. src:sub(a, e + 4), "@anchor"))(DF)
+-- The health bar's insets come from DF:GetHealthBarInsets, which both files call.
+for _, sig in ipairs({ "function DF:BarsInsideFrameBorder(db)",
+                       "function DF:GetFrameBorderBandInset(db)",
+                       "function DF:GetHealthBarInsets(frame, db)",
+                       "function DF:AnchorHealthBarsToPadding(frame, db)" }) do
+    local a = src:find(sig, 1, true)
+    local e = a and src:find("\nend\r?\n", a)
+    check(a and e, "setup: lifted " .. sig)
+    assert(loadstring("local DF = ...\n" .. src:sub(a, e + 4), "@lift"))(DF)
+end
 
 local frame = { dfIsTestFrame = true, dfTestReducedMaxPct = 0.25, healthBar = Bar() }
 DF:CreateReducedMaxHealthBar(frame, db)

@@ -1994,6 +1994,9 @@ DF.PartyDefaults = {
     -- Frame Dimensions & Layout
     frameHeight = 64,
     framePadding = 0,
+    -- Keep Health Bar Inside Border: the health bar stops at the frame border's inner edge
+    -- instead of running under it (DF:BarsInsideFrameBorder). Off = padding only, as before.
+    healthInsideFrameBorder = false,
     frameSpacing = 1,
     frameScale = 1.0,
     frameWidth = 125,
@@ -2598,6 +2601,16 @@ DF.PartyDefaults = {
     -- behaviour, so true is what every upgrading profile already looks like. False
     -- here would have silently lengthened every matched bar on upgrade.
     resourceBarMatchAdjustFrameBorder = true,
+    -- OVER draws the bar on top of the health bar; BOTTOM / TOP / LEFT / RIGHT give it a
+    -- strip along that side and cut the health bar out under it on frames that carry one
+    -- (DF:GetResourceBarRoomEdge, DF:SyncResourceBarHole).
+    resourceBarPlacement = "OVER",
+    -- A Placement strip's own offsets, from its seat on its side (DF:LayoutResourceBar).
+    resourceBarStripX = 0,
+    resourceBarStripY = 0,
+    -- A Placement strip's own Frame Level: under the frame border (+14), see
+    -- DF:ResolveResourceBarLevelOffset.
+    resourceBarStripFrameLevel = 12,
     resourceBarOrientation = "HORIZONTAL",
     resourceBarReverseFill = false,
     resourceBarShowDPS = false,
