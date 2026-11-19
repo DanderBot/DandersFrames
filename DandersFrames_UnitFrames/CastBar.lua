@@ -507,12 +507,19 @@ function CB:OnEvent(cb, event, unit, ...)
     elseif event == "UNIT_SPELLCAST_DELAYED" or event == "UNIT_SPELLCAST_CHANNEL_UPDATE"
         or event == "UNIT_SPELLCAST_EMPOWER_UPDATE" then
         if cb.active then CB:Start(cb, true) end
-    elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
-        CB:Flash(cb, "interrupted")
-    elseif event == "UNIT_SPELLCAST_FAILED" then
+    elseif event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
+        -- Pressing another spell mid-cast fires FAILED (and can fire INTERRUPTED)
+        -- for the rejected press while the real cast carries on. Still casting
+        -- means the event was not about this bar's cast: ignore it. (Cast GUIDs
+        -- can be secret, so ask whether the unit is casting instead.)
+        if CB:QueryCast(f.unit) then return end
+        if event == "UNIT_SPELLCAST_INTERRUPTED" then
+            CB:Flash(cb, "interrupted")
         -- A failed cast the unit is no longer showing (a queued spell that never
         -- started) has nothing to flash.
-        if cb.active and not cb.channel then CB:Flash(cb, "failed") end
+        elseif cb.active and not cb.channel then
+            CB:Flash(cb, "failed")
+        end
     elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP"
         or event == "UNIT_SPELLCAST_EMPOWER_STOP" then
         if cb.holding then return end

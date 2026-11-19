@@ -471,6 +471,7 @@ CB:OnEvent(cb, "UNIT_SPELLCAST_INTERRUPTIBLE", "target")
 eq(cb.shield._alpha, 0, "INTERRUPTIBLE: shield hidden")
 
 print("-- Interrupted: a held flash")
+cast = nil
 CB:OnEvent(cb, "UNIT_SPELLCAST_INTERRUPTED", "target")
 eq(cb.holding, true, "held")
 eq(cb.text._text, "Interrupted", "the word on the bar")
@@ -494,6 +495,43 @@ local token = cb.token
 CB:OnEvent(cb, "UNIT_SPELLCAST_STOP", "target")
 check(cb.active, "the new cast keeps running")
 check(cb.token ~= token, "...re-read, not ended")
+
+print("-- Another spell pressed mid-cast: FAILED / INTERRUPTED for the rejected press")
+for _, ev in ipairs({ "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do
+    cast = { "Long", nil, 1, 1, 2, false, 1, false, 1 }
+    castDur = Duration(2, 0, false)
+    timers = {}
+    CB:OnEvent(cb, "UNIT_SPELLCAST_START", "target")
+    CB:OnEvent(cb, ev, "target")
+    eq(cb.holding, false, ev .. " while still casting: no flash")
+    check(cb.active, "...the bar stays active")
+    check(cb.text._text ~= "Failed" and cb.text._text ~= "Interrupted", "...no failed / interrupted word")
+    cast = nil
+    CB:OnEvent(cb, "UNIT_SPELLCAST_STOP", "target")
+    check(not cb.active and not cb.holding, "...and the real STOP ends it normally")
+end
+
+print("-- A real interrupt (no longer casting) still flashes")
+cast = { "Long", nil, 1, 1, 2, false, 1, false, 1 }
+castDur = Duration(2, 0, false)
+CB:OnEvent(cb, "UNIT_SPELLCAST_START", "target")
+cast = nil
+CB:OnEvent(cb, "UNIT_SPELLCAST_INTERRUPTED", "target")
+eq(cb.holding, true, "interrupted: held")
+eq(cb.text._text, "Interrupted", "...with the word")
+runTimers()
+
+print("-- A real failed cast (no longer casting) still flashes")
+cast = { "Long", nil, 1, 1, 2, false, 1, false, 1 }
+castDur = Duration(2, 0, false)
+CB:OnEvent(cb, "UNIT_SPELLCAST_START", "target")
+cast = nil
+CB:OnEvent(cb, "UNIT_SPELLCAST_FAILED", "target")
+eq(cb.holding, true, "failed: held")
+eq(cb.text._text, "Failed", "...with the word")
+runTimers()
+eq(cb.holding, false, "...released after the hold")
+cast = { "Next", nil, 1, 1, 2, false, 1, false, 1 }
 
 print("-- The duration arrives a frame late")
 castDur = nil

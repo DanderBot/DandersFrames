@@ -38,6 +38,7 @@
 - (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
 - (Unit Frames) Frame Fade's tick boxes now update your frames straight away, and hovering works with Separate Combat Fade.
 - (Unit Frames) The Unlock button on the Unit Frames pages now moves unit frames without showing other addons' movers.
+- (Unit Frames) Fix the cast bar vanishing mid-cast when pressing another spell while casting.
 - (Unit Frames) Turning the cast bar on or off on one frame no longer changes a linked frame.
 - (Unit Frames) The selection, hover and aggro outlines no longer include space for a hidden class power bar.
 - (Unit Frames) Target, Focus and Boss now have the important debuff highlight settings.
