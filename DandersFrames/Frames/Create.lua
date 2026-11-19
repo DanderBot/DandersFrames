@@ -1856,10 +1856,8 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- happens to match the default just hides the split again.
     local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
-        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
+        + DF:ResolveResourceBarLevelOffset(frame, powerDB))
     frame.dfPowerBar:Hide()
-    -- Shrink Health Bar follows this bar's visibility (Frames/Bars.lua).
-    DF:WatchPowerBarForHealthRect(frame)
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
     powerBg:SetAllPoints()
@@ -2166,10 +2164,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- happens to match the default just hides the split again.
     local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
-        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
+        + DF:ResolveResourceBarLevelOffset(frame, powerDB))
     frame.dfPowerBar:Hide()
-    -- Shrink Health Bar follows this bar's visibility (Frames/Bars.lua).
-    DF:WatchPowerBarForHealthRect(frame)
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
     powerBg:SetAllPoints()

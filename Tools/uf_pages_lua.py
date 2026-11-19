@@ -68,7 +68,7 @@ BUILT_NEW = {"uf_visibility", "uf_castbar", "uf_classpower", "uf_portrait", "uf_
 #   castbarDetached on Boss: five boss cast bars share one settings table, so one
 #   detached record would stack all five on one spot (CastBar.lua IsDetached).
 # Controls added to a DF card since the inventory that unit frames must not show:
-# (none at present -- resourceBarShrinkHealth was here until unit frames gained it)
+# (none at present)
 EXTRA_HIDE = {"uf_castbar": {"castbarDetached": {"boss"}}}
 # New cards on a DF page that get a built page of their own instead:
 # source page id -> (kind, category, title) of the page that draws them.

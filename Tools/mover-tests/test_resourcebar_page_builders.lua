@@ -164,7 +164,7 @@ end
 -- ============================================================
 print("-- Resource Bar page: the vocabulary at page scope")
 do
-    for _, name in ipairs({ "RB_CLASS_LIST", "anchorOptions", "orientOptions", "RESOURCE_COLOR_MODES" }) do
+    for _, name in ipairs({ "RB_CLASS_LIST", "anchorOptions", "placementOptions", "orientOptions", "RESOURCE_COLOR_MODES" }) do
         local decls = 0
         for _ in PAGE:gmatch("local " .. name .. " = {") do decls = decls + 1 end
         eq(decls, 1, "vocab: " .. name .. " is declared exactly once")
@@ -195,10 +195,12 @@ local RESOURCE_SIZE = {
     { "slider",   "Thickness",                "resourceBarHeight",                 55 },
 }
 local RESOURCE_POSITION = {
+    { "dropdown", "Placement", "resourceBarPlacement", 55 },
     { "dropdown", "Anchor",   "resourceBarAnchor", 55 },
     { "slider",   "Offset X", "resourceBarX",      55 },
     { "slider",   "Offset Y", "resourceBarY",      55 },
-    { "checkbox", "Shrink Health Bar To Fit", "resourceBarShrinkHealth", 30 },
+    { "slider",   "Offset X", "resourceBarStripX", 55 },
+    { "slider",   "Offset Y", "resourceBarStripY", 55 },
 }
 local RESOURCE_APPEARANCE = {
     { "texturedropdown", "Texture",                "resourceBarTexture",     55 },

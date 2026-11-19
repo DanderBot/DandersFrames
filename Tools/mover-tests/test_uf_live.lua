@@ -138,6 +138,7 @@ end
 function DF:ApplyFrameBorder(f) rec("ApplyFrameBorder:" .. f.name) end
 function DF:LayoutResourceBar(f) rec("LayoutResourceBar:" .. f.name) end
 function DF:AnchorHealthBarsToPadding(f) rec("Anchor:" .. f.name) end
+function DF:SyncHealthBarRect(f) rec("SyncRect:" .. f.name) end
 DF.DriveFactoryRowsNow = function(f) rec("rows:" .. f.name) end
 owners.buffBorderColor = "buffs"
 owners.backgroundColor, owners.healthColor = "health", "health"
@@ -145,8 +146,9 @@ owners.backgroundColor, owners.healthColor = "health", "health"
 eq(run("target", "backgroundColor", "health"), "UpdateBackgroundAppearance:target,tracks:target",
    "background colour: the background and the ring tracks")
 eq(run("target", "healthColor", "health"), "UpdateHealthBarAppearance:target", "health colour: the fill's colour")
-eq(run("player", "frameBorderColor", "frame"), "ApplyFrameBorder:player,UpdateAbsorb:player,UpdateHealAbsorb:player",
-   "border: the border, and the absorbs inset by it")
+eq(run("player", "frameBorderColor", "frame"),
+   "ApplyFrameBorder:player,SyncRect:player,UpdateAbsorb:player,UpdateHealAbsorb:player",
+   "border: the border, the health bar kept inside it, and the absorbs inset by it")
 eq(run("player", "frameFadeAlpha", "frame"), "UpdateFrameAppearance:player", "frame fade: its own updater")
 eq(run("player", "framePadding", "frame"), "Anchor:player,LayoutResourceBar:player", "padding re-anchors the bars")
 eq(run("player", "resourceBarBackgroundColor", "resource"), "LayoutResourceBar:player,tracks:player",
@@ -162,7 +164,7 @@ eq(run("player", "statusIconFontSize", "icons"), "UpdateAllStatusIcons:player", 
 eq(run("player", "color", "health"),
    "UpdateColorCurve,UpdateHealthBarAppearance:player,UpdateBackgroundAppearance:player,tracks:player",
    "a gradient stop: the curves, then what paints from them")
-eq(run("player", nil, "frame"), "ApplyFrameBorder:player,UpdateAbsorb:player,UpdateHealAbsorb:player",
+eq(run("player", nil, "frame"), "ApplyFrameBorder:player,SyncRect:player,UpdateAbsorb:player,UpdateHealAbsorb:player",
    "no key on the Frame page: Border Alpha")
 eq(run("player", "rangeUpdateInterval", "fading"), "", "nothing to show mid-drag")
 

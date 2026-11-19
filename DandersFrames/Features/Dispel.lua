@@ -248,6 +248,7 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     --   +0..+8   background, health/missing +3, power +5, heal-absorb +8
     --   +10      heal prediction    (healPredictionFrameLevel)
     --   +11      absorb bar         (absorbBarFrameLevel)
+    --   +12      resource bar in a Placement strip
     --   +13      overshield host,   +14 frame border
     --   +16/+17  dispel overlay / gradient + ring   <- HERE
     --   +20      resource bar       (resourceBarFrameLevel)
@@ -476,7 +477,7 @@ local function SafeRectSize(region)
     return h, w
 end
 
-local function LayoutStateChanged(overlay, db)
+local function LayoutStateChanged(overlay, db, frame)
     -- Measure the padded-frame anchor proxy when it exists (the rect the layout
     -- actually uses); the healthBar fallback only applies before the first pass.
     local gradientParent = overlay.dfGradientAnchorProxy or overlay.gradientAnchorTarget
@@ -486,6 +487,10 @@ local function LayoutStateChanged(overlay, db)
     parentW = parentW or 80
     return overlay.dfL_borderSize              ~= db.dispelBorderSize
         or overlay.dfL_framePadding            ~= db.framePadding
+        -- The health rect (Frames/HealthRect.lua) can move without the padding changing:
+        -- a resource bar Placement strip or Keep Health Bar Inside Border.
+        or (frame and (overlay.dfL_rectL ~= frame.dfHealthRectL or overlay.dfL_rectR ~= frame.dfHealthRectR
+            or overlay.dfL_rectT ~= frame.dfHealthRectT or overlay.dfL_rectB ~= frame.dfHealthRectB))
         or overlay.dfL_borderInset             ~= db.dispelBorderInset
         or overlay.dfL_pixelPerfect            ~= db.pixelPerfect
         or overlay.dfL_iconSize                ~= db.dispelIconSize
@@ -506,10 +511,14 @@ local function LayoutStateChanged(overlay, db)
         or overlay.dfL_parentW                 ~= parentW
 end
 
-local function CacheLayoutState(overlay, db)
+local function CacheLayoutState(overlay, db, frame)
     local gradientParent = overlay.dfGradientAnchorProxy or overlay.gradientAnchorTarget
         or (overlay.gradient and overlay.gradient:GetParent())
     overlay.dfL_framePadding            = db.framePadding
+    if frame then
+        overlay.dfL_rectL, overlay.dfL_rectR = frame.dfHealthRectL, frame.dfHealthRectR
+        overlay.dfL_rectT, overlay.dfL_rectB = frame.dfHealthRectT, frame.dfHealthRectB
+    end
     overlay.dfL_borderSize              = db.dispelBorderSize
     overlay.dfL_borderInset             = db.dispelBorderInset
     overlay.dfL_pixelPerfect            = db.pixelPerfect
@@ -572,7 +581,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
 
     -- Fast path: skip the entire layout pass if nothing that affects
     -- it has changed since last call. Typical in-combat outcome.
-    if not LayoutStateChanged(overlay, db) then return end
+    if not LayoutStateChanged(overlay, db, frame) then return end
 
     ApplyDispelRingGeometry(overlay.borderRing, overlay, db,
         (frame and frame:GetWidth()) or overlay:GetWidth(),
@@ -604,9 +613,10 @@ local function ApplyOverlayLayout(overlay, db, frame)
         end
     end
     
-    -- Gradient positioning. Anchor rect = the frame minus framePadding — the
-    -- UN-CLIPPED health area (identical to the healthBar's normal rect,
-    -- Create.lua). Never anchor to the healthBar itself: reduced-max-health
+    -- Gradient positioning. Anchor rect = the UN-CLIPPED health rect
+    -- (DF:GetHealthBarInsets, Frames/HealthRect.lua: the frame minus framePadding,
+    -- less a resource bar Placement strip, so the wash never lies over the strip).
+    -- Never anchor to the healthBar itself: reduced-max-health
     -- "Clip Health Bar" mode re-anchors the healthBar to just the un-reduced
     -- portion (ReducedMaxHealth.lua), which shrank every gradient with it —
     -- the wash must span the WHOLE bar, reduced region included (live-caught:
@@ -622,7 +632,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
             gradientParent = CreateFrame("Frame", nil, overlay)
             overlay.dfGradientAnchorProxy = gradientParent
         end
-        local pad = db.framePadding or 0
+        local l, r, t, b = DF:GetHealthBarInsets(frame, db)
         gradientParent:ClearAllPoints()
         -- Anchor the proxy to the WIDGET (overlay), never to `frame` directly.
         -- overlay:SetAllPoints(host), and host is the frame (legacy path) or the
@@ -634,8 +644,8 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- all forbidden layout aspects from owner"); the game-mode gradient/tint
         -- carriers pin onto this proxy, so it has to lead back to the button — not the
         -- unit frame, whose chain carries none of the button's forbidden aspects.
-        gradientParent:SetPoint("TOPLEFT", overlay, "TOPLEFT", pad, -pad)
-        gradientParent:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", -pad, pad)
+        gradientParent:SetPoint("TOPLEFT", overlay, "TOPLEFT", l, -t)
+        gradientParent:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", -r, b)
     else
         gradientParent = overlay.gradientAnchorTarget or overlay.gradient:GetParent()
     end
@@ -860,7 +870,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
     end
     -- Cache the current layout settings so subsequent calls can
     -- short-circuit via LayoutStateChanged.
-    CacheLayoutState(overlay, db)
+    CacheLayoutState(overlay, db, frame)
 end
 
 -- ============================================================
@@ -2235,19 +2245,20 @@ local function StyleGameBorderSlot(btn, frame, db)
 end
 
 -- GAME mode, EDGE strip: one gradient strip texture per edge — all four now live on the
--- SAME slot button (keyed by side), positioned from settings on the padded frame rect
--- (immune to the reduced-max health-bar clip). Geometry mirrors ApplyOverlayLayout's
--- EDGE branch: strip depth = padded frame dimension × Gradient Size.
+-- SAME slot button (keyed by side), positioned from settings on the un-clipped health
+-- rect (DF:GetHealthBarInsets: immune to the reduced-max clip, clear of a resource bar
+-- Placement strip). Geometry mirrors ApplyOverlayLayout's EDGE branch: strip depth =
+-- health rect dimension × Gradient Size.
 local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- Strip tex is created + bound in DispelSlotSecureInit (secure); this pass only
     -- positions it. If onInit hasn't populated it yet, skip — it always runs first.
     local tex = btn.dfDispelEdgeTex and btn.dfDispelEdgeTex[edge]
     if not tex then return end
     tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
-    local pad = db.framePadding or 0
+    local l, r, t, b = DF:GetHealthBarInsets(frame, db)
     local gradientSize = db.dispelGradientSize or 0.3
-    local innerW = math.max((frame:GetWidth() or 80) - 2 * pad, 1)
-    local innerH = math.max((frame:GetHeight() or 40) - 2 * pad, 1)
+    local innerW = math.max((frame:GetWidth() or 80) - l - r, 1)
+    local innerH = math.max((frame:GetHeight() or 40) - t - b, 1)
     local dH = innerH * gradientSize   -- strip depth, horizontal strips
     local dW = innerW * gradientSize   -- strip depth, vertical strips
     -- Rect from TWO DIAGONAL POINTS only (the ring's proven pattern on these
@@ -2258,17 +2269,17 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- owner") — anchoring to the unit frame leaves this bound carrier orphaned (white).
     tex:ClearAllPoints()
     if edge == "TOP" then
-        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", pad, -pad)
-        tex:SetPoint("BOTTOMRIGHT", btn, "TOPRIGHT", -pad, -(pad + dH))
+        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", l, -t)
+        tex:SetPoint("BOTTOMRIGHT", btn, "TOPRIGHT", -r, -(t + dH))
     elseif edge == "BOTTOM" then
-        tex:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", pad, pad + dH)
-        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -pad, pad)
+        tex:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", l, b + dH)
+        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -r, b)
     elseif edge == "LEFT" then
-        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", pad, -pad)
-        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMLEFT", pad + dW, pad)
+        tex:SetPoint("TOPLEFT", btn, "TOPLEFT", l, -t)
+        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMLEFT", l + dW, b)
     else -- RIGHT
-        tex:SetPoint("TOPLEFT", btn, "TOPRIGHT", -(pad + dW), -pad)
-        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -pad, pad)
+        tex:SetPoint("TOPLEFT", btn, "TOPRIGHT", -(r + dW), -t)
+        tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -r, b)
     end
     tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
     -- Opacity on the dim host; the bound texture normalised to 1 (dim-host rule,

@@ -767,10 +767,10 @@ local function IterateFramesInMode(mode, updateFunc)
 end
 
 -- Update frame sizes AND layout positions
--- `force` skips the drag throttle. ⚠ NEEDED, not a convenience: this is the ONLY live
--- path that re-anchors the health bar to framePadding (the other two sites are frame
--- CREATION and the reduced-max-health restore). Nothing in the full-update path does it,
--- so a padding change that does not come from a slider DRAG left the health bar at the
+-- `force` skips the drag throttle. ⚠ NEEDED, not a convenience: this is the settings
+-- path that resizes frames and re-anchors the health bar to framePadding (the full update
+-- re-places it only through ApplyResourceBarLayout's DF:SyncHealthBarRect, for frames it
+-- lays out). Before that, a padding change that did not come from a slider DRAG left the health bar at the
 -- old inset while the resource bar moved — ApplyResourceBarLayout re-reads padding every
 -- pass, so the two disagreed. Typing a value and pressing Enter was the reported case;
 -- the throttle would also have swallowed a single un-forced call
@@ -1587,9 +1587,16 @@ function DF:LightweightUpdateBorder()
     local db = DF.db[mode]
     if not db or not DF.ApplyFrameBorder then return end
 
+    -- The border's thickness also places the health bar (Keep Health Bar Inside Border) and a
+    -- bar kept inside the border, so the drag moves those with it. SyncHealthBarRect is a
+    -- no-op unless the insets changed; a hidden resource bar is left for its next layout.
     local function UpdateBorder(frame)
         if not frame or not frame.border then return end
         DF:ApplyFrameBorder(frame, db)
+        if frame.dfPowerBar and frame.dfPowerBar:IsShown() and DF.LayoutResourceBar then
+            DF:LayoutResourceBar(frame, db)
+        end
+        if DF.SyncHealthBarRect then DF:SyncHealthBarRect(frame, db) end
     end
 
     IterateFramesInMode(mode, UpdateBorder)
@@ -2914,14 +2921,12 @@ function DF:LightweightUpdateResourceBarFrameLevel()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
-    
-    local frameLevelOffset = db.resourceBarFrameLevel or 20
-    
+
     local function UpdateFrame(frame)
         if not frame or not frame.dfPowerBar then return end
         local bar = frame.dfPowerBar
         local baseLevel = frame:GetFrameLevel()
-        bar:SetFrameLevel(baseLevel + frameLevelOffset)
+        bar:SetFrameLevel(baseLevel + DF:ResolveResourceBarLevelOffset(frame, db))
         -- Border needs to be above the bar
         if bar.border then
             bar.border:SetFrameLevel(bar:GetFrameLevel() + 1)
@@ -6726,7 +6731,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     { "overshieldHost", frame.dfOvershieldHost,      13 },
                     { "frame.border",    frame.border,               14 },
                     { "dfPowerBar",      frame.dfPowerBar,
-                        (bdb and bdb.resourceBarFrameLevel) or 20 },
+                        DF:ResolveResourceBarLevelOffset(frame, bdb) },
                     { "contentOverlay",  frame.contentOverlay,       25 },
                 }) do
                     local nm, w, want = e[1], e[2], e[3]

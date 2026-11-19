@@ -19,13 +19,11 @@ local DEFAULT_BAR_COLOR = { r = 0.2, g = 0.2, b = 0.2, a = 0.85 }
 function DF:CreateReducedMaxHealthBar(frame, db)
     if not frame or not frame.healthBar or frame.dfReducedMaxHealthBar then return end
 
-    local padding = (db and db.framePadding) or 0
-
     local bar = CreateFrame("StatusBar", nil, frame)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
-    bar:SetPoint("TOPLEFT", padding, -padding)
-    bar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- On the health rect (Frames/HealthRect.lua); UpdateReducedMaxHealth re-anchors it there.
+    DF:AnchorToHealthRect(bar, frame, DF:GetHealthBarInsets(frame, db))
     bar:SetReverseFill(true)
     bar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 6)
     bar:Hide()
@@ -127,8 +125,8 @@ function DF:UpdateReducedMaxHealth(frame)
     -- the clipped health bar's right edge, which anchors to this bar's texture —
     -- at the old inset, producing asymmetric padding (new on the left, old on
     -- the right).
-    -- ★ NESTED INSIDE THE HEALTH RECT, not the padding rect. With Shrink Health Bar on,
-    -- the rect already stops at the power bar, so the reduced band sits at the end of
+    -- ★ NESTED INSIDE THE HEALTH RECT, not the padding rect. With a Placement strip, the
+    -- rect already stops at the power bar, so the reduced band sits at the end of
     -- the SHRUNK health bar and the clip below only ever moves the full-health edge.
     -- Same insets, same function as every other health-bar anchor
     -- (DF:GetHealthBarInsets, Frames/HealthRect.lua) -- never re-derive them here.

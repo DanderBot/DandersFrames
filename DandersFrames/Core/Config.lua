@@ -1994,6 +1994,9 @@ DF.PartyDefaults = {
     -- Frame Dimensions & Layout
     frameHeight = 64,
     framePadding = 0,
+    -- Keep Health Bar Inside Border: the health bar stops at the frame border's inner edge
+    -- instead of running under it (DF:BarsInsideFrameBorder). Off = padding only, as before.
+    healthInsideFrameBorder = false,
     frameSpacing = 1,
     frameScale = 1.0,
     frameWidth = 125,
@@ -2598,16 +2601,22 @@ DF.PartyDefaults = {
     -- behaviour, so true is what every upgrading profile already looks like. False
     -- here would have silently lengthened every matched bar on upgrade.
     resourceBarMatchAdjustFrameBorder = true,
+    -- OVER draws the bar on top of a full-size health bar; BOTTOM / TOP / LEFT / RIGHT give
+    -- it a strip along that side, and the health bar stops at the strip on frames that carry
+    -- one (DF:GetResourceBarRoomEdge, DF:GetHealthBarInsets in Frames/HealthRect.lua).
+    resourceBarPlacement = "OVER",
+    -- A Placement strip's own offsets, from its seat on its side (DF:LayoutResourceBar).
+    resourceBarStripX = 0,
+    resourceBarStripY = 0,
+    -- A Placement strip's own Frame Level: under the frame border (+14), see
+    -- DF:ResolveResourceBarLevelOffset.
+    resourceBarStripFrameLevel = 12,
     resourceBarOrientation = "HORIZONTAL",
     resourceBarReverseFill = false,
     resourceBarShowDPS = false,
     resourceBarShowHealer = true,
     resourceBarShowInSoloMode = true,
     resourceBarShowTank = false,
-    -- Opt-in: while an edge-attached, matched power bar is SHOWN on a frame, that
-    -- frame's health bar stops at the bar's inner edge instead of running under it
-    -- (Frames/HealthRect.lua). Default false so no existing profile changes look.
-    resourceBarShrinkHealth = false,
     resourceBarSmooth = true,
     resourceBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     resourceBarWidth = 60,

@@ -2970,14 +2970,14 @@ function UFO.KeySet(...)
 end
 
 UFO.RING_DEAD = {
-    frame = UFO.KeySet("frameWidth", "frameHeight", "frameShowBorder"),
+    frame = UFO.KeySet("frameWidth", "frameHeight", "frameShowBorder", "healthInsideFrameBorder"),
     fading = UFO.KeySet("oorMissingHealthAlpha", "oorBorderAlpha", "fadeDeadPowerBar",
         "fadeDeadUseCustomColor", "fadeDeadBackgroundColor"),
     portrait = UFO.KeySet("portraitSide", "portraitSize", "portraitX", "portraitY", "portraitShape"),
     health = UFO.KeySet("healthOrientation", "backgroundColorMode", "backgroundClassAlpha", "backgroundMode"),
     resource = UFO.KeySet("resourceBarEnabled", "resourceBarClassFilter", "resourceBarMatchWidth",
-        "resourceBarMatchAdjustFrameBorder", "resourceBarWidth", "resourceBarHeight", "resourceBarAnchor",
-        "resourceBarX", "resourceBarY", "resourceBarFrameLevel", "resourceBarOrientation",
+        "resourceBarMatchAdjustFrameBorder", "resourceBarPlacement", "resourceBarWidth", "resourceBarHeight", "resourceBarAnchor",
+        "resourceBarX", "resourceBarY", "resourceBarStripX", "resourceBarStripY", "resourceBarFrameLevel", "resourceBarStripFrameLevel", "resourceBarOrientation",
         "resourceBarReverseFill", "resourceBarSmooth", "resourceBarBackgroundEnabled", "resourceBarShowBorder",
         "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "DEATHKNIGHT", "SHAMAN", "MAGE", "WARLOCK",
         "MONK", "DRUID", "DEMONHUNTER", "EVOKER"),

@@ -54,10 +54,11 @@ local issecretvalue = issecretvalue
 -- the file does not keep.
 
 -- ★ THE HEALTH BAR RECT lives in Frames/HealthRect.lua: DF:AnchorHealthBarsToPadding
--- (framePadding inset, plus room for an edge-attached power bar when Shrink Health
--- Bar is on). It used to be written out longhand here, in the resize path in Core.lua
--- and in the TEST-mode update; a preview restating live's geometry is the divergence
--- class this addon keeps paying for. Every anchor site now calls that one function.
+-- (framePadding inset -- or the border band with Keep Health Bar Inside Border -- plus
+-- room for a resource bar Placement strip). It used to be written out longhand here, in
+-- the resize path in Core.lua and in the TEST-mode update; a preview restating live's
+-- geometry is the divergence class this addon keeps paying for. Every anchor site now
+-- calls that one function.
 
 function DF:ApplyFrameLayout(frame)
     if not frame then return end
@@ -805,7 +806,8 @@ function DF:UpdateUnitFrame(frame, source)
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
     local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
-    -- Health bar positioning (resource bar is floating, doesn't affect health bar size)
+    -- The resource bar floats over the health bar unless its Placement gives it a strip.
+    DF:NoteResourceBarWanted(frame, showPower)
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if frame.dfPowerBar then
@@ -1170,6 +1172,11 @@ function DF:UpdatePower(frame)
     -- Check if power bar should be shown (uses centralized role filter).
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
     local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
+    -- Runs on power events, so only a change of answer re-syncs the strip's cut-out.
+    if frame.dfResourceBarWanted ~= (showPower and true or false) then
+        DF:NoteResourceBarWanted(frame, showPower)
+        DF:SyncHealthBarRect(frame, db)
+    end
 
     if not showPower then
         frame.dfPowerBar:Hide()

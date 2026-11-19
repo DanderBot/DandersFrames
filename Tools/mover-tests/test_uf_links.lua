@@ -256,9 +256,10 @@ do
     -- 167 = 166 + the ring list (which side each ring bar sits on).
     -- 166 = 162 + the detached resource bar's switch, anchor, x and y (where it sits;
     -- its size and Match Frame Width are look).
-    eq(#layout, 167, "the layout set is the size it was reviewed at (167 keys); a change here wants a look")
+    -- 169 = 167 + a Placement strip's own x and y (where it sits along its side).
+    eq(#layout, 169, "the layout set is the size it was reviewed at (169 keys); a change here wants a look")
     for _, k in ipairs({ "resourceBarDetached", "resourceBarDetachedAnchor", "resourceBarDetachedX",
-                         "resourceBarDetachedY" }) do
+                         "resourceBarDetachedY", "resourceBarStripX", "resourceBarStripY" }) do
         eq(Links.Aspect(k), "layout", "layout: " .. k)
         eq(Links.OwnerOf(k), "resource", "Resource Bar owns " .. k)
     end
