@@ -74,6 +74,16 @@ do  -- Forever carries its OWN generated database, never retail's
     local sor = RF.ByID[27827]
     check(sor and sor.class == "PRIEST" and sor.cats.defensives, "Spirit of Redemption is a priest defensive")
     check(RF.ByID[20711] == nil, "...keyed by its aura, not the passive talent")
+    -- Prayer of Mending: the cast applies its aura through a script, so the generator
+    -- lists the aura ids by hand; every rank's aura resolves, the casts and the rune don't
+    local pom = RF.ByID[401877]
+    check(pom and pom.n == "Prayer of Mending" and pom.class == "PRIEST" and pom.cats.healing,
+        "Prayer of Mending is a priest healing aura")
+    check(RF.ByID[1240848] == pom and RF.ByID[1240849] == pom, "...ranks 2 and 3 resolve to the same record")
+    for _, id in ipairs({ 401859, 1240826, 1240827, 402832 }) do
+        check(RF.ByID[id] == nil, id .. " (cast or rune) is not a Prayer of Mending aura")
+    end
+    check(RR.ByID[401877] == nil, "retail does not carry Forever's Prayer of Mending ids")
     local camp = RF.ByID[1229741]
     check(camp and camp.class == "ALL" and camp.cats.utility, "Camp Benefits is all-class utility")
 end
@@ -144,6 +154,7 @@ do  -- rank numbers + labels
     eq(RF:GetSpellRank(139), 1, "Renew 139 is rank 1")
     eq(RF:GetSpellRank(425268), 1, "...and so is its second rank-1 id (a map, not list order)")
     eq(RF:GetSpellRank(25315), 10, "Renew 25315 is rank 10")
+    eq(RF:GetSpellRank(1240849), 3, "Prayer of Mending 1240849 is rank 3")
     eq(RR.GetSpellRank and RR:GetSpellRank(139), nil, "retail has no ranks")
     forever.L = setmetatable({}, { __index = function(_, k) return k end })
     local prev = C_Spell
