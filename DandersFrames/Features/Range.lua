@@ -144,19 +144,22 @@ local specSpells = {
     },
     
     -- ==================== HUNTER ====================
+    -- ☠ A ranged shot can answer "out of range" at melee distance. Hostile units count as
+    -- in range if ANY listed spell says so, so a melee spell rides along at the end to
+    -- cover point-blank: Wing Clip (all specs), Raptor Strike / Mongoose Bite (Survival).
     [253] = { -- Beast Mastery
         friendly = nil,
-        hostile = { 193455, 75 },  -- Cobra Shot, Auto Shot
+        hostile = { 193455, 75, 195645 },  -- Cobra Shot, Auto Shot, Wing Clip
         range = "40yd"
     },
     [254] = { -- Marksmanship
         friendly = nil,
-        hostile = { 19434, 75 },   -- Aimed Shot, Auto Shot
+        hostile = { 19434, 75, 195645 },   -- Aimed Shot, Auto Shot, Wing Clip
         range = "40yd"
     },
     [255] = { -- Survival
         friendly = nil,
-        hostile = { 259491, 75 },  -- Kill Command (ranged version), Auto Shot
+        hostile = { 259491, 75, 186270, 259387, 195645 },  -- Kill Command (ranged version), Auto Shot, Raptor Strike, Mongoose Bite, Wing Clip
         range = "40yd"
     },
     
@@ -303,7 +306,7 @@ local classFallbacks = {
     DEMONHUNTER = { friendly = nil, hostile = 185123 },
     DRUID       = { friendly = { 8936, 774, 88423, 2782 }, hostile = 8921 },
     EVOKER      = { friendly = { 361469, 431442, 355913 }, hostile = { 361469, 431442, 362969 } },
-    HUNTER      = { friendly = nil, hostile = 75 },  -- Auto Shot
+    HUNTER      = { friendly = nil, hostile = { 75, 195645, 186270 } },  -- Auto Shot, Wing Clip, Raptor Strike
     MAGE        = { friendly = { 1459, 475 }, hostile = 116 },
     MONK        = { friendly = { 116670, 115450, 218164 }, hostile = 115546 },
     PALADIN     = { friendly = { 19750, 85673, 4987, 213644 }, hostile = 62124 },
@@ -321,7 +324,7 @@ local classFallbacks = {
 if DF.IS_FOREVER then
     classFallbacks = {
         DRUID   = { friendly = { 5185, 774, 8936 }, hostile = { 5176, 8921 } },  -- Healing Touch, Rejuvenation, Regrowth / Wrath, Moonfire
-        HUNTER  = { friendly = nil, hostile = { 75 } },                          -- Auto Shot
+        HUNTER  = { friendly = nil, hostile = { 75, 2973 } },                    -- Auto Shot, Raptor Strike
         MAGE    = { friendly = { 1459 }, hostile = { 133, 116 } },               -- Arcane Intellect / Fireball, Frostbolt
         PALADIN = { friendly = { 635, 19750 }, hostile = { 879 } },              -- Holy Light, Flash of Light / Exorcism
         PRIEST  = { friendly = { 2050, 2061 }, hostile = { 585 } },              -- Lesser Heal, Flash Heal / Smite
@@ -388,6 +391,9 @@ local friendlySpells = {}
 local hostileSpells = {}
 local currentFriendlySpell = nil
 local currentHostileSpell = nil
+-- true when hostileSpells[1] is the user's chosen spell: its answer decides alone, so a
+-- deliberately short pick is never widened by a longer automatic spell.
+local hostileUserFirst = false
 local currentSpecID = nil
 
 -- "361469 (30yd), 355913 (30yd)" -- the live range, so a log line shows whether a
@@ -413,6 +419,7 @@ local function UpdateRangeSpell()
     currentSpecID = specID
     wipe(friendlySpells)
     wipe(hostileSpells)
+    hostileUserFirst = false
 
     -- Check for user override in DB (check party first, then raid)
     local userSpellID = nil
@@ -434,6 +441,7 @@ local function UpdateRangeSpell()
         if IsPlayerSpell(userSpellID) then
             AddKnownSpells(friendlySpells, userSpellID)
             AddKnownSpells(hostileSpells, userSpellID)
+            hostileUserFirst = true
             source = "user override"
         else
             -- Worth a WARN: the user picked this deliberately and it is silently not being
@@ -571,15 +579,30 @@ local function CheckUnitRange(unit)
     -- but UnitCanAttack is also false (they're in your group). Using UnitCanAttack
     -- ensures they fall through to the friendly path.
     if UnitCanAttack("player", unit) then
-        -- HOSTILE UNITS: IsSpellInRange returns clean booleans, trust directly
-        for i = 1, #hostileSpells do
-            local inRange = SpellRangeAnswer(hostileSpells[i], unit)
+        -- HOSTILE UNITS: IsSpellInRange returns clean booleans (not secret).
+        -- ★ ANY "in range" wins. A ranged shot can say out of range at point-blank while a
+        -- melee spell says in range (a hunter in melee faded its target), so a false only
+        -- stands when no spell says true. Stops at the first true.
+        -- A user-chosen spell is the exception: if it answers, it decides alone.
+        local first = 1
+        if hostileUserFirst and hostileSpells[1] then
+            local inRange = SpellRangeAnswer(hostileSpells[1], unit)
             if inRange ~= nil then
                 return inRange
             end
+            first = 2
         end
-        -- No hostile spell or none answered - assume in range
-        return true
+        local sawFalse = false
+        for i = first, #hostileSpells do
+            local inRange = SpellRangeAnswer(hostileSpells[i], unit)
+            if inRange == true then
+                return true
+            elseif inRange == false then
+                sawFalse = true
+            end
+        end
+        -- Every answer was false -> out of range. None answered -> assume in range.
+        return not sawFalse
     end
 
     -- FRIENDLY UNITS (party/raid members)

@@ -292,6 +292,61 @@ do  -- hostile backups
     unload()
 end
 
+do  -- hostile: any "in range" wins (a hunter in melee: the shot says no, the melee spell yes)
+    local DF = loadRange("HUNTER", function()
+        S.specID = 253
+        S.known[193455], S.known[75], S.known[195645] = true, true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile, S.combat = true, true
+    S.inRange[193455], S.inRange[75], S.inRange[195645] = false, true, nil
+    eq(rangeOf(DF), true, "first spell false, second true -> in range")
+    S.inRange[75], S.inRange[195645] = false, true
+    eq(rangeOf(DF), true, "a melee spell's true overrides the shots' false")
+    S.inRange[195645] = false
+    eq(rangeOf(DF), false, "every spell false -> out of range")
+    S.inRange[193455], S.inRange[75], S.inRange[195645] = nil, nil, nil
+    eq(rangeOf(DF), true, "no spell answers -> assume in range")
+    S.inRange[193455], S.inRange[75] = nil, false
+    eq(rangeOf(DF), false, "a lone false with the rest nil -> out of range")
+    unload()
+
+    -- Survival knows its melee spells; the class list carries one for an unknown spec
+    DF = loadRange("HUNTER", function()
+        S.specID = 255
+        S.known[259491], S.known[75], S.known[186270] = true, true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[259491], S.inRange[75], S.inRange[186270] = false, false, true
+    eq(rangeOf(DF), true, "Survival in melee: Raptor Strike keeps the enemy in range")
+    unload()
+
+    DF = loadRange("HUNTER", function()
+        S.specIndex, S.specID = nil, nil
+        S.known[75], S.known[195645] = true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[75], S.inRange[195645] = false, true
+    eq(rangeOf(DF), true, "the hunter class list carries a melee spell too")
+    unload()
+
+    -- a chosen spell that answers still decides alone: no widening by the auto list
+    DF = loadRange("HUNTER", function()
+        S.specID = 253
+        S.known[193455], S.known[75], S.known[195645] = true, true, true
+    end)
+    DF.db.party.rangeCheckSpellID = 195645
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[195645], S.inRange[193455], S.inRange[75] = false, true, true
+    eq(rangeOf(DF), false, "a chosen spell's false is not overridden by a longer auto spell")
+    S.inRange[195645] = nil
+    eq(rangeOf(DF), true, "a chosen spell that can't check the unit falls to the any-true auto list")
+    unload()
+end
+
 do  -- paladin rez: Intercession behind Redemption
     local DF = loadRange("PALADIN", function()
         S.specID = 65

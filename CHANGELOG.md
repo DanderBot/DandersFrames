@@ -33,6 +33,7 @@
 
 ### Bug Fixes
 
+- (Range) Fix enemy targets fading as out of range when a hunter is in melee range.
 - (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
 - (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
 - (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
