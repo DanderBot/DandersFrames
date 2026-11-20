@@ -88,8 +88,8 @@ do  -- Forever carries its OWN generated database, never retail's
     check(camp and camp.class == "ALL" and camp.cats.utility, "Camp Benefits is all-class utility")
 end
 
-do  -- Missing Buffs: the four shared group buffs, every rank, under the retail keys
-    eq(#forever.RaidBuffs, 4, "Forever tracks four raid buffs")
+do  -- Missing Buffs: the four shared group buffs (retail keys) plus Forever's extras, every rank
+    eq(#forever.RaidBuffs, 8, "Forever tracks eight raid buffs")
     local keys = {}
     for _, info in ipairs(forever.RaidBuffs) do keys[info[2]] = info end
     for _, k in ipairs({ "missingBuffCheckStamina", "missingBuffCheckIntellect",
@@ -100,7 +100,32 @@ do  -- Missing Buffs: the four shared group buffs, every rank, under the retail 
     for _, id in ipairs(keys.missingBuffCheckStamina[1]) do fort[id] = true end
     check(fort[1243] and fort[10938] and fort[21562], "Fortitude counts rank 1, top rank and Prayer of Fortitude")
     eq(forever.ClassToRaidBuff.SHAMAN, nil, "no Shaman raid buff on Forever")
-    eq(forever.ClassToRaidBuff.PRIEST, "missingBuffCheckStamina", "Priest -> Fortitude")
+    eq(table.concat(forever.ClassToRaidBuff.PRIEST, ","), "missingBuffCheckStamina,missingBuffCheckSpirit",
+       "Priest -> Fortitude and Divine Spirit")
+    eq(table.concat(forever.ClassToRaidBuff.PALADIN, ","), "missingBuffCheckBlessing,missingBuffCheckSalvation",
+       "Paladin -> a blessing and Salvation")
+    eq(table.concat(forever.ClassToRaidBuff.DRUID, ","), "missingBuffCheckVersatility,missingBuffCheckThorns",
+       "Druid -> Mark of the Wild and Thorns")
+    -- the rules ride the entries
+    check(keys.missingBuffCheckIntellect.manaOnly and keys.missingBuffCheckSpirit.manaOnly,
+          "Arcane Intellect and Divine Spirit are mana users only")
+    check(keys.missingBuffCheckSalvation.notTank, "Salvation is never checked on tanks")
+    eq(keys.missingBuffCheckThorns.tankOption, "missingBuffThornsTankOnly", "Thorns has its tanks-only option")
+    for _, k in ipairs({ "missingBuffCheckSpirit", "missingBuffCheckThorns", "missingBuffCheckSalvation", "missingBuffCheckBlessing" }) do
+        check(keys[k] and keys[k].opt, k .. " is a Forever extra with its own switch")
+    end
+    check(not keys.missingBuffCheckStamina.opt, "the shared four are not extras")
+    local bl = keys.missingBuffCheckBlessing
+    local union = {}
+    for _, id in ipairs(bl[1]) do union[id] = true end
+    for part, first in pairs({ might = 19740, wisdom = 19742, kings = 20217 }) do
+        eq(bl.blessings[part] and bl.blessings[part][1], first, "blessing: " .. part .. " leads with rank 1")
+        for _, id in ipairs(bl.blessings[part] or {}) do
+            check(union[id], "blessing: " .. part .. " " .. id .. " counts as blessed")
+        end
+    end
+    check(union[25916] and union[25918] and union[25898], "blessing: the Greater blessings count")
+    check(not union[1038], "blessing: Salvation is its own check, not a blessing")
 end
 
 -- ---- 2. the registry on Forever -----------------------------------

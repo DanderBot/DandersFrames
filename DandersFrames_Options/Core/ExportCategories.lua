@@ -531,11 +531,18 @@ DF.ExportCategories = {
     },
     -- Missing raid-buff indicator
     missingBuffs = {
+        "missingBuffBlessingDPS",
+        "missingBuffBlessingHealer",
+        "missingBuffBlessingTank",
         "missingBuffCheckAttackPower",
+        "missingBuffCheckBlessing",
         "missingBuffCheckBronze",
         "missingBuffCheckIntellect",
+        "missingBuffCheckSalvation",
         "missingBuffCheckSkyfury",
+        "missingBuffCheckSpirit",
         "missingBuffCheckStamina",
+        "missingBuffCheckThorns",
         "missingBuffCheckVersatility",
         "missingBuffClassDetection",
         "missingBuffHideFromBar",
@@ -578,6 +585,7 @@ DF.ExportCategories = {
         "missingBuffIconSize",
         "missingBuffIconX",
         "missingBuffIconY",
+        "missingBuffThornsTankOnly",
     },
     -- Defensive bar + external defensive icon
     defensives = {

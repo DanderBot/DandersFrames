@@ -175,9 +175,9 @@ do
         gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
     end
     eq(table.concat(gotGroups, " | "),
-       "Content@1: missingbuffs_settings, missingbuffs_buffs | Layout@1: missingbuffs_position | Appearance@2: missingbuffs_appearance, missingbuffs_border",
+       "Content@1: missingbuffs_settings, missingbuffs_buffs, missingbuffs_forever | Layout@1: missingbuffs_position | Appearance@2: missingbuffs_appearance, missingbuffs_border",
        "groups: Content, Layout, Appearance, each over its cards")
-    for _, key in ipairs({ "missingbuffs_settings", "missingbuffs_buffs", "missingbuffs_appearance", "missingbuffs_position", "missingbuffs_border" }) do
+    for _, key in ipairs({ "missingbuffs_settings", "missingbuffs_buffs", "missingbuffs_forever", "missingbuffs_appearance", "missingbuffs_position", "missingbuffs_border" }) do
         check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
               "groups: " .. key .. " registers its card for the group mount")
     end
@@ -188,13 +188,14 @@ do
     eq(decls, 1, "vocab: anchorOptions is declared exactly once, at page scope")
     local vocabAt = PAGE:find("local anchorOptions = {", 1, true)
     for _, b in ipairs({ "BuildMissingSettingsGroup", "BuildMissingBuffsToCheckGroup",
+                         "BuildMissingForeverBuffsGroup",
                          "BuildMissingAppearanceGroup", "BuildMissingPositionGroup",
                          "BuildMissingBorderGroup" }) do
         local at = PAGE:find("local function " .. b .. "(tools2)", 1, true)
         check(at ~= nil and vocabAt ~= nil and vocabAt < at,
               "vocab: " .. b .. " is declared after it, so it closes over the real table")
     end
-    for _, g in ipairs({ "HideMissingBuffOptions", "HideManualBuffVariant", "refreshMissing", "MissingOffRow" }) do
+    for _, g in ipairs({ "HideMissingBuffOptions", "HideManualBuffVariant", "HideForeverBuffs", "refreshMissing", "MissingOffRow" }) do
         local n = 0
         for _ in PAGE:gmatch("local function " .. g .. "%(") do n = n + 1 end
         eq(n, 1, "vocab: " .. g .. " is declared exactly once")
@@ -203,6 +204,7 @@ do
     -- Every builder still declares the group gate it always did, so the bodies
     -- grey under the page gate.
     for _, b in ipairs({ "BuildMissingSettingsGroup", "BuildMissingBuffsToCheckGroup",
+                         "BuildMissingForeverBuffsGroup",
                          "BuildMissingAppearanceGroup", "BuildMissingPositionGroup" }) do
         check(builderBody(b):find("group.disableChildrenOn = HideMissingBuffOptions", 1, true) ~= nil,
               "gate: " .. b .. " carries the page's group gate")
@@ -234,6 +236,19 @@ local MISSING_BUFFS = {
     { "checkbox", "Skyfury (Shaman)",               "missingBuffCheckSkyfury",     30 },
     { "checkbox", "Blessing of the Bronze (Evoker)", "missingBuffCheckBronze",     30 },
 }
+-- WoW Forever's extras: each binds its own key, the three role dropdowns grey while
+-- Paladin Blessing is off.
+local MISSING_FOREVER = {
+    { "label",    "Also checked with auto-detect on, for the buffs your class can cast.", "(none)", 35 },
+    { "checkbox", "Divine Spirit (Priest)",          "missingBuffCheckSpirit",     30 },
+    { "checkbox", "Thorns (Druid)",                  "missingBuffCheckThorns",     30 },
+    { "checkbox", "Thorns on Tanks Only",            "missingBuffThornsTankOnly",  30 },
+    { "checkbox", "Blessing of Salvation (Paladin)", "missingBuffCheckSalvation",  30 },
+    { "checkbox", "Paladin Blessing",                "missingBuffCheckBlessing",   30 },
+    { "dropdown", "Tank Blessing",                   "missingBuffBlessingTank",    55 },
+    { "dropdown", "Healer Blessing",                 "missingBuffBlessingHealer",  55 },
+    { "dropdown", "DPS Blessing",                    "missingBuffBlessingDPS",     55 },
+}
 local MISSING_APPEARANCE = {
     { "slider", "Icon Size",   "missingBuffIconSize",       55 },
     { "slider", "Scale",       "missingBuffIconScale",      55 },
@@ -260,6 +275,9 @@ local CARDS = {
       
       builder = "BuildMissingBuffsToCheckGroup", golden = MISSING_BUFFS, summary = "MissingBuffsToCheckSummary",
       dim = true, hide = "HideManualBuffVariant" },
+    { label = "Class Buffs (WoW Forever)", key = "missingbuffs_forever", col = 1,
+      builder = "BuildMissingForeverBuffsGroup", golden = MISSING_FOREVER, summary = "MissingForeverBuffsSummary",
+      dim = true, hide = "HideForeverBuffs" },
     { label = "Icon Style", key = "missingbuffs_appearance", col = 2, 
       builder = "BuildMissingAppearanceGroup", golden = MISSING_APPEARANCE, summary = "MissingAppearanceSummary",
       dim = true, pin = true },
@@ -327,8 +345,8 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Settings | Buffs to Check (Manual Mode) | Icon Style | Position | Border",
-       "order: the five cards are declared in reading order; they mount in the group table's")
+       "Settings | Buffs to Check (Manual Mode) | Class Buffs (WoW Forever) | Icon Style | Position | Border",
+       "order: the six cards are declared in reading order; they mount in the group table's")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0
@@ -364,4 +382,20 @@ do
           "page: the copy button keeps the prefix it owns")
     check(PAGE:find('{pageId = "auras_buffs", label = L["Buff Bar"]}', 1, true) ~= nil,
           "page: ...and the See Also block is unchanged")
+end
+
+-- ============================================================
+-- 4. THE FOREVER CARD'S OWN GATES
+-- ============================================================
+print("-- Missing Buffs page: the WoW Forever card")
+do
+    check(PAGE:find("local function HideForeverBuffs()\n            return not DF.IS_FOREVER\n        end", 1, true) ~= nil,
+          "forever: the card hides off WoW Forever, not with auto-detect")
+    local body = builderBody("BuildMissingForeverBuffsGroup")
+    check(body:find("thornsTank.disableOn = function(d) return not d.missingBuffCheckThorns end", 1, true) ~= nil,
+          "forever: Thorns on Tanks Only greys while Thorns is off")
+    for _, w in ipairs({ "tank", "healer", "dps" }) do
+        check(body:find(w .. ".disableOn = BlessingOff", 1, true) ~= nil,
+              "forever: the " .. w .. " blessing dropdown greys while Paladin Blessing is off")
+    end
 end

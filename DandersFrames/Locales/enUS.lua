@@ -3757,4 +3757,20 @@ L["Unit Frames is not loaded."] = true
 L["Draw the glow around the portrait too when it sits beside the frame."] = true
 L["Include Portrait"] = true
 L["Show a soft gold glow around the outside of the frame."] = true
+-- Missing Buffs: the WoW Forever class buffs card (DandersFrames_Options/GUI/Pages/Indicators.lua).
+L["Class Buffs (WoW Forever)"] = true
+L["Also checked with auto-detect on, for the buffs your class can cast."] = true
+L["Divine Spirit (Priest)"] = true
+L["Thorns (Druid)"] = true
+L["Thorns on Tanks Only"] = true
+L["Blessing of Salvation (Paladin)"] = true
+L["Never checked on tanks. Off by default: on some game versions Salvation replaces your other blessing on that player."] = true
+L["Paladin Blessing"] = true
+L["Tank Blessing"] = true
+L["Healer Blessing"] = true
+L["DPS Blessing"] = true
+L["Blessing of Might"] = true
+L["Blessing of Wisdom"] = true
+L["Blessing of Kings"] = true
+L["A paladin is reminded about their own blessing, so several paladins each cover everyone. If you don't know the chosen blessing, Kings is used."] = true
 --@end-do-not-package@

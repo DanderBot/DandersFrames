@@ -180,19 +180,28 @@ R.ForeverRanks = {
     [1239243] = 3, [1240848] = 2, [1240849] = 3, [1291335] = 7, [1310503] = 7,
 }
 
--- Missing Buffs: the four group buffs Forever shares with retail, under the same
--- setting keys. Replaces DF.RaidBuffs / DF.ClassToRaidBuff from Frames/Bars.lua,
--- whose retail ids don't exist here. Entry = {ids, configKey, name, class}; ids
--- cover every rank, the group version and item/NPC sources.
+-- Missing Buffs: the four group buffs Forever shares with retail (same setting
+-- keys) plus Divine Spirit, Thorns, Salvation and one paladin blessing check.
+-- Replaces DF.RaidBuffs / DF.ClassToRaidBuff from Frames/Bars.lua, whose retail ids
+-- don't exist here. Entry = {ids, configKey, name, class, rules...}; ids cover every
+-- rank, the group version and item/NPC sources. Rules: see MISSING_BUFF_RULES in
+-- the generator and missingTrackedBuffs in Features/Auras.lua.
 DF.RaidBuffs = {
     { { 1243, 1244, 1245, 2791, 10937, 10938, 13864, 23947, 23948, 21562, 21564, 450086 }, "missingBuffCheckStamina", "Power Word: Fortitude", "PRIEST" },
-    { { 1459, 1460, 1461, 10156, 10157, 364161, 13326, 16876, 23028 }, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE" },
+    { { 1459, 1460, 1461, 10156, 10157, 364161, 13326, 16876, 23028 }, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE", manaOnly = true },
     { { 1126, 5232, 6756, 5234, 8907, 9884, 9885, 364163, 16878, 24752, 1291335, 1310503, 21849, 21850 }, "missingBuffCheckVersatility", "Mark of the Wild", "DRUID" },
     { { 6673, 5242, 6192, 11549, 11550, 11551, 25289, 9128, 24438, 25101, 27578, 26043, 26099 }, "missingBuffCheckAttackPower", "Battle Shout", "WARRIOR" },
+    { { 14752, 14818, 14819, 27841, 16875, 27681 }, "missingBuffCheckSpirit", "Divine Spirit", "PRIEST", manaOnly = true, opt = true },
+    { { 1038, 25895 }, "missingBuffCheckSalvation", "Blessing of Salvation", "PALADIN", notTank = true, opt = true },
+    { { 467, 782, 1075, 8914, 9756, 9910, 1236308, 21335, 21337, 22128, 22351, 22696, 25640, 25777, 1291338, 438294, 16877, 15438, 1312955, 1213813, 1213816, 1213834 }, "missingBuffCheckThorns", "Thorns", "DRUID", tankOption = "missingBuffThornsTankOnly", opt = true },
+    { { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916, 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918, 20217, 1213408, 25898 }, "missingBuffCheckBlessing", "Paladin Blessing", "PALADIN", opt = true,
+      blessings = { might = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916 }, wisdom = { 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918 }, kings = { 20217, 1213408, 25898 } } },
 }
+-- Auto-detect: the buffs each class provides (a list here; retail's is one key).
 DF.ClassToRaidBuff = {
-    PRIEST = "missingBuffCheckStamina",
-    MAGE = "missingBuffCheckIntellect",
-    DRUID = "missingBuffCheckVersatility",
-    WARRIOR = "missingBuffCheckAttackPower",
+    PRIEST = { "missingBuffCheckStamina", "missingBuffCheckSpirit" },
+    MAGE = { "missingBuffCheckIntellect" },
+    DRUID = { "missingBuffCheckVersatility", "missingBuffCheckThorns" },
+    WARRIOR = { "missingBuffCheckAttackPower" },
+    PALADIN = { "missingBuffCheckBlessing", "missingBuffCheckSalvation" },
 }
