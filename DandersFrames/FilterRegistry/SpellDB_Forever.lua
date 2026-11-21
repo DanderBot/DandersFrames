@@ -194,7 +194,7 @@ DF.RaidBuffs = {
     { { 14752, 14818, 14819, 27841, 16875, 27681 }, "missingBuffCheckSpirit", "Divine Spirit", "PRIEST", manaOnly = true, opt = true },
     { { 1038, 25895 }, "missingBuffCheckSalvation", "Blessing of Salvation", "PALADIN", notTank = true, opt = true },
     { { 467, 782, 1075, 8914, 9756, 9910, 1236308, 21335, 21337, 22128, 22351, 22696, 25640, 25777, 1291338, 438294, 16877, 15438, 1312955, 1213813, 1213816, 1213834 }, "missingBuffCheckThorns", "Thorns", "DRUID", tankOption = "missingBuffThornsTankOnly", opt = true },
-    { { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916, 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918, 20217, 1213408, 25898 }, "missingBuffCheckBlessing", "Paladin Blessing", "PALADIN", opt = true,
+    { { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916, 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918, 20217, 1213408, 25898, 19977, 19978, 19979, 26650, 25890, 1038, 25895 }, "missingBuffCheckBlessing", "Paladin Blessing", "PALADIN", opt = true,
       blessings = { might = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916 }, wisdom = { 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918 }, kings = { 20217, 1213408, 25898 } } },
 }
 -- Auto-detect: the buffs each class provides (a list here; retail's is one key).
