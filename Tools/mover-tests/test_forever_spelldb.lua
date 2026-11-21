@@ -74,12 +74,22 @@ do  -- Forever carries its OWN generated database, never retail's
     local sor = RF.ByID[27827]
     check(sor and sor.class == "PRIEST" and sor.cats.defensives, "Spirit of Redemption is a priest defensive")
     check(RF.ByID[20711] == nil, "...keyed by its aura, not the passive talent")
+    -- Prayer of Mending: the cast applies its aura through a script, so the generator
+    -- lists the aura ids by hand; every rank's aura resolves, the casts and the rune don't
+    local pom = RF.ByID[401877]
+    check(pom and pom.n == "Prayer of Mending" and pom.class == "PRIEST" and pom.cats.healing,
+        "Prayer of Mending is a priest healing aura")
+    check(RF.ByID[1240848] == pom and RF.ByID[1240849] == pom, "...ranks 2 and 3 resolve to the same record")
+    for _, id in ipairs({ 401859, 1240826, 1240827, 402832 }) do
+        check(RF.ByID[id] == nil, id .. " (cast or rune) is not a Prayer of Mending aura")
+    end
+    check(RR.ByID[401877] == nil, "retail does not carry Forever's Prayer of Mending ids")
     local camp = RF.ByID[1229741]
     check(camp and camp.class == "ALL" and camp.cats.utility, "Camp Benefits is all-class utility")
 end
 
-do  -- Missing Buffs: the four shared group buffs, every rank, under the retail keys
-    eq(#forever.RaidBuffs, 4, "Forever tracks four raid buffs")
+do  -- Missing Buffs: the four shared group buffs (retail keys) plus Forever's extras, every rank
+    eq(#forever.RaidBuffs, 8, "Forever tracks eight raid buffs")
     local keys = {}
     for _, info in ipairs(forever.RaidBuffs) do keys[info[2]] = info end
     for _, k in ipairs({ "missingBuffCheckStamina", "missingBuffCheckIntellect",
@@ -90,7 +100,32 @@ do  -- Missing Buffs: the four shared group buffs, every rank, under the retail 
     for _, id in ipairs(keys.missingBuffCheckStamina[1]) do fort[id] = true end
     check(fort[1243] and fort[10938] and fort[21562], "Fortitude counts rank 1, top rank and Prayer of Fortitude")
     eq(forever.ClassToRaidBuff.SHAMAN, nil, "no Shaman raid buff on Forever")
-    eq(forever.ClassToRaidBuff.PRIEST, "missingBuffCheckStamina", "Priest -> Fortitude")
+    eq(table.concat(forever.ClassToRaidBuff.PRIEST, ","), "missingBuffCheckStamina,missingBuffCheckSpirit",
+       "Priest -> Fortitude and Divine Spirit")
+    eq(table.concat(forever.ClassToRaidBuff.PALADIN, ","), "missingBuffCheckBlessing,missingBuffCheckSalvation",
+       "Paladin -> a blessing and Salvation")
+    eq(table.concat(forever.ClassToRaidBuff.DRUID, ","), "missingBuffCheckVersatility,missingBuffCheckThorns",
+       "Druid -> Mark of the Wild and Thorns")
+    -- the rules ride the entries
+    check(keys.missingBuffCheckIntellect.manaOnly and keys.missingBuffCheckSpirit.manaOnly,
+          "Arcane Intellect and Divine Spirit are mana users only")
+    check(keys.missingBuffCheckSalvation.notTank, "Salvation is never checked on tanks")
+    eq(keys.missingBuffCheckThorns.tankOption, "missingBuffThornsTankOnly", "Thorns has its tanks-only option")
+    for _, k in ipairs({ "missingBuffCheckSpirit", "missingBuffCheckThorns", "missingBuffCheckSalvation", "missingBuffCheckBlessing" }) do
+        check(keys[k] and keys[k].opt, k .. " is a Forever extra with its own switch")
+    end
+    check(not keys.missingBuffCheckStamina.opt, "the shared four are not extras")
+    local bl = keys.missingBuffCheckBlessing
+    local union = {}
+    for _, id in ipairs(bl[1]) do union[id] = true end
+    for part, first in pairs({ might = 19740, wisdom = 19742, kings = 20217 }) do
+        eq(bl.blessings[part] and bl.blessings[part][1], first, "blessing: " .. part .. " leads with rank 1")
+        for _, id in ipairs(bl.blessings[part] or {}) do
+            check(union[id], "blessing: " .. part .. " " .. id .. " counts as blessed")
+        end
+    end
+    check(union[25916] and union[25918] and union[25898], "blessing: the Greater blessings count")
+    check(not union[1038], "blessing: Salvation is its own check, not a blessing")
 end
 
 -- ---- 2. the registry on Forever -----------------------------------
@@ -144,6 +179,7 @@ do  -- rank numbers + labels
     eq(RF:GetSpellRank(139), 1, "Renew 139 is rank 1")
     eq(RF:GetSpellRank(425268), 1, "...and so is its second rank-1 id (a map, not list order)")
     eq(RF:GetSpellRank(25315), 10, "Renew 25315 is rank 10")
+    eq(RF:GetSpellRank(1240849), 3, "Prayer of Mending 1240849 is rank 3")
     eq(RR.GetSpellRank and RR:GetSpellRank(139), nil, "retail has no ranks")
     forever.L = setmetatable({}, { __index = function(_, k) return k end })
     local prev = C_Spell

@@ -15,7 +15,7 @@ if not DF.IS_FOREVER then return end
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
-R.ForeverStamp = { flavor = "forever", harvest = "2026-11-06", gameBuild = 70205 }
+R.ForeverStamp = { flavor = "forever", harvest = "2026-11-20", gameBuild = 70205 }
 
 R.ForeverSpells = {
     -- defensives
@@ -49,6 +49,7 @@ R.ForeverSpells = {
     { id = 774, alts = { 1058, 1430, 2090, 2091, 3627, 8910, 9839, 9840, 9841, 25299 }, n = "Rejuvenation", class = "DRUID", cats = { healing = true } },
     { id = 408120, alts = { 1238214, 1238215 }, n = "Wild Growth", class = "DRUID", cats = { healing = true } },
     { id = 17, alts = { 592, 600, 3747, 6065, 6066, 10898, 10899, 10900, 10901 }, n = "Power Word: Shield", class = "PRIEST", cats = { healing = true } },
+    { id = 401877, alts = { 1240848, 1240849 }, n = "Prayer of Mending", class = "PRIEST", cats = { healing = true } },
     { id = 139, alts = { 425268, 6074, 425269, 6075, 425270, 6076, 425271, 6077, 425272, 6078, 425273, 10927, 425274, 10928, 425275, 10929, 425276, 25315, 425277 }, n = "Renew", class = "PRIEST", cats = { healing = true } },
     { id = 408514, n = "Earth Shield", class = "SHAMAN", cats = { healing = true } },
     { id = 408521, alts = { 1239242, 1239243 }, n = "Riptide", class = "SHAMAN", cats = { healing = true } },
@@ -173,25 +174,34 @@ R.ForeverRanks = {
     [19838] = 6, [19850] = 2, [19852] = 3, [19853] = 4, [19854] = 5, [19977] = 1, [19978] = 2, [19979] = 3,
     [20729] = 2, [21562] = 1, [21564] = 2, [21849] = 1, [21850] = 2, [23947] = 5, [23948] = 6, [24752] = 7,
     [25289] = 7, [25290] = 6, [25291] = 7, [25299] = 11, [25315] = 10, [25782] = 1, [25894] = 1, [25916] = 2,
-    [25918] = 2, [27578] = 6, [27681] = 1, [27841] = 4, [28610] = 4, [364161] = 2, [364163] = 6, [408120] = 1,
-    [408521] = 1, [425268] = 1, [425269] = 2, [425270] = 3, [425271] = 4, [425272] = 5, [425273] = 6, [425274] = 7,
-    [425275] = 8, [425276] = 9, [425277] = 10, [450086] = 2, [1238214] = 2, [1238215] = 3, [1239242] = 2, [1239243] = 3,
-    [1291335] = 7, [1310503] = 7,
+    [25918] = 2, [27578] = 6, [27681] = 1, [27841] = 4, [28610] = 4, [364161] = 2, [364163] = 6, [401877] = 1,
+    [408120] = 1, [408521] = 1, [425268] = 1, [425269] = 2, [425270] = 3, [425271] = 4, [425272] = 5, [425273] = 6,
+    [425274] = 7, [425275] = 8, [425276] = 9, [425277] = 10, [450086] = 2, [1238214] = 2, [1238215] = 3, [1239242] = 2,
+    [1239243] = 3, [1240848] = 2, [1240849] = 3, [1291335] = 7, [1310503] = 7,
 }
 
--- Missing Buffs: the four group buffs Forever shares with retail, under the same
--- setting keys. Replaces DF.RaidBuffs / DF.ClassToRaidBuff from Frames/Bars.lua,
--- whose retail ids don't exist here. Entry = {ids, configKey, name, class}; ids
--- cover every rank, the group version and item/NPC sources.
+-- Missing Buffs: the four group buffs Forever shares with retail (same setting
+-- keys) plus Divine Spirit, Thorns, Salvation and one paladin blessing check.
+-- Replaces DF.RaidBuffs / DF.ClassToRaidBuff from Frames/Bars.lua, whose retail ids
+-- don't exist here. Entry = {ids, configKey, name, class, rules...}; ids cover every
+-- rank, the group version and item/NPC sources. Rules: see MISSING_BUFF_RULES in
+-- the generator and missingTrackedBuffs in Features/Auras.lua.
 DF.RaidBuffs = {
     { { 1243, 1244, 1245, 2791, 10937, 10938, 13864, 23947, 23948, 21562, 21564, 450086 }, "missingBuffCheckStamina", "Power Word: Fortitude", "PRIEST" },
-    { { 1459, 1460, 1461, 10156, 10157, 364161, 13326, 16876, 23028 }, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE" },
+    { { 1459, 1460, 1461, 10156, 10157, 364161, 13326, 16876, 23028 }, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE", manaOnly = true },
     { { 1126, 5232, 6756, 5234, 8907, 9884, 9885, 364163, 16878, 24752, 1291335, 1310503, 21849, 21850 }, "missingBuffCheckVersatility", "Mark of the Wild", "DRUID" },
     { { 6673, 5242, 6192, 11549, 11550, 11551, 25289, 9128, 24438, 25101, 27578, 26043, 26099 }, "missingBuffCheckAttackPower", "Battle Shout", "WARRIOR" },
+    { { 14752, 14818, 14819, 27841, 16875, 27681 }, "missingBuffCheckSpirit", "Divine Spirit", "PRIEST", manaOnly = true, opt = true },
+    { { 1038, 25895 }, "missingBuffCheckSalvation", "Blessing of Salvation", "PALADIN", notTank = true, opt = true },
+    { { 467, 782, 1075, 8914, 9756, 9910, 1236308, 21335, 21337, 22128, 22351, 22696, 25640, 25777, 1291338, 438294, 16877, 15438, 1312955, 1213813, 1213816, 1213834 }, "missingBuffCheckThorns", "Thorns", "DRUID", tankOption = "missingBuffThornsTankOnly", opt = true },
+    { { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916, 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918, 20217, 1213408, 25898 }, "missingBuffCheckBlessing", "Paladin Blessing", "PALADIN", opt = true,
+      blessings = { might = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916 }, wisdom = { 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918 }, kings = { 20217, 1213408, 25898 } } },
 }
+-- Auto-detect: the buffs each class provides (a list here; retail's is one key).
 DF.ClassToRaidBuff = {
-    PRIEST = "missingBuffCheckStamina",
-    MAGE = "missingBuffCheckIntellect",
-    DRUID = "missingBuffCheckVersatility",
-    WARRIOR = "missingBuffCheckAttackPower",
+    PRIEST = { "missingBuffCheckStamina", "missingBuffCheckSpirit" },
+    MAGE = { "missingBuffCheckIntellect" },
+    DRUID = { "missingBuffCheckVersatility", "missingBuffCheckThorns" },
+    WARRIOR = { "missingBuffCheckAttackPower" },
+    PALADIN = { "missingBuffCheckBlessing", "missingBuffCheckSalvation" },
 }

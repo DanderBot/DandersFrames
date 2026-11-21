@@ -24,10 +24,12 @@
 - (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction: the shield and incoming heals can run past the end of the health bar again, up to a full bar's length. Off (0%) by default. (by Krathe)
 - (Resource Bar) New **Placement** option in the resource bar's Position settings, for party, raid and unit frames: keep the bar **On Top of Health Bar** (as before), or put it **Below**, **Above**, **Left of** or **Right of** the health bar. Along a side the health bar shrinks to make room, so it never shows through the resource bar, and the side has its own **Offset X / Y** and **Frame Level**. Turn off **Match Health Bar Width** to set a shorter bar and use **Anchor** to pick where along the side it sits. Frames that don't show a resource bar keep the full health bar. (by Krathe)
 - (Frame) New **Keep Health Bar Inside Border** option (Border card): the health bar stops at the inner edge of the frame border instead of running under it, so a see-through border sits over the frame background on every side. The resource bar keeps inside the border too. Off by default. (by Krathe)
+- (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (never on tanks, off by default) and one paladin blessing per role. Find them on the new **Class Buffs (WoW Forever)** card; with auto-detect on, priests, druids and paladins watch the ones they can cast.
 
 ### Improvements
 
 - (Unit Frames) The **Linked Frames** page is easier to read: each linked pair folds away to one line showing how many parts are linked, mirrored or separate, and its group and column headings stand out.
+- (WoW Forever) Arcane Intellect and Divine Spirit no longer show as missing on warriors and rogues, who have no mana.
 - (Performance) Debug logging now costs nothing while it is off: diagnostics and log messages are skipped entirely instead of being built and thrown away, and turning logging off stops them at once. (by Krathe)
 - (Absorbs) The absorb and heal absorb Display Mode options have clearer names: Overlay on Health, Attached (overflows), Attached (wraps back) (was Attached + Overflow) and, for heal absorbs, Attached (into health). The dropdowns now have a tooltip that explains each mode. Saved settings are unchanged. (by Krathe)
 
@@ -55,6 +57,7 @@
 - (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
 - (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
 - (WoW Forever) Flasks, potions, elixirs, Spirit of Redemption and Camp Benefits now show in aura filters, and shadow protection potions no longer count as the priest buff.
+- (WoW Forever) Prayer of Mending now shows on your frames and in the healing aura filter.
 
 ## [5.6.2]
 

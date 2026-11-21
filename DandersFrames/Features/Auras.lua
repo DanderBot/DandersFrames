@@ -3382,11 +3382,16 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             local map = candidateFilters.excludeSpellIDs or {}
             candidateFilters.excludeSpellIDs = map
             for i = 1, #DF.RaidBuffs do
-                local ids = DF.RaidBuffs[i][1]
-                if type(ids) == "table" then
-                    for j = 1, #ids do map[ids[j]] = true end
-                else
-                    map[ids] = true
+                local info = DF.RaidBuffs[i]
+                -- Forever's extras (Spirit, Thorns, Salvation, blessings) leave the bar
+                -- only while their own check is on: an untracked buff stays visible.
+                if not info.opt or db[info[2]] then
+                    local ids = info[1]
+                    if type(ids) == "table" then
+                        for j = 1, #ids do map[ids[j]] = true end
+                    else
+                        map[ids] = true
+                    end
                 end
             end
         end
@@ -4690,7 +4695,8 @@ local MISSING_BADGE_GAP  = 2
 -- Render gate (excludes test mode; the test drive calls the factory itself).
 -- WoW Forever runs this too: its buffs come in RANKS with different spell ids, so
 -- FilterRegistry/SpellDB_Forever.lua replaces DF.RaidBuffs with every rank, group version
--- and item source of the four shared buffs (no Skyfury / Bronze there).
+-- and item source of the four shared buffs (no Skyfury / Bronze there), plus Forever's
+-- extras (Divine Spirit, Thorns, Salvation, a paladin blessing) and their per-member rules.
 function DF:UseFactoryForMissingBuff(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not DF:FrameInTestScope(frame, "any")
@@ -4702,29 +4708,149 @@ function DF:FactoryOwnsMissingBuff(db)
     return (DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
 end
 
--- Tracked raid buffs per settings: class-detection = only YOUR class's buff;
--- manual = every enabled missingBuffCheck* key. Returns DF.RaidBuffs entries
--- ({spellIDOrTable, configKey, name, class}) in DF.RaidBuffs order.
-local function missingTrackedBuffs(db)
+-- ---- Per-unit rules (WoW Forever) --------------------------------------------
+-- Forever's DF.RaidBuffs entries (FilterRegistry/SpellDB_Forever.lua, generated)
+-- carry rule fields; retail's carry none, so every rule below is a no-op there:
+--   manaOnly   = only on classes that use mana (Arcane Intellect, Divine Spirit)
+--   notTank    = never on a tank (Salvation)
+--   tankOption = a setting that, when on, keeps the buff to tanks (Thorns)
+--   opt        = a Forever extra: its own switch counts under auto-detect too, and
+--                auto-detect tracks it only once the player knows a rank of it
+--   blessings  = the paladin blessing check: one cell, icon picked per member role
+-- Roles come from DF:GetUnitRole; unknown / NONE reads as DPS. A unit whose class or
+-- role can't be read passes every rule (a missing icon beats a hidden one).
+local MISSING_NO_MANA = { WARRIOR = true, ROGUE = true }
+local BLESSING_ROLE_KEY = {
+    TANK = "missingBuffBlessingTank", HEALER = "missingBuffBlessingHealer", DAMAGER = "missingBuffBlessingDPS",
+}
+local BLESSING_ROLE_DEFAULT = { TANK = "might", HEALER = "wisdom", DAMAGER = "might" }
+
+-- Does the player know any rank of these spells? Cached per id list; the cache
+-- clears on SPELLS_CHANGED (event frame below).
+local missingKnownCache = {}
+local function playerKnowsAny(ids)
+    local known = missingKnownCache[ids]
+    if known == nil then
+        known = false
+        local isKnown = IsPlayerSpell or IsSpellKnown
+        if isKnown then
+            for i = 1, #ids do
+                if isKnown(ids[i]) then known = true; break end
+            end
+        end
+        missingKnownCache[ids] = known
+    end
+    return known
+end
+
+local function missingUnitRole(unit)
+    local role = DF.GetUnitRole and DF:GetUnitRole(unit)
+    if role == "TANK" or role == "HEALER" then return role end
+    return "DAMAGER"
+end
+
+local function missingUnitPasses(info, unit, db)
+    if not (info.manaOnly or info.notTank or info.tankOption) or not unit then return true end
+    if info.manaOnly then
+        local _, cls = UnitClass(unit)
+        if cls and MISSING_NO_MANA[cls] then return false end
+    end
+    if info.notTank and missingUnitRole(unit) == "TANK" then return false end
+    if info.tankOption and db[info.tankOption] then
+        -- Solo there is no group role: the player's own frame keeps the check.
+        if missingUnitRole(unit) ~= "TANK" and IsInGroup and IsInGroup() then return false end
+    end
+    return true
+end
+
+-- The blessing check's cell for one member: the role's pick, as a derived entry
+-- (same ids, key and slot; its own icon, filter and signature). A paladin is checked
+-- for THEIR OWN blessing (HELPFUL|PLAYER): with several paladins each one is reminded
+-- to bless everyone. A paladin who knows neither the pick nor Kings gets no cell.
+-- Anyone else (manual mode) is checked for any paladin's blessing.
+local missingBlessingCells = {}
+local function missingBlessingCell(info, unit, db)
+    local role = missingUnitRole(unit)
+    local pick = db[BLESSING_ROLE_KEY[role]]
+    if not info.blessings[pick] then pick = BLESSING_ROLE_DEFAULT[role] end
+    local isPaladin = select(2, UnitClass("player")) == "PALADIN"
+    if isPaladin and not playerKnowsAny(info.blessings[pick]) then
+        if not playerKnowsAny(info.blessings.kings) then return nil end
+        pick = "kings"
+    end
+    local sig = info[2] .. ":" .. pick .. (isPaladin and ":own" or "")
+    local cell = missingBlessingCells[sig]
+    if not cell then
+        cell = { info[1], info[2], info[3], info[4],
+            icon = info.blessings[pick][1],
+            filter = isPaladin and "HELPFUL|PLAYER" or "HELPFUL",
+            sig = sig }
+        missingBlessingCells[sig] = cell
+    end
+    return cell
+end
+
+-- Tracked raid buffs per settings: class-detection = only YOUR class's buff(s);
+-- manual = every enabled missingBuffCheck* key; then the per-unit rules above.
+-- Returns DF.RaidBuffs entries ({spellIDOrTable, configKey, name, class}) in
+-- DF.RaidBuffs order (the blessing check as a derived entry).
+local function missingTrackedBuffs(db, unit)
     local list = {}
-    local playerKey
+    local classKeys
     if db.missingBuffClassDetection then
-        playerKey = DF.ClassToRaidBuff and DF.ClassToRaidBuff[select(2, UnitClass("player"))]
-        if not playerKey then return list end   -- class has no raid buff -> nothing to track
+        local v = DF.ClassToRaidBuff and DF.ClassToRaidBuff[select(2, UnitClass("player"))]
+        if not v then return list end   -- class has no raid buff -> nothing to track
+        classKeys = {}
+        if type(v) == "table" then   -- Forever: a list per class
+            for i = 1, #v do classKeys[v[i]] = true end
+        else
+            classKeys[v] = true
+        end
     end
     for i = 1, #DF.RaidBuffs do
         local info = DF.RaidBuffs[i]
-        if (playerKey and info[2] == playerKey) or (not playerKey and db[info[2]]) then
-            list[#list + 1] = info
+        local want
+        if classKeys then
+            want = classKeys[info[2]]
+                and (not info.opt or (db[info[2]] and playerKnowsAny(info[1])))
+        else
+            want = db[info[2]]
+        end
+        if want and missingUnitPasses(info, unit, db) then
+            if info.blessings then info = missingBlessingCell(info, unit, db) end
+            if info then list[#list + 1] = info end
         end
     end
     return list
+end
+DF._missingTrackedBuffs = missingTrackedBuffs   -- tests
+
+-- Forever: a role change or a newly learned rank changes what each member is
+-- checked for. Re-drive every frame once the burst settles (the drive rebuilds a
+-- frame's cells only when its signature moved).
+if DF.IS_FOREVER then
+    local missingRuleEvents = CreateFrame("Frame")
+    missingRuleEvents:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    missingRuleEvents:RegisterEvent("SPELLS_CHANGED")
+    local pending = false
+    missingRuleEvents:SetScript("OnEvent", function(_, event)
+        if event == "SPELLS_CHANGED" then wipe(missingKnownCache) end
+        if pending then return end
+        pending = true
+        C_Timer.After(0.2, function()
+            pending = false
+            -- Past the 0.1s throttle: a roster sweep a moment earlier may have read
+            -- the old roles, and this pass must not be the one it drops.
+            DF.lastMissingBuffUpdate = nil
+            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+        end)
+    end)
 end
 
 -- Structural signature: the tracked set (cell handles are created per entry).
 local function missingFactorySig(tracked)
     local keys = {}
-    for i = 1, #tracked do keys[i] = tracked[i][2] end
+    for i = 1, #tracked do keys[i] = tracked[i].sig or tracked[i][2] end
     return table.concat(keys, ",")
 end
 
@@ -4738,7 +4864,7 @@ local function buildMissingCellConfig(info, unit, size)
     return {
         unit = unit,
         mode = "missing",
-        filter = "HELPFUL",
+        filter = info.filter or "HELPFUL",   -- the paladin's own-blessing cell: HELPFUL|PLAYER
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
         -- ☠ MUST BE EXPLICIT, AND MUST BE 0. ApplyZOrder does
@@ -4806,7 +4932,7 @@ end
 local function styleMissingBadge(h, db, frame, info)
     local badge = h.GetBadgeFrame and h:GetBadgeFrame()
     if not badge then return end
-    local firstID = type(info[1]) == "table" and info[1][1] or info[1]
+    local firstID = info.icon or (type(info[1]) == "table" and info[1][1] or info[1])
     if not badge.dfIcon then
         badge.dfIcon = badge:CreateTexture(nil, "ARTWORK")
         badge.dfIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4989,7 +5115,7 @@ function DF:DriveMissingBuffFactory(frame, db)
     -- Lazy strip + cells; recreate the cells when the tracked set changes (rare:
     -- settings toggle / class-detection flip). Handle creation is combat-guarded
     -- inside the factory (defers the container build to regen).
-    local tracked = missingTrackedBuffs(db)
+    local tracked = missingTrackedBuffs(db, frame.unit)
     if #tracked == 0 then
         -- Nothing to track (no manual buffs checked / class has no raid buff):
         -- drop any stale cells and keep the strip hidden.

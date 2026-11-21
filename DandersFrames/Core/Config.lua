@@ -2177,11 +2177,22 @@ DF.PartyDefaults = {
     showMinimapButton = true,
 
     -- Missing Buff
+    missingBuffBlessingDPS = "might",      -- WoW Forever: the paladin blessing each role is checked for
+    missingBuffBlessingHealer = "wisdom",
+    missingBuffBlessingTank = "might",
     missingBuffCheckAttackPower = true,
+    missingBuffCheckBlessing = true,       -- WoW Forever only (as are Salvation, Spirit and Thorns)
     missingBuffCheckBronze = true,
     missingBuffCheckIntellect = true,
+    -- OFF by default: on older Forever builds Salvation counts as a paladin blessing and
+    -- doesn't stack with another blessing from the same paladin, so Salvation + Might on
+    -- one member would leave one of the two checks always showing. Stacking is reported
+    -- from build 70425; our spell data is from 70205, so it is unconfirmed.
+    missingBuffCheckSalvation = false,
     missingBuffCheckSkyfury = true,
+    missingBuffCheckSpirit = true,
     missingBuffCheckStamina = true,
+    missingBuffCheckThorns = true,
     missingBuffCheckVersatility = true,
     missingBuffClassDetection = true,
     missingBuffHideFromBar = true,
@@ -2231,6 +2242,7 @@ DF.PartyDefaults = {
     missingBuffIconSize = 24,
     missingBuffIconX = 0,
     missingBuffIconY = 0,
+    missingBuffThornsTankOnly = true,       -- WoW Forever: Thorns only on tanks (and on you while solo)
 
     -- Name Text
     nameColorClass = false,

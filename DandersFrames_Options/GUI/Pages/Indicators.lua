@@ -3068,6 +3068,75 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             CloseSection(band)
         end)
 
+        -- ===== CLASS BUFFS (WOW FOREVER) (a Content card) =====
+        -- Forever's extra checks: Divine Spirit, Thorns, Salvation and one paladin
+        -- blessing per role (FilterRegistry/SpellDB_Forever.lua's DF.RaidBuffs). Unlike
+        -- the manual list these switches count under auto-detect too (a priest, druid or
+        -- paladin watches the ones they can cast), so the card does NOT hide with
+        -- auto-detect -- only off Forever, where none of these exist.
+        local function HideForeverBuffs()
+            return not DF.IS_FOREVER
+        end
+
+        local blessingOptions = {
+            might = L["Blessing of Might"], wisdom = L["Blessing of Wisdom"], kings = L["Blessing of Kings"],
+        }
+
+        local function BuildMissingForeverBuffsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- The buff row's exclude list follows these switches (an untracked extra
+            -- stays on the buff bar), so the row re-drives as well.
+            local function refreshForever()
+                tools2.refreshStates()
+                refreshMissing()
+                DF:UpdateAllAuras()
+            end
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Also checked with auto-detect on, for the buffs your class can cast."], 250), 35)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Divine Spirit (Priest)"], db, "missingBuffCheckSpirit", refreshForever), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Thorns (Druid)"], db, "missingBuffCheckThorns", refreshForever), 30)
+            local thornsTank = group:AddWidget(GUI:CreateCheckbox(parent, L["Thorns on Tanks Only"], db, "missingBuffThornsTankOnly", refreshForever), 30)
+            thornsTank.disableOn = function(d) return not d.missingBuffCheckThorns end
+            local salvation = group:AddWidget(GUI:CreateCheckbox(parent, L["Blessing of Salvation (Paladin)"], db, "missingBuffCheckSalvation", refreshForever), 30)
+            salvation.tooltip = L["Never checked on tanks. Off by default: on some game versions Salvation replaces your other blessing on that player."]
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Paladin Blessing"], db, "missingBuffCheckBlessing", refreshForever), 30)
+            local function BlessingOff(d) return not d.missingBuffCheckBlessing end
+            local tank = group:AddWidget(GUI:CreateDropdown(parent, L["Tank Blessing"], blessingOptions, db, "missingBuffBlessingTank", refreshForever), 55)
+            tank.disableOn = BlessingOff
+            local healer = group:AddWidget(GUI:CreateDropdown(parent, L["Healer Blessing"], blessingOptions, db, "missingBuffBlessingHealer", refreshForever), 55)
+            healer.disableOn = BlessingOff
+            local dps = group:AddWidget(GUI:CreateDropdown(parent, L["DPS Blessing"], blessingOptions, db, "missingBuffBlessingDPS", refreshForever), 55)
+            dps.disableOn = BlessingOff
+            dps.tooltip = L["A paladin is reminded about their own blessing, so several paladins each cover everyone. If you don't know the chosen blessing, Kings is used."]
+            group.disableChildrenOn = HideMissingBuffOptions
+        end
+
+        local MISSING_FOREVER_KEYS = {
+            "missingBuffCheckSpirit", "missingBuffCheckThorns",
+            "missingBuffCheckSalvation", "missingBuffCheckBlessing",
+        }
+        local function MissingForeverBuffsSummary(d)
+            if not d then return "" end
+            local on = 0
+            for _, k in ipairs(MISSING_FOREVER_KEYS) do
+                if d[k] then on = on + 1 end
+            end
+            return format("%d/%d", on, #MISSING_FOREVER_KEYS)
+        end
+
+        tools.DeferCard("missingbuffs_forever", function()
+            -- Hidden off Forever (header and band together); greys with the page gate.
+            -- Decides which buffs are WATCHED, so no pin.
+            local band = OpenSection(L["Class Buffs (WoW Forever)"], "missingbuffs_forever", 1, MissingForeverBuffsSummary,
+                MissingOffRow, HideForeverBuffs)
+            BuildMissingForeverBuffsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
+        end)
+
         -- ===== ICON STYLE (an Appearance card) =====
         local function BuildMissingAppearanceGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -3225,7 +3294,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         Add(tools.SectionControls(self.child), 24, "both")
         tools.MountCardGroups(Add, {
             { label = L["Content"], col = 1, keys = {
-                "missingbuffs_settings", "missingbuffs_buffs",
+                "missingbuffs_settings", "missingbuffs_buffs", "missingbuffs_forever",
             } },
             { label = L["Layout"], col = 1, keys = {
                 "missingbuffs_position",
