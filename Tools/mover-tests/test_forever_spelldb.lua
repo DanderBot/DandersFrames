@@ -125,7 +125,18 @@ do  -- Missing Buffs: the four shared group buffs (retail keys) plus Forever's e
         end
     end
     check(union[25916] and union[25918] and union[25898], "blessing: the Greater blessings count")
-    check(not union[1038], "blessing: Salvation is its own check, not a blessing")
+    -- Light and Salvation also count as blessed (a paladin's Light on a healer; Salvation
+    -- replaces their other blessing on older builds), but are never a role's pick
+    for _, id in ipairs({ 19977, 19979, 25890, 1038, 25895 }) do
+        check(union[id], "blessing: Light / Salvation " .. id .. " counts as blessed")
+    end
+    eq(bl.blessings.light, nil, "blessing: Light is no role's pick")
+    eq(bl.blessings.salvation, nil, "blessing: ...nor is Salvation")
+    for part, list in pairs(bl.blessings) do
+        for _, id in ipairs(list) do
+            check(id ~= 1038 and id ~= 19977, "blessing: the " .. part .. " pick list holds only " .. part)
+        end
+    end
 end
 
 -- ---- 2. the registry on Forever -----------------------------------

@@ -108,6 +108,29 @@ do
     check(type(bless[1]) == "table" and #bless[1] >= 18, "blessing: ...and any rank of Might, Wisdom or Kings counts")
 end
 
+-- ---- Light and Salvation satisfy the check, without changing the pick ------------------
+-- The cell is a "missing" container over bless[1]: an aura whose id is in that list
+-- means the badge stays hidden. So "counts as present" = the id is in the cell's list.
+do
+    local function inCell(cell, id)
+        for _, x in ipairs(cell[1]) do if x == id then return true end end
+        return false
+    end
+    local SALVATION, GREATER_SALV, LIGHT, GREATER_LIGHT = 1038, 25895, 19977, 25890
+    world({ playerClass = "PALADIN", roles = { party1 = "DAMAGER", party2 = "HEALER" },
+            known = { [19740] = true, [19742] = true } })
+    local db = allOn({ missingBuffCheckSalvation = false })
+    local dps = tracked(db, "party1"); dps = dps[#dps]
+    eq(dps.icon, 19740, "satisfy: a DPS is still asked for Might")
+    check(inCell(dps, SALVATION) and inCell(dps, GREATER_SALV),
+          "satisfy: a DPS with only Salvation from you counts as blessed (Salvation check off)")
+    local healer = tracked(db, "party2"); healer = healer[#healer]
+    eq(healer.icon, 19742, "satisfy: a healer is still asked for Wisdom")
+    check(inCell(healer, LIGHT) and inCell(healer, GREATER_LIGHT),
+          "satisfy: a healer with only Light from you counts as blessed")
+    eq(healer.filter, "HELPFUL|PLAYER", "satisfy: ...still only your own blessings count")
+end
+
 -- ---- the paladin's own blessing, with a Kings fallback ---------------------------------
 do
     local MIGHT1, WISDOM1, KINGS = 19740, 19742, 20217
