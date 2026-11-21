@@ -4761,7 +4761,8 @@ end
 -- drift on the four things a caster-filter change has to drive. `redraw` is the
 -- layout's own repaint -- the card rebuilds the page (its default), a control row
 -- hands in the page's state pass instead, because a rebuild there would retire the
--- row being clicked.
+-- row being clicked. Only on My Frame reuses it: it adds or removes a block on some frames,
+-- which costs exactly the same four things.
 S.EffectOthersOnlyChanged = function(redraw)
     if type(redraw) == "function" then redraw() else DF:AuraDesigner_RefreshPage() end
     DF:InvalidateAuraLayout()
@@ -4907,6 +4908,10 @@ S.CreateEffectCard = function(parent, yPos, effect)
     -- P.ShowsOthersOnly for the whole argument.
     if ShowsOthersOnly() and effect.config and effect.config.othersOnly then
         addFact(L["Others Only"])
+    end
+    -- Only on My Frame: same label as the body checkbox (one string), same helper-pool rule.
+    if not P.IsPIHelperTab() and effect.config and effect.config.onlyMyFrame then
+        addFact(L["Only on My Frame"])
     end
     chrome.title:SetText(effect.displayName)
     -- Grouped indicators keep their dim title: the group manages them.
@@ -5098,6 +5103,22 @@ S.CreateEffectCard = function(parent, yPos, effect)
             ooCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 12))
             ooCb:SetWidth(bodyWidth - 16)
             ooCb.tooltip = L["Only show this effect for other players' casts of the buff."]
+            triggersH = triggersH + 34
+        end
+
+        -- ── ONLY ON MY FRAME (both buff pools; placed AND frame-level effects, sound too) ──
+        -- Picks FRAMES, not casters: the effect renders on the player's own frame only (the
+        -- self-buff reminder case). Writes instance.onlyMyFrame / typeCfg.onlyMyFrame; the
+        -- factory skips a gated block like an eye-hidden one, so the change rides the same
+        -- full refresh Others Only does.
+        -- ⚠ NOT ON THE HELPER'S POOL: the helper watches other players' cooldowns, and its
+        -- effects are laid out by the recipe.
+        if not P.IsPIHelperTab() then
+            local meCb = GUI:CreateCheckbox(body, L["Only on My Frame"], proxy, "onlyMyFrame",
+                                            S.EffectOthersOnlyChanged)
+            meCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 12))
+            meCb:SetWidth(bodyWidth - 16)
+            meCb.tooltip = L["Only show this effect on your own frame. Use it for self-buffs such as Inner Fire."]
             triggersH = triggersH + 34
         end
 

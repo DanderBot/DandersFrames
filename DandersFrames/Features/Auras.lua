@@ -5255,10 +5255,16 @@ local function driveFactoryRowsNow(frame)
     -- Unlike the drives above, the sync has no version latch of its own: it re-walks its
     -- signatures every time. Skipped when this frame was already synced at the current
     -- version for this unit -- a layout switch's own sweep has always done so a frame earlier.
+    -- ☠ THE "IS ME" ANSWER IS THE THIRD KEY. A roster reshuffle can point the SAME raidN token
+    -- at a different player, you included, and Only on My Frame blocks then belong on a
+    -- different frame. Version and unit both read unchanged, so without this key the sync is
+    -- skipped and the reminder stays on whoever now holds your old token.
+    local ADF = DF.AuraDesigner and DF.AuraDesigner.Factory
     if DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
-        and DF.AuraDesigner and DF.AuraDesigner.Factory
+        and ADF
         and DF.UseFactoryForAD and DF:UseFactoryForAD(frame, db)
-        and not (frame.dfADSyncVer == DF.auraLayoutVersion and frame.dfADSyncUnit == frame.unit) then
+        and not (frame.dfADSyncVer == DF.auraLayoutVersion and frame.dfADSyncUnit == frame.unit
+            and (not ADF.ADGate or frame.dfADSyncMe == ADF.ADGate.frameIsMe(frame))) then
         DF.AuraDesigner.Factory:SyncFrame(frame)
     end
 end

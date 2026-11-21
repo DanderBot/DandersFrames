@@ -25,6 +25,7 @@
 - (Resource Bar) New **Placement** option in the resource bar's Position settings, for party, raid and unit frames: keep the bar **On Top of Health Bar** (as before), or put it **Below**, **Above**, **Left of** or **Right of** the health bar. Along a side the health bar shrinks to make room, so it never shows through the resource bar, and the side has its own **Offset X / Y** and **Frame Level**. Turn off **Match Health Bar Width** to set a shorter bar and use **Anchor** to pick where along the side it sits. Frames that don't show a resource bar keep the full health bar. (by Krathe)
 - (Frame) New **Keep Health Bar Inside Border** option (Border card): the health bar stops at the inner edge of the frame border instead of running under it, so a see-through border sits over the frame background on every side. The resource bar keeps inside the border too. Off by default. (by Krathe)
 - (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (never on tanks, off by default) and one paladin blessing per role. Find them on the new **Class Buffs (WoW Forever)** card; with auto-detect on, priests, druids and paladins watch the ones they can cast.
+- (Aura Designer) New **Only on My Frame** option for indicators and effects. Turn it on to show a buff, or a "missing" reminder such as Inner Fire, only on your own frame instead of on everyone's.
 
 ### Improvements
 
