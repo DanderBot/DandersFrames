@@ -2248,6 +2248,103 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         CloseSection(band)
 
+        -- ===== AURAS (Buffs, Debuffs -- column 2, under Appearance) =====
+        -- One row of each on every pet frame (Frames/Pets.lua PET AURA ROWS). Only
+        -- WHERE the row sits and how many it shows are pet settings; what it shows
+        -- and how the icons look follow the Buffs / Debuffs pages.
+        --
+        -- ⚠ A do-block: the builder runs once per row, and this page's builder is a
+        -- single function close to Lua's 200-local ceiling, so nothing here may leave
+        -- a local behind at page scope.
+        --
+        -- ⚠ ONLY WHERE THE CONTAINER EXISTS. Pet rows have no pre-12.1 path, so on a
+        -- client without it the cards would be live controls wired to nothing.
+        if DF.FactoryOwnsBuffRow and DF:FactoryOwnsBuffRow(db) then
+            Add(GUI:CreateHeader(self.child, L["Auras"]), 40, 2)
+
+            -- Every control re-drives the rows through the aura layout version: the
+            -- same debounced pass the Buffs / Debuffs pages use (DF:RefreshFactoryRows
+            -- -> DF:RefreshPetAuras), previews included.
+            local function ApplyPetAuras()
+                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            end
+
+            -- The two rows differ only in their keys and labels.
+            local PET_AURA_ROWS = {
+                { title = L["Buffs"], key = "pets_buffs", show = "petShowBuffs", showLabel = L["Show Buffs"],
+                  maxLabel = L["Max Buffs"], prefix = "petBuff" },
+                { title = L["Debuffs"], key = "pets_debuffs", show = "petShowDebuffs", showLabel = L["Show Debuffs"],
+                  maxLabel = L["Max Debuffs"], prefix = "petDebuff" },
+            }
+
+            for _, row in ipairs(PET_AURA_ROWS) do
+                local function RowOff(d) return not d[row.show] end
+
+                -- ☠ THE SHOW TICK IS THE HEADER'S on the page (hoistToggle), built in
+                -- the body only for a pinned panel, which has no header of its own.
+                local function BuildPetAuraRowGroup(tools2)
+                    local group, parent = tools2.group, tools2.parent
+
+                    group.disableChildrenOn = function(d) return not d.petEnabled end
+
+                    if not tools2.hoistToggle then
+                        group:AddWidget(GUI:CreateCheckbox(parent, row.showLabel, db, row.show, function()
+                            ApplyPetAuras()
+                            GateRefresh(tools2)
+                        end), 30)
+                    end
+
+                    local maxSlider = group:AddWidget(GUI:CreateSlider(parent, row.maxLabel, 0, 6, 1, db, row.prefix .. "Max",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    maxSlider.disableOn = RowOff
+
+                    local sizeSlider = group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 8, 24, 1, db, row.prefix .. "Size",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    sizeSlider.disableOn = RowOff
+
+                    local anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorValues, db, row.prefix .. "Anchor",
+                        ApplyPetAuras), 55)
+                    anchor.disableOn = RowOff
+
+                    local growth = group:AddWidget(GUI:CreateGrowthControl(parent, db, row.prefix .. "Growth", ApplyPetAuras), 155)
+                    growth.disableOn = RowOff
+
+                    local offX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, row.prefix .. "OffsetX",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    offX.disableOn = RowOff
+
+                    local offY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, row.prefix .. "OffsetY",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    offY.disableOn = RowOff
+                end
+
+                -- How many, in the slider's own words.
+                local function PetAuraRowSummary(d)
+                    if not d then return "" end
+                    return format("%s %d", row.maxLabel, tonumber(d[row.prefix .. "Max"]) or 0)
+                end
+
+                -- How the pets LOOK, so pinnable; greys with the page gate.
+                local rowBand = OpenSection(row.title, row.key, 2, PetAuraRowSummary, PetsOffRow, nil,
+                    BuildPetAuraRowGroup, {
+                        db = db, key = row.show, label = row.showLabel,
+                        disableOn = PetsOffRow,
+                        onChanged = function()
+                            ApplyPetAuras()
+                            self:RefreshStates()
+                            tools.ReflowMounted()
+                        end,
+                    })
+                rowBand.disableChildrenOn = function(d) return not d.petEnabled end
+                BuildPetAuraRowGroup({
+                    group = rowBand, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                    hoistToggle = true,
+                })
+                CloseSection(rowBand)
+            end
+        end
+
         -- ===== NAME TEXT (the first Text card -- opened after Position, see
         -- NAME TEXT, AS A CARD) =====
         local function BuildPetNameTextGroup(tools2)

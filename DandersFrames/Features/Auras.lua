@@ -5296,6 +5296,10 @@ function DF:RefreshFactoryRows()
         if DF.PinnedFrames and DF.PinnedFrames.ForEachActiveFrame then
             DF.PinnedFrames:ForEachActiveFrame(driveFactoryRowsNow)
         end
+        -- Group pet frames carry their own buff/debuff rows with pet-specific
+        -- placement (Frames/Pets.lua PET AURA ROWS); their filters and looks follow
+        -- the main rows, so the same edits re-drive them -- preview pets included.
+        if DF.RefreshPetAuras then DF:RefreshPetAuras() end
     end)
 end
 

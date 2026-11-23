@@ -2389,6 +2389,23 @@ DF.PartyDefaults = {
     petBorderSize = 1,
     petBorderStyle = "SOLID",
     petBorderTexture = "SOLID",
+    -- Aura rows (Frames/Pets.lua PET AURA ROWS): one buff row and one debuff row on
+    -- each group pet frame. Only these seven per row are pet-specific; filters, sort,
+    -- duration text, borders and the rest come from the main Buffs / Debuffs rows.
+    -- Inside the frame by default: debuffs from the left edge, buffs left of the
+    -- health percentage (petHealthAnchor RIGHT), both clear of the centred name.
+    petBuffAnchor = "RIGHT",
+    petBuffGrowth = "LEFT_DOWN",
+    petBuffMax = 2,
+    petBuffOffsetX = -30,
+    petBuffOffsetY = 0,
+    petBuffSize = 16,
+    petDebuffAnchor = "LEFT",
+    petDebuffGrowth = "RIGHT_DOWN",
+    petDebuffMax = 2,
+    petDebuffOffsetX = 2,
+    petDebuffOffsetY = 0,
+    petDebuffSize = 16,
     petEnabled = false,
     petFrameHeight = 22,
     petFrameWidth = 130,
@@ -2426,6 +2443,8 @@ DF.PartyDefaults = {
     petPowerColor = {r = 0.2, g = 0.4, b = 0.9},
     petPowerColorMode = "POWER",
     petShowBorder = true,
+    petShowBuffs = false,
+    petShowDebuffs = true,
     petShowHealthText = true,
     petShowPowerBar = false,
     petTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",

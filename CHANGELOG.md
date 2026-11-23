@@ -26,6 +26,7 @@
 - (Frame) New **Keep Health Bar Inside Border** option (Border card): the health bar stops at the inner edge of the frame border instead of running under it, so a see-through border sits over the frame background on every side. The resource bar keeps inside the border too. Off by default. (by Krathe)
 - (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (never on tanks, off by default) and one paladin blessing per role. Find them on the new **Class Buffs (WoW Forever)** card; with auto-detect on, priests, druids and paladins watch the ones they can cast.
 - (Aura Designer) New **Only on My Frame** option for indicators and effects. Turn it on to show a buff, or a "missing" reminder such as Inner Fire, only on your own frame instead of on everyone's.
+- (Pet Frames) Pet frames can now show buffs and debuffs. Turn them on and set their size, count and position on the new **Buffs** and **Debuffs** cards of the **Pet Frames** page; what they show follows your main buff and debuff settings.
 
 ### Improvements
 
