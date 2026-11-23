@@ -131,6 +131,39 @@ do
     check(sw.alpha == 0.4 and sw.mouse == false, "switch: disabled is dimmed and deaf")
 end
 
+print("-- Switch: rounded (pill)")
+do
+    local surfaces = {}
+    UI.Colors.element = { r = 0.2, g = 0.2, b = 0.2 }
+    UI.Colors.border = { r = 0.3, g = 0.3, b = 0.3 }
+    function UI:CreateRoundedSurface(frame, opts)
+        local s = { frame = frame, opts = opts }
+        function s:SetFillColor(r, g, b, a) self.fill = { r, g, b, a } end
+        function s:SetBorderColor(r, g, b, a) self.border = { r, g, b, a } end
+        surfaces[#surfaces + 1] = s
+        return s
+    end
+    local got = {}
+    local sw = UI:CreateSwitch(Frame(), { rounded = true, width = 32, height = 16,
+                                          accent = { r = 0.7, g = 0.1, b = 0.1 },
+                                          onToggle = function(v) got[#got + 1] = v end })
+    eq(#surfaces, 2, "pill: a rounded track and a rounded knob")
+    eq(surfaces[1].opts.radius, 8, "pill: the track is fully round at 16px tall")
+    eq(sw.Knob.w, 12, "pill: a 12px knob")
+    eq(surfaces[2].opts.radius, 6, "pill: ...that is a circle")
+    check(sw.Fill == nil, "pill: no square fill texture")
+    eq(sw.Track.fill[1], 0.2, "pill: off is the plain element fill, whatever the accent")
+    sw:SetChecked(true)
+    eq(sw.Track.fill[1], 0.7, "pill: on fills the track in the accent")
+    eq(sw.Knob.surface.fill[1], 1, "pill: ...with a white knob")
+    eq(#got, 0, "pill: SetChecked never reports")
+    sw.scripts.OnClick(sw)
+    eq(got[1], false, "pill: a click flips and reports")
+    sw:SetEnabled(false)
+    check(sw.alpha == 0.4 and sw.mouse == false, "pill: disabled is dimmed and deaf")
+    UI.CreateRoundedSurface = nil
+end
+
 print("-- Mini slider")
 do
     local moves, drags = {}, {}

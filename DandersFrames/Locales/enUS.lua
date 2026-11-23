@@ -406,6 +406,7 @@ L["ToT"] = true
 L["Turn off %s to change this"] = true
 L["Turn on %s to change this"] = true
 L["Turn on Show Border to use this"] = true
+L["Turn on Unit Frames first."] = true
 L["Turning Unit Frames on or off requires a UI reload to take effect.\n\nReload now?"] = true
 L["Turning it on or off stays separate on each frame."] = true
 L["Unit Frames handles the Blizzard player frame."] = true
