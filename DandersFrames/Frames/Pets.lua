@@ -447,6 +447,8 @@ local function recoverIfHidden(frame)
     if frame.dfPetHidden and UnitExists(frame.unit)
         and not UnitIsDeadOrGhost(frame.ownerUnit) then
         RefreshPetFrame(frame)
+        -- The hidden -> shown edge is usually a resummon: re-scan the aura rows too.
+        DF:RefreshPetAuraRows(frame)
         return true
     end
     return false
@@ -473,6 +475,10 @@ function DF:OnPetFrameEvent(frame, event, unit, ...)
                 DF:SetPetFrameVisible(frame, true)
                 DF:UpdatePetHealth(frame)
                 DF:UpdatePetName(frame)
+                -- Possibly a DIFFERENT pet behind the same token: drive the rows (first
+                -- show builds them) and force a re-scan so the old pet's icons go.
+                DF:UpdatePetAuras(frame)
+                DF:RefreshPetAuraRows(frame)
             else
                 DF:SetPetFrameVisible(frame, false)
             end
@@ -1053,6 +1059,7 @@ function DF:UpdatePetFrame(frame)
         DF:ApplyPetFrameStyle(frame)
         DF:UpdatePetFrameTestMode(frame)
         DF:SetPetFrameVisible(frame, true)
+        DF:UpdatePetAuras(frame)
         return
     end
 
@@ -1068,6 +1075,7 @@ function DF:UpdatePetFrame(frame)
         DF:UpdatePetName(frame)
         DF:UpdatePetPower(frame)
         DF:SetPetFrameVisible(frame, true)
+        DF:UpdatePetAuras(frame)
     else
         DF:SetPetFrameVisible(frame, false)
     end
@@ -2292,6 +2300,179 @@ function DF:HandleUnitPetEvent(unit)
     end
 
     DF:OnPetChanged(unit)
+end
+
+-- ============================================================
+-- PET AURA ROWS
+-- One buff row and one debuff row on each GROUP pet frame (party, raid, arena and
+-- the test pets), through the SAME drives the party/raid frames use
+-- (DF:DriveBuffFactory / DF:DriveDebuffFactory, Features/Auras.lua). The container
+-- fills itself from the game's own aura events on the pet's token, so nothing here
+-- runs per UNIT_AURA: a row is driven when its pet is shown or changes, and when a
+-- setting moves (DF:RefreshFactoryRows -> DF:RefreshPetAuras).
+--
+-- THE SETTINGS VIEW. The drives read the row keys (buffSize, showDebuffs, ...) from
+-- the table they are handed. A pet hands them a view over its mode's table that
+-- answers the seven per-row placement keys from the pet's own keys (PET_AURA_MAP),
+-- pins a few off (PET_AURA_FORCED), and passes EVERY other read through -- so
+-- filters, sort, duration text, borders and the rest follow the main rows.
+--
+-- ⚠ NOT frame.dfDB. GetFrameDB(petFrame) stays the plain mode table for the rest of
+-- this file (border, text, tooltip): a proxy there would read empty to pairs() and
+-- go stale on a profile swap. The view reaches the two drives and nothing else.
+-- ============================================================
+
+-- Row key -> the pet key that answers it. Wrap = Max: one line of icons, no wrap
+-- setting of its own (a 22px frame has no room for a second line).
+local PET_AURA_MAP = {
+    showBuffs = "petShowBuffs", buffMax = "petBuffMax", buffWrap = "petBuffMax",
+    buffSize = "petBuffSize", buffAnchor = "petBuffAnchor", buffGrowth = "petBuffGrowth",
+    buffOffsetX = "petBuffOffsetX", buffOffsetY = "petBuffOffsetY",
+    showDebuffs = "petShowDebuffs", debuffMax = "petDebuffMax", debuffWrap = "petDebuffMax",
+    debuffSize = "petDebuffSize", debuffAnchor = "petDebuffAnchor", debuffGrowth = "petDebuffGrowth",
+    debuffOffsetX = "petDebuffOffsetX", debuffOffsetY = "petDebuffOffsetY",
+}
+
+-- Pinned on pets whatever the main rows say:
+--   * Scale 1 and no caster name: the pet rows have no such settings.
+--   * No defensive bar or missing-buff strip on a pet, so nothing to dedup against
+--     and no strip to hide from (and Hide Duplicate Buffs would also pull in the
+--     Aura Designer's tracked set -- pets draw no AD).
+--   * No important-debuff enlarge: it scales icons up past a 22px frame.
+-- ☠ COMPARED BY VALUE (`~= nil`), never `or`: these are mostly false, and an `or`
+-- would fall through to the main row's true.
+local PET_AURA_FORCED = {
+    buffScale = 1, debuffScale = 1,
+    buffCasterName = false, debuffCasterName = false,
+    defensiveIconEnabled = false, missingBuffIconEnabled = false,
+    buffDeduplicateDefensives = false,
+    debuffImportantHighlight = false,
+}
+
+-- The view for one pet frame. Cached on the frame and rebuilt when the mode table's
+-- IDENTITY changes: Core/Profile.lua replaces DF.db[mode] on a reset, copy or
+-- AutoProfiles swap, and a view over the retired table would read stale settings.
+function DF:GetPetAuraDB(frame)
+    local src = frame and DF:GetFrameDB(frame)
+    if not src then return nil end
+    if frame.dfPetAuraSrc == src and frame.dfPetAuraDB then return frame.dfPetAuraDB end
+    local view = setmetatable({}, {
+        __index = function(_, key)
+            local forced = PET_AURA_FORCED[key]
+            if forced ~= nil then return forced end
+            local petKey = PET_AURA_MAP[key]
+            if petKey then return src[petKey] end
+            return src[key]
+        end,
+        __newindex = function(_, key, value)
+            src[PET_AURA_MAP[key] or key] = value
+        end,
+    })
+    frame.dfPetAuraSrc, frame.dfPetAuraDB = src, view
+    return view
+end
+
+-- Take one row off the frame. Through SetIntentShown, never GetFrame():Hide(): the
+-- container's visibility sweeps restore recorded intent (see UpdateAuras_Enhanced).
+local function HidePetAuraRow(frame, isDebuff)
+    if isDebuff then
+        if frame.debuffFactory then
+            frame.debuffFactory:SetIntentShown(false)
+            frame.dfDebuffFactoryShown = false
+        end
+    elseif frame.buffFactory then
+        frame.buffFactory:SetIntentShown(false)
+        frame.dfBuffFactoryShown = false
+    end
+end
+
+-- Drive (or hide) both rows on one pet frame. Cheap to repeat: each drive is gated on
+-- DF.auraLayoutVersion and only rebuilds or restyles when a setting moved.
+function DF:UpdatePetAuras(frame)
+    if not (frame and frame.unit) then return end
+    local AC = DF.AuraContainer
+    if not (AC and AC.IsSupported and AC.IsSupported()) then return end
+    local db = DF:GetPetAuraDB(frame)
+    if not db then return end
+
+    if frame.dfIsTestFrame then
+        -- The preview, exactly as DF:UpdateTestAuras previews a party/raid frame: the
+        -- test panel's Show Auras gate, its count sliders clamped by the row's own
+        -- Max (a 0 from either hides the row -- the container floors a slot count at 1).
+        local showAuras = db.testShowAuras ~= false
+        local buffCount = math.min(db.testBuffCount or 2, db.buffMax or 2)
+        local debuffCount = math.min(db.testDebuffCount or 2, db.debuffMax or 2)
+        if db.showBuffs and showAuras and buffCount > 0 then
+            DF:DriveBuffFactory(frame, db)
+            if frame.buffFactory and frame.buffFactory.SetTestMax then
+                frame.buffFactory:SetTestMax(buffCount)
+            end
+        else
+            HidePetAuraRow(frame, false)
+        end
+        if db.showDebuffs and showAuras and debuffCount > 0 then
+            DF:DriveDebuffFactory(frame, db)
+            if frame.debuffFactory and frame.debuffFactory.SetTestMax then
+                frame.debuffFactory:SetTestMax(debuffCount)
+            end
+        else
+            HidePetAuraRow(frame, true)
+        end
+        return
+    end
+
+    -- Live. UseFactoryFor* is false in test mode (the preview owns the screen) and
+    -- under the memory test's aura switch; either way the row goes dark.
+    if db.showBuffs and DF:UseFactoryForBuffs(frame, db) then
+        DF:DriveBuffFactory(frame, db)
+    else
+        HidePetAuraRow(frame, false)
+    end
+    if db.showDebuffs and DF:UseFactoryForDebuffs(frame, db) then
+        DF:DriveDebuffFactory(frame, db)
+    else
+        HidePetAuraRow(frame, true)
+    end
+end
+
+-- ★ A NEW PET BEHIND THE SAME TOKEN. A pet frame's unit never changes (partypet2 is
+-- always partypet2), so the drives see no retarget when a different pet is summoned.
+-- Force the re-scan the party frames get from confirmRetarget instead, so the old
+-- pet's icons cannot linger. pcall'd: a re-scan must never break the pet event path.
+function DF:RefreshPetAuraRows(frame)
+    if not frame then return end
+    local b, d = frame.buffFactory, frame.debuffFactory
+    if b and b.Refresh then pcall(b.Refresh, b) end
+    if d and d.Refresh then pcall(d.Refresh, d) end
+end
+
+-- Every SHOWN pet frame in the set on screen. ☠ ONE SET AT A TIME, the same rule as
+-- LightweightUpdatePetFrames: a hidden set is skipped (its rows are driven again by
+-- UpdatePetFrame the moment it comes back). Driving rows never re-anchors the frame,
+-- so this is safe in combat.
+local function DrivePetAurasIn(frames, first, last)
+    for i = first, last do
+        local f = frames[i]
+        if f and f:IsShown() then DF:UpdatePetAuras(f) end
+    end
+end
+
+-- Re-drive every pet row after a setting change (called from DF:RefreshFactoryRows,
+-- which every aura-row setting already reaches through DF:InvalidateAuraLayout).
+function DF:RefreshPetAuras()
+    if DF.testMode then DrivePetAurasIn(DF.testPetFrames, 0, 4) end
+    if DF.raidTestMode then DrivePetAurasIn(DF.testRaidPetFrames, 1, 40) end
+    if DF.testMode or DF.raidTestMode then return end
+    local track = DF:ActivePetTrack()
+    if track == PET_TRACK_PARTY then
+        local p = DF.petFrames.player
+        if p and p:IsShown() then DF:UpdatePetAuras(p) end
+        DrivePetAurasIn(DF.partyPetFrames, 1, 4)
+    elseif track == PET_TRACK_RAID then
+        DrivePetAurasIn(DF.raidPetFrames, 1, 40)
+    elseif track == PET_TRACK_ARENA then
+        DrivePetAurasIn(DF.arenaPetFrames, 1, 5)
+    end
 end
 
 -- ============================================================

@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- PET FRAMES PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Pet Frames: TEN groups, as the Debuff Bar's
+-- Display > Pet Frames: TWELVE groups, as the Debuff Bar's
 -- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
 -- value summary in a shut card's corner, Expand All / Collapse All at the top:
 --
@@ -14,6 +14,9 @@ local NS = ...
 --              "Text"              Name Text, Health Text
 --   column 2   "Frame"             Appearance, Border (Show Border is the
 --                                  header's tick), Health Bar
+--              "Auras"             Buffs, Debuffs (one loop, Show Buffs /
+--                                  Show Debuffs as the header tick; only where
+--                                  the aura container exists)
 --
 -- Every card but the first greys with the page gate. Pins on the eight that
 -- decide how the pets LOOK.
@@ -151,7 +154,7 @@ do
           "gate: a pinned pane reflows itself, a page widget (box or card) re-lays the page, nothing rebuilds")
     local uses = 0
     for _ in PAGE:gmatch("GateRefresh%(tools2%)") do uses = uses + 1 end
-    eq(uses, 6, "gate: five callbacks go through it, plus its own declaration")
+    eq(uses, 7, "gate: six callbacks go through it (the sixth is the pet aura rows' pinned Show tick), plus its own declaration")
     local rebuilds = 0
     for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
     eq(rebuilds, 1, "gate: one rebuild on the page -- the layout dropdown, which changes which cards exist")
@@ -336,7 +339,7 @@ do
        "order: the cards open in the order they stack -- Name Text after Position, so the Text cards follow Layout in column 1")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
-    eq(hoists, 1, "ticks: exactly one mount skips its in-body toggle (Border)")
+    eq(hoists, 2, "ticks: exactly two mounts skip their in-body toggle (Border, and the pet aura rows' loop)")
     check((select(1, sectionBlock("Settings", "BuildPetGeneralGroup"))):find('key = "petEnabled"', 1, true) == nil,
           "ticks: Enable Pet Frames is not hoisted -- it is the page gate, in the first card's body")
 
@@ -360,4 +363,61 @@ do
         end
     end
     eq(missing, 0, "locale: every string this page asks for already exists -- zero new keys")
+end
+
+-- ============================================================
+-- 6. AURAS -- the Buffs and Debuffs cards (one loop, two rows)
+-- Frames/Pets.lua PET AURA ROWS draws them; these are their settings.
+-- ============================================================
+print("-- Pet Frames page: Auras")
+do
+    local a = PAGE:find("-- ===== AURAS (Buffs, Debuffs", 1, true)
+    check(a ~= nil, "auras: the block is on the page")
+    local b = a and PAGE:find("-- ===== NAME TEXT", a, true)
+    local block = (a and b) and PAGE:sub(a, b):gsub("%s+", " ") or ""
+
+    check(block:find("if DF.FactoryOwnsBuffRow and DF:FactoryOwnsBuffRow(db) then Add(GUI:CreateHeader(self.child, L[\"Auras\"]), 40, 2)", 1, true) ~= nil,
+          "auras: header in column 2, built only where the aura container exists")
+    for _, row in ipairs({
+        { "Buffs", "pets_buffs", "petShowBuffs", "Show Buffs", "Max Buffs", "petBuff" },
+        { "Debuffs", "pets_debuffs", "petShowDebuffs", "Show Debuffs", "Max Debuffs", "petDebuff" },
+    }) do
+        check(block:find(string.format('{ title = L["%s"], key = "%s", show = "%s", showLabel = L["%s"], maxLabel = L["%s"], prefix = "%s" }',
+            row[1], row[2], row[3], row[4], row[5], row[6]), 1, true) ~= nil,
+              "auras: the " .. row[1] .. " row's keys and labels")
+    end
+
+    -- The census, in order: the pinned-only Show tick, then the seven settings.
+    local want = {
+        'GUI:CreateCheckbox(parent, row.showLabel, db, row.show,',
+        'GUI:CreateSlider(parent, row.maxLabel, 0, 6, 1, db, row.prefix .. "Max",',
+        'GUI:CreateSlider(parent, L["Icon Size"], 8, 24, 1, db, row.prefix .. "Size",',
+        'GUI:CreateDropdown(parent, L["Anchor"], textAnchorValues, db, row.prefix .. "Anchor",',
+        'GUI:CreateGrowthControl(parent, db, row.prefix .. "Growth", ApplyPetAuras), 155)',
+        'GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, row.prefix .. "OffsetX",',
+        'GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, row.prefix .. "OffsetY",',
+    }
+    local at = 0
+    for i, w in ipairs(want) do
+        local p = block:find(w, at + 1, true)
+        check(p ~= nil, "auras: control " .. i .. " in order: " .. w)
+        at = p or at
+    end
+    local controls = 0
+    for _ in block:gmatch("GUI:Create%a+%(parent") do controls = controls + 1 end
+    eq(controls, #want, "auras: no other control in the row builder")
+    check(block:find("if not tools2.hoistToggle then group:AddWidget(GUI:CreateCheckbox(parent, row.showLabel", 1, true) ~= nil,
+          "auras: the body Show tick exists only in a pinned panel")
+    local greyed = 0
+    for _ in block:gmatch("%.disableOn = RowOff") do greyed = greyed + 1 end
+    eq(greyed, 6, "auras: every setting greys while its row is off")
+    check(block:find("group.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil
+      and block:find("rowBand.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil,
+          "auras: body and band grey with the page gate")
+    check(block:find("OpenSection(row.title, row.key, 2, PetAuraRowSummary, PetsOffRow, nil, BuildPetAuraRowGroup, { db = db, key = row.show, label = row.showLabel, disableOn = PetsOffRow,", 1, true) ~= nil,
+          "auras: a pinnable card in column 2 with the Show tick in its header")
+    check(block:find("BuildPetAuraRowGroup({ group = rowBand, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "auras: mounted with hoistToggle")
+    check(block:find("DF:InvalidateAuraLayout()", 1, true) ~= nil and block:find("RefreshCurrentPage", 1, true) == nil,
+          "auras: every commit re-drives the rows through the aura layout version, never a page rebuild")
 end
