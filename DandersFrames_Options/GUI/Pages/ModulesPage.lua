@@ -14,7 +14,9 @@ local CreateFrame = CreateFrame
 -- The `modules` rail item (GUI/ModuleRegistry.lua): every module that can be
 -- switched on or off, grouped On / Off / Coming soon, each row with its
 -- status, a switch and an Open button. Group Frames carries a MASTER switch
--- with Party Frames and Raid Frames as indented sub-rows.
+-- with Party Frames and Raid Frames as indented sub-rows; Unit Frames lists its
+-- frames the same way (SUB-ROWS BY MODULE). A module with sub-rows folds them
+-- away behind a chevron (FOLDED LISTS).
 --
 -- A switch writes the EXISTING setting -- DF.db.partyEnabled / raidEnabled,
 -- the click-casting enable -- through the existing reload prompt. No new
@@ -133,6 +135,71 @@ local function SwitchFor(def)
     return def.setEnabled or SWITCHES[def.id]
 end
 
+-- ============================================================
+-- SUB-ROWS BY MODULE
+-- The indented rows under a module, each with its own switch. A module may
+-- bring its own `def.subSwitches()` (Unit Frames: one per frame,
+-- DandersFrames_Options/UnitFrames/Pages.lua UFO.SubSwitches); Group Frames'
+-- Party and Raid are wired here, next to the master they belong to.
+-- An entry:
+--   key            stable, unique within the module (the row pool's key)
+--   label          shown name
+--   isOn()         switched on
+--   setOn(on)      the write (and its reload prompt)
+--   accent         optional colour; the module's when absent
+--   offStatus()    optional: the status shown while off ("Blizzard")
+--   disabled()     optional: returns isDisabled, reason -- greys the row
+--   openModule / openTab   where its Open button goes
+-- ============================================================
+
+local SUBS = {
+    group = function()
+        local out = {}
+        for _, mode in ipairs({ "party", "raid" }) do
+            local m = mode
+            out[#out + 1] = {
+                key = m,
+                label = (m == "raid") and L["Raid Frames"] or L["Party Frames"],
+                accent = GUI.GetThemeColorFor and GUI.GetThemeColorFor(m == "raid") or nil,
+                isOn = (m == "raid") and GF.RaidOn or GF.PartyOn,
+                setOn = function(on) GF.SetMode(m, on) end,
+                openModule = "group", openTab = m,
+            }
+        end
+        return out
+    end,
+}
+
+-- The module's sub-row entries, or {} (a broken provider must not take the
+-- page down with it).
+function GUI:ModuleSubSwitches(def)
+    if type(def) == "string" then def = GUI:GetModule(def) end
+    local fn = def and (def.subSwitches or SUBS[def.id])
+    if type(fn) ~= "function" then return {} end
+    local ok, list = pcall(fn)
+    return (ok and type(list) == "table") and list or {}
+end
+
+-- ============================================================
+-- FOLDED LISTS
+-- A module with sub-rows folds them away behind a chevron. Open by default;
+-- the fold is remembered account-wide in the store collapsible settings
+-- sections use (GUI:GetCollapsedGroups), as `modules:<id>` = true when folded.
+-- ============================================================
+
+local function FoldKey(id) return "modules:" .. tostring(id) end
+
+function GUI:IsModuleListFolded(id)
+    local store = GUI.GetCollapsedGroups and GUI:GetCollapsedGroups()
+    return (store and store[FoldKey(id)]) and true or false
+end
+
+function GUI:SetModuleListFolded(id, folded)
+    local store = GUI.GetCollapsedGroups and GUI:GetCollapsedGroups()
+    if not store then return end
+    store[FoldKey(id)] = folded and true or nil
+end
+
 -- The modules this page lists, in rail order, sorted into its three groups.
 -- Listed: anything with a switch, and anything coming soon. Global has
 -- neither (it cannot be turned off).
@@ -161,7 +228,11 @@ local ROW_H, SUB_H = 40, 32       -- 30px icon box + 5px padding; a sub-row
 local GAP = 9                     -- between blocks
 local ROW_GAP = 4                 -- between the rows of a group
 local ICON_BOX, ICON_GLYPH = 30, 18
-local SUB_INDENT = 40             -- Party / Raid sit under Group Frames' name
+local FOLD_W = 22                 -- the fold chevron's column, left of the icon box
+local BOX_X = FOLD_W + 2          -- the icon box's inset (every module row, so they align)
+local NAME_X = BOX_X + ICON_BOX + 12
+local SUB_INDENT = NAME_X - 12    -- a sub-row's name lines up under its module's name
+local SWITCH_W, SWITCH_H = 32, 16 -- the kit's pill switch (UI:CreateSwitch rounded)
 local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 local C = GUI.Colors
 
@@ -329,9 +400,8 @@ end
 
 -- A list row. Bespoke on purpose (an icon box, two lines and two controls in
 -- a pooled list row); its pieces are the shared ones: the kit's rounded
--- surface, GUI:CreateCheckRow for the switch (the kit has no pill switch, so
--- the shared checkbox stands in, tinted in the module's accent), StyleButton
--- for Open.
+-- surface, the kit's pill switch (UI:CreateSwitch rounded) in the module's
+-- accent, StyleButton for Open and Reset, a glyph button for the fold.
 local function MakeRow(sub)
     local row = CreateFrame("Frame", nil, view.body)
     row:SetHeight(sub and SUB_H or ROW_H)
@@ -339,15 +409,33 @@ local function MakeRow(sub)
 
     local x = 12
     if not sub then
+        -- The fold chevron: only on a module with sub-rows (PaintModuleRow).
+        local fold = GUI:CreateGlyphButton(row, {
+            texture = ICONS .. "expand_more.png", size = 16, width = FOLD_W, height = ROW_H,
+            onClick = function() if row.onFold then row.onFold() end end,
+        })
+        fold:SetPoint("LEFT", row, "LEFT", 2, 0)
+        fold:Hide()
+        row.Fold = fold
+
         local box = CreateFrame("Frame", nil, row)
         box:SetSize(ICON_BOX, ICON_BOX)
-        box:SetPoint("LEFT", row, "LEFT", 10, 0)
+        box:SetPoint("LEFT", row, "LEFT", BOX_X, 0)
         box.surface = GUI:CreateRoundedSurface(box, { radius = 6, border = false, fill = RGBA(C.text, 0.05) })
         local icon = box:CreateTexture(nil, "ARTWORK")
         icon:SetSize(ICON_GLYPH, ICON_GLYPH)
         icon:SetPoint("CENTER", box, "CENTER", 0, 0)
         row.Box, row.Icon = box, icon
-        x = 10 + ICON_BOX + 12
+        x = NAME_X
+    else
+        -- A greyed sub-row's switch is deaf, so the ROW explains why on hover.
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function(self)
+            if self.disabledReason then
+                GUI:ShowTooltip(self, { title = self.disabledTitle, lines = { self.disabledReason } })
+            end
+        end)
+        row:SetScript("OnLeave", function() GUI:HideTooltip() end)
     end
 
     local open = CreateFrame("Button", nil, row, "BackdropTemplate")
@@ -361,9 +449,12 @@ local function MakeRow(sub)
     end)
     row.Open = open
 
-    local switch = GUI:CreateCheckRow(row, {
-        label = "",
-        onClick = function(want) if row.onSwitch then row.onSwitch(want, row.Switch) end end,
+    -- Coloured only while on (off is always grey), so the colour itself says
+    -- "on"; the module's own colour rides on that.
+    local switch = GUI:CreateSwitch(row, {
+        rounded = true, width = SWITCH_W, height = SWITCH_H,
+        accent = function() return row.switchAccent end,
+        onToggle = function(want) if row.onSwitch then row.onSwitch(want, row.Switch) end end,
     })
     switch:SetPoint("RIGHT", open, "LEFT", -12, 0)
     row.Switch = switch
@@ -471,8 +562,9 @@ local function PaintModuleRow(row, def, on, soon)
     local sw = not soon and SwitchFor(def)
     if sw then
         row.Switch:Show()
+        row.switchAccent = a
+        row.Switch:SetEnabled(true)
         row.Switch:SetChecked(on)
-        if row.Switch.ApplyThemeColor then row.Switch.ApplyThemeColor(a) end
         row.onSwitch = function(want, checkbox) sw(want, checkbox, RefreshAll) end
     else
         row.Switch:Hide()
@@ -496,22 +588,48 @@ local function PaintModuleRow(row, def, on, soon)
     row.Status:SetPoint("RIGHT", hasReset and row.Reset or row.Switch, "LEFT", -12, 0)
 end
 
--- Party Frames / Raid Frames under the master, each in its own accent.
-local function PaintSubRow(row, mode)
-    local on = (mode == "raid") and GF.RaidOn() or GF.PartyOn()
-    local a = GUI.GetThemeColorFor and GUI.GetThemeColorFor(mode == "raid") or GUI:GetAccent()
-    PaintPlate(row, on)
-    row.Name:SetText(mode == "raid" and L["Raid Frames"] or L["Party Frames"])
-    row.Name:SetAlpha(on and 1 or 0.7)
-    row.Status:SetText("")
+-- The fold chevron on a module row with sub-rows: down while open, right
+-- while folded. A click flips it and repaints the page.
+local function PaintFold(row, def, hasSubs)
+    if not hasSubs then
+        row.Fold:Hide()
+        row.onFold = nil
+        return
+    end
+    local folded = GUI:IsModuleListFolded(def.id)
+    row.Fold:SetGlyph(ICONS .. (folded and "chevron_right.png" or "expand_more.png"))
+    row.Fold:Show()
+    row.onFold = function()
+        GUI:SetModuleListFolded(def.id, not GUI:IsModuleListFolded(def.id))
+        GUI:RefreshModulesView()
+    end
+end
+
+-- One sub-row (a SUB-ROWS BY MODULE entry) under its module.
+local function PaintSubRow(row, def, e)
+    local on = e.isOn and e.isOn() and true or false
+    local off, reason = false, nil
+    if e.disabled then off, reason = e.disabled() end
+    off = off and true or false
+    PaintPlate(row, on and not off)
+    row.Name:SetText(e.label or "")
+    row.Name:SetAlpha((on and not off) and 1 or 0.7)
+    row.Status:SetText((not on and e.offStatus) and (e.offStatus() or "") or "")
     row.Soon:Hide()
     row.Switch:Show()
+    row.switchAccent = e.accent or ModAccent(def)
+    row.Switch:SetEnabled(not off)
     row.Switch:SetChecked(on)
-    if row.Switch.ApplyThemeColor then row.Switch.ApplyThemeColor(a) end
-    row.onSwitch = function(want) GF.SetMode(mode, want); RefreshAll() end
-    row.Open.target, row.Open.targetTab = "group", mode
-    row.Open:SetShown(on)
-    row.Open:SetEnabled(on and not GUI:IsModulePickLocked("group", mode))
+    row.disabledTitle = off and e.label or nil
+    row.disabledReason = off and reason or nil
+    row.onSwitch = function(want)
+        if e.setOn then e.setOn(want) end
+        RefreshAll()
+    end
+    row.Open.target, row.Open.targetTab = e.openModule, e.openTab
+    row.Open:SetShown(on and not off and e.openModule ~= nil)
+    row.Open:SetEnabled(on and not off and e.openModule ~= nil
+        and not GUI:IsModulePickLocked(e.openModule, e.openTab))
 end
 
 function GUI:RefreshModulesView()
@@ -555,17 +673,20 @@ function GUI:RefreshModulesView()
                 local isOn = g.key == "on"
                 local row = GetRow(def.id, false)
                 PaintModuleRow(row, def, isOn, g.key == "soon")
+                -- Sub-rows: Group Frames' Party and Raid (shown off with the
+                -- master off, and still clickable), Unit Frames' frames (greyed
+                -- while the module is not running). None on a coming-soon row.
+                local subs = (g.key ~= "soon") and GUI:ModuleSubSwitches(def) or {}
+                PaintFold(row, def, #subs > 0)
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
                 row:SetWidth(cw)
                 row:Show()
                 y = y + ROW_H + ROW_GAP
-                -- Group Frames: Party and Raid, each with its own switch.
-                -- Shown off with the master off, and still clickable.
-                if def.id == "group" then
-                    for _, mode in ipairs({ "party", "raid" }) do
-                        local sr = GetRow("group:" .. mode, true)
-                        PaintSubRow(sr, mode)
+                if #subs > 0 and not GUI:IsModuleListFolded(def.id) then
+                    for _, e in ipairs(subs) do
+                        local sr = GetRow(def.id .. ":" .. tostring(e.key), true)
+                        PaintSubRow(sr, def, e)
                         sr:ClearAllPoints()
                         sr:SetPoint("TOPLEFT", body, "TOPLEFT", x0 + SUB_INDENT, -y)
                         sr:SetWidth(cw - SUB_INDENT)

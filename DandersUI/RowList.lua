@@ -99,33 +99,79 @@ end
 -- SWITCH -- an on / off toggle: a small track that fills with the accent and
 -- a square knob that sits right when on, left when off.
 --   opts: width (26), height (14), accent, tooltip, onToggle(checked)
+--         rounded  -- a PILL: a fully rounded track and a round knob, drawn
+--                     with the kit's rounded surfaces (Round.lua). Its height
+--                     should be 16 (the track's radius is 8, the knob a 12px
+--                     circle at radius 6 -- the radii the art has).
 --   :SetChecked(bool) / :GetChecked() / :SetEnabled(bool) / :Repaint()
 -- onToggle runs on a user click only; SetChecked never calls it.
+-- Off is always grey whatever the accent: the colour only ever shows on a
+-- switch that is ON, so the colour itself says "on".
 -- ============================================================
+local function CreatePillSwitch(host, sw, opts, h)
+    -- The track: off = the element fill with a plain border; on = the accent.
+    local track = host:CreateRoundedSurface(sw, { radius = 8 })
+    sw.Track = track
+
+    local kd = h - 4
+    local knob = CreateFrame("Frame", nil, sw)
+    knob:SetSize(kd, kd)
+    knob:EnableMouse(false)
+    knob.surface = host:CreateRoundedSurface(knob, { radius = 6, border = false })
+    sw.Knob = knob
+
+    local C = UI.Colors
+    local el, bd = C.element or C.panel or C_TEXT_DIM, C.border or C_TEXT_DIM
+
+    return function(self)
+        local r, g, b = Unpack(AccentOf(host, opts.accent), 1, 1, 1)
+        knob:ClearAllPoints()
+        if self.checked then
+            local a = (self.hovered and self.enabled) and 1 or 0.85
+            track:SetFillColor(r, g, b, a)
+            track:SetBorderColor(r, g, b, 1)
+            knob:SetPoint("RIGHT", self, "RIGHT", -2, 0)
+            knob.surface:SetFillColor(1, 1, 1, 1)
+        else
+            track:SetFillColor(el.r, el.g, el.b, 1)
+            track:SetBorderColor(bd.r, bd.g, bd.b, 1)
+            local c = (self.hovered and self.enabled) and C_TEXT or C_TEXT_DIM
+            knob:SetPoint("LEFT", self, "LEFT", 2, 0)
+            knob.surface:SetFillColor(c.r, c.g, c.b, 1)
+        end
+        self:SetAlpha(self.enabled and 1 or DISABLED_ALPHA)
+    end
+end
+
 function UI:CreateSwitch(parent, opts)
     local host = self
     opts = opts or {}
     local M = UI.RowList
     local w, h = opts.width or M.switchW, opts.height or M.switchH
 
-    local sw = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    local sw = CreateFrame("Button", nil, parent, opts.rounded and nil or "BackdropTemplate")
     sw:SetSize(w, h)
-    host:CreateElementBackdrop(sw)
-
-    local fill = sw:CreateTexture(nil, "ARTWORK")
-    fill:SetPoint("TOPLEFT", sw, "TOPLEFT", 1, -1)
-    fill:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT", -1, 1)
-    fill:SetColorTexture(1, 1, 1, 0)
-    fill:Hide()
-    sw.Fill = fill
-
-    local knob = sw:CreateTexture(nil, "OVERLAY")
-    knob:SetSize(h - 4, h - 4)
-    sw.Knob = knob
-
     sw.checked, sw.enabled, sw.hovered = false, true, false
 
+    local pillRepaint = opts.rounded and CreatePillSwitch(host, sw, opts, h)
+    if not pillRepaint then host:CreateElementBackdrop(sw) end
+
+    local fill, knob
+    if not pillRepaint then
+        fill = sw:CreateTexture(nil, "ARTWORK")
+        fill:SetPoint("TOPLEFT", sw, "TOPLEFT", 1, -1)
+        fill:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT", -1, 1)
+        fill:SetColorTexture(1, 1, 1, 0)
+        fill:Hide()
+        sw.Fill = fill
+
+        knob = sw:CreateTexture(nil, "OVERLAY")
+        knob:SetSize(h - 4, h - 4)
+        sw.Knob = knob
+    end
+
     function sw:Repaint()
+        if pillRepaint then return pillRepaint(self) end
         local r, g, b = Unpack(AccentOf(host, opts.accent), 1, 1, 1)
         knob:ClearAllPoints()
         if self.checked then

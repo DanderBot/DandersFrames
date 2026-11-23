@@ -165,7 +165,8 @@ function GUI:StyleButton(b, o)
     if o.text then buttons[#buttons + 1] = b end
 end
 function GUI:CreateRoundedSurface(_, o) local s = FakeUIFrame(); s.opts = o; return s end
-function GUI:CreateCheckRow() local c = FakeUIFrame(); c.SetChecked = function(self, v) self._checked = v end; return c end
+function GUI:CreateSwitch() local c = FakeUIFrame(); c.SetChecked = function(self, v) self._checked = v end; return c end
+function GUI:CreateGlyphButton() return FakeUIFrame() end
 function GUI:IsModulePickLocked() return false end
 function GUI:ShowTooltip(owner, spec) tooltips[#tooltips + 1] = { owner = owner, spec = spec } end
 function GUI:HideTooltip() end

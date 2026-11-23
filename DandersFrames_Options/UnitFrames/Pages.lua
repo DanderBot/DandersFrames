@@ -3236,6 +3236,15 @@ end
 function UFO.GetSource(unit)
     local UF = DF.UnitFrames
     local db = UF and UF:GetUnitDB(unit)
+    if not UF then
+        -- Not loaded (the Modules page lists the frames while the module is
+        -- off): the stored value as it is, read-only. Absent means "DF", the
+        -- default every unit starts with (DandersFrames_UnitFrames/Defaults.lua).
+        local root = DF.db and DF.db.unitframes
+        local units = type(root) == "table" and root.units
+        db = type(units) == "table" and units[unit] or nil
+        if type(db) ~= "table" then db = nil end
+    end
     return (db and db.source) or "DF"
 end
 
@@ -3264,6 +3273,49 @@ function UFO.SetSource(unit, value)
         UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
     end
     return true
+end
+
+-- ============================================================
+-- THE MODULES PAGE'S PER-FRAME SWITCHES (GUI:ModuleSubSwitches,
+-- GUI/Pages/ModulesPage.lua)
+-- One switch per frame, over the frame's EXISTING source: on = "DF" (we draw
+-- it); off = "Blizzard" (Blizzard's own frame comes back), or "Hidden" where
+-- Blizzard is not allowed (UFO.INSIDE: target of target / focus target while
+-- their host is not Blizzard's). Through UFO.SetSource, so its rules and its
+-- reload prompt stay in one place. Boss is one switch for boss1-5 (one table).
+-- Greyed while the module is not running: its unit tables are the companion's.
+-- ============================================================
+function UFO.OffSource(unit)
+    local inside = UFO.INSIDE[unit]
+    if inside and UFO.GetSource(inside) ~= "Blizzard" then return "Hidden" end
+    return "Blizzard"
+end
+
+function UFO.SubSwitchesDisabled()
+    if not UFO.IsEnabled() then return true, L["Turn on Unit Frames first."] end
+    if not (UFO.IsLoaded() and DF.UnitFrames) then
+        return true, L["Reload to finish turning on Unit Frames."]
+    end
+    return false
+end
+
+function UFO.SubSwitches()
+    local out = {}
+    for _, unit in ipairs(UFO.UNITS) do
+        local u = unit
+        out[#out + 1] = {
+            key = u,
+            label = UFO.UnitLabel(u),
+            isOn = function() return UFO.GetSource(u) == "DF" end,
+            setOn = function(on) UFO.SetSource(u, on and "DF" or UFO.OffSource(u)) end,
+            offStatus = function()
+                return (UFO.GetSource(u) == "Hidden") and L["Hidden"] or L["Blizzard"]
+            end,
+            disabled = UFO.SubSwitchesDisabled,
+            openModule = UFO.MODULE, openTab = UFO.TabOf(u),
+        }
+    end
+    return out
 end
 
 -- Blizzard's player cast bar is hidden (the user's choice, or following ours).
@@ -3447,6 +3499,7 @@ function UFO.RegisterModule()
         pageForTab = function(tabId, from) return UFO.PageForTab(tabId, from) end,
         isEnabled = UFO.IsEnabled,
         setEnabled = UFO.SetEnabled,
+        subSwitches = UFO.SubSwitches,
         status = UFO.Status,
         description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
         reset = UFO.Reset,
@@ -3538,6 +3591,7 @@ function UFO.ApplyInstallState()
     def.comingSoon = nil
     def.isEnabled = UFO.IsEnabled
     def.setEnabled = UFO.SetEnabled
+    def.subSwitches = UFO.SubSwitches
     def.status = UFO.Status
     -- Switched on but not loaded yet: its rail item says so, with the reload.
     def.placeholderNote = UFO.PlaceholderNote
