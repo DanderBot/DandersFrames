@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Improvements
+
+- (Modules) Modules now use on/off switches instead of checkboxes, so it's clearer what's on.
+- (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
+- (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
+
 ### Bug Fixes
 
 - (Unit Frames) Fix raid buffs such as Fortitude never showing on the buff bar, even with All Buffs on.
