@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- (Unit Frames) Fix raid buffs such as Fortitude never showing on the buff bar, even with All Buffs on.
+
 ## [6.0.0]
 
 ### New Features
