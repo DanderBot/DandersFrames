@@ -175,7 +175,7 @@ echo "$CHANGELOG_CONTENT" > "$CHANGELOG_FILE"
 # DandersMover is NOT in this list: it has its own version, set by its own
 # release (release-mover.yml, mover-v* tags). Syncing it here would overwrite
 # that with the DandersFrames version.
-for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc"; do
+for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc" "DandersFrames_UnitFrames/DandersFrames_UnitFrames.toc"; do
     if [ ! -f "$TOC_FILE" ]; then
         echo "Error: $TOC_FILE not found — the addon layout changed without this script." >&2
         exit 1
