@@ -145,8 +145,12 @@ local function ResolvePreset(frame, lib, presetKey)
         and "dfAuraPresetOverride" or "dfTextPresetOverride"]
     if override and lib[override] then return lib[override] end
 
+    -- A standalone frame (DF:InitStandaloneFrame) names its template in its own
+    -- settings table (DF:GetFrameDB). Gated on the flag, not GetFrameDB for every
+    -- frame: a pinned frame's dfDB can sit on the other mode from FrameMode once
+    -- the raid registry goes stale, and that answer must not move.
     local mode = FrameMode(frame)
-    local modeDB = DF:GetDB(mode)
+    local modeDB = (frame and frame.dfStandalone and DF:GetFrameDB(frame)) or DF:GetDB(mode)
     local name = (modeDB and modeDB[presetKey]) or DefaultPresetNameForMode(mode)
     return lib[name] or lib[DF.DEFAULT_PRESET]
 end
@@ -219,6 +223,18 @@ function DF:IsAuraDesignerEnabledForMode(mode)
     return modeDB.auraDesignerEnabled and true or false
 end
 
+-- The enable for whichever settings table a settings page is editing: the party and
+-- raid tables answer through their mode (above); any other table -- a standalone
+-- frame's own (DF:InitStandaloneFrame), see DF:IsAuraDesignerEnabled -- answers from
+-- its own key. Absent means off.
+function DF:IsAuraDesignerEnabledForDB(d)
+    local db = DF.db
+    if type(d) == "table" and db and d ~= db.party and d ~= db.raid and d ~= DF._realRaidDB then
+        return d.auraDesignerEnabled == true
+    end
+    return DF:IsAuraDesignerEnabledForMode((db and d == db.raid) and "raid" or "party")
+end
+
 -- ⚠ Writes the MODE only. The preset's own `enabled` is left where it is rather than
 -- cleaned up: an older build still reads it, and a profile carried between builds should
 -- not come back with the designer silently off. It is inert for mode resolution from here.
@@ -283,6 +299,47 @@ local function UniquePresetName(lib, base)
     local i = 2
     while lib[base .. " " .. i] do i = i + 1 end
     return base .. " " .. i
+end
+
+-- ============================================================
+-- OTHER REFERENCE CARRIERS
+-- A module outside the party / raid tables (the unit frames companion: every unit
+-- names its own Text Designer and Aura Designer template) holds designer refs
+-- too. It registers a WALKER: walker(profile, fn) calls
+-- fn(tbl, holder, label[, uses]) for every table in `profile` -- the live profile
+-- OR an import payload, so the walker must read the table it is handed, never
+-- DF.db -- that may hold a <kind>Preset ref. `holder` is the carrier's own word
+-- ("unit"); `label` is what the "also used by" list shows; `uses(refKey)`, when
+-- given, names the template the carrier DRAWS with where an unset ref means
+-- "follow another" (asked by the users list only: rename and delete must see the
+-- stored ref, or a following carrier would be pinned to a name). What each walk
+-- does with them:
+--   rename      repoints them (ForEachDesignerRef)
+--   delete      CLEARS them: like a pinned set, a cleared ref falls back to the
+--               carrier's own default, not onto the empty Default template
+--   users list  names them (DF:ListDesignerPresetUsers)
+--   pruning     counts them as references (PresetReferenced)
+--   import      repoints them inside the payload (UniquifyImportedDesignerPresets)
+-- Nothing registered = exactly the walks before this hook existed.
+-- ============================================================
+DF.DesignerRefCarriers = DF.DesignerRefCarriers or {}
+
+function DF:RegisterDesignerRefCarrier(walker)
+    if type(walker) ~= "function" then return end
+    for _, w in ipairs(DF.DesignerRefCarriers) do
+        if w == walker then return end
+    end
+    DF.DesignerRefCarriers[#DF.DesignerRefCarriers + 1] = walker
+end
+
+-- A walker that errors costs its own carriers, never the rename / delete / import
+-- that asked: the party and raid refs are repointed regardless.
+local function ForEachExtraCarrier(profile, fn)
+    if type(profile) ~= "table" then return end
+    for _, walker in ipairs(DF.DesignerRefCarriers) do
+        local ok, err = pcall(walker, profile, fn)
+        if not ok and DF.DebugError then DF:DebugError("Designer", "ref carrier: %s", tostring(err)) end
+    end
 end
 
 -- Invoke fn(overrideHolder) for every raid auto-layout entry that carries an
@@ -450,6 +507,9 @@ local function PresetReferenced(profile, refKey, name)
     local found = false
     ForEachRaidLayoutOverride(profile, function(layout)
         if layout.overrides[refKey] == name then found = true end
+    end)
+    ForEachExtraCarrier(profile, function(t)
+        if t[refKey] == name then found = true end
     end)
     return found
 end
@@ -712,6 +772,7 @@ function DF:UniquifyImportedDesignerPresets(importData, categories)
                 ForEachRaidLayoutOverride(importData, function(layout)
                     repoint(layout.overrides)
                 end)
+                ForEachExtraCarrier(importData, repoint)
                 renamedAny = renamedAny or {}
                 renamedAny[kind] = renames
             end
@@ -753,6 +814,9 @@ local function ForEachDesignerRef(fn)
     -- too, or exiting re-installs a renamed/deleted name as the raid base.
     local apu = DF.AutoProfilesUI
     if apu and apu.globalSnapshot then fn(apu.globalSnapshot, "snapshot") end
+    -- Registered carriers (OTHER REFERENCE CARRIERS, above). Their holder word
+    -- is never "mode" or "snapshot", so a delete clears them.
+    ForEachExtraCarrier(prof, function(t, holder) fn(t, holder or "extra") end)
 end
 
 -- Pinned frames stamp their per-frame preset overrides (dfAuraPresetOverride/
@@ -948,6 +1012,10 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
             users[#users + 1] = layout.name and Kinded(layout.name, L["Auto Layout"])
                 or L["Auto Layouts"]
         end
+    end)
+    ForEachExtraCarrier(prof, function(t, _, label, uses)
+        local used = (type(uses) == "function" and uses(refKey)) or t[refKey]
+        if used == name and label then users[#users + 1] = label end
     end)
     return users
 end

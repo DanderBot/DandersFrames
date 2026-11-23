@@ -342,6 +342,19 @@ end
 -- would be a deliberate change with its own storage.
 function DF:IsAuraDesignerEnabled(frame)
     if not frame then return false end
+    -- ☠ GROUP PET FRAMES DRAW NO AURA DESIGNER, so they must answer no. They are neither
+    -- standalone nor preset-overridden, so without this they fall through to the mode's
+    -- switch and answer yes whenever party/raid AD is on -- and their debuff row then
+    -- drops every category AD "claims" (GetClaimedDebuffCategories) and their buff row
+    -- hides every AD-tracked buff (GetADTrackedSpellIDs), for indicators that never draw.
+    if frame.isPetFrame then return false end
+    -- ★ A STANDALONE FRAME (DF:InitStandaloneFrame) is neither party nor raid: it
+    -- has no mode tab to own a switch, and its own settings table answers, under
+    -- the mode's key name. Absent means off. Asked before the preset override,
+    -- which such a frame may also carry for the template it draws.
+    if frame.dfStandalone and type(frame.dfDB) == "table" then
+        return frame.dfDB.auraDesignerEnabled == true
+    end
     if frame.dfAuraPresetOverride then
         local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
         return (adDB and adDB.enabled) and true or false

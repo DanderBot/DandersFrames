@@ -63,11 +63,14 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOve
         end
     end
 
-    -- Role filter
+    -- Role filter. ★ A STANDALONE FRAME (DF:InitStandaloneFrame) has no group role to
+    -- filter on -- it shows one fixed unit -- so the role and solo gates do not apply.
     local roleAllowed = false
     local hasAnyRoleFilter = db.resourceBarShowHealer or db.resourceBarShowTank or db.resourceBarShowDPS
 
-    if hasAnyRoleFilter then
+    if frame and frame.dfStandalone then
+        roleAllowed = true
+    elseif hasAnyRoleFilter then
         -- ☠ DF:GetUnitRole, not UnitGroupRolesAssigned. The raw call returns
         -- "NONE" for the player whenever the group has not assigned a role --
         -- solo, open world, and inside a delve until a spec change forces one --
@@ -133,6 +136,43 @@ end
 -- call this so the two can never drift. The caller does the enabled/role checks and
 -- sets the bar VALUE + fill COLOUR (live UnitPower vs test mock) — the only per-caller
 -- part. Assumes the bar should be shown.
+-- ============================================================
+-- DETACHED RESOURCE BAR (standalone frames: the unit frames companion)
+-- A frame DF:InitStandaloneFrame marked may detach its bar: it then takes its own
+-- size (resourceBarDetachedMatchWidth / Width / Height) and sits OUTSIDE the frame,
+-- its opposite point on a point of the frame's edge (resourceBarDetachedAnchor),
+-- moved by resourceBarDetachedX / Y. BOTTOM hangs it under the frame, TOPLEFT puts
+-- it above the frame flush with its left edge, LEFT beside the left edge, CENTER
+-- over the middle. Party, raid and pinned frames never detach: the keys are the
+-- unit frames' own and the branch asks for a standalone frame first.
+-- ============================================================
+DF.DETACHED_BAR_POINT = {
+    TOP = "BOTTOM", BOTTOM = "TOP", LEFT = "RIGHT", RIGHT = "LEFT", CENTER = "CENTER",
+    TOPLEFT = "BOTTOMLEFT", TOPRIGHT = "BOTTOMRIGHT",
+    BOTTOMLEFT = "TOPLEFT", BOTTOMRIGHT = "TOPRIGHT",
+}
+
+function DF:IsResourceBarDetached(frame, db)
+    return (frame and frame.dfStandalone and db and db.resourceBarDetached) and true or false
+end
+
+-- The resource bar's frame level, as an offset from its unit frame. Every writer of that
+-- level asks here, so creation, layout and the Frame Level slider's live reapply agree.
+-- On top of the health bar: the user's Frame Level (default +20, above the frame border at
+-- +14). Along a Placement side: its own Frame Level, default +12 -- under the frame border,
+-- so with Adjust For Frame Border off the border draws over the strip as it does over the
+-- health bar. Its own key, as the strip's offsets are, so neither placement's default moves
+-- the other. The health bar stops at the strip (DF:GetHealthBarInsets), so nothing from it
+-- draws in the strip's rect and any level shows the bar; the level only orders it against
+-- the border, the dispel ring and text.
+DF.RESOURCE_BAR_ROOM_LEVEL = 12
+function DF:ResolveResourceBarLevelOffset(frame, db)
+    if DF:GetResourceBarRoomEdge(db, frame) then
+        return tonumber(db.resourceBarStripFrameLevel) or DF.RESOURCE_BAR_ROOM_LEVEL
+    end
+    return (db and db.resourceBarFrameLevel) or 20
+end
+
 function DF:LayoutResourceBar(frame, db)
     local bar = frame and frame.dfPowerBar
     if not bar then return end
@@ -226,12 +266,65 @@ function DF:LayoutResourceBar(frame, db)
     -- so no upgrading profile changes look — see the key's note in Config.lua. Aphoex
     -- 5's resolution is the OFF position being one click away, not the default:
     -- continuity for every existing profile won over the new ideal.
+    -- Keep Health Bar Inside Border puts the health bar's ends at the border's inner edge,
+    -- so a bar matching it ends there too, whichever way Adjust is set.
     local edgeInset = padding
-    if db.resourceBarMatchAdjustFrameBorder and db.frameShowBorder ~= false then
+    if (db.resourceBarMatchAdjustFrameBorder or DF:BarsInsideFrameBorder(db)) and db.frameShowBorder ~= false then
         edgeInset = math.max(padding, bInset)
     end
 
-    if isVertical then
+    local roomEdge = DF:GetResourceBarRoomEdge(db, frame)
+
+    if DF:IsResourceBarDetached(frame, db) then
+        -- ★ DETACHED (a standalone frame only -- see DF:IsResourceBarDetached): the
+        -- bar's own width and height, OUTSIDE the frame at a point of its edge. The
+        -- Size / Position settings above keep their values for when it re-attaches.
+        local w = db.resourceBarDetachedMatchWidth ~= false and frameWidth
+            or (tonumber(db.resourceBarDetachedWidth) or frameWidth)
+        local h = tonumber(db.resourceBarDetachedHeight) or 8
+        if db.pixelPerfect then w, h = DF:PixelPerfect(w), DF:PixelPerfect(h) end
+        if w < 1 then w = 1 end
+        if h < 1 then h = 1 end
+        bar:SetSize(w, h)
+        local point = db.resourceBarDetachedAnchor or "BOTTOM"
+        if not DF.DETACHED_BAR_POINT[point] then point = "BOTTOM" end
+        bar:SetPoint(DF.DETACHED_BAR_POINT[point], frame, point,
+            tonumber(db.resourceBarDetachedX) or 0, tonumber(db.resourceBarDetachedY) or 0)
+    elseif roomEdge then
+        -- ★ PLACEMENT STRIP: the bar sits along its side, inset from every frame edge by the
+        -- same amount -- the padding, or the border band with Adjust For Frame Border on. The
+        -- health bar stops at its inner edge (DF:GetHealthBarInsets, Frames/HealthRect.lua),
+        -- which measures from the same inset, thickness and offsets as this rect.
+        -- The side fixes one axis, so Anchor only says where along the side a shorter bar
+        -- (Match off) sits: its left / centre / right part on a top or bottom strip, its top /
+        -- middle / bottom part on a left or right one. The side, not the Orientation, decides
+        -- which way the strip runs. The strip's offsets are its own keys: On Top's offsets
+        -- measure from the frame edge (and default to a 1 px lift), so sharing them would move
+        -- every strip off its edge.
+        local p = DF:GetResourceBarStripInset(db)
+        local sx = tonumber(db.resourceBarStripX) or 0
+        local sy = tonumber(db.resourceBarStripY) or 0
+        local across = roomEdge == "BOTTOM" or roomEdge == "TOP"
+        local function seat(point)
+            local x = point:find("LEFT") and p or (point:find("RIGHT") and -p or 0)
+            local y = point:find("BOTTOM") and p or (point:find("TOP") and -p or 0)
+            bar:SetPoint(point, frame, point, x + sx, y + sy)
+        end
+        if across then bar:SetHeight(ppThickness) else bar:SetWidth(ppThickness) end
+        if db.resourceBarMatchWidth then
+            if across then
+                seat(roomEdge .. "LEFT"); seat(roomEdge .. "RIGHT")
+            else
+                seat("TOP" .. roomEdge); seat("BOTTOM" .. roomEdge)
+            end
+        elseif across then
+            bar:SetWidth(ppLength)
+            seat(roomEdge .. (anchor:find("LEFT") and "LEFT" or (anchor:find("RIGHT") and "RIGHT" or "")))
+        else
+            bar:SetHeight(ppLength)
+            seat((anchor:find("TOP") and "TOP" or (anchor:find("BOTTOM") and "BOTTOM" or "")) .. roomEdge)
+        end
+    elseif isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
         bar:SetWidth(ppThickness)
         if db.resourceBarMatchWidth and healthBarHeight > 1 then
@@ -260,10 +353,7 @@ function DF:LayoutResourceBar(frame, db)
         end
     end
 
-    -- Frame level - relative to the main frame. The default 20 puts it ABOVE the frame
-    -- border (+14, see Frames/Create.lua CreateFrameBorder); below 14 renders under it.
-    local frameLevelOffset = db.resourceBarFrameLevel or 20
-    bar:SetFrameLevel(frame:GetFrameLevel() + frameLevelOffset)
+    bar:SetFrameLevel(frame:GetFrameLevel() + DF:ResolveResourceBarLevelOffset(frame, db))
     if bar.border then
         bar.border:SetFrameLevel(bar:GetFrameLevel() + 1)
     end
@@ -288,6 +378,13 @@ function DF:LayoutResourceBar(frame, db)
             frame = frame,
         }))
     end
+
+    -- Thickness, Placement or the strip offsets may have changed with nothing else
+    -- re-running (a slider drag runs only this function): let the health rect follow.
+    -- A no-op unless the rect actually moved.
+    if DF.SyncHealthBarRect then
+        DF:SyncHealthBarRect(frame, db)
+    end
 end
 
 function DF:ApplyResourceBarLayout(frame)
@@ -300,11 +397,19 @@ function DF:ApplyResourceBarLayout(frame)
     if not frame.dfPowerBar then return end
     local bar = frame.dfPowerBar
 
-    -- Enabled + unit + role gates
-    if not db.resourceBarEnabled then bar:Hide() return end
+    -- Enabled + unit + role gates. The decision also tells a Placement strip whether this
+    -- frame keeps a strip for the bar, and the sync moves the health bar to make room or back.
+    if not db.resourceBarEnabled then
+        DF:NoteResourceBarWanted(frame, false)
+        DF:SyncHealthBarRect(frame, db)
+        bar:Hide() return
+    end
     if not frame.unit then bar:Hide() return end
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
-    if not DF:ShouldShowResourceBar(frame.unit, db, nil, nil, nil, frame) then bar:Hide() return end
+    local wanted = DF:ShouldShowResourceBar(frame.unit, db, nil, nil, nil, frame)
+    DF:NoteResourceBarWanted(frame, wanted)
+    DF:SyncHealthBarRect(frame, db)
+    if not wanted then bar:Hide() return end
 
     -- Shared geometry/appearance (size, anchor, level, background, border).
     DF:LayoutResourceBar(frame, db)
@@ -332,8 +437,13 @@ function DF:UpdateResourceBar(frame)
     local bar = frame.dfPowerBar
     local unit = frame.unit
     
-    -- Only process player, party, and raid units
-    if unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$") then
+    -- Only process player, party, and raid units -- or a standalone frame
+    -- (DF:InitStandaloneFrame), which shows one fixed unit of any kind.
+    -- ☠ Without that exemption this hid a standalone frame's bar straight after
+    -- ApplyResourceBarLayout showed it (FullFrameRefresh runs the two back to back),
+    -- so the bar stayed hidden until the unit's power next changed.
+    if not frame.dfStandalone and unit ~= "player"
+        and not unit:match("^party%d$") and not unit:match("^raid%d+$") then
         bar:Hide()
         return
     end
@@ -448,6 +558,7 @@ local function AbsorbLayoutStateChanged(frame, db)
     if s.frameShowBorder ~= (db.frameShowBorder ~= false)                 then return true end
     if s.frameBorderSize ~= (db.frameBorderSize or 1)                     then return true end
     if s.frameBorderAlpha ~= ((db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1) then return true end
+    if s.barsInsideBorder ~= DF:BarsInsideFrameBorder(db)                 then return true end
 
     -- Floating-mode specific
     if s.orientation     ~= (db.absorbBarOrientation or "HORIZONTAL")     then return true end
@@ -483,6 +594,12 @@ local function AbsorbLayoutStateChanged(frame, db)
     -- Texture layers are painted only on the full path.
     if DF:BarTextureLayersChanged(s.textureLayers, db, "absorbBar") then return true end
 
+    -- Past the bar end: its length, and the object it hangs off (the heals' breakout fill
+    -- appears and goes with the heal prediction, and is replaced on a texture swap).
+    local breakout = db.absorbBarBreakout or 0
+    if s.breakout        ~= breakout                                      then return true end
+    if breakout > 0 and s.breakoutAnchor ~= DF.ResolveAbsorbBreakoutAnchor(frame, db) then return true end
+
     return false
 end
 
@@ -515,6 +632,7 @@ local function CacheAbsorbLayoutState(frame, db)
     s.frameShowBorder = db.frameShowBorder ~= false
     s.frameBorderSize = db.frameBorderSize or 1
     s.frameBorderAlpha = (db.frameBorderColor and (db.frameBorderColor.a or db.frameBorderColor[4])) or 1
+    s.barsInsideBorder = DF:BarsInsideFrameBorder(db)
     s.orientation     = db.absorbBarOrientation or "HORIZONTAL"
     s.width           = db.absorbBarWidth or 50
     s.height          = db.absorbBarHeight or 6
@@ -538,6 +656,8 @@ local function CacheAbsorbLayoutState(frame, db)
     s.overshieldReverse = db.absorbBarOvershieldReverse
     local osc = db.absorbBarOvershieldColor or db.absorbBarColor or DEFAULT_ABSORB_COLOR
     s.overshieldR, s.overshieldG, s.overshieldB = osc.r, osc.g, osc.b
+    s.breakout        = db.absorbBarBreakout or 0
+    s.breakoutAnchor  = s.breakout > 0 and DF.ResolveAbsorbBreakoutAnchor(frame, db) or nil
 end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health bar) when the
@@ -555,7 +675,18 @@ function DF:GetAbsorbEdgeInset(frame, db)
     local bc = db.frameBorderColor
     local alpha = (bc and (bc.a or bc[4])) or 1
     if alpha >= 1 then return 0 end
-    local inset = (frame and frame.dfReducedMaxHealthClipping) and 0 or (db.frameBorderSize or 1)
+    return DF:GetHealthBarBorderOverlap(frame, db)
+end
+
+-- How far the frame border lies over the health bar on each side: the border size, snapped
+-- as the border is, or 0 when none of it does -- no border, a reduced-max clip edge (internal,
+-- no border there), or Keep Health Bar Inside Border, which stops the bar at the border's
+-- inner edge. The bars tied to the health bar size and inset themselves by it; counting a
+-- border the bar is already clear of shrank them twice.
+function DF:GetHealthBarBorderOverlap(frame, db)
+    if not db or db.frameShowBorder == false then return 0 end
+    if (frame and frame.dfReducedMaxHealthClipping) or DF:BarsInsideFrameBorder(db) then return 0 end
+    local inset = db.frameBorderSize or 1
     if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
     return inset
 end
@@ -682,7 +813,7 @@ end
 -- test drives are the only writers for a test frame; everyone else must leave it
 -- alone. Previews differ in DATA, never in which caller happens to run last.
 local function testFrameNeedsData(frame, testIndex)
-    return (DF.testMode or DF.raidTestMode) and testIndex == nil
+    return DF:FrameInTestScope(frame, "any") and testIndex == nil
         and frame and frame.dfIsTestFrame
 end
 
@@ -790,13 +921,243 @@ local function HoldFillUntilPlaced(bar)
     fillHoldWatcher:Show()
 end
 
+-- Anchor a full-length bar's leading edge to the trailing edge of a previous fill texture
+-- (the health fill, or the segment before it in the chain), per health orientation.
+-- `cross` insets the other axis (the absorb's translucent-border inset); 0 or nil for none.
+local function AnchorHealPredSegment(seg, prevTex, orient, w, h, cross)
+    cross = cross or 0
+    seg:ClearAllPoints()
+    if orient == "HORIZONTAL_INV" then
+        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(true); seg:SetWidth(w)
+        seg:SetPoint("TOPRIGHT", prevTex, "TOPLEFT", 0, -cross)
+        seg:SetPoint("BOTTOMRIGHT", prevTex, "BOTTOMLEFT", 0, cross)
+    elseif orient == "VERTICAL" then
+        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(false); seg:SetHeight(h)
+        seg:SetPoint("BOTTOMLEFT", prevTex, "TOPLEFT", cross, 0)
+        seg:SetPoint("BOTTOMRIGHT", prevTex, "TOPRIGHT", -cross, 0)
+    elseif orient == "VERTICAL_INV" then
+        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(true); seg:SetHeight(h)
+        seg:SetPoint("TOPLEFT", prevTex, "BOTTOMLEFT", cross, 0)
+        seg:SetPoint("TOPRIGHT", prevTex, "BOTTOMRIGHT", -cross, 0)
+    else  -- HORIZONTAL (default)
+        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(false); seg:SetWidth(w)
+        seg:SetPoint("TOPLEFT", prevTex, "TOPRIGHT", 0, -cross)
+        seg:SetPoint("BOTTOMLEFT", prevTex, "BOTTOMRIGHT", 0, cross)
+    end
+end
+
+local SHIELD_OVERLAY_TEX = "Interface\\RaidFrame\\Shield-Overlay"
+
+-- The absorb fill texture, shared by the shield and its breakout so the two halves match.
+-- Holds the fill when the texture changes (see HoldFillUntilPlaced).
+local function ApplyAbsorbFillTexture(bar, tex)
+    if bar.currentTexture == tex then return end
+    bar.currentTexture = tex
+    if tex == SHIELD_OVERLAY_TEX then
+        bar:SetStatusBarTexture(tex)
+        local barTex = bar:GetStatusBarTexture()
+        if barTex then
+            -- Wrap set WITH the file, as Blizzard's own template declares for
+            -- this texture (UnitFrame.xml, horizTile/vertTile on the node) --
+            -- SetStatusBarTexture alone leaves the sampler clamped. Same rule
+            -- as DF's tiled textures; see ☠ in DF:ApplyBarTextureTiling.
+            barTex:SetTexture(tex, "REPEAT", "REPEAT")
+            barTex:SetHorizTile(true)
+            barTex:SetVertTile(true)
+            barTex:SetTexCoord(0, 2, 0, 1)
+            barTex:SetDesaturated(true)
+            barTex:SetDrawLayer("ARTWORK", 2)
+        end
+    else
+        -- Tiling follows the texture that actually LANDED: if the safe setter
+        -- substituted the stock fallback, tile against that, not the path we
+        -- asked for (the fallback is a stretched texture).
+        local applied = DF:SafeSetStatusBarTexture(bar, tex)
+        DF:ApplyBarTextureTiling(bar, applied == false and DF.STOCK_BAR_TEXTURE or tex)
+        local barTex = bar:GetStatusBarTexture()
+        if barTex then
+            barTex:SetDesaturated(false)
+            barTex:SetDrawLayer("ARTWORK", 1)
+        end
+    end
+    HoldFillUntilPlaced(bar)
+end
+
+-- ============================================================
+-- ★ PAST THE BAR END (the "breakout")
+-- The absorb (Attached) and the heal prediction can draw a set share of the bar's length
+-- past its max-health end, as they did before every bar was masked to the health bar.
+-- Each is a second bar, a CHILD of the bar it continues, so the out-of-range fade and every
+-- hide path reach it through the parent. It draws the same value on the same ruler and is
+-- masked to the strip outside the bar, so inside the bar only the main bar shows.
+--
+-- ☠ THE JOIN GHOST. Outside the bar nothing masks a wrong value, so the strip shows exactly
+-- what the mask hid before: a member's max health is a placeholder for a moment on a join.
+-- Two things keep it out, the same two the main bars rely on: the fill is held until it is
+-- placed (HoldFillUntilPlaced), and the range and the amount come from ONE calculator
+-- snapshot, never UnitHealthMax beside a calculator amount. A third guard, hiding the strip
+-- while the calculator said absorbs or heals exceeded the whole max health, was built and
+-- removed: with it switched off a raid join showed no ghost. If one comes back, that flag
+-- (absorb clamp 2 / heal clamp 1, driving SetAlphaFromBoolean) is the place to start.
+-- ============================================================
+
+-- The max-health end of the health bar for each fill direction: the frame side the
+-- breakout runs out of.
+local BREAKOUT_SIDE = { HORIZONTAL = "RIGHT", HORIZONTAL_INV = "LEFT", VERTICAL = "TOP", VERTICAL_INV = "BOTTOM" }
+-- A breakout fully under a resource bar strip: a sliver too small to draw, never 0 --
+-- a 0 size on a region anchored by one edge reads as "no size set", not "empty".
+local BREAKOUT_NONE = 0.001
+
+-- The strip past the max-health end of the health bar, `pct` percent of its length long.
+-- Same mask texture and filtering as MaskBarToHealthBar, anchored outside the bar.
+-- ★ A RESOURCE BAR PLACEMENT STRIP AT THAT END IS SKIPPED (DF:GetResourceStripReachPast):
+-- the mask starts past the strip's outer edge and ends where it always did, so the
+-- breakout keeps its ruler and its reach, and never draws in the strip whatever the two
+-- frame levels are.
+local function MaskBarToBreakoutStrip(frame, bar, orient, pct, db)
+    local hb = frame.healthBar
+    local mask = bar.dfHealthMaskTex
+    if not mask then
+        mask = bar:CreateMaskTexture()
+        mask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE", "NEAREST")
+        bar.dfHealthMaskTex = mask
+    end
+    local w, h = hb:GetWidth(), hb:GetHeight()
+    local skip = DF:GetResourceStripReachPast(frame, db, BREAKOUT_SIDE[orient] or "RIGHT")
+    if mask.dfAnchor ~= hb or mask.dfOrient ~= orient or mask.dfPct ~= pct
+        or mask.dfW ~= w or mask.dfH ~= h or mask.dfSkip ~= skip then
+        mask.dfAnchor, mask.dfOrient, mask.dfPct, mask.dfW, mask.dfH, mask.dfSkip = hb, orient, pct, w, h, skip
+        mask:ClearAllPoints()
+        if orient == "HORIZONTAL_INV" then
+            mask:SetPoint("TOPRIGHT", hb, "TOPLEFT", -skip, 0)
+            mask:SetPoint("BOTTOMRIGHT", hb, "BOTTOMLEFT", -skip, 0)
+            mask:SetWidth(math.max(w * pct / 100 - skip, BREAKOUT_NONE))
+        elseif orient == "VERTICAL" then
+            mask:SetPoint("BOTTOMLEFT", hb, "TOPLEFT", 0, skip)
+            mask:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT", 0, skip)
+            mask:SetHeight(math.max(h * pct / 100 - skip, BREAKOUT_NONE))
+        elseif orient == "VERTICAL_INV" then
+            mask:SetPoint("TOPLEFT", hb, "BOTTOMLEFT", 0, -skip)
+            mask:SetPoint("TOPRIGHT", hb, "BOTTOMRIGHT", 0, -skip)
+            mask:SetHeight(math.max(h * pct / 100 - skip, BREAKOUT_NONE))
+        else
+            mask:SetPoint("TOPLEFT", hb, "TOPRIGHT", skip, 0)
+            mask:SetPoint("BOTTOMLEFT", hb, "BOTTOMRIGHT", skip, 0)
+            mask:SetWidth(math.max(w * pct / 100 - skip, BREAKOUT_NONE))
+        end
+    end
+    -- Read by TextureLayers for layer textures it creates after this call.
+    bar.dfHealthMask = mask
+    local fill = bar:GetStatusBarTexture()
+    if fill then SetTextureMask(fill, mask) end
+    local layers = bar.dfTextureLayers
+    if layers then
+        for _, tex in pairs(layers.textures) do SetTextureMask(tex, mask) end
+        layers.canvas:SetAlpha(bar.dfFillHeld and 0 or 1)
+    end
+end
+
+-- The absorb's breakout amount: the whole shield, capped at the whole max health (2,
+-- MaximumHealth) -- the most one bar-length StatusBar can draw anyway.
+local function PopulateAbsorbBreakoutCalc(frame, unit)
+    local calc = frame.dfAbsorbBreakoutCalc
+    if not calc then
+        calc = CreateUnitHealPredictionCalculator()
+        if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(2) end
+        if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
+        frame.dfAbsorbBreakoutCalc = calc
+    end
+    UnitGetDetailedHealPrediction(unit, nil, calc)
+    return calc
+end
+
+-- Where the absorb's breakout starts: after the heals' breakout while that is drawn (so
+-- outside the bar the order stays health -> heals -> shield), else where the shield does.
+local function ResolveAbsorbBreakoutAnchor(frame, db)
+    local hbo, pred = frame.dfHealBreakout, frame.dfHealPredictionBar
+    if hbo and hbo:IsShown() and pred and pred:IsShown() then
+        local t = hbo:GetStatusBarTexture()
+        if t then return t end
+    end
+    return DF:ResolveAbsorbChainAnchor(frame, db)
+end
+DF.ResolveAbsorbBreakoutAnchor = ResolveAbsorbBreakoutAnchor   -- the absorb layout cache, above
+
+local function HideBreakout(bar)
+    if bar then bar:Hide() end
+end
+
+-- `layout` is true on UpdateAbsorb's full path: style, anchor and mask. The fast path only
+-- refreshes the value. `absorbs`/`maxHealth` are used for the preview only.
+local function UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxHealth, layout)
+    local pct = db.absorbBarBreakout or 0
+    local bo = frame.dfAbsorbBreakout
+    local main = frame.dfAbsorbBar
+    if pct <= 0 or not main then return HideBreakout(bo) end
+    if not isTestRender and not (unit and CreateUnitHealPredictionCalculator) then return HideBreakout(bo) end
+    if not bo then
+        bo = CreateFrame("StatusBar", nil, main)
+        bo:SetMinMaxValues(0, 1)
+        bo:EnableMouse(false)
+        frame.dfAbsorbBreakout = bo
+        layout = true
+    end
+    if layout then
+        if bo:GetParent() ~= main then bo:SetParent(main) end
+        bo:SetFrameLevel(main:GetFrameLevel())
+        local tex = main.currentTexture or DF.STOCK_BAR_TEXTURE
+        ApplyAbsorbFillTexture(bo, tex)
+        DF:ApplyBarTextureTiling(bo, tex)
+        local blendMode = db.absorbBarBlendMode or "BLEND"
+        local fill = bo:GetStatusBarTexture()
+        if fill then fill:SetBlendMode(blendMode) end
+        SetFillColor(bo, main.dfFillR or 1, main.dfFillG or 1, main.dfFillB or 1, main.dfFillA or 1)
+        if DF:BarTextureLayersWanted(bo, db, "absorbBar") then
+            DF:ApplyBarTextureLayers(bo, "absorbBar", db, DF:BarLayerOpts(frame.healthBar, main.dfIsVerticalFill,
+                { r = main.dfFillR or 1, g = main.dfFillG or 1, b = main.dfFillB or 1, a = main.dfFillA or 1 },
+                blendMode, tex == SHIELD_OVERLAY_TEX))
+        end
+        local orient = db.healthOrientation or "HORIZONTAL"
+        local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
+        local anchorTex = ResolveAbsorbBreakoutAnchor(frame, db)
+        if not anchorTex then return HideBreakout(bo) end
+        AnchorHealPredSegment(bo, anchorTex, orient,
+            frame.healthBar:GetWidth() - inset * 2, frame.healthBar:GetHeight() - inset * 2, edgeInset)
+        MaskBarToBreakoutStrip(frame, bo, orient, pct, db)
+    end
+    if isTestRender then
+        bo:SetMinMaxValues(0, maxHealth)
+        DF.SetBarValue(bo, math.min(absorbs, maxHealth), frame)
+    else
+        local calc = PopulateAbsorbBreakoutCalc(frame, unit)
+        -- Range from the same snapshot as the value (see UpdateAbsorb).
+        if calc.GetMaximumHealth then
+            bo:SetMinMaxValues(0, calc:GetMaximumHealth())
+        else
+            bo:SetMinMaxValues(0, UnitHealthMax(unit))
+        end
+        local amount = calc:GetDamageAbsorbs()
+        DF.SetBarValue(bo, amount, frame)
+    end
+    bo:Show()
+end
+
 function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
     if testFrameNeedsData(frame, testIndex) then return end
 
+    -- A unit frame with no shield settings of its own (DandersFrames_UnitFrames/Rings.lua).
+    if frame.dfNoShieldBar then
+        if frame.dfAbsorbBar then frame.dfAbsorbBar:Hide() end
+        if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
+        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
+        return
+    end
+
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
-    if DF:MemTestDisabled("enableAbsorbs") and not DF.testMode and not DF.raidTestMode then
+    if DF:MemTestDisabled("enableAbsorbs") and not DF:FrameInTestScope(frame, "any") then
         if frame.absorbBar then frame.absorbBar:Hide() end
         if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
@@ -817,7 +1178,10 @@ function DF:UpdateAbsorb(frame, testIndex)
     local isTestRender, testHealthPercent, testIncomingPercent, testReducedPct, testHealAbsorbPct =
         false, nil, nil, nil, nil
 
-    if DF.testMode and testIndex ~= nil then
+    -- Party pool unless only raid test mode is on; a preview frame (in scope with
+    -- neither group mode) passes its own data table and takes the first branch.
+    local testScope = testIndex ~= nil and DF:FrameInTestScope(frame, "any")
+    if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
@@ -833,7 +1197,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             maxHealth = 100000
             absorbs = 0
         end
-    elseif DF.raidTestMode and testIndex ~= nil then
+    elseif testScope then
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
@@ -848,8 +1212,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             absorbs = 0
         end
     else
-        -- Only process player, party, and raid units for real data
-        if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
+        -- Only process player, party, and raid units for real data (or a standalone
+        -- frame, DF:InitStandaloneFrame: it shows one fixed unit of any kind)
+        if not unit or (not frame.dfStandalone and unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
             return
         end
 
@@ -947,9 +1312,12 @@ function DF:UpdateAbsorb(frame, testIndex)
                     frame.absorbOverflowBar.visibilityHelper:SetAlphaFromBoolean(isClamped, visAlpha, 0)
                     frame.absorbOverflowBar:SetAlpha(frame.absorbOverflowBar.visibilityHelper:GetAlpha())
                 end
-            elseif mode == "ATTACHED" and frame.absorbOvershieldGlow and db.absorbBarShowOvershield then
+            elseif mode == "ATTACHED" then
                 -- ATTACHED mode: overshield glow visibility toggles with isClamped
-                frame.absorbOvershieldGlow:SetAlphaFromBoolean(isClamped, db.absorbBarOvershieldAlpha or 0.8, 0)
+                if frame.absorbOvershieldGlow and db.absorbBarShowOvershield then
+                    frame.absorbOvershieldGlow:SetAlphaFromBoolean(isClamped, db.absorbBarOvershieldAlpha or 0.8, 0)
+                end
+                UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxHealth, false)
             end
         else
             -- OVERLAY / FLOATING mode: simplest fast path — just value + OOR
@@ -986,6 +1354,8 @@ function DF:UpdateAbsorb(frame, testIndex)
     if frame.absorbOverflowBar then
         frame.absorbOverflowBar:Hide()
     end
+    -- Only the ATTACHED branch draws past the bar end; it shows this again.
+    HideBreakout(frame.dfAbsorbBreakout)
 
     -- Create custom absorb bar if needed
     if not frame.dfAbsorbBar then
@@ -1025,38 +1395,9 @@ function DF:UpdateAbsorb(frame, testIndex)
     local blendMode = db.absorbBarBlendMode or "BLEND"
     
     -- Apply texture only if changed to prevent flickering
-    if customBar.currentTexture ~= tex then
-        customBar.currentTexture = tex
-        if tex == "Interface\\RaidFrame\\Shield-Overlay" then
-            customBar:SetStatusBarTexture(tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                -- Wrap set WITH the file, as Blizzard's own template declares for
-                -- this texture (UnitFrame.xml, horizTile/vertTile on the node) --
-                -- SetStatusBarTexture alone leaves the sampler clamped. Same rule
-                -- as DF's tiled textures; see ☠ in DF:ApplyBarTextureTiling.
-                barTex:SetTexture(tex, "REPEAT", "REPEAT")
-                barTex:SetHorizTile(true)
-                barTex:SetVertTile(true)
-                barTex:SetTexCoord(0, 2, 0, 1)
-                barTex:SetDesaturated(true)
-                barTex:SetDrawLayer("ARTWORK", 2)
-            end
-        else
-            -- Tiling follows the texture that actually LANDED: if the safe setter
-            -- substituted the stock fallback, tile against that, not the path we
-            -- asked for (the fallback is a stretched texture).
-            local applied = DF:SafeSetStatusBarTexture(customBar, tex)
-            DF:ApplyBarTextureTiling(customBar, applied == false and DF.STOCK_BAR_TEXTURE or tex)
-            local barTex = customBar:GetStatusBarTexture()
-            if barTex then
-                barTex:SetDesaturated(false)
-                barTex:SetDrawLayer("ARTWORK", 1)
-            end
-        end
-        HoldFillUntilPlaced(customBar)
-    end
-    
+    ApplyAbsorbFillTexture(customBar, tex)
+    customBar.dfIsVerticalFill = isVerticalFill
+
     -- Always apply blend mode (may have changed without texture change)
     local barTex = customBar:GetStatusBarTexture()
     if barTex then
@@ -1423,11 +1764,7 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
         
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -1471,7 +1808,8 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Let WoW's StatusBar handle the percentage calculation internally
         customBar:SetMinMaxValues(0, maxHealth)
         DF.SetBarValue(customBar, attachedAbsorbs, frame)
-        
+        UpdateAbsorbBreakout(frame, db, unit, isTestRender, absorbs, maxHealth, true)
+
         if customBar.border then customBar.border:Hide() end
         customBar:SetScript("OnUpdate", nil)
 
@@ -1585,11 +1923,7 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
 
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -1835,14 +2169,9 @@ end
 function DF:RefreshAbsorbBarVisibility(frame)
     if not frame or not frame.dfAbsorbBar or not frame.absorbOverflowBar then return end
     if not frame.dfAbsorbBar:IsShown() then return end
-    if DF.testMode or DF.raidTestMode then return end
+    if DF:FrameInTestScope(frame, "any") then return end
 
-    local db
-    if frame.isRaidFrame and DF.GetRaidDB then
-        db = DF:GetRaidDB()
-    elseif DF.GetDB then
-        db = DF:GetDB()
-    end
+    local db = DF:GetFrameDB(frame)
     if not db then return end
     if (db.absorbBarMode or "OVERLAY") ~= "ATTACHED_OVERFLOW" then return end
 
@@ -1900,8 +2229,15 @@ end
 function DF:UpdateHealAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
+
+    -- A unit frame with no heal absorb settings of its own (DandersFrames_UnitFrames/Rings.lua).
+    if frame.dfNoHealAbsorbBar then
+        if frame.dfHealAbsorbBar then frame.dfHealAbsorbBar:Hide() end
+        return
+    end
+
     -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
-    if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
+    if DF:FrameInTestScope(frame, "any") and testIndex == nil and frame.dfIsTestFrame then return end
     
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
@@ -1911,7 +2247,10 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     local maxHealth, healAbsorb
     local isTestRender = false
     
-    if DF.testMode and testIndex ~= nil then
+    -- Party pool unless only raid test mode is on; a preview frame (in scope with
+    -- neither group mode) passes its own data table and takes the first branch.
+    local testScope = testIndex ~= nil and DF:FrameInTestScope(frame, "any")
+    if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
@@ -1927,7 +2266,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             maxHealth = 100000
             healAbsorb = 0
         end
-    elseif DF.raidTestMode and testIndex ~= nil then
+    elseif testScope then
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
@@ -1942,8 +2281,9 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             healAbsorb = 0
         end
     else
-        -- Only process player, party, and raid units for real data
-        if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
+        -- Only process player, party, and raid units for real data (or a standalone
+        -- frame, DF:InitStandaloneFrame: it shows one fixed unit of any kind)
+        if not unit or (not frame.dfStandalone and unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
             return
         end
         
@@ -2133,11 +2473,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         end
         
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
@@ -2251,29 +2587,6 @@ end
 -- the single bar (no arithmetic; the StatusBar fills itself from SetValue).
 -- ============================================================
 
--- Anchor a segment's leading edge to the trailing edge of a previous fill
--- texture (the health fill, or the prior segment), per health orientation.
-local function AnchorHealPredSegment(seg, prevTex, orient, w, h)
-    seg:ClearAllPoints()
-    if orient == "HORIZONTAL_INV" then
-        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(true); seg:SetWidth(w)
-        seg:SetPoint("TOPRIGHT", prevTex, "TOPLEFT", 0, 0)
-        seg:SetPoint("BOTTOMRIGHT", prevTex, "BOTTOMLEFT", 0, 0)
-    elseif orient == "VERTICAL" then
-        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(false); seg:SetHeight(h)
-        seg:SetPoint("BOTTOMLEFT", prevTex, "TOPLEFT", 0, 0)
-        seg:SetPoint("BOTTOMRIGHT", prevTex, "TOPRIGHT", 0, 0)
-    elseif orient == "VERTICAL_INV" then
-        seg:SetOrientation("VERTICAL"); seg:SetReverseFill(true); seg:SetHeight(h)
-        seg:SetPoint("TOPLEFT", prevTex, "BOTTOMLEFT", 0, 0)
-        seg:SetPoint("TOPRIGHT", prevTex, "BOTTOMRIGHT", 0, 0)
-    else  -- HORIZONTAL (default)
-        seg:SetOrientation("HORIZONTAL"); seg:SetReverseFill(false); seg:SetWidth(w)
-        seg:SetPoint("TOPLEFT", prevTex, "TOPRIGHT", 0, 0)
-        seg:SetPoint("BOTTOMLEFT", prevTex, "BOTTOMRIGHT", 0, 0)
-    end
-end
-
 -- Get/create the second heal-prediction segment ("others' heals" in SPLIT mode).
 local function GetOrCreateHealPredSegment2(frame)
     if not frame.dfHealPredictionBar2 then
@@ -2364,6 +2677,59 @@ local function UpdateOverhealSpark(frame, db, color, overhealing, known)
     spark:Show()
 end
 
+-- Heals past the bar end (see "PAST THE BAR END" above UpdateAbsorb). Drawn from the health
+-- fill like the prediction, by a calculator that lets heals overflow by the breakout share.
+-- In SPLIT the part past the end is the tail of the chain, so it takes the others' colour.
+-- `testAmount` is the preview's plain amount; nil means read the unit.
+local function UpdateHealBreakout(frame, db, unit, showMode, testAmount, maxHealth, style)
+    local pct = db.healPredictionBreakout or 0
+    local bo = frame.dfHealBreakout
+    local main = frame.dfHealPredictionBar
+    if pct <= 0 or not main then return HideBreakout(bo) end
+    if testAmount == nil and not (unit and CreateUnitHealPredictionCalculator) then return HideBreakout(bo) end
+    if not bo then
+        bo = CreateFrame("StatusBar", nil, main)
+        bo:SetMinMaxValues(0, 1)
+        bo:EnableMouse(false)
+        frame.dfHealBreakout = bo
+    end
+    if bo:GetParent() ~= main then bo:SetParent(main) end
+    bo:SetFrameLevel(style.level)
+    StyleHealPredSegment(bo, style.tex, style.blendMode, style.color, db, style.layerOpts)
+    local orient = db.healthOrientation or "HORIZONTAL"
+    AnchorHealPredSegment(bo, style.anchorTex, orient, style.w, style.h)
+    MaskBarToBreakoutStrip(frame, bo, orient, pct, db)
+    if testAmount ~= nil then
+        bo:SetMinMaxValues(0, maxHealth)
+        DF.SetBarValue(bo, testAmount, frame)
+    else
+        local calc = frame.dfHealBreakoutCalc
+        if not calc then
+            calc = CreateUnitHealPredictionCalculator()
+            calc:SetIncomingHealClampMode(0)
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
+            frame.dfHealBreakoutCalc = calc
+        end
+        calc:SetIncomingHealOverflowPercent(1 + pct / 100)
+        local healerUnit = (showMode == "MINE" or showMode == "OTHERS" or showMode == "SPLIT") and "player" or nil
+        UnitGetDetailedHealPrediction(unit, healerUnit, calc)
+        if calc.GetMaximumHealth then
+            bo:SetMinMaxValues(0, calc:GetMaximumHealth())
+        else
+            bo:SetMinMaxValues(0, UnitHealthMax(unit))
+        end
+        local amount, fromHealer, fromOthers = calc:GetIncomingHeals()
+        if showMode == "MINE" then
+            DF.SetBarValue(bo, fromHealer, frame)
+        elseif showMode == "OTHERS" then
+            DF.SetBarValue(bo, fromOthers, frame)
+        else
+            DF.SetBarValue(bo, amount, frame)
+        end
+    end
+    bo:Show()
+end
+
 -- At file scope, not inside UpdateHealPrediction: defined there it was a fresh closure on
 -- every call -- live calls included, which never run it -- and most of DF's allocation in combat.
 local function testHealValues(frame, db, showMode, testData)
@@ -2385,6 +2751,8 @@ local function testHealValues(frame, db, showMode, testData)
     -- health, with the excess reported as the clamped flag that lights the spark.
     local missing = math.max(0, maxHealth - healthPct * maxHealth)
     local overhealing = total > missing
+    -- Past the bar end, the breakout's own calculator allows `missing + breakout`.
+    local breakoutTotal = math.min(total, missing + (db.healPredictionBreakout or 0) / 100 * maxHealth)
     total = math.min(total, missing)
     -- The breakdown live gets from the calculator. An even split is the only
     -- honest preview: there is no real healer to attribute to.
@@ -2398,18 +2766,20 @@ local function testHealValues(frame, db, showMode, testData)
     else
         incomingHeals = total
     end
-    return maxHealth, incomingHeals, myHeals, othersHeals, overhealing
+    -- The breakout draws the whole chain (SPLIT included); one source is half of it.
+    if showMode == "MINE" or showMode == "OTHERS" then breakoutTotal = breakoutTotal * 0.5 end
+    return maxHealth, incomingHeals, myHeals, othersHeals, overhealing, breakoutTotal
 end
 
 function DF:UpdateHealPrediction(frame, testIndex)
     if not frame or not frame.healthBar then return end
     -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
-    if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
+    if DF:FrameInTestScope(frame, "any") and testIndex == nil and frame.dfIsTestFrame then return end
     -- Every early return below leaves the spark hidden; only the OVERLAY branch shows it.
     if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
     
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
-    if DF:MemTestDisabled("enableHealPrediction") and not DF.testMode and not DF.raidTestMode then
+    if DF:MemTestDisabled("enableHealPrediction") and not DF:FrameInTestScope(frame, "any") then
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         return
     end
@@ -2439,6 +2809,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     local myHeals, othersHeals          -- Per-source breakdown (SPLIT mode)
     local overhealing                   -- The calculator's clamped flag (may be secret)
     local haveOverheal = false          -- Plain flag: overhealing was set (never test overhealing itself)
+    local testBreakout                  -- The preview's amount past the bar end; nil = read the unit
     -- ⚠ There is deliberately NO isTestMode flag any more. It existed only to pick
     -- a different render path, and every one of those forks was a bug waiting to
     -- happen. If you find yourself wanting it back, the answer is almost certainly
@@ -2452,19 +2823,23 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- here (a StatusBar fed a plain value behaves as one fed a secret), so test follows live.
     --
 
-    if DF.testMode and testIndex ~= nil then
+    -- Party pool unless only raid test mode is on; a preview frame (in scope with
+    -- neither group mode) passes its own data table and takes the first branch.
+    local testScope = testIndex ~= nil and DF:FrameInTestScope(frame, "any")
+    if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
-        maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
+        maxHealth, incomingHeals, myHeals, othersHeals, overhealing, testBreakout = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
         haveOverheal = true
-    elseif DF.raidTestMode and testIndex ~= nil then
-        maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
+    elseif testScope then
+        maxHealth, incomingHeals, myHeals, othersHeals, overhealing, testBreakout = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
         haveOverheal = true
     else
-        -- Only process valid units for real data
-        if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
+        -- Only process valid units for real data (or a standalone frame, which
+        -- shows one fixed unit of any kind)
+        if not unit or (not frame.dfStandalone and unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
             return
         end
         
@@ -2659,6 +3034,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- MODE: FLOATING
     -- ============================================================
     if mode == "FLOATING" then
+        HideBreakout(frame.dfHealBreakout)   -- a free-standing bar has no end to run past
         bar:SetParent(frame)
         
         bar:SetFrameStrata(frame:GetFrameStrata())
@@ -2751,11 +3127,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         end
         
         local healthOrient = db.healthOrientation or "HORIZONTAL"
-        local inset = 0
-        if db.frameShowBorder ~= false then
-            inset = frame.dfReducedMaxHealthClipping and 0 or (db.frameBorderSize or 1)  -- 0 when clipped: the clip edge is internal, no frame border there
-        end
-        if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
+        local inset = DF:GetHealthBarBorderOverlap(frame, db)
         
         -- ★ ONE PATH, TEST AND LIVE. Anchoring to the health FILL TEXTURE is what
         -- makes the prediction start exactly where health ends, at any health value
@@ -2802,6 +3174,22 @@ function DF:UpdateHealPrediction(frame, testIndex)
         bar:Show()
         UpdateOverhealSpark(frame, db, color, overhealing, haveOverheal)
 
+        -- Past the bar end. Reused table: this runs on every heal-prediction event.
+        if (db.healPredictionBreakout or 0) > 0 then
+            local style = bar.dfBreakoutStyle
+            if not style then
+                style = {}
+                bar.dfBreakoutStyle = style
+            end
+            style.level, style.tex, style.blendMode = predictionLevel, tex, blendMode
+            style.color = isSplit and othersColor or color
+            style.layerOpts, style.anchorTex = healPredLayerOpts, healthFillTexture
+            style.w, style.h = barWidth, barHeight
+            UpdateHealBreakout(frame, db, unit, showMode, testBreakout, maxHealth, style)
+        else
+            HideBreakout(frame.dfHealBreakout)
+        end
+
         -- ============================================================
         -- SPLIT: second segment ("others' heals"), chained after the
         -- primary (my) segment by anchoring to its fill-texture edge.
@@ -2841,8 +3229,12 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- ⚠ testIndex IS FORWARDED: the preview's absorb amount is a parameter of the same
     -- live function, and dropping it repaints a test frame's shield from live (zero) data.
     local chainEnd = DF.ChainEndKey and DF.ChainEndKey(frame, db) or "fill"
-    if frame.dfHealPredChainEnd ~= chainEnd then
+    -- The absorb's breakout hangs off the heals' breakout while that is drawn.
+    local hbo = frame.dfHealBreakout
+    local breakoutOn = (hbo and hbo:IsShown()) and true or false
+    if frame.dfHealPredChainEnd ~= chainEnd or frame.dfHealPredBreakoutOn ~= breakoutOn then
         frame.dfHealPredChainEnd = chainEnd
+        frame.dfHealPredBreakoutOn = breakoutOn
         if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, testIndex) end
     end
 end
@@ -2998,8 +3390,10 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
         -- reappearing with no record of having gone. Exactly the bug class the edge-trigger
         -- was added to prevent, on the reverse edge.
         if frame.dfLastRoleShown ~= false or frame.dfLastRole ~= role then
-            DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
-                tostring(frame.unit), tostring(role))
+            if DF:DebugActive("ROLE") then
+                DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
+                    tostring(frame.unit), tostring(role))
+            end
             frame.dfLastRoleShown = false
             frame.dfLastRole = role
         end
@@ -3027,9 +3421,11 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
     -- party and raid frame, and GUI option callbacks drive it, so logging here
     -- unconditionally floods the console on any slider drag.
     if frame.dfLastRoleShown ~= shouldShow or frame.dfLastRole ~= role then
-        DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
-            tostring(frame.unit), tostring(role), tostring(shouldShow),
-            tostring(db.roleIconHideInCombat), tostring(inCombat))
+        if DF:DebugActive("ROLE") then
+            DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
+                tostring(frame.unit), tostring(role), tostring(shouldShow),
+                tostring(db.roleIconHideInCombat), tostring(inCombat))
+        end
         frame.dfLastRoleShown = shouldShow
         frame.dfLastRole = role
     end
@@ -3065,7 +3461,9 @@ function DF:UpdateAllRoleIcons()
     -- Use our tracked combat state
     local inCombat = DF.playerInCombat or false
     
-    DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
+    if DF:DebugActive("ROLE") then
+        DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
+    end
     
     local function updateFrame(frame)
         if frame and frame:IsShown() then
@@ -3126,12 +3524,10 @@ function DF:UpdateLeaderIcon(frame)
     local isAssist = UnitIsGroupAssistant(unit) and not isLeader
     
     if isLeader then
-        frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
-        frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
+        DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-LeaderIcon")
         frame.leaderIcon:Show()
     elseif isAssist then
-        frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
-        frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
+        DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-AssistantIcon")
         frame.leaderIcon:Show()
     else
         frame.leaderIcon:Hide()

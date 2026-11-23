@@ -99,6 +99,57 @@ local function ResolveTooltipSpec(widget, label)
     return nil
 end
 
+-- ============================================================
+-- WHY IS IT GREY? -- widget.disableReason
+--
+-- A greyed control says "not now" but never said why. A consumer can set
+--     widget.disableReason = "Turn on Portrait to change this"
+--     widget.disableReason = function(db) return ... end   (nil = no reason)
+-- and while the widget is greyed its hover shows the reason as the first line,
+-- under the widget's own title, ahead of whatever its tooltip already said.
+--
+-- "Greyed" is what the grey sweep last decided, stamped as `dfGreyed` by the
+-- code that calls SetEnabled from a disableOn (Sections' RefreshChildStates, and
+-- a host's own page sweep). The stamp rather than asking SetEnabled's widget:
+-- every factory spells its disabled state differently, and the sweep is the one
+-- place that knows the answer for all of them.
+--
+-- ⚠ THE HOVER STILL REACHES A GREYED WIDGET. The hit frame (UI:AttachTooltip,
+-- below) is a motion-only child built over the label, and no SetEnabled touches
+-- it -- the control underneath may stop taking the mouse, the label's rect never
+-- does. A widget built with noHit has no rect, so it shows no reason either.
+-- ============================================================
+local function ResolveDisableReason(host, widget)
+    if not rawget(widget, "dfGreyed") then return nil end
+    local reason = widget.disableReason
+    if type(reason) == "function" then
+        local ok, r = pcall(reason, host:Call("getSettingsDB"))
+        reason = ok and r or nil
+    end
+    if type(reason) ~= "string" or reason == "" then return nil end
+    return reason
+end
+
+-- The tooltip a hover shows: the widget's own, with the disable reason (if it is
+-- greyed and has one) put first. Never mutates the widget's spec table -- a
+-- reason is state, and a spec stamped with one would keep it once re-enabled.
+local function HoverSpec(host, widget, label)
+    local spec = ResolveTooltipSpec(widget, label)
+    local reason = ResolveDisableReason(host, widget)
+    if not reason then return spec end
+    local out = { title = (spec and spec.title) or label, tone = spec and spec.tone,
+                  icons = spec and spec.icons, iconSize = spec and spec.iconSize }
+    if not out.title then return spec end
+    local lines = { { text = reason, accent = true } }
+    if spec and type(spec.lines) == "table" then
+        for _, line in ipairs(spec.lines) do lines[#lines + 1] = line end
+    end
+    out.lines = lines
+    return out
+end
+UI.ResolveDisableReason = ResolveDisableReason
+UI.HoverSpec = HoverSpec
+
 --   widget       the frame the caller holds and sets .tooltip on (the container)
 --   label        the default title
 --   labelRegion  the label FontString — the hit frame is built over ITS rect
@@ -167,7 +218,7 @@ function UI:AttachTooltip(widget, label, labelRegion, opts)
             })
             return
         end
-        local spec = ResolveTooltipSpec(widget, label)
+        local spec = HoverSpec(host, widget, label)
         if spec then host:ShowTooltip(hit, spec) end
     end)
     hit:SetScript("OnLeave", function() host:HideTooltip() end)
@@ -175,6 +226,14 @@ function UI:AttachTooltip(widget, label, labelRegion, opts)
     widget.dfTooltipHit = hit   -- exposed for a caller that needs to re-anchor it
     return hit
 end
+
+-- A toned button's LABEL colour, by tone (StyleButton's `tone`). Published so a
+-- button that draws its own label -- the popup's, which wraps -- wears the same red
+-- or green as every other toned button rather than a second copy of the numbers.
+UI.ButtonToneLabel = UI.ButtonToneLabel or {
+    danger  = { 0.9, 0.45, 0.45 },
+    success = { 0.4, 0.85, 0.5 },
+}
 
 function UI:StyleButton(btn, opts)
     local host = self
@@ -196,6 +255,24 @@ function UI:StyleButton(btn, opts)
     end
     CreateElementBackdrop(btn)  -- mixes in BackdropTemplate if needed
 
+    -- Rounded corners (opts.rounded = true for radius 6, or 4 / 6 / 8). Every
+    -- paint below -- rest, hover, active, disabled, and any caller's own
+    -- SetBackdropColor -- goes through the backdrop methods, so routing those
+    -- two methods to a rounded surface rounds every state at once. The square
+    -- backdrop stays underneath, fully transparent.
+    if opts.rounded and not rawget(btn, "RoundedSurface") then
+        local radius = (type(opts.rounded) == "number") and opts.rounded or 6
+        local surf = host:CreateRoundedSurface(btn, { radius = radius, borderWidth = 1 })
+        if surf then
+            local setColor, setBorder = btn.SetBackdropColor, btn.SetBackdropBorderColor
+            if setColor then setColor(btn, 0, 0, 0, 0) end
+            if setBorder then setBorder(btn, 0, 0, 0, 0) end
+            btn.SetBackdropColor = function(_, r, g, b, a) surf:SetFillColor(r, g, b, a) end
+            btn.SetBackdropBorderColor = function(_, r, g, b, a) surf:SetBorderColor(r, g, b, a) end
+            btn.RoundedSurface = surf
+        end
+    end
+
     -- Optional label + leading icon. opts.icon = { texture, size (18),
     -- color {r,g,b}, gap (4) }. opts.align controls layout:
     --   "center" (default) — centre the icon+label as a GROUP (text-only centres
@@ -214,8 +291,7 @@ function UI:StyleButton(btn, opts)
     -- label+icon — soft red for destructive, soft green for affirmative — plus the
     -- accent hover wash. A coloured-text button, NOT a filled CTA (the accent set
     -- below drives the hover). Mirrors each other so Delete/Save read as a pair.
-    local toneLabel = (opts.tone == "danger" and { 0.9, 0.45, 0.45 })
-        or (opts.tone == "success" and { 0.4, 0.85, 0.5 }) or nil
+    local toneLabel = opts.tone and UI.ButtonToneLabel[opts.tone] or nil
 
     if opts.text ~= nil then
         if not btn.Text then
@@ -393,6 +469,13 @@ function UI:StyleButton(btn, opts)
     -- neutral rest branch; active / primary / tinted keep their accent-derived
     -- borders, so the override can't fight a state the button is in.
     local restBorder = opts.restBorderColor
+    -- Segment pill (opts.segment): one choice in a segmented track. Nothing at rest
+    -- -- the track behind it shows -- and a dim label; hovered, a neutral C_HOVER
+    -- plate and a bright label; selected (SetActive), a pill tinted with the accent
+    -- (opts.accent, or the theme's) and a bright label. Pair it with `rounded` so
+    -- the plate and the pill are the rounded surface: the square HIGHLIGHT wash is
+    -- kept at zero, or its corners would show past the pill's.
+    local segment = opts.segment
     local hl = btn:GetHighlightTexture() or btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetTexture("Interface\\Buttons\\WHITE8x8")
     hl:SetAllPoints(btn)
@@ -421,6 +504,20 @@ function UI:StyleButton(btn, opts)
     -- panel colour for active tabs, otherwise the neutral element colour.
     local function restBackdrop(self, a)
         restColor.r, restColor.g, restColor.b = a.r, a.g, a.b
+        if segment then
+            if self.dfActive then
+                self:SetBackdropColor(a.r, a.g, a.b, 0.22)
+                self:SetBackdropBorderColor(a.r, a.g, a.b, 0.55)
+            else
+                self:SetBackdropColor(0, 0, 0, 0)
+                self:SetBackdropBorderColor(0, 0, 0, 0)
+            end
+            if self.Text then
+                local c = self.dfActive and C_TEXT or C_TEXT_DIM
+                self.Text:SetTextColor(c.r, c.g, c.b)
+            end
+            return
+        end
         if isTabStyle then
             -- Underline tab: a faint neutral cell when inactive (so every tab's
             -- bounds stay visible and the active one doesn't appear to "grow"),
@@ -488,7 +585,9 @@ function UI:StyleButton(btn, opts)
     -- border (computed live in OnEnter) over a party-blue fill. The border was
     -- always right; the wash simply wasn't asking again.
     local function applyWash(c)
-        if neutralHover then
+        if segment then
+            hl:SetVertexColor(c.r, c.g, c.b, 0)   -- the plate is the hover (see opts.segment)
+        elseif neutralHover then
             hl:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
         else
             hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
@@ -515,6 +614,8 @@ function UI:StyleButton(btn, opts)
             restBackdrop(btn, c)  -- faint cell / tinted fill; accent-coloured label
             if btn.Text then btn.Text:SetTextColor(c.r, c.g, c.b) end
             if btn.Icon then btn.Icon:SetVertexColor(c.r, c.g, c.b) end  -- icon matches the accent label
+        elseif segment then
+            restBackdrop(btn, c)  -- the pill (if selected) and the label's state colour
         elseif primary or btn.dfActive then
             restBackdrop(btn, c)  -- refresh persistent accent
         end
@@ -638,6 +739,17 @@ function UI:StyleButton(btn, opts)
     -- way: locking an already-hovered button is a no-op, and unlocking one still
     -- under the mouse leaves the client's own highlight up.
     local function applyHoverState(self, hovered, rest)
+        if segment then
+            if self.dfDisabled or not self:IsEnabled() then return end
+            if hovered and not self.dfActive then
+                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+                self:SetBackdropBorderColor(0, 0, 0, 0)
+                if self.Text then self.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end
+            else
+                restBackdrop(self, rest or accent or host:GetAccent())
+            end
+            return
+        end
         if not hovered then
             if isTabStyle or ghost then return end
             if self:IsEnabled() and not self.dfDisabled then
@@ -838,6 +950,86 @@ function UI:CreateSelectionMarker(parent, opts)
 end
 UI.CreateSelectionMarkerNative = UI.CreateSelectionMarker
 
+-- ============================================================
+-- A LABEL MARK -- a small state glyph right after a button's label
+--
+--   host:SetLabelMark(btn, spec)    spec nil/false clears it
+--   spec = { texture = path, size = 12, gap = 3, color = {r,g,b},
+--            grow = false }
+--
+-- For a row or tab whose label should say "this one is in a state" without a
+-- second widget: a nav row whose page is linked, a tab whose subject is. The
+-- glyph sits right after btn.Text, vertically centred on it, tinted the dim text
+-- colour unless spec.color says otherwise (colour is for state, so a caller that
+-- wants one passes it).
+--
+-- A label anchored at its CENTRE (StyleButton's default "center" layout, the deck
+-- tabs) is nudged left by half the glyph so the label + glyph pair stays centred,
+-- and put back when the mark clears. A label anchored any other way (a LEFT-
+-- anchored nav row) is left where it is -- the glyph just follows it.
+--
+-- spec.grow: widen the button when label + glyph no longer fit (grow only, like
+-- StyleButton's fitText -- a declared width is a minimum). For a free-standing
+-- tab; never for a row whose width its container owns.
+--
+-- ⚠ IDEMPOTENT. Callers repaint marks on every refresh, so setting the same spec
+-- twice must not nudge the label twice: the label's own resting offset is read
+-- ONCE, the first time a mark goes on, and every later nudge is from that.
+-- ============================================================
+function UI:SetLabelMark(btn, spec)
+    if not btn then return nil end
+    local text = rawget(btn, "Text")
+    local mark = rawget(btn, "dfLabelMark")
+    if not spec then
+        if mark then
+            mark:Hide()
+            -- Only a centred label was ever moved, so only it is put back.
+            local rest = rawget(btn, "dfLabelMarkRest")
+            if text and rest and rest[1] == "CENTER" then
+                text:ClearAllPoints()
+                text:SetPoint(rest[1], rest[2], rest[3], rest[4], rest[5])
+            end
+        end
+        return nil
+    end
+    if not text then return nil end
+    local size = spec.size or 12
+    local gap = spec.gap or 3
+    if not mark then
+        mark = btn:CreateTexture(nil, "OVERLAY")
+        btn.dfLabelMark = mark
+    end
+    mark:SetTexture(spec.texture)
+    mark:SetSize(size, size)
+    local c = spec.color or C_TEXT_DIM
+    mark:SetVertexColor(c.r or c[1] or 1, c.g or c[2] or 1, c.b or c[3] or 1)
+    mark:ClearAllPoints()
+    mark:SetPoint("LEFT", text, "RIGHT", gap, 0)
+    mark:Show()
+
+    -- The label's resting anchor, remembered once (see IDEMPOTENT above).
+    local rest = rawget(btn, "dfLabelMarkRest")
+    if not rest then
+        local p, rel, relP, x, y = text:GetPoint(1)
+        if p then
+            rest = { p, rel or btn, relP or p, x or 0, y or 0 }
+            btn.dfLabelMarkRest = rest
+        end
+    end
+    if rest and rest[1] == "CENTER" then
+        text:ClearAllPoints()
+        text:SetPoint("CENTER", rest[2], rest[3], rest[4] - (size + gap) / 2, rest[5])
+    end
+    if spec.grow then
+        local tw = text:GetStringWidth() or 0
+        if tw > 0 then
+            local need = math.ceil(tw) + size + gap + 10
+            if need > (btn:GetWidth() or 0) then btn:SetWidth(need) end
+        end
+    end
+    return mark
+end
+
 
 function UI:CreateCloseButton(parent, opts)
     local host = self
@@ -901,6 +1093,7 @@ end
 --   iconSize    art size (= size)    rotation  -- radians, so one arrow texture
 --                                    can serve both directions
 --   color       rest tint (C_TEXT_DIM)          hoverColor (white)
+--   tooltip may also be a function returning either form, read on each hover
 --
 -- Returns the button with .Icon plus:
 --   :SetGlyph(texture, color)  re-point the art for a state change. The colour
@@ -972,6 +1165,9 @@ function UI:CreateGlyphButton(parent, opts)
     -- because the title only restates the glyph you are already looking at.
     local function GlyphTooltipSpec()
         local t = opts.tooltip
+        -- A function is resolved at hover time, for a glyph whose meaning flips
+        -- with its state (an on / off toggle says what a click will do).
+        if type(t) == "function" then t = t() end
         if type(t) == "table" then return t end
         if type(t) == "string" and t ~= "" then return { title = t } end
         return nil
@@ -1827,6 +2023,10 @@ end
 -- straight to CreateElementBackdrop, which only reads them.
 local INPUT_FILL = { 0, 0, 0, 0.5 }
 local INPUT_EDGE = { 0.3, 0.3, 0.3, 1 }
+-- Published read-only, for a consumer that draws the same well on a ROUNDED
+-- surface (the settings Home's big search box) and so cannot go through
+-- StyleEditBox's square backdrop. The same tables: never mutate them.
+UI.InputColors = { fill = INPUT_FILL, edge = INPUT_EDGE }
 
 -- StyleEditBox: normalize a bare (label-less) EditBox to the standard input
 -- chrome used by CreateInput/CreateEditBox — translucent-black fill + dim border
@@ -3695,6 +3895,10 @@ function UI:CreateDropdown(parent, opts)
     -- The opener is exposed for callers that need to hang state off the button
     -- itself (see .openerTooltip below).
     container.opener = btn
+    -- ...and the menu, for a host whose opener sits inside a scroll frame: a
+    -- scroll frame clips its descendants, so the host re-parents the menu out
+    -- of it (it stays anchored to the opener; strata is re-asserted on open).
+    container.menuFrame = menuFrame
 
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)

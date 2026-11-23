@@ -41,12 +41,16 @@ function DF:RunLocaleRefreshers()
         if not ok then
             failed = failed + 1
             if DF.DebugError then
-                DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+                if DF:DebugActive("SCRIPT") then
+                    DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+                end
             end
         end
     end
-    DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
-        #DF._localeRefreshers, failed)
+    if DF:DebugActive("SCRIPT") then
+        DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
+            #DF._localeRefreshers, failed)
+    end
 end
 
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).
@@ -98,13 +102,15 @@ end
 
 -- Show the standard "reload to apply enable changes" popup if the flags
 -- have diverged from the loaded state. Safe to call from any context.
-function DF:PromptReloadIfEnableFlagsChanged()
+-- `message` (optional): the popup's text, for a caller that is not a profile
+-- change (the Modules page's switches); the default speaks of a new profile.
+function DF:PromptReloadIfEnableFlagsChanged(message)
     if not DF:EnableFlagsDifferFromLoaded() then return end
     if not DF.ShowPopupAlert then return end
     local L = DF.L
     DF:ShowPopupAlert({
         title = L["Reload Required"],
-        message = L["The new profile changes which frame modes are enabled. A UI reload is required to apply this.\n\nReload now?"],
+        message = message or L["The new profile changes which frame modes are enabled. A UI reload is required to apply this.\n\nReload now?"],
         buttons = {
             { label = L["Reload Now"], onClick = function() ReloadUI() end },
             { label = L["Later"] },
@@ -656,11 +662,13 @@ function DF:OnSliderDragStart(lightweightFunc, funcName, usePreviewMode)
     DF.sliderLightweightName = funcName or "unknown"
     DF.sliderUpdateCallCount = 0  -- Reset counter
 
-    DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
-        DF.sliderDragCount,
-        lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
-            or "no lightweight function (will skip until release)",
-        usePreviewMode and " (PREVIEW MODE)" or "")
+    if DF:DebugActive("GUI") then
+        DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
+            DF.sliderDragCount,
+            lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
+                or "no lightweight function (will skip until release)",
+            usePreviewMode and " (PREVIEW MODE)" or "")
+    end
 end
 
 -- Called when a slider stops being dragged (mouse up)
@@ -676,8 +684,10 @@ function DF:OnSliderDragStop()
     DF.sliderDragCount = count
     DF.sliderDragging = count > 0
 
-    DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
-        count, tostring(DF.sliderUpdateCallCount))
+    if DF:DebugActive("GUI") then
+        DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
+            count, tostring(DF.sliderUpdateCallCount))
+    end
 
     -- Still someone holding a bar: keep the lightweight slot and do NOT run the
     -- test-mode catch-up below, which is the "the gesture is over" pass.
@@ -757,10 +767,10 @@ local function IterateFramesInMode(mode, updateFunc)
 end
 
 -- Update frame sizes AND layout positions
--- `force` skips the drag throttle. ⚠ NEEDED, not a convenience: this is the ONLY live
--- path that re-anchors the health bar to framePadding (the other two sites are frame
--- CREATION and the reduced-max-health restore). Nothing in the full-update path does it,
--- so a padding change that does not come from a slider DRAG left the health bar at the
+-- `force` skips the drag throttle. ⚠ NEEDED, not a convenience: this is the settings
+-- path that resizes frames and re-anchors the health bar to framePadding (the full update
+-- re-places it only through ApplyResourceBarLayout's DF:SyncHealthBarRect, for frames it
+-- lays out). Before that, a padding change that did not come from a slider DRAG left the health bar at the
 -- old inset while the resource bar moved — ApplyResourceBarLayout re-reads padding every
 -- pass, so the two disagreed. Typing a value and pressing Enter was the reported case;
 -- the throttle would also have swallowed a single un-forced call
@@ -967,6 +977,18 @@ end
 -- ============================================================
 DF.STOCK_BAR_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist"
 local _df_warnedMissingTexture = {}
+-- The paths warnMissingTexture actually reported (the db repair also claims
+-- paths in the table above, for textures it has already fixed -- those are not
+-- missing any more). Read through DF:GetMissingTextures for Needs attention.
+local _df_missingTextures = {}
+
+-- Read-only copy, sorted: the texture paths found missing this session.
+function DF:GetMissingTextures()
+    local out = {}
+    for path in pairs(_df_missingTextures) do out[#out + 1] = path end
+    table.sort(out)
+    return out
+end
 
 DF.OUR_MEDIA_PREFIX = "interface\\addons\\dandersframes\\media\\"
 
@@ -1036,11 +1058,12 @@ DF.IsTexturePresent = textureKnown
 local function warnMissingTexture(path)
     if not path or _df_warnedMissingTexture[path] then return end
     _df_warnedMissingTexture[path] = true
+    _df_missingTextures[path] = true
     -- ☠ WARN, not INFO. A missing texture is significant enough that the next lines print
     -- it to chat, yet the log entry sat at INFO -- so anyone who raised the log level to
     -- cut chatter lost the only line this category has. TEXTURE has exactly one call site;
     -- filtering it out by severity left the category permanently empty.
-    if DF.DebugWarn then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
+    if DF.DebugActive and DF:DebugActive("TEXTURE") then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
 
     local shown = tostring(path)
     -- Ours: show just the filename, and say plainly that it is not coming back.
@@ -1564,9 +1587,16 @@ function DF:LightweightUpdateBorder()
     local db = DF.db[mode]
     if not db or not DF.ApplyFrameBorder then return end
 
+    -- The border's thickness also places the health bar (Keep Health Bar Inside Border) and a
+    -- bar kept inside the border, so the drag moves those with it. SyncHealthBarRect is a
+    -- no-op unless the insets changed; a hidden resource bar is left for its next layout.
     local function UpdateBorder(frame)
         if not frame or not frame.border then return end
         DF:ApplyFrameBorder(frame, db)
+        if frame.dfPowerBar and frame.dfPowerBar:IsShown() and DF.LayoutResourceBar then
+            DF:LayoutResourceBar(frame, db)
+        end
+        if DF.SyncHealthBarRect then DF:SyncHealthBarRect(frame, db) end
     end
 
     IterateFramesInMode(mode, UpdateBorder)
@@ -1802,6 +1832,15 @@ function DF:LightweightUpdateHighlight(highlightType)
             -- them. Drop it or the next full update sees a matching signature and
             -- skips, leaving these drag-time values in place permanently.
             if DF.InvalidateHighlightStyle then DF:InvalidateHighlightStyle(highlight) end
+            -- ☠ AN OUTLINED HIGHLIGHT (frame.dfHighlightShape, Features/Highlights.lua)
+            -- is not drawn with the four lines at all -- they sit hidden while its own
+            -- strips trace the outline. Writing them here would paint a rectangle over
+            -- the outline for the rest of the drag, so it takes the full redraw instead
+            -- (the cache is already dropped above, so it runs in full).
+            if frame.dfHighlightShape then
+                if DF.UpdateHighlights then DF:UpdateHighlights(frame) end
+                return
+            end
             highlight:SetAlpha(alpha)
 
             -- ☠ SNAP THE SAME WAY THE REAL RENDERER DOES. Because this writes the
@@ -2158,7 +2197,7 @@ function DF:GetFrameBorderColor(frame, db)
     if source == "CLASS" then
         local class
         if frame.dfIsTestFrame then
-            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+            local testData = DF:GetTestDataForFrame(frame)
             class = testData and testData.class
         elseif frame.unit and UnitExists(frame.unit) then
             -- No UnitIsPlayer gate: class-based NPC party members (e.g.
@@ -2178,7 +2217,7 @@ function DF:GetFrameBorderColor(frame, db)
         local rc = DF.db and DF.db.roleColors
         local role
         if frame.dfIsTestFrame then
-            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+            local testData = DF:GetTestDataForFrame(frame)
             role = testData and testData.role
         else
             -- Player falls back to the spec role when the group assigned none;
@@ -2732,6 +2771,10 @@ function DF:LightweightUpdateAbsorbBarColor()
         if frame.dfAbsorbBar and db.absorbBarColor then
             local c = db.absorbBarColor
             frame.dfAbsorbBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+            -- The part past the bar end matches the shield.
+            if frame.dfAbsorbBreakout then
+                frame.dfAbsorbBreakout:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
+            end
         end
         if frame.dfAbsorbBar and frame.dfAbsorbBar.bg and db.absorbBarBackgroundColor then
             local c = db.absorbBarBackgroundColor
@@ -2878,14 +2921,12 @@ function DF:LightweightUpdateResourceBarFrameLevel()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
     if not db then return end
-    
-    local frameLevelOffset = db.resourceBarFrameLevel or 20
-    
+
     local function UpdateFrame(frame)
         if not frame or not frame.dfPowerBar then return end
         local bar = frame.dfPowerBar
         local baseLevel = frame:GetFrameLevel()
-        bar:SetFrameLevel(baseLevel + frameLevelOffset)
+        bar:SetFrameLevel(baseLevel + DF:ResolveResourceBarLevelOffset(frame, db))
         -- Border needs to be above the bar
         if bar.border then
             bar.border:SetFrameLevel(bar:GetFrameLevel() + 1)
@@ -5236,6 +5277,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- can only be (un)created on /reload.
         DF.loadedPartyEnabled = DF.db.partyEnabled ~= false
         DF.loadedRaidEnabled  = DF.db.raidEnabled  ~= false
+        -- ...and the other settings that only apply on a reload, for the Needs
+        -- attention "reload needed" item (Features/Attention.lua).
+        if DF.Attention and DF.Attention.SnapshotLoaded then DF.Attention:SnapshotLoaded() end
 
         -- Apply user's Settings Panel font (safe no-op until DandersUI's Fonts module has
         -- loaded; the Settings Font dropdowns re-apply it through the same call)
@@ -5274,6 +5318,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end
                     end
                 end
+                -- Registered profile-root tables (Core/Profile.lua, PROFILE-ROOT TABLE
+                -- REGISTRY): migrate, then fill. Nothing registered: nothing happens.
+                DF:ApplyProfileRootDefaults(profile)
                 -- Dispel colours are account-wide (per profile, mode-independent — edited on the Colors
                 -- page; sibling of classColors). Seed ONCE from the profile's v4 colours so any
                 -- customisation carries over; otherwise the game palette. No None key — the
@@ -6684,7 +6731,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     { "overshieldHost", frame.dfOvershieldHost,      13 },
                     { "frame.border",    frame.border,               14 },
                     { "dfPowerBar",      frame.dfPowerBar,
-                        (bdb and bdb.resourceBarFrameLevel) or 20 },
+                        DF:ResolveResourceBarLevelOffset(frame, bdb) },
                     { "contentOverlay",  frame.contentOverlay,       25 },
                 }) do
                     local nm, w, want = e[1], e[2], e[3]
@@ -7113,7 +7160,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- ☠ THE SHIPPED DEFAULT, NOT A LITERAL. The window builder lives on the OTHER side of the
                 -- load-on-demand split; GUI.WindowDefaults is resident precisely so both readers share
                 -- one value and "reset to default" cannot restore a size the addon no longer ships.
-                local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 640, height = 600 }
+                local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 700, height = 600 }
                 local ws = DF:GetWindowState()
                 ws.scale = 1.0
                 ws.width = wd.width
@@ -7203,6 +7250,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 cmd("/df lock|r / " .. C .. "unlock", L["lock/unlock party frames"])
                 cmd("/df raidlock|r / " .. C .. "raidunlock", L["lock/unlock raid frames"])
                 cmd("/df test", L["toggle the test mode panel"])
+                if DF.UnitFrames then cmd("/df test units", L["toggle the unit frames test mode panel"]) end
                 cmd("/df hide", L["hide test frames"])
                 cmd("/df users", L["show DandersFrames users in your group"])
                 cmd("/df clearoverride <key|all>", L["clear stuck auto-layout overrides"])
@@ -7220,6 +7268,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df test a silent no-op until the settings panel was opened.
                 if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
+            elseif msg == "test units" then
+                -- The Unit Frames companion's own test mode: the test popup's
+                -- Units mode (DandersFrames_Options/UnitFrames/TestMode.lua).
+                if not DF.UnitFrames then
+                    DF:Say(L["Unit Frames is not loaded."])
+                    return
+                end
+                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
+                local UFO = DF.GUI and DF.GUI.UnitFrameOptions
+                if UFO and UFO.ToggleTestPopup then UFO.ToggleTestPopup() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then
@@ -8674,9 +8732,11 @@ function DF:FullProfileRefresh()
     -- Falls back to direct SetPoint if the function isn't loaded yet.
     if DF.raidContainer then
         local scale = raidDB.frameScale or 1.0
-        DF:Debug("RAIDPOS", "FullProfileRefresh: applying raid container pos (%.1f,%.1f) scale=%.3f autoActive=%s",
-            raidDB.raidAnchorX or 0, raidDB.raidAnchorY or 0, scale,
-            tostring(DF.AutoProfilesUI and DF.AutoProfilesUI.activeRuntimeProfile and DF.AutoProfilesUI.activeRuntimeProfile.name or "none"))
+        if DF:DebugActive("RAIDPOS") then
+            DF:Debug("RAIDPOS", "FullProfileRefresh: applying raid container pos (%.1f,%.1f) scale=%.3f autoActive=%s",
+                raidDB.raidAnchorX or 0, raidDB.raidAnchorY or 0, scale,
+                tostring(DF.AutoProfilesUI and DF.AutoProfilesUI.activeRuntimeProfile and DF.AutoProfilesUI.activeRuntimeProfile.name or "none"))
+        end
         if DF.UpdateRaidContainerPosition and not InCombatLockdown() then
             DF:UpdateRaidContainerPosition()
         else
@@ -9054,8 +9114,41 @@ function DF:ShouldHideDefaultPlayerFrame()
     return true
 end
 
+-- ★ ONE OWNER PER BLIZZARD FRAME. Another module that takes over hiding (or showing)
+-- a Blizzard frame claims it by global name, and DandersFrames' own handling of that
+-- frame stands down -- otherwise two owners fight over Show/Hide. Today only the
+-- default player frame (below) consults a claim. Nothing claimed: nothing changes.
+local blizzardFrameClaims = {}
+
+function DF:ClaimBlizzardFrame(frameName, owner)
+    if type(frameName) ~= "string" or frameName == "" then return false end
+    blizzardFrameClaims[frameName] = owner or true
+    DF:Debug("BLIZZARD", "%s claimed by %s", frameName, tostring(owner))
+    return true
+end
+
+-- Release a claim. With an owner, only that owner's claim is released.
+function DF:ReleaseBlizzardFrame(frameName, owner)
+    local cur = blizzardFrameClaims[frameName]
+    if cur == nil or (owner ~= nil and cur ~= owner) then return false end
+    blizzardFrameClaims[frameName] = nil
+    return true
+end
+
+-- Claimed? Returns true and the owner, or false.
+function DF:IsBlizzardFrameClaimed(frameName)
+    local cur = frameName and blizzardFrameClaims[frameName]
+    if cur == nil then return false end
+    return true, cur
+end
+
 function DF:UpdateDefaultPlayerFrame()
     if not DF:GetDB() then return end
+    -- Another module owns the player frame: leave it entirely to that owner.
+    if DF:IsBlizzardFrameClaimed("PlayerFrame") then
+        DF.pendingPlayerFrameUpdate = nil
+        return
+    end
     -- PlayerFrame is protected: a change that lands in combat (joining a raid mid-fight)
     -- waits for PLAYER_REGEN_ENABLED instead of being dropped.
     if InCombatLockdown() then
@@ -9073,7 +9166,7 @@ function DF:UpdateDefaultPlayerFrame()
             -- Use a hook to keep it hidden
             if not DF.playerFrameHooked then
                 hooksecurefunc(PlayerFrame, "Show", function(self)
-                    if DF:ShouldHideDefaultPlayerFrame() then
+                    if DF:ShouldHideDefaultPlayerFrame() and not DF:IsBlizzardFrameClaimed("PlayerFrame") then
                         if not InCombatLockdown() then
                             self:Hide()
                         end

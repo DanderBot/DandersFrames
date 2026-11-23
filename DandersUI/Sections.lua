@@ -973,6 +973,10 @@ function UI:CreateSettingsGroup(parent, width, opts)
                     shouldDisable = true
                 end
                 widget:SetEnabled(not shouldDisable)
+                -- What the hover reads to show widget.disableReason (Widgets.lua,
+                -- WHY IS IT GREY?). rawset: a stub frame's catch-all __index must
+                -- not be what answers "is it greyed".
+                rawset(widget, "dfGreyed", shouldDisable and true or nil)
             end
             if widget.refreshContent and widget:IsShown() then
                 widget:refreshContent(db)

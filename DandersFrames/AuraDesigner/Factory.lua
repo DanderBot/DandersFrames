@@ -58,8 +58,10 @@ local otherIdentWarned = {}
 local function warnOtherUnresolved(auraName, where)
     if not otherIdentWarned[auraName] then
         otherIdentWarned[auraName] = true
-        DF:DebugWarn(DBG, "%s aura %s has no resolvable spell identity (expected a SpellDB spell name, a #<id> key, or a live filter reference); skipping",
-            where or "Other Buffs", tostring(auraName))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "%s aura %s has no resolvable spell identity (expected a SpellDB spell name, a #<id> key, or a live filter reference); skipping",
+                where or "Other Buffs", tostring(auraName))
+        end
     end
 end
 
@@ -72,7 +74,7 @@ end
 -- themselves (DF:UpdateAllTestAuraDesigner), so the live path must not double-drive.
 function DF:UseFactoryForAD(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
 end
 
 -- GUI-facing predicate: does the factory own AD for this mode's db? Unlike the render
@@ -576,26 +578,29 @@ local function unionIdentity(spec, auraName, typeCfg)
     return map, ((not map) and sawMuted) or nil
 end
 
-local function auraHasTrackedIndicator(auraCfg)
+-- isMe: the frame's "is me" answer (Factory.ADGate.frameIsMe). An onlyMyFrame block
+-- renders nothing on someone else's frame, so it tracks nothing there either.
+local function auraHasTrackedIndicator(auraCfg, isMe)
     if type(auraCfg) ~= "table" then return false end
+    local shown = Factory.ADGate.shown
     local inds = auraCfg.indicators
     if inds then
         for _, ind in ipairs(inds) do
             -- Bars ignore missing mode entirely (no duration data when absent), so a bar
             -- always renders present and always dedups.
-            if ind.enabled ~= false and not ind.othersOnly
+            if ind.enabled ~= false and not ind.othersOnly and shown(ind, isMe)
                 and (ind.type == "bar" or not ind.showWhenMissing) then return true end
         end
     end
     local hb, bg, bd = auraCfg.healthbar, auraCfg.background, auraCfg.border
-    if hb and hb.enabled ~= false and not hb.othersOnly and not hb.showWhenMissing then return true end
-    if bg and bg.enabled ~= false and not bg.othersOnly and not bg.showWhenMissing then return true end
-    if bd and bd.enabled ~= false and not bd.othersOnly and not bd.showWhenMissing then return true end
+    if hb and hb.enabled ~= false and not hb.othersOnly and not hb.showWhenMissing and shown(hb, isMe) then return true end
+    if bg and bg.enabled ~= false and not bg.othersOnly and not bg.showWhenMissing and shown(bg, isMe) then return true end
+    if bd and bd.enabled ~= false and not bd.othersOnly and not bd.showWhenMissing and shown(bd, isMe) then return true end
     -- Text colour-by-cover (recovered): a present-mode name/health text indicator is a
     -- rendering visual, so it dedups. SWM-flagged text renders nothing (unsupported).
     local nt, ht = auraCfg.nametext, auraCfg.healthtext
-    if nt and nt.enabled ~= false and not nt.othersOnly and nt.color and not nt.showWhenMissing then return true end
-    if ht and ht.enabled ~= false and not ht.othersOnly and ht.color and not ht.showWhenMissing then return true end
+    if nt and nt.enabled ~= false and not nt.othersOnly and nt.color and not nt.showWhenMissing and shown(nt, isMe) then return true end
+    if ht and ht.enabled ~= false and not ht.othersOnly and ht.color and not ht.showWhenMissing and shown(ht, isMe) then return true end
     return false
 end
 
@@ -612,8 +617,9 @@ end
 -- what the effect shows cannot drift apart.
 local AD_FRAME_EFFECT_KEYS = { "healthbar", "background", "border", "nametext", "healthtext" }
 
-local function unionTrackedIdentity(spec, auraName, auraCfg, out)
+local function unionTrackedIdentity(spec, auraName, auraCfg, out, isMe)
     if type(auraCfg) ~= "table" then return out end
+    local shown = Factory.ADGate.shown
     local function add(cfg)
         local map = unionIdentity(spec, auraName, cfg)
         if not map then return end
@@ -625,7 +631,7 @@ local function unionTrackedIdentity(spec, auraName, auraCfg, out)
         for _, ind in ipairs(inds) do
             -- Bars ignore missing mode (no duration data when absent), so a bar always
             -- renders present and always dedups.
-            if ind.enabled ~= false and not ind.othersOnly
+            if ind.enabled ~= false and not ind.othersOnly and shown(ind, isMe)
                 and (ind.type == "bar" or not ind.showWhenMissing) then
                 add(ind)
             end
@@ -634,7 +640,7 @@ local function unionTrackedIdentity(spec, auraName, auraCfg, out)
     for _, key in ipairs(AD_FRAME_EFFECT_KEYS) do
         local c = auraCfg[key]
         if type(c) == "table" and c.enabled ~= false and not c.othersOnly
-            and not c.showWhenMissing then
+            and not c.showWhenMissing and shown(c, isMe) then
             -- Text colour-by-cover renders nothing without a colour, so it tracks nothing.
             if (key ~= "nametext" and key ~= "healthtext") or c.color then
                 add(c)
@@ -677,15 +683,17 @@ function DF:GetADTrackedSpellIDs(frame, db)
     -- function, and calling it from here would compile as a nil global.
     local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
     local onOwnFrame = frame.unit and DF.UnitIsUnit(frame.unit, "player")
+    -- Only on My Frame: same answer the render path gates with (test frames, withheld reads).
+    local isMe = Factory.ADGate.frameIsMe(frame)
     local union, mineOnly
     if specAuras then
         for auraName, auraCfg in pairs(specAuras) do
             local selfOnly = onOwnFrame and Adapter and Adapter.IsSelfOnlyAura
                 and Adapter:IsSelfOnlyAura(spec, auraName)
             if selfOnly then
-                union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+                union = unionTrackedIdentity(spec, auraName, auraCfg, union, isMe)
             else
-                mineOnly = unionTrackedIdentity(spec, auraName, auraCfg, mineOnly)
+                mineOnly = unionTrackedIdentity(spec, auraName, auraCfg, mineOnly, isMe)
             end
         end
     end
@@ -702,7 +710,7 @@ function DF:GetADTrackedSpellIDs(frame, db)
             -- very first allocation — every later record tripped the warning whether or not it
             -- resolved. Contribution has to be measured, not inferred from identity.
             local added = false
-            local probe = unionTrackedIdentity(nil, auraName, auraCfg, nil)
+            local probe = unionTrackedIdentity(nil, auraName, auraCfg, nil, isMe)
             if probe and next(probe) then
                 added = true
                 union = union or {}
@@ -710,7 +718,7 @@ function DF:GetADTrackedSpellIDs(frame, db)
             end
             -- A tracked other-pool record that contributed NOTHING means an unresolvable
             -- name, which the pool's naming contract forbids.
-            if not added and auraHasTrackedIndicator(auraCfg) then
+            if not added and auraHasTrackedIndicator(auraCfg, isMe) then
                 warnOtherUnresolved(auraName)
             end
         end
@@ -940,6 +948,66 @@ local function resolvePoolMode(spec, auraName, frame, mine)
     local unit = frame and frame.unit
     if unit and DF.UnitIsUnit(unit, "player") then return SELF_ONLY end
     return mine
+end
+
+-- ============================================================
+-- ONLY ON MY FRAME  (`onlyMyFrame`, per indicator / per effect block)
+-- A block with onlyMyFrame set renders on the player's OWN frame only (the self-buff
+-- reminder case: an Inner Fire "missing" icon belongs on your frame, not on everyone's).
+-- Not a caster filter -- othersOnly is that axis; this one picks FRAMES.
+--
+-- ☠ A GATED BLOCK IS SKIPPED, NEVER SIGNED. On a frame that is not yours the block is
+-- treated exactly like an eye-hidden one (enabled == false): not marked live, so the
+-- end-of-pass sweep releases its handle. It never enters a struct/tuning sig, so the sig
+-- vs config agreement resolvePoolMode warns about cannot break. The only churn is one
+-- destroy/create when the frame's answer really changes (a roster move).
+--
+-- ☠ A FIELD ON Factory, NOT EVEN ONE NEW LOCAL: this file's main chunk sits AT the Lua 5.1
+-- ceiling of 200 active locals (measured with a real 5.1 compile, not a grep count -- the
+-- grep undercounts). One more top-level `local` is a parse error that kills the whole file
+-- at load. Callers read Factory.ADGate.*. Tools/mover-tests/test_ad_only_my_frame.lua
+-- compiles this file with real Lua 5.1 to guard it.
+-- ============================================================
+Factory.ADGate = {}
+
+-- Does this block render on a frame whose "is me" answer is `isMe`? Pure, allocation-free.
+function Factory.ADGate.shown(cfg, isMe)
+    return not (type(cfg) == "table" and cfg.onlyMyFrame) or isMe == true
+end
+
+-- Is this frame the player's own? Resolved ONCE per sync and passed down.
+-- ☠ Re-asked every sync, not cached at roster time and trusted: a raidN token can point at
+-- a different player after a roster change. Only a DEFINITE answer is remembered, so a
+-- withheld read (restricted content, combat) keeps the last definite answer for the same
+-- token -- the indicator stays on your own frame instead of vanishing. Withheld with a
+-- token never seen before answers false: shown nowhere until the next definite read,
+-- never on everyone.
+function Factory.ADGate.frameIsMe(frame)
+    if not frame then return false end
+    -- Test frames carry fake units; TestMode marks party index 0 and raid index 1 as the
+    -- player. Solo, UnitIsUnit("raid1", "player") is false, so the raid case needs this.
+    -- Pinned test pools are 1-based in both modes (PinnedFrames.lua: slot 1 is the fake
+    -- "player" in party mode); a boss set has no player in it.
+    if frame.dfIsTestFrame then
+        -- Unit-frame previews are test frames too, but their unit token is the real one
+        -- they stand for ("player", "pet", ...), and their index is a sample-data slot.
+        if frame.dfUFPreview then return frame.unit == "player" end
+        if frame.dfIsPinnedTestFrame then
+            return (not frame.isPinnedBossFrame) and frame.index == 1
+        end
+        if frame.isRaidFrame then return frame.index == 1 end
+        return frame.index == 0
+    end
+    local unit = frame.unit
+    if not unit then return false end
+    if unit == "player" then return true end
+    local same = DF.UnitIsUnit(unit, "player")
+    if same ~= nil then
+        frame.dfADIsMe, frame.dfADIsMeUnit = same and true or false, unit
+        return same and true or false
+    end
+    if frame.dfADIsMeUnit == unit then return frame.dfADIsMe and true or false end
+    return false
 end
 
 -- Stable signature of an includeSpellIDs map (sorted IDs). Changing the set is a TUNING
@@ -1325,8 +1393,11 @@ end
 -- pick falls to the next candidate, or nothing.
 -- Returns the winner's STORE KEY (OTHER_PREFIX-prefixed for other-pool winners, so store
 -- entries never collide with a same-named spec-pool aura), its type config, map, priority.
-local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
+-- isMe: the frame's Only on My Frame answer. A gated block is not a candidate at all, so
+-- it cannot win priority on someone else's frame and leave nothing drawn there.
+local function pickWinner(spec, specAuras, otherAuras, typeKey, validate, isMe)
     local bestName, bestCfg, bestMap, bestPrio, bestPool
+    local shown = Factory.ADGate.shown
     for pool = 1, 2 do
         local auras = (pool == 1) and specAuras or otherAuras
         -- Other-pool identity is spec-INDEPENDENT: nil spec skips the per-spec Config
@@ -1335,7 +1406,8 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
         if auras then
             for auraName, auraCfg in pairs(auras) do
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
-                if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
+                if typeCfg and typeCfg.enabled ~= false and shown(typeCfg, isMe)
+                    and (not validate or validate(typeCfg)) then
                     local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
                     -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
                     if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
@@ -4297,7 +4369,9 @@ local function registerAuraSound(event, unit, spellID, argKey, argVal, channel)
     if trig == nil then return nil end
     local ok, id = pcall(C_UnitAuras.AddAuraSound, trig, sound)
     if ok then return id end
-    DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
+    if DF:DebugActive(DBG) then
+        DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
+    end
     return nil
 end
 
@@ -4321,14 +4395,15 @@ local SOUND_EVENTS = {
 -- for the Other Buffs pool. NOTE: the native sound path has no caster filter, so othersOnly
 -- cannot gate sound — an othersOnly aura's sound fires for any caster. On a pre-rename
 -- (apply-only) client the dropped / stackGained triggers simply fail to register (no-op).
-local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, channel)
+local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, channel, isMe)
+    local shown = Factory.ADGate.shown
     for auraName, auraCfg in pairs(auras) do
         local sc = (type(auraCfg) == "table") and auraCfg.sound
         -- Filter-owned records never register sounds: the native path is per spell ID,
         -- so one filter would mean one registration per spell in it. The editor doesn't
         -- offer sound on them either; this is the render-side backstop for hand-edited
         -- or imported data.
-        if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
+        if sc and sc.enabled and shown(sc, isMe) and not DF:ParseADFilterRef(auraName) then
             -- sc carries the sound effect's Tracked IDs mutes (same table the card
             -- writes mutedSpellIDs to); mutedEmpty is a choice, not a data problem.
             local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, sc)
@@ -4369,7 +4444,12 @@ local function reconcileSoundNow(frame)
     local enabled = DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
     local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     local owns = DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)
-    if enabled and owns and frame.unit then
+    -- ☠ NEVER FOR A TEST OR PREVIEW FRAME (frame.dfIsTestFrame / frame.dfPreview).
+    -- It shows sample auras under a real unit token, so registering would arm real
+    -- alerts on that unit from a frame that is only a preview -- and ClearFrame,
+    -- which ends here, is its teardown. Desired stays nil, so anything it holds is
+    -- unregistered.
+    if enabled and owns and frame.unit and not frame.dfIsTestFrame and not frame.dfPreview then
         local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
         -- ☠ soundEnabled IS THE MASTER MUTE (the Global tab's "Sound Alerts -> Enabled"), and
         -- this gate is its only reader: SoundEngine:StopAll() is inert (STATE_PLAYING is never
@@ -4386,11 +4466,12 @@ local function reconcileSoundNow(frame)
             if spec then
                 local channel = resolveSoundChannel(adDB)
                 local specAuras = adDB.auras and adDB.auras[spec]
+                local isMe = Factory.ADGate.frameIsMe(frame)
                 if specAuras then
-                    desired = collectDesiredSounds(desired, frame.unit, specAuras, "", spec, channel)
+                    desired = collectDesiredSounds(desired, frame.unit, specAuras, "", spec, channel, isMe)
                 end
                 if adDB.otherAuras then
-                    desired = collectDesiredSounds(desired, frame.unit, adDB.otherAuras, OTHER_PREFIX, nil, channel)
+                    desired = collectDesiredSounds(desired, frame.unit, adDB.otherAuras, OTHER_PREFIX, nil, channel, isMe)
                 end
             end
         end
@@ -4591,9 +4672,13 @@ end
 
 -- The set of member indicators a group container will draw, keyed exactly as
 -- syncPlacedPool keys its own entries so the skip is a plain lookup.
-local function claimedGroupMembers(groups, auras, keyPrefix)
+-- isMe gates HERE and in collectGroupMembers identically, never inside memberRenderable
+-- (published to the editor canvas, which has no frame). The two must agree or a member
+-- draws twice or not at all, the rule the comment above memberRenderable states.
+local function claimedGroupMembers(groups, auras, keyPrefix, isMe)
     if not groups then return nil end
     local claimed
+    local shown = Factory.ADGate.shown
     for _, group in ipairs(groups) do
         if type(group) == "table" and group.kind ~= "filter" and group.enabled ~= false
            and type(group.members) == "table" then
@@ -4601,7 +4686,7 @@ local function claimedGroupMembers(groups, auras, keyPrefix)
                 local auraCfg = auras and auras[m.auraName]
                 if type(auraCfg) == "table" and auraCfg.indicators then
                     for _, ind in ipairs(auraCfg.indicators) do
-                        if ind.id == m.indicatorID and memberRenderable(ind) then
+                        if ind.id == m.indicatorID and memberRenderable(ind) and shown(ind, isMe) then
                             claimed = claimed or {}
                             claimed[placedKey(keyPrefix, m.auraName, ind)] = true
                         end
@@ -4640,7 +4725,10 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
     -- Members of a layout group are drawn by that group's OWN container, where the
     -- engine can pack them (syncMemberGroupList). Skipping them here is what stops
     -- them being drawn a second time as pinned single-slot containers.
-    local claimed = claimedGroupMembers(groups, auras, keyPrefix)
+    -- frame.dfADSyncMe: the Only on My Frame answer SyncFrame resolved for this pass.
+    local isMe = frame.dfADSyncMe
+    local shown = Factory.ADGate.shown
+    local claimed = claimedGroupMembers(groups, auras, keyPrefix, isMe)
     for auraName, auraCfg in pairs(auras) do
         -- ☠ `mine` from here down is the RESOLVED pool mode for THIS aura, not the raw
         -- pool flag: a self-only aura on the player's own frame drops the caster filter
@@ -4657,10 +4745,11 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                     -- Drawn by its group's container. Not marked live -> the end-of-pass sweep destroys any
                     -- single-slot handle this indicator owned, so adding a member to a group migrates it
                     -- rather than duplicating it.
-                elseif indicator.enabled == false then
-                    -- Hidden (eye toggle; nil/true = shown for legacy records):
-                    -- render nothing. Not marking the key `live` lets the
-                    -- end-of-pass sweep destroy any existing handle.
+                elseif indicator.enabled == false or not shown(indicator, isMe) then
+                    -- Hidden (eye toggle; nil/true = shown for legacy records), or
+                    -- Only on My Frame on someone else's frame: render nothing. Not
+                    -- marking the key `live` lets the end-of-pass sweep destroy any
+                    -- existing handle.
                 elseif isBar then
                     -- mutedEmpty = the user ticked nothing, which is a CHOICE and must not
                     -- be reported as an unresolved aura. Same nil map, different reason.
@@ -4926,7 +5015,7 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
                 if x.id == m.indicatorID then ind = x; break end
             end
         end
-        if memberRenderable(ind) then
+        if memberRenderable(ind) and Factory.ADGate.shown(ind, frame.dfADSyncMe) then
             -- `ind` so a member of a layout group narrows exactly like a loose placement —
             -- this is the reported case (a Beacon square inside a layout group).
             local ids = DF:BuildADIdentityFilters(idSpec, m.auraName, ind)
@@ -5106,8 +5195,10 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix, defs)
                 -- Warn once per group id (this sync runs per aura event).
                 if not fgroupExcludeWarned[group] then
                     fgroupExcludeWarned[group] = true
-                    DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
-                        tostring(group.id))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "Filter group %s resolved to an exclude selection; skipping",
+                            tostring(group.id))
+                    end
                 end
             end
             -- res.kind == "all" (empty/no selection): render nothing — the group
@@ -5207,8 +5298,9 @@ end
 -- allocated unless the profile actually uses the mode). Deliberately NOT a reused module
 -- scratch table -- SyncFrame runs per frame off config/roster changes, not per tick, so a
 -- short-lived list is free here and cannot be clobbered by re-entrancy.
-local function collectStackedBorders(spec, specAuras, otherAuras)
+local function collectStackedBorders(spec, specAuras, otherAuras, isMe)
     local stackedBorders
+    local shown = Factory.ADGate.shown
     for pool = 1, 2 do
         local auras = (pool == 1) and specAuras or otherAuras
         -- Other-pool identity is spec-INDEPENDENT (see pickWinner).
@@ -5217,7 +5309,7 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
             for auraName, auraCfg in pairs(auras) do
                 local typeCfg = (type(auraCfg) == "table") and auraCfg.border
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
-                   and typeCfg.borderMode == "custom" then
+                   and typeCfg.borderMode == "custom" and shown(typeCfg, isMe) then
                     local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
                     -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
                     if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
@@ -5277,8 +5369,9 @@ end
 -- identity resolved. Sorted lowest priority first; ties reverse pickWinner's exactly
 -- (spec pool and alphabetically-smaller names sort LATER = draw on top), so with a single
 -- candidate the rendered result is identical to the old winner's.
-local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
+local function collectFrameTints(spec, specAuras, otherAuras, typeKey, isMe)
     local list
+    local shown = Factory.ADGate.shown
     for pool = 1, 2 do
         local auras = (pool == 1) and specAuras or otherAuras
         -- Other-pool identity is spec-INDEPENDENT (see pickWinner).
@@ -5286,7 +5379,7 @@ local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
         if auras then
             for auraName, auraCfg in pairs(auras) do
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
-                if typeCfg and typeCfg.enabled ~= false and typeCfg.color then
+                if typeCfg and typeCfg.enabled ~= false and typeCfg.color and shown(typeCfg, isMe) then
                     local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
                     -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
                     if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
@@ -5722,6 +5815,11 @@ function Factory:SyncFrame(frame)
     -- Read by RefreshFactoryRows' re-drive (driveFactoryRowsNow), which exists to apply
     -- a layout-version bump and can skip a frame already synced at that version.
     frame.dfADSyncVer, frame.dfADSyncUnit = DF.auraLayoutVersion, frame.unit
+    -- Only on My Frame: resolved ONCE per pass and read by every gate below. Also the
+    -- third key of that re-drive latch: a roster reshuffle can point the SAME raidN token
+    -- at a different player (you included), which changes this answer and must force a
+    -- sync the version/unit keys alone would skip.
+    frame.dfADSyncMe = Factory.ADGate.frameIsMe(frame)
 
     -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the
     -- transition, then stay quiet. Merely skipping the sync would leave every
@@ -5857,7 +5955,7 @@ function Factory:SyncFrame(frame)
         local hb = store.healthbar
         if not hb then hb = {}; store.healthbar = hb end
 
-        local tints = collectFrameTints(spec, specAuras, otherAuras, "healthbar")
+        local tints = collectFrameTints(spec, specAuras, otherAuras, "healthbar", frame.dfADSyncMe)
         if tints then
             syncTintFamily(tints, hb, store, "healthbarOrder", spec,
                 -- ☠ KEEP THIS ARITY IN STEP WITH syncTintFamily's syncOne CALL. Lua fills a
@@ -5892,7 +5990,7 @@ function Factory:SyncFrame(frame)
         local bg = store.background
         if not bg then bg = {}; store.background = bg end
 
-        local tints = collectFrameTints(spec, specAuras, otherAuras, "background")
+        local tints = collectFrameTints(spec, specAuras, otherAuras, "background", frame.dfADSyncMe)
         if tints then
             syncTintFamily(tints, bg, store, "backgroundOrder", spec,
                 function(key, cfg, map, mine, asMissing, sublevel)
@@ -5932,10 +6030,10 @@ function Factory:SyncFrame(frame)
         -- are excluded here — they opt OUT of the single-ring contest and are stood up below,
         -- so a Stacked ring never suppresses the Priority-mode winner or vice versa.
         local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "border",
-            function(c) return c.ShowBorder ~= false and c.borderMode ~= "custom" end)
+            function(c) return c.ShowBorder ~= false and c.borderMode ~= "custom" end, frame.dfADSyncMe)
 
         -- STACKED: each opted-in indicator gets its own ring, highest priority created first.
-        local stacked = collectStackedBorders(spec, specAuras, otherAuras)
+        local stacked = collectStackedBorders(spec, specAuras, otherAuras, frame.dfADSyncMe)
 
         -- CONDITION CHAIN for the PRIORITY winner. Returns true when it rendered
         -- something, matching syncBorderEntry's contract so both paths compose.
@@ -6019,7 +6117,7 @@ function Factory:SyncFrame(frame)
             if not st then st = {}; store[typeKey] = st end
 
             local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, typeKey,
-                function(c) return c.color and not c.showWhenMissing end)
+                function(c) return c.color and not c.showWhenMissing end, frame.dfADSyncMe)
             if bestName and TDRender then
                 local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
                 local r, g, b, a = readADColor(bestCfg.color)
@@ -6327,7 +6425,7 @@ function Factory:SyncFrame(frame)
     -- Reconcile C_UnitAuras.AddAuraSound registrations to the sound-indicator config
     -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
     -- Skipped in test mode: previews must not register real on-apply sounds.
-    if not (DF.testMode or DF.raidTestMode) then
+    if not DF:FrameInTestScope(frame, "any") then
         self:SyncSound(frame)
     end
 

@@ -92,6 +92,57 @@ DF.Defaults = DF.Defaults or {}
 local Defaults = DF.Defaults
 
 -- ============================================================
+-- REGISTERED ADAPTERS
+-- ------------------------------------------------------------
+-- A settings table that is not a mode table -- an addon module's own, read
+-- through a fallback chain of its own -- registers how it answers:
+--
+--   DF.Defaults:RegisterAdapter(tbl, {
+--       getDefault    = function(key) end,  -- what the key falls back to, or nil
+--                                           -- when it is no setting of this table
+--       isOverride    = function(key) end,  -- true when the table holds its OWN
+--                                           -- value for the key
+--       resetOverride = function(key) end,  -- drop that own value (optional)
+--       getStored     = function(key) end,  -- the own value (optional; default:
+--                                           -- tbl[key] when isOverride says so)
+--   })
+--
+-- Asked before anything else, like __dfDefaultsAdapter, and answered the same
+-- way. The difference is where the answer lives: in a WEAK-KEYED table here,
+-- never on the settings table itself, so nothing reaches the SavedVariables and
+-- a table that is dropped (a profile switch rebuilds a proxy) takes its entry
+-- with it. RegisterAdapter(tbl, nil) removes it.
+-- ⚠ The spec must not hold `tbl` itself (a closure over it): a weak-keyed entry
+-- whose value refers to its key is never collected.
+-- ============================================================
+local registered = setmetatable({}, { __mode = "k" })
+
+function Defaults:RegisterAdapter(tbl, spec)
+    if type(tbl) ~= "table" then return false end
+    if spec == nil then
+        registered[tbl] = nil
+        return true
+    end
+    if type(spec) ~= "table" or type(spec.getDefault) ~= "function" then return false end
+    registered[tbl] = spec
+    return true
+end
+
+-- The spec registered for this table, or nil.
+function Defaults:GetAdapter(tbl)
+    if type(tbl) ~= "table" then return nil end
+    return registered[tbl]
+end
+
+-- Drop the table's own value for key through its adapter. True when it could.
+function Defaults:ResetOverride(tbl, key)
+    local spec = self:GetAdapter(tbl)
+    if not (spec and spec.resetOverride and key ~= nil) then return false end
+    spec.resetOverride(key)
+    return true
+end
+
+-- ============================================================
 -- VALUE EQUALITY
 -- ============================================================
 
@@ -148,6 +199,11 @@ end
 local function Resolve(db)
     if type(db) ~= "table" then return nil end
 
+    -- A registered adapter (REGISTERED ADAPTERS): the table itself rides as
+    -- `stored`, so KeyValues can read its own value.
+    local reg = registered[db]
+    if reg then return db, nil, reg end
+
     local adapter = rawget(db, "__dfDefaultsAdapter")
     if type(adapter) == "table" then return nil, nil, adapter end
 
@@ -173,6 +229,17 @@ end
 -- same way -- two spellings of the adapter branch is one drift away from a tick
 -- that disagrees with the value beside it.
 local function KeyValues(stored, defaults, adapter, key)
+    if adapter and adapter.getDefault then
+        -- A registered adapter (lower-case verbs; see REGISTERED ADAPTERS).
+        local def = adapter.getDefault(key)
+        local cur
+        if adapter.getStored then
+            cur = adapter.getStored(key)
+        elseif stored ~= nil and (not adapter.isOverride or adapter.isOverride(key)) then
+            cur = stored[key]
+        end
+        return cur, def
+    end
     if adapter then
         local getStored, getDefault = adapter.GetStored, adapter.GetDefault
         local cur = getStored and getStored(key)

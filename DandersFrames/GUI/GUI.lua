@@ -67,7 +67,9 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     L = L,
 
     print = function(msg) DF:Say(tostring(msg)) end,
-    error = function(msg) DF:DebugError("GUI", "%s", tostring(msg)) end,
+    error = function(msg)
+        if DF:DebugActive("GUI") then DF:DebugError("GUI", "%s", tostring(msg)) end
+    end,
 
     -- ---- fonts -------------------------------------------------
     getFontSetting = function()
@@ -116,6 +118,12 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- instead. Folding it into "overridden" would show a button that cannot work.
     getOverrideState = function(db, key)
         if not key or type(key) ~= "string" then return "none" end
+        -- A table that answers for itself (DF.Defaults:RegisterAdapter) is no
+        -- layout's: its own values show as "differs from default" (the amber dot,
+        -- isModifiedDefault below), never as an auto-layout override -- whatever
+        -- mode sits under the page and whatever layout is being edited.
+        local D = DF.Defaults
+        if db and D and D.GetAdapter and D:GetAdapter(db) then return "none" end
         if GUI.SelectedMode ~= "raid" then return "none" end
         local AP = DF.AutoProfilesUI
         if not AP then return "none" end
@@ -168,6 +176,11 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- Drops the layout override AND writes the true global back into the live
     -- table, so the widget can redraw from db[key] straight after.
     resetOverride = function(db, key)
+        -- A table that answers for itself drops its own value, back to its chain.
+        local D = DF.Defaults
+        if db and key and D and D.ResetOverride and D:ResetOverride(db, key) then
+            return db[key]
+        end
         local AP = DF.AutoProfilesUI
         if not AP or not key then return nil end
         AP:ResetProfileSetting(key)
@@ -190,6 +203,13 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         local SU = DF.SettingsUndo
         if SU then SU:OnInterceptWrite(db, key, value) end
         if GUI.SelectedMode ~= "raid" then return false end
+        -- ☠ ONLY A WRITE TO THE RAID TABLE ITSELF. The runtime handler matches by key
+        -- NAME, so any other table written while Raid is up -- a nested table on a
+        -- raid page, a page with a settings table of its own -- whose key happened
+        -- to be a raid key under a running layout was swallowed: written to the raid
+        -- baseline instead of where it was aimed. The proxy (DF.db.raid) and the real
+        -- table under it (DF._realRaidDB) are the raid table; nothing else is.
+        if not db or not (DF.db and (db == DF.db.raid or db == DF._realRaidDB)) then return false end
         local AP = DF.AutoProfilesUI
         if not AP then return false end
         return AP:HandleRuntimeWrite(key, value) and true or false
@@ -300,7 +320,21 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- disableOn / refreshContent predicates against: whichever mode the window
     -- is currently editing. Every predicate in the pages takes exactly this
     -- table, so it has to follow SelectedMode rather than being pinned.
-    getSettingsDB = function() return DF.db and DF.db[GUI.SelectedMode] end,
+    -- ...unless the page showing was built against a table of its own (a module
+    -- page: GUI.PageBuildDb, companion GUI/ModuleRegistry.lua), whose predicates
+    -- take that table.
+    getSettingsDB = function()
+        -- The page mid-sweep first (GUI.PageRefreshStates, companion Panel.lua):
+        -- a new page is swept before CurrentPageName names it.
+        local page = GUI.StatesPage
+        if not page then
+            local name = GUI.CurrentPageName
+            page = name and GUI.Pages and GUI.Pages[name]
+        end
+        local own = page and GUI.PageBuildDb and GUI.PageBuildDb(page)
+        if own then return own end
+        return DF.db and DF.db[GUI.SelectedMode]
+    end,
 
     -- A collapsible settings group opened or closed. The Aura Designer page owns
     -- its own layout and has to re-run it either way; BuildPage pages re-flow
@@ -478,7 +512,11 @@ end
 -- ⚠ THE DEFAULT, NOT A MINIMUM. A stored guiDb.width/height wins over it everywhere, and
 -- the resize floor (Panel.lua's minWidth/minHeight) is lower on purpose -- a user who
 -- wants the window smaller than it opens can drag it there.
-GUI.WindowDefaults = { width = 640, height = 600 }
+--
+-- 700 / 580 since the module rail (62px) went down the window's left edge: 640 / 520
+-- plus the rail, so the content box keeps its width. DF:GetWindowState moves a saved
+-- 640 (the old default) to 700 once, and clamps a saved width below the floor.
+GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580, minHeight = 440 }
 
 -- ============================================================
 -- MODE + THEME (DandersFrames-only)
@@ -537,9 +575,6 @@ GUI.GlobalPages = {
     general_nicknames     = true,
     display_classcolors   = true,
     auras_filterdesigner  = true,
-    profiles_manage       = true,
-    profiles_importexport = true,
-    profiles_changed_global = true,
     debug_console         = true,
 }
 GUI.GlobalView = false
@@ -548,8 +583,58 @@ function GUI.IsGlobalPage(name)
     return name ~= nil and GUI.GlobalPages[name] == true
 end
 
--- The accent for whichever tab the window is showing.
-function GUI.CurrentAccent()
+-- ============================================================
+-- THE PROFILES SIDEBAR
+-- ------------------------------------------------------------
+-- The Profiles rail item's pages (DandersFrames_Options/GUI/Pages/Profiles.lua).
+-- They belong to neither Party/Raid nor GLOBAL, and they are MODE-NEUTRAL: one
+-- build whatever mode sits underneath (BuildPage, GUI/Panel.lua). A page that
+-- needs a mode asks for it on the page itself.
+-- ☠ Like GLOBAL, GUI.SelectedMode stays "party" or "raid" underneath while
+-- Profiles is up; GUI.ProfilesView is the only thing that says it is showing.
+-- ============================================================
+GUI.ProfilesPages = {
+    profiles_manage       = true,
+    profiles_spec         = true,
+    profiles_auto         = true,
+    profiles_clickcast    = true,
+    profiles_importexport = true,
+    profiles_changed      = true,
+}
+GUI.ProfilesView = false
+
+function GUI.IsProfilesPage(name)
+    return name ~= nil and GUI.ProfilesPages[name] == true
+end
+
+-- ★ A PROFILES PAGE CARRIES ITS OWN ACCENT, the one the window wears while it
+-- is selected -- the sidebar marker, deck 2's crumb, the group headers and the
+-- cards. Auto Layouts is Raid's (it only ever changes raid frames), Click
+-- Casting is Binds' green, and every other Profiles page is account-wide, so
+-- it takes GLOBAL's teal. A page not listed here gets the teal.
+-- ⚠ LATE-BOUND: ClicksAccent is declared by the companion (ModuleRegistry.lua).
+GUI.ProfilesPageAccents = {
+    profiles_auto      = function() return GetThemeColorFor(true) end,
+    profiles_clickcast = function() return GUI.ClicksAccent or GUI.GlobalAccent end,
+}
+
+function GUI.ProfilesAccentFor(page)
+    local f = page and GUI.ProfilesPageAccents[page]
+    return f and f() or GUI.GlobalAccent
+end
+
+-- The accent for whichever tab the window is showing. Under Profiles it is the
+-- page's own (above): `page` is the page about to show (SelectTab asks before
+-- it updates GUI.CurrentPageName), else the page showing.
+function GUI.CurrentAccent(page)
+    if GUI.ProfilesView then return GUI.ProfilesAccentFor(page or GUI.CurrentPageName) end
+    -- A sidebar module of its own wears its module's accent.
+    if GUI.ModuleView and GUI.GetModule then
+        local def = GUI:GetModule(GUI.ModuleView)
+        local acc = def and def.accent
+        if type(acc) == "function" then acc = acc() end
+        if acc then return acc end
+    end
     if GUI.GlobalView then return GUI.GlobalAccent end
     return GetThemeColorFor(GUI.SelectedMode == "raid")
 end
@@ -574,6 +659,26 @@ GUI.NewSections = {
 -- Live-tracked badges pending a "seen" mark, keyed by tabName → { key = badge }.
 -- Populated by AddSectionNewBadge, drained by SelectTab on tab leave.
 GUI.pendingSectionBadges = {}
+
+-- ============================================================
+-- PAGE PROVIDERS AND MODULE-OWNED PAGES
+-- ------------------------------------------------------------
+-- DF.GUIPageProviders: functions another addon or module appends to, run in order
+-- when the settings window builds -- after the built-in pages, before the rail is
+-- first painted -- as provider(GUI, CreateCategory, CreateSubTab, BuildPage, L).
+-- A provider can add categories and pages, and register (or replace) a module in
+-- the settings module registry (GUI:RegisterModule / GUI:SidebarModule, companion
+-- GUI/ModuleRegistry.lua). Empty: nothing runs.
+--
+-- GUI.ModulePageOwner: page name -> the id of the module whose sidebar lists it
+-- (GUI:SetPageModule). Such a page is on no other module's sidebar.
+-- GUI.ModuleView: the id of the sidebar module showing (GUI:EnterModuleView), nil
+-- for the built-in views. Like GLOBAL and Profiles, GUI.SelectedMode stays "party"
+-- or "raid" underneath it.
+-- ============================================================
+DF.GUIPageProviders = DF.GUIPageProviders or {}
+GUI.ModulePageOwner = GUI.ModulePageOwner or {}
+GUI.ModuleView = nil
 
 
 -- Pages that remain fully accessible regardless of whether party or raid

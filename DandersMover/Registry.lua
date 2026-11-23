@@ -51,7 +51,8 @@ end
 -- ============================================================
 function R:RegisterAddon(name, info)
     info = info or {}
-    self.addons[name] = { name = name, title = info.title or name, icon = info.icon }
+    -- watch = false opts the addon's elements and targets out of the watcher; see R:IsWatched.
+    self.addons[name] = { name = name, title = info.title or name, icon = info.icon, watch = info.watch }
 end
 
 local function insertTarget(self, addon, key, def, element)
@@ -61,6 +62,7 @@ local function insertTarget(self, addon, key, def, element)
         frame = def.frame, getFrame = def.getFrame, getSize = def.getSize,
         getRect = def.getRect, group = def.group, element = element,
         isRelevant = def.isRelevant,
+        watch = def.watch,
         -- false = the target builds no snap zones; the picker and link-drag still reach it.
         snappable = def.snappable ~= false,
         -- "addon:key" of the element this target is a PART of (a frame inside that
@@ -78,9 +80,11 @@ local function insertElement(self, addon, key, def)
         addon = addon, key = key, id = id, title = def.title or key,
         frame = def.frame, getFrame = def.getFrame,
         getPos = def.getPos, onChanged = def.onChanged, default = def.default,
-        secure = def.secure and true or false, getSize = def.getSize,
+        -- Kept as given: nil means "ask the frame" (R:IsSecure), so it must not become false here.
+        secure = def.secure, getSize = def.getSize,
         getRect = def.getRect, anchorable = def.anchorable ~= false, group = def.group,
         isRelevant = def.isRelevant,
+        watch = def.watch,
         -- pos -> dx, dy: where the visible rect's centre sits relative to the record
         -- (Core.lua, RECORD-TO-VISIBLE OFFSET). Optional; nil = centred on it.
         visibleOffset = def.visibleOffset,
@@ -346,6 +350,9 @@ end
 -- frame's own shown state.
 function R:IsTargetAvailable(entry)
     if not entry then return false end
+    -- The watcher caught this target's callbacks throwing (Core.lua, WATCHER). Calling
+    -- them again here would stop every solve that merely names it as a backup.
+    if entry.watchFailed then return false end
     -- Irrelevant right now (wrong group type, feature off): not a snap target, and a
     -- child anchored to it HOLDS its last solved position (NS:ResolveElement) rather
     -- than jumping to a rect that is not meaningfully on screen.
@@ -354,10 +361,28 @@ function R:IsTargetAvailable(entry)
     return R.IsFrameVisible(self:GetFrame(entry))
 end
 
+-- ☠ ONE ADDON'S BAD RECORD MUST NOT TAKE THE EDITOR DOWN FOR EVERY OTHER ADDON. This
+-- runs across every registered element when a session opens and on every graph walk,
+-- so an error here used to stop /mover opening at all. A getPos that errors or returns
+-- no table is reported once and marked recordBroken: the element stays out of sessions
+-- (IsInSession) and hears no onChanged (NS:Notify), and the stand-in keeps the graph
+-- walks running. It heals by itself the moment getPos returns a table again, which is
+-- the normal story for a consumer that creates its record late.
 function R:GetPos(el)
-    local pos = el.getPos()
-    if type(pos) ~= "table" then error("DandersMover: getPos for " .. el.id .. " must return a table") end
-    return pos
+    local ok, pos = pcall(el.getPos)
+    if ok and type(pos) == "table" then
+        el.recordBroken = nil
+        return pos
+    end
+    if not el.recordBroken then
+        el.recordBroken = true
+        geterrorhandler()(ok and ("DandersMover: getPos for " .. el.id .. " must return a table") or pos)
+    end
+    if not el.standInPos then
+        local d = el.default or {}
+        el.standInPos = { point = d.point or "CENTER", x = d.x or 0, y = d.y or 0 }
+    end
+    return el.standInPos
 end
 
 -- ============================================================
@@ -386,6 +411,15 @@ function R:EndCanonMemo()
     if depth == 0 then self._canonMemo = nil end
 end
 
+-- A consumer's getFrame can throw, and the alias walk below calls every element's. One
+-- bad element must not stop the graph walk for everybody else, and its error is reported
+-- on the paths that actually use its frame.
+local function aliasFrame(entry)
+    if not entry.getFrame then return entry.frame end
+    local ok, f = pcall(entry.getFrame)
+    return ok and f or nil
+end
+
 function R:CanonicalId(targetId)
     local m = self._canonMemo; if m and m[targetId] ~= nil then return m[targetId] end
     local target = self.targets[targetId]
@@ -395,10 +429,10 @@ function R:CanonicalId(targetId)
         if m then m[targetId] = id end
         return id
     end
-    local f = self:GetFrame(target)
+    local f = aliasFrame(target)
     if not f then if m then m[targetId] = targetId end return targetId end
     for id, el in pairs(self.elements) do
-        if self:GetFrame(el) == f then
+        if aliasFrame(el) == f then
             if m then m[targetId] = id end
             return id
         end
@@ -539,7 +573,14 @@ function R:IsRelevant(entry)
     if NS.forcedRelevant[entry.id] then return true end
     if entry.isRelevant == nil then return true end
     local ok, res = pcall(entry.isRelevant)
-    if not ok then geterrorhandler()(res); return true end   -- fail OPEN
+    if not ok then   -- fail OPEN
+        -- Once per entry: the watcher asks this several times a second.
+        if not entry.relevantErrorReported then
+            entry.relevantErrorReported = true
+            geterrorhandler()(res)
+        end
+        return true
+    end
     return res and true or false
 end
 
@@ -569,6 +610,8 @@ end
 -- Precedence: user toggle > key filter > isRelevant.
 function R:IsInSession(filter, el)
     if not self:IsEnabled(el.addon, el.key) then return false end   -- toggle wins
+    self:GetPos(el)
+    if el.recordBroken then return false end                        -- nothing to edit
     if filter and filter.addon == el.addon and filter.keySet then
         return filter.keySet[el.key] == true                        -- key filter wins
     end
@@ -584,6 +627,28 @@ function R:WantsProxy(filter, el)
         return (NS.db and NS.db.showOtherAddons) and true or false
     end
     return true
+end
+
+-- ============================================================
+-- PROTECTED FRAMES + WATCHING
+-- ============================================================
+-- Does a write to this element have to wait for the end of combat? An explicit
+-- def.secure wins; otherwise the frame answers, so a consumer cannot forget to say.
+-- No frame yet, or something with no IsProtected, has nothing to protect.
+function R:IsSecure(el)
+    if el.secure ~= nil then return el.secure and true or false end
+    local ok, f = pcall(self.GetFrame, self, el)
+    if not ok or not f or not f.IsProtected then return false end
+    local okP, protected = pcall(f.IsProtected, f)
+    return okP and protected and true or false
+end
+
+-- Does the watcher (Core.lua) look after this element or target? Its own def.watch
+-- wins, then its addon's; on by default.
+function R:IsWatched(obj)
+    if obj.watch ~= nil then return obj.watch and true or false end
+    local addon = self.addons[obj.addon]
+    return not addon or addon.watch ~= false
 end
 
 -- ============================================================

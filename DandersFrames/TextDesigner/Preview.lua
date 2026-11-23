@@ -29,6 +29,13 @@ function Preview:Init(mockFrame, tdDB)
     self:RefreshAll()
 end
 
+-- Bind only when this is not already the binding: a page coming back into view
+-- takes the preview back without a full refresh of every frame.
+function Preview:Bind(mockFrame, tdDB)
+    if activeMockFrame == mockFrame and activeTdDB == tdDB then return end
+    self:Init(mockFrame, tdDB)
+end
+
 -- Refreshes all TD FontStrings on the bound mock frame using
 -- synthetic mock data. Called on settings changes (FullRebuildCards,
 -- eye-icon toggle, master toggle).
@@ -42,6 +49,10 @@ function Preview:RefreshPreview()
     local Render = DF.TextDesigner.Render
     local DataSource = DF.TextDesigner.DataSource
     if not Render or not DataSource then return end
+    -- The mock is never hovered: Show on Hover elements are drawn shown on it --
+    -- unless the page has a Show Hover State switch (a unit frame's), which drives
+    -- the mock's hover itself (Render:SetHover).
+    if not activeMockFrame.dfTDHoverToggle then activeMockFrame._tdHoverT = 1 end
     Render:UpdateFrame(activeMockFrame, activeTdDB, DataSource.Mock(), "all", true)
 end
 
@@ -77,11 +88,20 @@ function Preview:RefreshLiveFrames()
     if DF.PinnedFrames and DF.PinnedFrames.RefreshTextDesigner then
         DF.PinnedFrames:RefreshTextDesigner()
     end
+    -- Standalone frames (DF:InitStandaloneFrame) are in neither pool. Shown ones only:
+    -- a hidden one repaints when it next shows.
+    if DF.UpdateTextDesigner and DF.StandaloneFrames then
+        for f in pairs(DF.StandaloneFrames) do
+            if f.IsVisible and f:IsVisible() then DF:UpdateTextDesigner(f, "all") end
+        end
+    end
 end
 
 function Preview:RefreshAll()
-    DF:Debug("TD", "Preview:RefreshAll called, mockFrame=%s tdDB=%s",
-        tostring(activeMockFrame), tostring(activeTdDB))
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "Preview:RefreshAll called, mockFrame=%s tdDB=%s",
+            tostring(activeMockFrame), tostring(activeTdDB))
+    end
     self:RefreshPreview()
     self:RefreshLiveFrames()
 end

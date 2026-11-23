@@ -85,7 +85,7 @@ local visible = true        -- /mdemo show|hide
 -- Coloured background with a 1px border: the border texture fills the frame,
 -- the fill sits 1px inside it.
 local function build(def, secure)
-    local name = "DandersMoverDemo" .. (secure and "Secure" or def.key)
+    local name = def.frameName or ("DandersMoverDemo" .. (secure and "Secure" or def.key))
     local f
     if secure then
         f = CreateFrame("Button", name, UIParent, "SecureUnitButtonTemplate")
@@ -317,8 +317,10 @@ end
 
 SLASH_DANDERSMOVERDEMO1 = "/mdemo"
 SlashCmdList.DANDERSMOVERDEMO = function(msg)
-    local cmd = (msg or ""):lower():match("^%s*(%S*)")
-    if cmd == "show" then
+    local cmd, rest = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
+    if NS.EasyCommand and NS.EasyCommand(cmd, rest) then
+        return      -- one of Easy.lua's commands
+    elseif cmd == "show" then
         setVisible(true)
     elseif cmd == "hide" then
         setVisible(false)
@@ -333,7 +335,8 @@ SlashCmdList.DANDERSMOVERDEMO = function(msg)
     elseif cmd == "status" then
         printStatus()
     else
-        Print("usage: /mdemo show | hide | reset | unlock | status")
+        Print("usage: /mdemo show | hide | reset | unlock | status | move | size | scale | toggle"
+            .. " | link | unlink | stats | stress [n|off] | selftest")
     end
 end
 
@@ -368,10 +371,18 @@ events:SetScript("OnEvent", function(_, event, arg1)
         end
         registerAll()
         applyAll()
+        if NS.EasyInit then NS.EasyInit() end
     else
         updateCombatFrame()
     end
 end)
+
+-- Shared with Easy.lua, which loads straight after this file.
+NS.LOGO = LOGO
+NS.Print = Print
+NS.build = build
+NS.insetRect = insetRect
+NS.applyPositionFallback = applyPositionFallback
 
 -- Exposed for /run poking during manual testing only.
 NS.frames = frames

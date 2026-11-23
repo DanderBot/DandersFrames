@@ -94,6 +94,20 @@ function KIT:CreateEditBox(_, opts)
     return e
 end
 
+-- The Mirror row's toggles: the opts the panel built them with (so a test can
+-- click one through its set), the checked state its get reports, and the enable.
+function KIT:CreateCheckbox(_, opts)
+    local c = FakeUIFrame()
+    c._opts = opts or {}
+    c._enabled = true
+    function c:Refresh() self._checked = (self._opts.get and self._opts.get()) and true or false end
+    function c:SetEnabled(v) self._enabled = v and true or false end
+    function c:Click(v) if self._opts.set then self._opts.set(v) end end
+    c:Refresh()
+    return c
+end
+KIT.CreateCheckboxNative = KIT.CreateCheckbox
+
 -- The dropdown surface the panel actually drives: a caption override, an option
 -- set that can be swapped, and the enable state.
 function KIT:CreateDropdown(_, opts)
@@ -202,6 +216,7 @@ NS.Session = {
     Reset = function(_, el) calls[#calls + 1] = { "reset", el.id } end,
     Detach = function(_, el) calls[#calls + 1] = { "detach", el.id } end,
     CopyToTwin = function(_, el) calls[#calls + 1] = { "copytwin", el.id } end,
+    SetMirror = function(_, el, axis, on) calls[#calls + 1] = { "mirror", el.id, axis, on } end,
 }
 -- The mover's own settings window, which the verb row's cog opens. Read at
 -- call time by Panel.lua (Settings.lua loads after it), same as the legend.
@@ -544,6 +559,38 @@ do
     local last = calls[#calls]
     check(last[1] == "spec" and last[2] == "P:child" and last[3].edge == "top",
         "outside mode writes `edge`, for the panel's own element")
+end
+
+-- ============================================================
+-- 3b. MIRROR: a fifth row in the block, offered only while anchored; a mirrored
+-- axis relabels its box Mirror Position.
+-- ============================================================
+do
+    childPos.anchor = nil
+    local po = refresh("P:child")
+    local ui = po.ui
+    eq(ui.mirrorRow.label:GetText(), L["Mirror"], "mirror: the row is labelled")
+    check(not ui.mirrorX._enabled and not ui.mirrorY._enabled, "free: both mirror toggles are greyed")
+    eq(ui.mirrorRow.label:GetWidth(), ui.targetRow.label:GetWidth(), "mirror: the row shares the label column")
+    childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
+    po = refresh("P:child"); ui = po.ui
+    check(ui.mirrorX._enabled and ui.mirrorY._enabled, "anchored: both mirror toggles are live")
+    check(not ui.mirrorX._checked and not ui.mirrorY._checked, "anchored, old record: both read off")
+    eq(ui.xLabel:GetText(), L["Offset X"], "unmirrored: the X box is the offset")
+    ui.mirrorX:Click(true)
+    local last = calls[#calls]
+    check(last[1] == "mirror" and last[2] == "P:child" and last[3] == "X" and last[4] == true,
+        "the X toggle asks the session to mirror X on the panel's own element")
+    ui.mirrorY:Click(false)
+    last = calls[#calls]
+    check(last[1] == "mirror" and last[3] == "Y" and last[4] == false, "the Y toggle is independent")
+    childPos.anchor.mirrorX, childPos.anchor.mirrorPosX = true, 12
+    po = refresh("P:child"); ui = po.ui
+    check(ui.mirrorX._checked and not ui.mirrorY._checked, "mirror X reads on, Y off")
+    eq(ui.xLabel:GetText(), L["Mirror Position"], "mirrored: the X box is the Mirror Position")
+    eq(ui.yLabel:GetText(), L["Offset Y"], "...and Y is still an offset")
+    eq(ui.xBox._opts.get(), 12, "the X box reads the line")
+    childPos.anchor = nil
 end
 
 -- ============================================================

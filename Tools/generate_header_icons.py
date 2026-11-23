@@ -37,6 +37,16 @@ No third-party modules: plain Python 3, like the other generators here.
 
 Run from anywhere:  python generate_header_icons.py <repo-root>
                     python generate_header_icons.py --preview
+
+64PX PNG MODE (--png). The GUI icons became 64x64 white-mask PNGs (commit
+5af7e6bf), so a NEW icon is written that way: PNG_ICONS below, fitted to the
+same ink box doubled (6..58 on a 64px canvas), 8-bit RGBA, white with the shape
+in alpha. The TGA set above is kept for its path data only -- running the TGA
+mode now writes files the PNG guard (test_gui_icon_png.py) rejects.
+
+                    python generate_header_icons.py --png <repo-root>
+                    python generate_header_icons.py --png --preview
+Then regenerate the icon manifest: python Tools/generate-icon-manifest.py
 """
 
 import math
@@ -130,6 +140,22 @@ ICONS = {
         "M455.39-180q-15.08 0-25.23-10.16Q420-200.31 420-215.39v-231.53L196.08-731.38q-11.54-15.39"
         "-3.35-32 8.2-16.62 27.66-16.62h519.22q19.46 0 27.66 16.62 8.19 16.61-3.35 32L540-446.92v231.53"
         "q0 15.08-10.16 25.23Q519.69-180 504.61-180h-49.22ZM480-468l198-252H282l198 252Zm0 0Z"
+    ),
+}
+
+# name -> SVG path `d`, written as 64px PNGs (--png). Same family and weight as
+# ICONS: Material Symbols Outlined geometry at weight 300 (60-unit strokes in the
+# 960 space), fill 0.
+PNG_ICONS = {
+    # `link`: two open loops and a bar -- "these two are joined". Built on the
+    # published link glyph's geometry with weight 300's 60-unit stroke: outer
+    # radius 190, inner 130, bar 300 long.
+    "link": (
+        "M450-290H280q-78.7 0-134.35-55.65T90-480q0-78.7 55.65-134.35T280-670h170v60H280"
+        "q-53.85 0-91.92 38.08T150-480q0 53.85 38.08 91.92T280-350h170v60Z"
+        "M330-450v-60h300v60H330Z"
+        "M510-290v-60h170q53.85 0 91.92-38.08T810-480q0-53.85-38.08-91.92T680-610H510v-60h170"
+        "q78.7 0 134.35 55.65T870-480q0 78.7-55.65 134.35T680-290H510Z"
     ),
 }
 
@@ -228,9 +254,9 @@ def parse(d):
     return polys
 
 
-def render(d):
+def render(d, W=W, LO=LO, HI=HI):
     """Fit the path's bbox into LO..HI (longer side), centred; return W rows of
-    coverage 0..1, top row first."""
+    coverage 0..1, top row first. The PNG mode passes the 64px canvas and box."""
     polys = parse(d)
     pts = [p for poly in polys for p in poly]
     x0 = min(p[0] for p in pts)
@@ -309,10 +335,42 @@ def report(name, rows):
         print("    " + "".join("#" if a > 0.6 else ("+" if a > 0.15 else ".") for a in row))
 
 
+def write_png(path, rows):
+    """8-bit RGBA PNG, white with the coverage in alpha (the 64px icon format)."""
+    import zlib
+    size = len(rows)
+    raw = bytearray()
+    for row in rows:
+        raw.append(0)   # filter: none
+        for a in row:
+            raw += bytes((255, 255, 255, int(round(255.0 * a))))
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+    with open(path, "wb") as f:
+        f.write(bytes((137, 80, 78, 71, 13, 10, 26, 10)))   # the PNG signature
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(bytes(raw), 9)))
+        f.write(chunk(b"IEND", b""))
+
+
+def main_png(root, preview_only):
+    out_dir = os.path.join(root, "DandersFrames", "Media", "Icons")
+    for name in sorted(PNG_ICONS):
+        rows = render(PNG_ICONS[name], W=64, LO=6.0, HI=58.0)
+        if not preview_only:
+            path = os.path.join(out_dir, name + ".png")
+            write_png(path, rows)
+            print("wrote", os.path.normpath(path))
+        report(name, rows)
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     preview_only = "--preview" in sys.argv[1:]
     root = args[0] if args else os.getcwd()
+    if "--png" in sys.argv[1:]:
+        return main_png(root, preview_only)
     out_dir = os.path.join(root, "DandersFrames", "Media", "Icons")
 
     for name in sorted(ICONS):

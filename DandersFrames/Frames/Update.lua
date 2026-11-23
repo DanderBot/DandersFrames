@@ -53,38 +53,12 @@ local issecretvalue = issecretvalue
 -- tables under it -- whatever it introduced is long gone, and it read as a promise
 -- the file does not keep.
 
--- ★ THE ONE PLACE THE HEALTH BARS ARE INSET BY THE FRAME PADDING.
--- The rule ("both bars sit `framePadding` inside the frame rect, re-applied on every
--- update because a padding change must move them") was written out longhand in three
--- places: here, the resize path in Core.lua, and the TEST-mode update — whose comment
--- said it was "matching what UpdateUnitFrame does unconditionally for live frames",
--- which is the tell. A preview restating live's geometry is the divergence class this
--- addon keeps paying for; it differs in DATA, never in rendering.
--- (ReducedMaxHealth.lua insets its own bar by the same padding and then re-clips the
--- right edge — that one is a different widget with an extra step, deliberately not
--- folded in here.)
-function DF:AnchorHealthBarsToPadding(frame, db)
-    if not (frame and frame.healthBar) then return end
-    db = db or DF:GetFrameDB(frame)
-    local padding = (db and db.framePadding) or 0
-    frame.healthBar:ClearAllPoints()
-    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    -- ☠ THIS UN-CLIPS A REDUCED-MAX-HEALTH CLIP, so it forgets that clip. The clip only
-    -- re-runs when its geometry changes (ReducedMaxHealth.lua's needClip); left set, the
-    -- flag said "still clipped" and the health fill ran under the reduced band until
-    -- orientation, padding or texture next changed. Cleared, the next reduced-max pass
-    -- (right after this in the live and test updates) clips again.
-    frame.dfReducedMaxHealthClipping = nil
-    frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = nil, nil, nil
-    -- Keep the missing-health overlay inside the padding too (anchored once
-    -- at creation, so it would otherwise sit over the padding after a change).
-    if frame.missingHealthBar then
-        frame.missingHealthBar:ClearAllPoints()
-        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    end
-end
+-- ★ THE HEALTH BAR RECT lives in Frames/HealthRect.lua: DF:AnchorHealthBarsToPadding
+-- (framePadding inset -- or the border band with Keep Health Bar Inside Border -- plus
+-- room for a resource bar Placement strip). It used to be written out longhand here, in
+-- the resize path in Core.lua and in the TEST-mode update; a preview restating live's
+-- geometry is the divergence class this addon keeps paying for. Every anchor site now
+-- calls that one function.
 
 function DF:ApplyFrameLayout(frame)
     if not frame then return end
@@ -138,9 +112,9 @@ function DF:ApplyFrameLayout(frame)
         -- drive owns them).
         local newFill = healthBar:GetStatusBarTexture()
         if newFill ~= prevFill then
-            local isTest = (DF.testMode or DF.raidTestMode) and frame.dfIsTestFrame
+            local isTest = DF:FrameInTestScope(frame, "any") and frame.dfIsTestFrame
             local ti = nil
-            if isTest and DF.GetTestUnitData and frame.index ~= nil then
+            if isTest and (frame.dfTestData or frame.index ~= nil) then
                 -- ☠ A PINNED test frame is NOT a pool slot, and asking with pool arguments
                 -- answers about the wrong unit. The party/raid pools are 0- and 1-based
                 -- respectively and carry no boss flag; a pinned set is 1-based and may be
@@ -152,9 +126,9 @@ function DF:ApplyFrameLayout(frame)
                 -- the main pools, which is what it has always meant there.
                 if frame.isPinnedFrame then
                     local pIdx = frame.dfTestIndex or frame.index
-                    ti = DF:GetTestUnitData(pIdx, false, frame.isPinnedBossFrame)
+                    ti = DF:GetTestDataForFrame(frame, pIdx, false, frame.isPinnedBossFrame)
                 else
-                    ti = DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+                    ti = DF:GetTestDataForFrame(frame, frame.index, frame.isRaidFrame)
                 end
             end
             if not isTest or ti then
@@ -536,9 +510,7 @@ function DF:UpdateUnitFrame(frame, source)
     if not frame or not frame.unit then return end
     
     -- Skip if in test mode (test mode has its own update)
-    local isRaid = DF:IsRaidFrame(frame)
-    if isRaid and DF.raidTestMode then return end
-    if not isRaid and DF.testMode then return end
+    if DF:FrameInTestScope(frame) then return end
     
     local unit = frame.unit
     if not UnitExists(unit) then return end
@@ -834,7 +806,8 @@ function DF:UpdateUnitFrame(frame, source)
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
     local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
-    -- Health bar positioning (resource bar is floating, doesn't affect health bar size)
+    -- The resource bar floats over the health bar unless its Placement gives it a strip.
+    DF:NoteResourceBarWanted(frame, showPower)
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if frame.dfPowerBar then
@@ -937,9 +910,7 @@ function DF:UpdateHealthFast(frame)
     if frame.dfIsTestFrame then return end
 
     -- Skip if in test mode (blanket skip for real live frames)
-    local isRaidHF = DF:IsRaidFrame(frame)
-    if isRaidHF and DF.raidTestMode then return end
-    if not isRaidHF and DF.testMode then return end
+    if DF:FrameInTestScope(frame) then return end
 
     local unit = frame.unit
     if not UnitExists(unit) then return end
@@ -1201,6 +1172,11 @@ function DF:UpdatePower(frame)
     -- Check if power bar should be shown (uses centralized role filter).
     -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
     local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
+    -- Runs on power events, so only a change of answer re-syncs the strip's cut-out.
+    if frame.dfResourceBarWanted ~= (showPower and true or false) then
+        DF:NoteResourceBarWanted(frame, showPower)
+        DF:SyncHealthBarRect(frame, db)
+    end
 
     if not showPower then
         frame.dfPowerBar:Hide()

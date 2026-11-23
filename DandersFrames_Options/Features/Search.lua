@@ -160,6 +160,15 @@ end
 -- An entry offered while the registry is sealed is stamped and captured but NOT
 -- added to the Registry, as before.
 function Search:Register(entry)
+    -- ★ A PAGE BUILD MAY TAKE SOME CONTROLS OFF ITS PAGE (Search.EntryFilter, set
+    -- around the build by whoever draws it): such an entry is marked and never
+    -- registered, and the page hides the widget it came back on (widget.searchEntry).
+    -- First, so the mark lands whatever else would have returned early.
+    local filter = self.EntryFilter
+    if filter and entry and filter(entry) == false then
+        entry.dfFilteredOut = true
+        return entry
+    end
     local capture = self._captureEntries
     if self.RegistryBuilt and not capture then
         return entry
@@ -304,6 +313,35 @@ end
 function Search:RegistryIsStale()
     local currentMode = DF.GUI and DF.GUI.SelectedMode or "party"
     return (not self.RegistryBuilt) or #self.Registry == 0 or self.BuiltForMode ~= currentMode
+        or (self.BuiltWithDeferred or false) ~= (self.deferredIndexOn or false)
+end
+
+-- ============================================================
+-- DEFERRED PAGES
+-- ------------------------------------------------------------
+-- A page may set `page.deferIndex = true`: it stays OUT of the index until
+-- something asks for it -- a search being typed (ShowResults / Find) or a caller
+-- that reports on those pages (Search:IncludeDeferredPages). For a large set of
+-- pages that most sessions never search, it keeps every OTHER index build (the
+-- Changed Settings ledger's, a Party/Raid switch's) from building them all.
+-- Once included they stay included for the session: dropping them again would
+-- only rebuild the index for nothing.
+-- ⚠ STALENESS, NOT AN ABORT. Including them marks the index stale (see
+-- RegistryIsStale) rather than invalidating it, so a budgeted build already in
+-- flight finishes and fires its waiters; their re-check then finds the index
+-- stale and starts the build that adds the deferred pages -- reusing every page
+-- that already holds a valid build, so only the deferred ones are built.
+-- ============================================================
+function Search:IsPageIndexed(page)
+    if not page or page.skipSearchIndex then return false end
+    if page.deferIndex and not self.deferredIndexOn then return false end
+    return true
+end
+
+function Search:IncludeDeferredPages()
+    if self.deferredIndexOn then return false end
+    self.deferredIndexOn = true
+    return true
 end
 
 function Search:EnsureRegistry()
@@ -330,7 +368,7 @@ function Search:TryReuseRegistry()
 
     local lists = {}
     for _, page in pairs(GUI.Pages) do
-        if not page.skipSearchIndex then
+        if self:IsPageIndexed(page) then
             local entries = page.GetIndexEntries and page:GetIndexEntries()
             if not entries then return false end
             lists[#lists + 1] = entries
@@ -340,6 +378,7 @@ function Search:TryReuseRegistry()
     self.Registry = {}
     registrationId = 0
     self.BuiltForMode = GUI.SelectedMode
+    self.BuiltWithDeferred = self.deferredIndexOn or false
     self._buildToken = (self._buildToken or 0) + 1
     for _, entries in ipairs(lists) do AppendIndexEntries(self, entries) end
     self.RegistryBuilt = true
@@ -394,6 +433,10 @@ local REGISTRY_BUILD_BUDGET_MS = 8
 function Search:_BeginRegistryBuild()
     self.Registry = {}
     registrationId = 0
+    -- ⚠ NOT BUILT WHILE IT IS BEING BUILT. Register drops every entry while
+    -- RegistryBuilt is true, so a rebuild that was not preceded by an
+    -- InvalidateRegistry (a stale index -- DEFERRED PAGES) would come back empty.
+    self.RegistryBuilt = false
 
     if not DF.GUI or not DF.GUI.Pages then
         return nil
@@ -401,6 +444,8 @@ function Search:_BeginRegistryBuild()
 
     -- Store the mode we're building for
     self.BuiltForMode = DF.GUI.SelectedMode
+    -- ...and whether the deferred pages are in it (DEFERRED PAGES, above).
+    self.BuiltWithDeferred = self.deferredIndexOn or false
 
     -- Bumped on every build AND by InvalidateRegistry, so a budgeted drain can
     -- tell "still mine" from "superseded" between slices.
@@ -418,7 +463,8 @@ function Search:_BeginRegistryBuild()
       -- keeps its rows out of the index, which is correct on its own terms -- a
       -- report of settings is not itself a setting.
       -- Deliberately page-agnostic: any page may set `skipSearchIndex`.
-      if not page.skipSearchIndex then
+      -- A deferred page (page.deferIndex) waits until something asks for it.
+      if self:IsPageIndexed(page) then
         ctx.steps[#ctx.steps + 1] = function()
             -- ★ A VALID BUILD FOR THIS MODE IS INDEXED AS IT STANDS -- no builder,
             -- nothing retired. Asked at STEP time, not when the list was made: a
@@ -430,7 +476,7 @@ function Search:_BeginRegistryBuild()
                 return
             end
 
-            self:SetCurrentTab(tabName, page.tabLabel or tabName)
+            self:SetCurrentTab(tabName, page.searchTabLabel or page.tabLabel or tabName)
             self.CurrentSection = nil
 
             local wasShown = page:IsShown()
@@ -475,17 +521,23 @@ function Search:_FinishRegistryBuild()
     -- tabs mid-drain, and re-showing the page they navigated AWAY from would be
     -- the window changing itself under them a second after they clicked.
     local currentTab = DF.GUI and DF.GUI.CurrentPageName
-    if currentTab and DF.GUI.Pages[currentTab] then
-        -- The page the user is actually looking at comes back out of the dock.
-        -- It was never parked by the steps above (wasShown was true for it), so
-        -- this is normally a no-op -- but it is the one page that MUST be
-        -- adopted when this returns, so it is asserted rather than assumed.
-        if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[currentTab]) end
-        DF.GUI.Pages[currentTab]:Show()
-        if DF.GUI.Pages[currentTab].RefreshStates then
-            DF.GUI.Pages[currentTab]:RefreshStates()
+    -- ☠ PROTECTED: an error from the page must not skip the lines below. RegistryBuilding
+    -- would stay true with nothing left to clear it, and every later search would wait on
+    -- a build that had already finished.
+    local ok, err = pcall(function()
+        if currentTab and DF.GUI.Pages[currentTab] then
+            -- The page the user is actually looking at comes back out of the dock.
+            -- It was never parked by the steps above (wasShown was true for it), so
+            -- this is normally a no-op -- but it is the one page that MUST be
+            -- adopted when this returns, so it is asserted rather than assumed.
+            if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[currentTab]) end
+            DF.GUI.Pages[currentTab]:Show()
+            if DF.GUI.Pages[currentTab].RefreshStates then
+                DF.GUI.Pages[currentTab]:RefreshStates()
+            end
         end
-    end
+    end)
+    if not ok and err then geterrorhandler()(err) end
 
     self.RegistryBuilt = true
     self.RegistryBuilding = false
@@ -577,6 +629,23 @@ end
 -- Several callers can wait on ONE build (the ledger page and the search box both
 -- do), which is the other half of why this is not just "call the budgeted
 -- builder": two surfaces asking at once must not start two builds.
+-- A build that finished in combat can't draw its results, and nothing else would come
+-- back for them: the box would say "Indexing settings..." until its text changed.
+function Search:ShowResultsAfterCombat()
+    local f = self._afterCombatFrame
+    if not f then
+        f = CreateFrame("Frame")
+        f:SetScript("OnEvent", function(frame)
+            frame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            if not (self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
+            local live = self.SearchBar and self.SearchBar.editbox:GetText()
+            if live and live ~= "" then self:ShowResults(live) end
+        end)
+        self._afterCombatFrame = f
+    end
+    f:RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
 function Search:EnsureRegistryAsync(onReady)
     -- Assembled from the pages' own builds when it can be, which needs no frame.
     if self:TryReuseRegistry() then return "ready" end
@@ -738,6 +807,8 @@ end
 function Search:Find(query)
     if not query or query == "" then return {} end
     
+    -- A search covers every page, deferred ones included (DEFERRED PAGES).
+    self:IncludeDeferredPages()
     self:EnsureRegistry()
     
     query = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
@@ -901,6 +972,16 @@ end
 -- Create actual editable widgets in search results
 -- ============================================================
 
+-- The settings table an entry's setting lives in: its page's own table when the
+-- page has one (a module page -- GUI.PageBuildDb), else the frame mode's. An inline
+-- control bound to the mode table would edit the wrong settings for such a page.
+local function EntryDB(entry)
+    local GUI = DF.GUI
+    local page = entry and entry.tab and GUI.Pages and GUI.Pages[entry.tab]
+    local own = page and GUI.PageBuildDb and GUI.PageBuildDb(page)
+    return own or DF.db[GUI.SelectedMode]
+end
+
 function Search:CreateInlineCheckbox(parent, entry)
     -- A custom checkbox has no dbKey to bind, so there is nothing for the shared
     -- builder to drive -- show the label and point at the real page instead.
@@ -929,7 +1010,7 @@ function Search:CreateInlineCheckbox(parent, entry)
     -- indicators and the label-only tooltip -- all of which the hand-rolled copy
     -- here lacked. Re-registration is not a concern: Search:Register early-returns
     -- once RegistryBuilt is set, and Find() sets it before any result is built.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     return DF.GUI:CreateCheckbox(parent, entry.label, db, entry.dbKey, entry.callback)
 end
 
@@ -942,7 +1023,7 @@ function Search:CreateInlineSlider(parent, entry)
     -- accentColor is left nil ON PURPOSE: CreateSlider falls back to
     -- GetThemeColor(), so the thumb and fill track party purple / raid orange like
     -- every other slider.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     local minVal = entry.minVal or 0
     local maxVal = entry.maxVal or 100
     local step = entry.step or 1
@@ -959,7 +1040,7 @@ function Search:CreateInlineColorPicker(parent, entry)
     -- a full refresh merely on OPENING the picker) and mutates db[dbKey] in place
     -- rather than rebuilding it as a fresh table, plus the themed swatch, the factory
     -- row height and the label-only tooltip.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     return DF.GUI:CreateColorPicker(parent, entry.label, db, entry.dbKey,
         entry.hasAlpha, entry.callback)
 end
@@ -971,7 +1052,7 @@ function Search:CreateInlineDropdown(parent, entry)
     -- get/set, and entry.callback onto its callback. entry.values is the same
     -- keyed value->display table (with optional _order) that was registered, so
     -- it passes straight through as the builder's options arg.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     local values = entry.values or {}
 
     -- Returns CreateDropdown's container Frame (exposes :UpdateText / :SetEnabled /
@@ -1271,8 +1352,10 @@ function Search:ScrollToSection(tabName, sectionName)
     -- was renamed or moved into a group -- the jump scrolls nowhere and never flashes, in
     -- silence. Naming both halves makes it a one-line fix instead of a hunt.
     if not flashTarget then
-        DF:DebugWarn("SEARCH", "ScrollToSection: %q not found on tab %q - jump did nothing",
-            tostring(sectionName), tostring(tabName))
+        if DF:DebugActive("SEARCH") then
+            DF:DebugWarn("SEARCH", "ScrollToSection: %q not found on tab %q - jump did nothing",
+                tostring(sectionName), tostring(tabName))
+        end
         return
     end
 
@@ -1312,10 +1395,18 @@ end
 -- ============================================================
 -- SEARCH BAR
 -- ============================================================
-function Search:CreateSearchBar(parent)
+-- opts (all optional; the sidebar's bar passes none and is unchanged):
+--   radius     draw the well as a ROUNDED surface (Round.lua) instead of the square
+--              input backdrop -- the same fill and edge, so it reads as the same control
+--   iconSize   the leading search glyph's size (default 15)
+--   iconX      its left inset (default 6); the text starts one gap after it
+--   fontSize   the typed text and the placeholder, at the settings font (default:
+--              the small template font)
+function Search:CreateSearchBar(parent, opts)
+    opts = opts or {}
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
-    
+
     -- ☠ THE SHARED INPUT CHROME, not a private copy of it. INPUT_FILL/INPUT_EDGE are
     -- file-locals in Widgets.lua, so GUI:StyleEditBox IS the supported way to reach them;
     -- there is no palette entry to reference instead.
@@ -1325,22 +1416,39 @@ function Search:CreateSearchBar(parent)
     -- font (set below).
     DF.GUI:StyleEditBox(frame, { skipFont = true })
 
+    -- The rounded well: the SAME two colours (published by the kit as
+    -- UI.InputColors), on a sliced rounded surface. ApplyRoundedChrome takes the
+    -- square backdrop down -- it would otherwise paint over the rounded fill.
+    local surface
+    local IC = DF.GUI.InputColors
+    if opts.radius and IC and DF.GUI.ApplyRoundedChrome then
+        surface = DF.GUI:ApplyRoundedChrome(frame, { radius = opts.radius, fill = IC.fill, border = IC.edge })
+    end
+
+    local iconSize = opts.iconSize or 15
+    local iconX = opts.iconX or 6
+    local textX = iconX + iconSize + (opts.radius and 12 or 5)
     local icon = frame:CreateTexture(nil, "OVERLAY")
-    icon:SetPoint("LEFT", 6, 0)
-    icon:SetSize(15, 15)
+    icon:SetPoint("LEFT", iconX, 0)
+    icon:SetSize(iconSize, iconSize)
     icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     icon:SetVertexColor(0.72, 0.72, 0.72)
 
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("LEFT", 26, 0)
+    editbox:SetPoint("LEFT", textX, 0)
     editbox:SetPoint("RIGHT", -24, 0)
-    editbox:SetHeight(20)
-    editbox:SetFontObject(DFFontHighlightSmall)
+    editbox:SetHeight(opts.fontSize and (opts.fontSize + 8) or 20)
+    if opts.fontSize then
+        DF.GUI:SetSettingsFont(editbox, opts.fontSize)
+    else
+        editbox:SetFontObject(DFFontHighlightSmall)
+    end
     editbox:SetAutoFocus(false)
     editbox:SetTextInsets(2, 2, 0, 0)
-    
+
     local placeholder = frame:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-    placeholder:SetPoint("LEFT", 26, 0)
+    placeholder:SetPoint("LEFT", textX + 2, 0)
+    if opts.fontSize then DF.GUI:SetSettingsFont(placeholder, opts.fontSize) end
     placeholder:SetText(L["Search..."])
     -- textDim from the palette, so placeholder text moves with it instead of being pinned.
     local cDim = DF.GUI.Colors.textDim
@@ -1364,7 +1472,11 @@ function Search:CreateSearchBar(parent)
     
     editbox:SetScript("OnEditFocusGained", function()
         local c = GetThemeColor()
-        frame:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+        if surface then
+            surface:SetBorderColor(c.r, c.g, c.b, 1)
+        else
+            frame:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+        end
         placeholder:Hide()
     end)
 
@@ -1374,7 +1486,12 @@ function Search:CreateSearchBar(parent)
         -- a change to the shared input look would have fixed the resting state and left
         -- the after-focus state on the old colour, which is the sort of drift only ever
         -- noticed by accident.
-        DF.GUI:StyleEditBox(frame, { skipFont = true })
+        if surface then
+            local e = IC.edge
+            surface:SetBorderColor(e[1], e[2], e[3], e[4])
+        else
+            DF.GUI:StyleEditBox(frame, { skipFont = true })
+        end
         if editbox:GetText() == "" then
             placeholder:Show()
         end
@@ -1646,12 +1763,17 @@ function Search:ShowResults(query)
     -- would put stale results under a box that says something else.
     -- (An index that can be assembled from the pages' retained builds comes first: no builder
     -- runs and nothing waits -- see TryReuseRegistry.)
+    -- A search covers every page, deferred ones included (DEFERRED PAGES).
+    if query and query ~= "" then self:IncludeDeferredPages() end
     self:TryReuseRegistry()
     if self:RegistryIsStale() or self.RegistryBuilding then
         self:ShowBuildingMessage()
         self:EnsureRegistryAsync(function(ok)
             if not (ok and self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                self:ShowResultsAfterCombat()
+                return
+            end
             local live = self.SearchBar and self.SearchBar.editbox:GetText()
             if live and live ~= "" then self:ShowResults(live) end
         end)

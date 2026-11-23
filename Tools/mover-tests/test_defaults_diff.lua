@@ -424,6 +424,66 @@ do
     eq(DF.RaidDefaults.defensiveIconSize, 24, "...spot-check: nor did the raid override")
 end
 
+-- ---- registered adapters (D9) ------------------------------------------
+-- A table that is no mode table registers how it answers: weak-keyed, never a
+-- field on the table, asked first.
+print("-- Registered adapters")
+do
+    local D = DF.Defaults
+    local stored = { width = 300, tint = { r = 1, g = 0, b = 0 } }
+    local chain = { width = 200, height = 40, tint = { r = 1, g = 0, b = 0 }, flag = false }
+    local proxy = setmetatable({}, { __index = function(_, k)
+        local v = stored[k]
+        if v == nil then v = chain[k] end
+        return v
+    end, __newindex = function(_, k, v) stored[k] = v end })
+    check(not D:IsModified(proxy, "width"), "unregistered proxy: unknown table, never modified")
+    check(not D:RegisterAdapter(proxy, {}), "a spec without getDefault is refused")
+    check(D:RegisterAdapter(proxy, {
+        getDefault = function(k) return chain[k] end,
+        isOverride = function(k) return rawget(stored, k) ~= nil end,
+        resetOverride = function(k) stored[k] = nil end,
+    }), "an adapter registers")
+    check(rawget(proxy, "__dfDefaultsAdapter") == nil and next(stored) ~= nil and stored.__dfDefaultsAdapter == nil,
+          "...and nothing is written onto either table")
+    check(D:GetAdapter(proxy) ~= nil, "GetAdapter finds it")
+    check(D:IsModified(proxy, "width"), "an own value that differs: modified")
+    check(not D:IsModified(proxy, "height"), "no own value: not modified (the chain answers)")
+    check(not D:IsModified(proxy, "tint"), "an own value equal to the default (a copy-on-read table): not modified")
+    check(not D:IsModified(proxy, "nope"), "a key with no default: not a setting here")
+    eq(D:GetDefaultFor(proxy, "width"), 200, "GetDefaultFor: the chain's value")
+    local diff = D:DiffKeys(proxy, { "width", "height", "tint" })
+    check(diff.width and diff.width.current == 300 and diff.width.default == 200 and not diff.height and not diff.tint,
+          "DiffKeys: only the modified key, with both values")
+    eq(D:Count(proxy, { "width", "height", "tint" }), 1, "Count agrees")
+    check(D:ResetOverride(proxy, "width"), "ResetOverride drops the own value")
+    eq(rawget(stored, "width"), nil, "...from the stored table")
+    check(not D:IsModified(proxy, "width"), "...and the key is back on its default")
+    check(not D:ResetOverride({}, "width"), "ResetOverride on an unregistered table: refused")
+
+    -- No isOverride and no getStored: the table's own read is the stored value.
+    local plain = { a = 2 }
+    D:RegisterAdapter(plain, { getDefault = function(k) return ({ a = 1 })[k] end })
+    check(D:IsModified(plain, "a"), "getDefault alone: the table's own read is compared")
+    D:RegisterAdapter(plain, nil)
+    check(D:GetAdapter(plain) == nil and not D:IsModified(plain, "a"), "RegisterAdapter(tbl, nil) removes it")
+
+    -- Weak keys: a dropped table takes its entry with it.
+    local src = df_file_source("Core/Defaults.lua")
+    check(src:find('local registered = setmetatable({}, { __mode = "k" })', 1, true) ~= nil,
+          "the registry is weak-keyed")
+
+    -- The GUI host's override hooks consult it (DandersFrames/GUI/GUI.lua).
+    local gui = df_file_source("GUI/GUI.lua"):gsub("\r\n", "\n")
+    local ov = gui:find("getOverrideState = function(db, key)", 1, true)
+    local gate = gui:find("if db and D and D.GetAdapter and D:GetAdapter(db) then return \"none\" end", 1, true)
+    local mode = gui:find('if GUI.SelectedMode ~= "raid" then return "none" end', ov or 1, true)
+    check(ov and gate and mode and ov < gate and gate < mode,
+          "getOverrideState: an adapter table is never a layout override, before the mode check")
+    check(gui:find("if db and key and D and D.ResetOverride and D:ResetOverride(db, key) then", 1, true) ~= nil,
+          "resetOverride: an adapter table drops its own value")
+end
+
 CreateFrame   = savedCreateFrame
 GetLocale     = savedGetLocale
 DandersFrames = savedDandersFrames

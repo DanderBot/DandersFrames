@@ -230,6 +230,7 @@ end
 local HP_SETTINGS = {
     { "checkbox",        "Enable Heal Prediction", "healPredictionEnabled",       30 },
     { "checkbox",        "Show Overheal",          "healPredictionShowOverheal",  30 },
+    { "slider",          "Overflow (%)",           "healPredictionBreakout",      55 },
     { "dropdown",        "Display Mode",           "healPredictionMode",          55 },
     { "dropdown",        "Show Heals From",        "healPredictionShowMode",      55 },
     { "texturedropdown", "Texture",                "healPredictionTexture",       55 },
@@ -324,9 +325,9 @@ do
     for _ in PAGE:gmatch("disableOn = function%(d%) return not d%.healPredictionEnabled end") do
         gates = gates + 1
     end
-    -- Seventeen: eight in the Settings builder (the enable itself excepted),
+    -- Eighteen: nine in the Settings builder (the enable itself excepted),
     -- four in Floating Bar Position and five in Floating Bar Anchor.
-    eq(gates, 17, "gate: every control on the page carries the page gate")
+    eq(gates, 18, "gate: every control on the page carries the page gate")
 
     local body = builderBody("BuildHealPredictionSettingsGroup")
     check(body:find("self:RefreshStates", 1, true) == nil,

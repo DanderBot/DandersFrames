@@ -2830,8 +2830,10 @@ local function TargetedList_OnInterruptibilityChange(casterUnit, isInterruptible
     -- Clean booleans are always safe to feed into SetVertexColorFromBoolean.
     active.uninterruptible = not isInterruptible
     if DF.Debug then
-        DF:Debug("TARGETEDLIST", "~cast %s: interruptible=%s",
-            casterUnit, tostring(isInterruptible))
+        if DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "~cast %s: interruptible=%s",
+                casterUnit, tostring(isInterruptible))
+        end
     end
     -- Commit #5: apply to the bar via SetVertexColorFromBoolean.
 end
@@ -2943,9 +2945,11 @@ local function TargetedList_ValidateTrackedBars()
                 activeTargetedListCasts[unit] = nil
                 anyRemoved = true
                 if DF.Debug then
-                    DF:Debug("TARGETEDLIST", "sweep %s: fading + %s - culled after %.2fs of a %.2fs fade",
-                        unit, TL_UnitExists(unit) and "dead" or "gone",
-                        TL_GetTime() - (rec.fadingStartedAt or 0), rec.fadingDuration or 0)
+                    if DF:DebugActive("TARGETEDLIST") then
+                        DF:Debug("TARGETEDLIST", "sweep %s: fading + %s - culled after %.2fs of a %.2fs fade",
+                            unit, TL_UnitExists(unit) and "dead" or "gone",
+                            TL_GetTime() - (rec.fadingStartedAt or 0), rec.fadingDuration or 0)
+                    end
                 end
             end
         else

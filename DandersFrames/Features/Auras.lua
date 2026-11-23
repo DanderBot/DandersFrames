@@ -537,8 +537,10 @@ local function KnowsPoisonCleansingTotem()
     if not warnedNoSpellProbe then
         warnedNoSpellProbe = true
         if DF.DebugError then
-            DF:DebugError("DISPEL", "no spellbook API available - cannot test for "
-                .. "Poison Cleansing Totem; the Shaman dispel-flag repair is inactive")
+            if DF:DebugActive("DISPEL") then
+                DF:DebugError("DISPEL", "no spellbook API available - cannot test for "
+                    .. "Poison Cleansing Totem; the Shaman dispel-flag repair is inactive")
+            end
         end
     end
     return nil
@@ -706,8 +708,10 @@ do
             if now == lastKnown then return end
             local before = lastKnown
             lastKnown = now
-            DF:Debug("DISPEL", "dispel exclusion changed: [%s] -> [%s] (re-planning)",
-                tostring(before), now)
+            if DF:DebugActive("DISPEL") then
+                DF:Debug("DISPEL", "dispel exclusion changed: [%s] -> [%s] (re-planning)",
+                    tostring(before), now)
+            end
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
         end)
     end
@@ -1824,7 +1828,10 @@ end
 -- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
 -- those gets an uncleansable twin. So the count uses the claims the Aura Designer REALLY
 -- makes, asked of a live frame of the same mode -- claims are per mode and spec, the same
--- on every frame. With no frame to ask (raid mode while not in a raid) it falls back to the
+-- on every frame. A standalone frame's own table (DF:InitStandaloneFrame) is asked of that
+-- frame, never of a party frame: its claims come from ITS Aura Designer, not the party's
+-- (a frame that reads the table but has no unit yet means the ceiling below).
+-- With no frame to ask (raid mode while not in a raid) it falls back to the
 -- larger of the unclaimed and By Me-claimed builds: a ceiling, never an under-count. Each
 -- build is taken with and without the racial self gap (a Dwarf's own frame). Nil records
 -- mean the show-all fallback, which is a single group.
@@ -1837,9 +1844,21 @@ function DF:GetDebuffRowGroupCount(dbLike)
         local function pick(f)
             if f and f.unit then frame = f return true end
         end
-        local isRaid = DF.GetRaidDB and dbLike == DF:GetRaidDB()
-        local iterate = isRaid and DF.IterateRaidFrames or DF.IteratePartyFrames
-        if iterate then iterate(DF, pick) end
+        -- A standalone frame reading this very table answers for it.
+        local standaloneDB = false
+        -- A preview frame (frame.dfPreview) shows test data under a real token, so it
+        -- marks the table as standalone but is never the frame asked.
+        for f in pairs(DF.StandaloneFrames or {}) do
+            if f.dfDB == dbLike then
+                standaloneDB = true
+                if f.unit and not f.dfPreview then frame = f break end
+            end
+        end
+        if not standaloneDB then
+            local isRaid = DF.GetRaidDB and dbLike == DF:GetRaidDB()
+            local iterate = isRaid and DF.IterateRaidFrames or DF.IteratePartyFrames
+            if iterate then iterate(DF, pick) end
+        end
         if frame then
             local okC, claimed = pcall(DF.GetClaimedDebuffCategories, DF, frame, dbLike)
             if okC then claimSets = { claimed or false } end
@@ -1916,7 +1935,7 @@ end)
 -- provider, so the live update path must not double-drive.
 function DF:UseFactoryForBuffs(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableAuras")
 end
 
@@ -3209,6 +3228,65 @@ local function SplitBuffRowForOwnCasts(filter, candidateFilters, mineOnly)
     }, candidateFilters
 end
 
+-- ============================================================
+-- PURGEABLE BUFFS (a frame's own hook: frame.dfBuffPurgeable, see rowPurge below)
+-- Which enemy buff the player can purge or spellsteal is NOT readable by addon code
+-- (isStealable is secret, or matches nothing in instanced PvP). The ENGINE knows:
+-- RAID_PLAYER_DISPELLABLE on HELPFUL is "a buff with a dispel type the player can
+-- remove" -- the purge set on an enemy. So the row is split into two groups by that
+-- token: the purgeable group FIRST (so those buffs lead the row), wearing a record
+-- style that rings each icon (`highlight`, Frames/AuraContainer.lua applyRecordStyle,
+-- drawn from the `buffPurgeable` DF.Border keys), then the rest with the token negated.
+-- Nothing here reads an aura.
+--
+-- ☠ FRIENDLY UNITS NEVER GLOW. The token's meaning on a friendly unit's buffs is not
+-- documented, so on a unit the player cannot attack the purgeable group gets the dead
+-- candidate map (nothing passes) and the rest group takes the plain filter: every buff
+-- in one plain group. The SPLIT stays (same record keys), so a target that turns from
+-- hostile to friendly is a TUNING change, which applies in place and in combat; only
+-- switching the feature itself rebuilds the row.
+--
+-- ⚠ Blizzard caps each GROUP at the row's Max (GetDebuffRowGroupCount), so the drive
+-- shares Max between the groups (DF:BuffPurgeCaps) to keep the row at Max in all.
+--
+-- `hostile`: true = split by the token; false = split held dark (friendly / unknown).
+-- Accepts the plain string list (BuildDirectBuffFilters) or the record list of
+-- SplitBuffRowForOwnCasts; anything else comes back unchanged.
+local PURGE_DEAD_CF = { maxDuration = 0 }
+local function SplitBuffRowForPurge(filter, hostile, db)
+    if type(filter) == "string" then filter = { filter } end
+    if type(filter) ~= "table" or #filter == 0 then return filter end
+    local token = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
+    local recs = {}
+    for i, e in ipairs(filter) do
+        if type(e) == "string" then
+            recs[i] = { f = e, key = "row" .. i }
+        elseif type(e) == "table" and type(e.filter) == "string" then
+            recs[i] = { f = e.filter, key = tostring(e.key or i), cf = e.candidateFilters, noVisLatch = e.noVisLatch }
+        else
+            return filter
+        end
+    end
+    -- ONE style table for every purgeable record (the test preview tells "one styled
+    -- treatment" from "a layout group" by identity -- AuraContainer's test shapes).
+    local style = { highlight = { db = db, prefix = "buffPurgeable" } }
+    local out = {}
+    for _, r in ipairs(recs) do
+        -- ⚠ Not `hostile and r.cf or DEAD`: a record with no candidate filters of its
+        -- own (nil: the row's apply) would fall through to the dead map.
+        local cf = PURGE_DEAD_CF
+        if hostile then cf = r.cf end
+        out[#out + 1] = { filter = r.f .. "|" .. token, key = r.key .. "_purge",
+                          candidateFilters = cf, noVisLatch = r.noVisLatch, style = style }
+    end
+    for _, r in ipairs(recs) do
+        out[#out + 1] = { filter = hostile and (r.f .. "|!" .. token) or r.f, key = r.key .. "_rest",
+                          candidateFilters = r.cf, noVisLatch = r.noVisLatch }
+    end
+    return out
+end
+DF.SplitBuffRowForPurge = SplitBuffRowForPurge
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -3222,6 +3300,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     if filter == nil then filter = (prefix == "debuff") and "HARMFUL" or "HELPFUL" end
 
     local iconSize = g("Size") or 20
+    -- The row's offsets live in its scaled space (see the layout below).
+    local rowScale = tonumber(g("Scale")) or 1
+    if rowScale <= 0 then rowScale = 1 end
     local dur
     if g("ShowDuration") ~= false then
         local durFormat = g("DurationFormat") or "NUMBER"
@@ -3301,11 +3382,16 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             local map = candidateFilters.excludeSpellIDs or {}
             candidateFilters.excludeSpellIDs = map
             for i = 1, #DF.RaidBuffs do
-                local ids = DF.RaidBuffs[i][1]
-                if type(ids) == "table" then
-                    for j = 1, #ids do map[ids[j]] = true end
-                else
-                    map[ids] = true
+                local info = DF.RaidBuffs[i]
+                -- Forever's extras (Spirit, Thorns, Salvation, blessings) leave the bar
+                -- only while their own check is on: an untracked buff stays visible.
+                if not info.opt or db[info[2]] then
+                    local ids = info[1]
+                    if type(ids) == "table" then
+                        for j = 1, #ids do map[ids[j]] = true end
+                    else
+                        map[ids] = true
+                    end
                 end
             end
         end
@@ -3384,6 +3470,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- My Buffs ids hide only your own casts -- see SplitBuffRowForOwnCasts.
         if adMineOnly then
             filter, candidateFilters = SplitBuffRowForOwnCasts(filter, candidateFilters, adMineOnly)
+        end
+        -- Purgeable buffs lead the row, ringed (SplitBuffRowForPurge): only a frame
+        -- whose hook answers (opts.purge true / false; nil = the plain row).
+        if opts.purge ~= nil then
+            filter = SplitBuffRowForPurge(filter, opts.purge, db)
         end
     end
 
@@ -3476,6 +3567,9 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         testMax  = (prefix == "buff" and (db.testBuffCount or 2))
                 or (prefix == "debuff" and (db.testDebuffCount or 2))
                 or nil,
+        -- Which window of the sample pool the preview draws (AuraContainer testPoolOffset);
+        -- nil = the unit token's number, as before.
+        testSeed = opts.testSeed,
         enabled  = true,
         candidateFilters = candidateFilters,
         -- Native hover tooltips: governed by the Tooltips page's per-row Enable.
@@ -3491,8 +3585,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             anchor   = g("Anchor") or "BOTTOMRIGHT",
             growth   = g("Growth") or "LEFT_UP",
             wrap     = g("Wrap") or 3,
-            offsetX  = g("OffsetX") or 0,
-            offsetY  = g("OffsetY") or 0,
+            -- + the frame's extra row offset (opts.extraOffsetX/Y, see rowPlacement), in
+            -- the frame's units, so it is turned into the row's scaled space here.
+            offsetX  = (g("OffsetX") or 0) + (tonumber(opts.extraOffsetX) or 0) / rowScale,
+            offsetY  = (g("OffsetY") or 0) + (tonumber(opts.extraOffsetY) or 0) / rowScale,
+            -- The row's own corner on the anchor (nil = the anchor; see rowPlacement).
+            rowPoint = opts.rowPoint,
         },
         style = {
             icon   = { show = true, zoom = true, inset = 0 },
@@ -3598,7 +3696,8 @@ end
 local function recStyleSig(s)
     if type(s) ~= "table" then return "" end
     local b = s.badge
-    return "@" .. tostring(s.scale) .. "/" .. (b and (tostring(b.size) .. ","
+    return "@" .. tostring(s.scale) .. (s.highlight and ("/hl=" .. tostring(s.highlight.prefix)) or "")
+        .. "/" .. (b and (tostring(b.size) .. ","
         .. tostring(b.point) .. "," .. tostring(b.offsetX) .. "," .. tostring(b.offsetY) .. ","
         .. tostring(b.color and b.color.r) .. "," .. tostring(b.color and b.color.g) .. ","
         .. tostring(b.color and b.color.b) .. ","
@@ -3810,21 +3909,122 @@ local function confirmRetarget(h, label, unit)
     if c and c.GetUnit then
         local okU, bound = pcall(c.GetUnit, c)
         if okU and type(bound) == "string" and unit and bound ~= unit then
-            DF:DebugWarn("AURAROW", "%s: retarget MISMATCH - asked for %s, container is"
-                .. " bound to %s; this row is showing %s's auras",
-                label, tostring(unit), tostring(bound), tostring(bound))
+            if DF:DebugActive("AURAROW") then
+                DF:DebugWarn("AURAROW", "%s: retarget MISMATCH - asked for %s, container is"
+                    .. " bound to %s; this row is showing %s's auras",
+                    label, tostring(unit), tostring(bound), tostring(bound))
+            end
         end
     end
     local reparsed = h:Refresh()
     if reparsed then
-        DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
+        end
     elseif h.backend then
-        DF:DebugWarn("AURAROW", "%s: retarget re-parse did NOT happen on %s - the row may "
-            .. "still be showing the previous occupant", label, tostring(unit))
+        if DF:DebugActive("AURAROW") then
+            DF:DebugWarn("AURAROW", "%s: retarget re-parse did NOT happen on %s - the row may "
+                .. "still be showing the previous occupant", label, tostring(unit))
+        end
     else
-        DF:Debug("AURAROW", "%s: retarget re-parse deferred on %s (backend not attached yet)",
-            label, tostring(unit))
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "%s: retarget re-parse deferred on %s (backend not attached yet)",
+                label, tostring(unit))
+        end
     end
+end
+
+-- ★ A FRAME'S OWN ROW PLACEMENT (optional). A frame may carry
+--     frame.dfAuraRowPlacement = function(frame, db, prefix, anchor, growth)
+--                                -> dx, dy [, rowPoint]
+-- dx/dy, in the frame's own units, are added to that row's configured offset (for a
+-- frame that draws something of its own where a row would sit); rowPoint is the
+-- row's own corner placed on the anchor (layout.rowPoint, AuraContainer
+-- resolveGrowthLayout), for a frame whose rows hang outside it. Party, raid and
+-- pinned frames never set it, so for them this is 0, 0, nil and their rows are
+-- exactly as configured.
+-- The answer can move without anything the row drives watch (DF.auraLayoutVersion), so
+-- a drive that sees it move re-applies that row's layout as if the version had bumped.
+local function rowPlacement(frame, db, prefix)
+    local fn = frame and frame.dfAuraRowPlacement
+    if type(fn) ~= "function" then return 0, 0, nil end
+    local ok, dx, dy, point = pcall(fn, frame, db, prefix,
+        db[prefix .. "Anchor"] or "BOTTOMRIGHT", db[prefix .. "Growth"] or "LEFT_UP")
+    if not ok then return 0, 0, nil end
+    return tonumber(dx) or 0, tonumber(dy) or 0, (type(point) == "string") and point or nil
+end
+
+-- ★ A FRAME'S PURGEABLE-BUFF SPLIT (optional). A frame may carry
+--     frame.dfBuffPurgeable = function(frame, db) -> nil | true | false
+-- nil: the plain row (party, raid and pinned frames never set it); true: the unit is
+-- hostile, purgeable buffs lead the row and are ringed; false: the split is kept but
+-- held dark (a friendly unit). See SplitBuffRowForPurge. Asked on every drive (a
+-- target change re-drives the row), so a hostile <-> friendly flip re-applies the row.
+local function rowPurge(frame, db)
+    local fn = frame and frame.dfBuffPurgeable
+    if type(fn) ~= "function" then return nil end
+    local ok, v = pcall(fn, frame, db)
+    if not ok or v == nil then return nil end
+    return v and true or false
+end
+
+-- ============================================================
+-- PURGEABLE SPLIT: KEEP THE ROW'S MAX (Max buffs in all, not Max per group)
+-- Blizzard caps each group, not the row (Handle:SetGroupMaxOverrides), so the split
+-- row shares Max between its groups in display order: each group may use what the
+-- groups before it left, and each but the last uses up as many as the unit has for
+-- its filter. The single split: purgeable = Max, rest = Max - purgeable count. The
+-- own-cast split (mine / others): the purgeable groups first, then the rest groups,
+-- in that order, out of one budget.
+--
+-- THE COUNT, without reading an aura: C_UnitAuras.GetAuraSlots(unit, filter, cap)
+-- returns a continuation token and then one slot per matching aura, so the NUMBER of
+-- returns is a plain count however secret the slots are. Nothing it returns is read.
+-- ⚠ It knows the filter STRING only, not a group's candidate filters (spell-ID maps,
+-- Hide Long Buffs): a group with those can count high, and the row then shows FEWER
+-- than Max -- never more.
+-- No answer (no API, an error, no unit access): nil -> every group back to Max, the
+-- uncapped row, and one warning per session. Never an error.
+-- ============================================================
+local function countRet(ok, _token, ...)
+    if not ok then return nil end
+    return select("#", ...)
+end
+
+function DF:CountAuraSlots(unit, filter, cap)
+    local api = C_UnitAuras and C_UnitAuras.GetAuraSlots
+    if type(api) ~= "function" or not unit or type(filter) ~= "string" then return nil end
+    local n = countRet(pcall(api, unit, filter, cap))
+    if type(n) ~= "number" then return nil end
+    if cap and n > cap then n = cap end
+    return n
+end
+
+local warnedPurgeCount = false
+function DF:BuffPurgeCaps(records, unit, max, countFn)
+    countFn = countFn or function(u, f, c) return DF:CountAuraSlots(u, f, c) end
+    max = tonumber(max)
+    if type(records) ~= "table" or #records == 0 or not max then return nil end
+    local remaining, caps = max, {}
+    for i, r in ipairs(records) do
+        if type(r) ~= "table" or r.key == nil or type(r.filter) ~= "string" then return nil end
+        caps[r.key] = remaining
+        if i < #records and remaining > 0 then
+            local n = countFn(unit, r.filter, remaining)
+            if type(n) ~= "number" then
+                if not warnedPurgeCount then
+                    warnedPurgeCount = true
+                    DF:DebugWarn("AURAROW", "purgeable split: no aura count for %s (%s); the row is uncapped",
+                        tostring(unit), tostring(r.filter))
+                end
+                return nil
+            end
+            if n > remaining then n = remaining end
+            if n < 0 then n = 0 end
+            remaining = remaining - n
+        end
+    end
+    return caps
 end
 
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
@@ -3832,14 +4032,21 @@ end
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
 function DF:DriveBuffFactory(frame, db)
     local h = frame.buffFactory
+    local extraX, extraY, rowPoint = rowPlacement(frame, db, "buff")
+    local purge = rowPurge(frame, db)
     if not h then
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
+            testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
+            purge = purge,
         }))
         frame.buffFactory = h
         frame.dfBuffFactoryVersion = DF.auraLayoutVersion or 0
+        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY, frame.dfBuffRowPoint = extraX, extraY, rowPoint
+        frame.dfBuffRowPurge = purge
         if h then
             frame.buffFactoryStructSig = rowStructSig(h.config)
             frame.buffFactoryTuningSig = rowTuningSig(h.config)
@@ -3861,9 +4068,11 @@ function DF:DriveBuffFactory(frame, db)
 
     -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
-        DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
-            tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat)" or "")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
+                tostring(h:GetUnit()), tostring(frame.unit),
+                InCombatLockdown() and " (in combat)" or "")
+        end
         h:SetUnit(frame.unit)
         confirmRetarget(h, "buff", frame.unit)
     end
@@ -3878,12 +4087,23 @@ function DF:DriveBuffFactory(frame, db)
     -- rebuilds and tuning are legal there, and the engine holds a restyle back by itself
     -- while auras are secret (AuraContainer.AurasRestricted).
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfBuffFactoryVersion ~= ver then
+    -- A frame's row placement that moved (rowPlacement) counts as a bump for this row.
+    local extraMoved = frame.dfAuraRowPlacement ~= nil
+        and (frame.dfBuffRowExtraX ~= extraX or frame.dfBuffRowExtraY ~= extraY
+             or frame.dfBuffRowPoint ~= rowPoint)
+    -- ...and so does a purgeable split that moved (on / off, hostile / friendly).
+    local purgeMoved = frame.dfBuffPurgeable ~= nil and frame.dfBuffRowPurge ~= purge
+    if frame.dfBuffFactoryVersion ~= ver or extraMoved or purgeMoved then
         frame.dfBuffFactoryVersion = ver
+        frame.dfBuffRowExtraX, frame.dfBuffRowExtraY, frame.dfBuffRowPoint = extraX, extraY, rowPoint
+        frame.dfBuffRowPurge = purge
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
+            testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
+            purge = purge,
         })
         -- Re-apply the z-order via the engine (buff rows sit at +32, not ApplyZOrder's 40). Frame Level
         -- is deliberately NOT in the sig, so a level-only change never reaches _build.
@@ -3893,8 +4113,10 @@ function DF:DriveBuffFactory(frame, db)
             -- "I changed a setting and nothing happened" is always answered by WHICH
             -- SIG MOVED. Both are already computed, and this only runs when the
             -- layout version bumped, so it is free at steady state.
-            DF:Debug("AURAROW", "buff: REBUILD - struct sig %s -> %s",
-                tostring(frame.buffFactoryStructSig), tostring(structSig))
+            if DF:DebugActive("AURAROW") then
+                DF:Debug("AURAROW", "buff: REBUILD - struct sig %s -> %s",
+                    tostring(frame.buffFactoryStructSig), tostring(structSig))
+            end
             local prevStruct, prevTuning = frame.buffFactoryStructSig, frame.buffFactoryTuningSig
             frame.buffFactoryStructSig = structSig
             frame.buffFactoryTuningSig = tuningSig
@@ -3909,12 +4131,16 @@ function DF:DriveBuffFactory(frame, db)
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips) — discrete, leak-safe
             if not okRB then
                 frame.buffFactoryStructSig, frame.buffFactoryTuningSig = prevStruct, prevTuning
-                DF:DebugWarn("AURAROW", "buff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                if DF:DebugActive("AURAROW") then
+                    DF:DebugWarn("AURAROW", "buff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                end
             end
         else
             if frame.buffFactoryTuningSig ~= tuningSig then
-                DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
-                    tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
+                if DF:DebugActive("AURAROW") then
+                    DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
+                        tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
+                end
                 frame.buffFactoryTuningSig = tuningSig
                 -- Per-record filter STRINGS and candidateFilters both ride cfg.filter;
                 -- the struct sig pins every record's KEY, so the fresh list is
@@ -3926,6 +4152,17 @@ function DF:DriveBuffFactory(frame, db)
             end
             h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
         end
+    end
+
+    -- The purgeable split keeps the row at Max in all (DF:BuffPurgeCaps), re-counted on
+    -- every drive (UNIT_AURA, a target change). Friendly, off, or a preview (no real
+    -- unit to count): no caps, every group at Max.
+    if frame.dfBuffPurgeable ~= nil and h.SetGroupMaxOverrides then
+        local caps
+        if purge == true and not DF:FrameInTestScope(frame, "any") then
+            caps = DF:BuffPurgeCaps(h.config and h.config.filter, frame.unit, h.config and h.config.max)
+        end
+        h:SetGroupMaxOverrides(caps)
     end
 end
 
@@ -3941,7 +4178,7 @@ end
 -- Render gate (excludes test mode, which paints legacy icons directly).
 function DF:UseFactoryForDebuffs(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableAuras")
 end
 
@@ -4028,6 +4265,7 @@ function DF:DriveDebuffFactory(frame, db)
     end
 
     local h = frame.debuffFactory
+    local extraX, extraY, rowPoint = rowPlacement(frame, db, "debuff")
     if not h then
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
@@ -4040,7 +4278,10 @@ function DF:DriveDebuffFactory(frame, db)
         h = DF.AuraContainer:Create(frame, DF:BuildAuraRowConfig(db, "debuff", {
             unit = frame.unit,
             filterList = filterList,
+            testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
         }))
+        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY, frame.dfDebuffRowPoint = extraX, extraY, rowPoint
         frame.debuffFactory = h
         frame.dfDebuffFactoryVersion = ver
         if h then
@@ -4058,9 +4299,11 @@ function DF:DriveDebuffFactory(frame, db)
     end
 
     if h:GetUnit() ~= frame.unit then
-        DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
-            tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat)" or "")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
+                tostring(h:GetUnit()), tostring(frame.unit),
+                InCombatLockdown() and " (in combat)" or "")
+        end
         h:SetUnit(frame.unit)
         confirmRetarget(h, "debuff", frame.unit)
     end
@@ -4069,8 +4312,13 @@ function DF:DriveDebuffFactory(frame, db)
         h:SetIntentShown(true)   -- see the buff drive
     end
 
-    if frame.dfDebuffFactoryVersion ~= ver or selfMoved then
+    -- A frame's row placement that moved (rowPlacement) counts as a bump for this row.
+    local extraMoved = frame.dfAuraRowPlacement ~= nil
+        and (frame.dfDebuffRowExtraX ~= extraX or frame.dfDebuffRowExtraY ~= extraY
+             or frame.dfDebuffRowPoint ~= rowPoint)
+    if frame.dfDebuffFactoryVersion ~= ver or selfMoved or extraMoved then
         frame.dfDebuffFactoryVersion = ver
+        frame.dfDebuffRowExtraX, frame.dfDebuffRowExtraY, frame.dfDebuffRowPoint = extraX, extraY, rowPoint
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
         filterList = applyDebuffBlacklist(filterList, db)
@@ -4086,6 +4334,8 @@ function DF:DriveDebuffFactory(frame, db)
         local cfg = DF:BuildAuraRowConfig(db, "debuff", {
             unit = frame.unit,
             filterList = filterList,
+            testSeed = frame.dfTestAuraSeed,
+            extraOffsetX = extraX, extraOffsetY = extraY, rowPoint = rowPoint,
         })
         -- Re-apply the z-order via the engine. Frame Level is deliberately NOT in the sig,
         -- so a level-only change never reaches _build.
@@ -4095,8 +4345,10 @@ function DF:DriveDebuffFactory(frame, db)
             -- "I changed a setting and nothing happened" is always answered by WHICH
             -- SIG MOVED. Both are already computed, and this only runs when the
             -- layout version bumped, so it is free at steady state.
-            DF:Debug("AURAROW", "debuff: REBUILD - struct sig %s -> %s",
-                tostring(frame.debuffFactoryStructSig), tostring(structSig))
+            if DF:DebugActive("AURAROW") then
+                DF:Debug("AURAROW", "debuff: REBUILD - struct sig %s -> %s",
+                    tostring(frame.debuffFactoryStructSig), tostring(structSig))
+            end
             local prevStruct, prevTuning = frame.debuffFactoryStructSig, frame.debuffFactoryTuningSig
             frame.debuffFactoryStructSig = structSig
             frame.debuffFactoryTuningSig = tuningSig
@@ -4104,12 +4356,16 @@ function DF:DriveDebuffFactory(frame, db)
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural — REPLACES the config wholesale (structSig = park key)
             if not okRB then
                 frame.debuffFactoryStructSig, frame.debuffFactoryTuningSig = prevStruct, prevTuning
-                DF:DebugWarn("AURAROW", "debuff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                if DF:DebugActive("AURAROW") then
+                    DF:DebugWarn("AURAROW", "debuff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                end
             end
         else
             if frame.debuffFactoryTuningSig ~= tuningSig then
-                DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
-                    tostring(frame.debuffFactoryTuningSig), tostring(tuningSig))
+                if DF:DebugActive("AURAROW") then
+                    DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
+                        tostring(frame.debuffFactoryTuningSig), tostring(tuningSig))
+                end
                 frame.debuffFactoryTuningSig = tuningSig
                 -- hideLong minutes / Keep Important within a stable category set
                 -- live in the RECORDS' candidateFilters — swap the (group-identical)
@@ -4139,7 +4395,9 @@ function DF:SetPlayerDeadState(dead)
     dead = dead and true or false
     if DF.playerIsDead == dead then return end
     DF.playerIsDead = dead
-    DF:Debug("AURAROW", "player dead state -> %s", tostring(dead))
+    if DF:DebugActive("AURAROW") then
+        DF:Debug("AURAROW", "player dead state -> %s", tostring(dead))
+    end
 end
 
 -- ============================================================
@@ -4158,7 +4416,7 @@ end
 function DF:UseFactoryForDefensive(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and BuildDirectDefensiveFilters() ~= nil
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableDefensive")
 end
 
@@ -4363,9 +4621,11 @@ function DF:DriveDefensiveFactory(frame, db)
 
     -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
-        DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
-            tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat)" or "")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
+                tostring(h:GetUnit()), tostring(frame.unit),
+                InCombatLockdown() and " (in combat)" or "")
+        end
         h:SetUnit(frame.unit)
         confirmRetarget(h, "defensive", frame.unit)
     end
@@ -4388,8 +4648,10 @@ function DF:DriveDefensiveFactory(frame, db)
             -- "I changed a setting and nothing happened" is always answered by WHICH
             -- SIG MOVED. Both are already computed, and this only runs when the
             -- layout version bumped, so it is free at steady state.
-            DF:Debug("AURAROW", "defensive: REBUILD - struct sig %s -> %s",
-                tostring(frame.defensiveFactoryStructSig), tostring(structSig))
+            if DF:DebugActive("AURAROW") then
+                DF:Debug("AURAROW", "defensive: REBUILD - struct sig %s -> %s",
+                    tostring(frame.defensiveFactoryStructSig), tostring(structSig))
+            end
             local prevStruct, prevTuning = frame.defensiveFactoryStructSig, frame.defensiveFactoryTuningSig
             frame.defensiveFactoryStructSig = structSig
             frame.defensiveFactoryTuningSig = tuningSig
@@ -4397,12 +4659,16 @@ function DF:DriveDefensiveFactory(frame, db)
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips); structSig = park key
             if not okRB then
                 frame.defensiveFactoryStructSig, frame.defensiveFactoryTuningSig = prevStruct, prevTuning
-                DF:DebugWarn("AURAROW", "defensive: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                if DF:DebugActive("AURAROW") then
+                    DF:DebugWarn("AURAROW", "defensive: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                end
             end
         else
             if frame.defensiveFactoryTuningSig ~= tuningSig then
-                DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
-                    tostring(frame.defensiveFactoryTuningSig), tostring(tuningSig))
+                if DF:DebugActive("AURAROW") then
+                    DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
+                        tostring(frame.defensiveFactoryTuningSig), tostring(tuningSig))
+                end
                 frame.defensiveFactoryTuningSig = tuningSig
                 h.config.filter = cfg.filter    -- group-identical records (see the buff driver)
                 h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
@@ -4429,10 +4695,11 @@ local MISSING_BADGE_GAP  = 2
 -- Render gate (excludes test mode; the test drive calls the factory itself).
 -- WoW Forever runs this too: its buffs come in RANKS with different spell ids, so
 -- FilterRegistry/SpellDB_Forever.lua replaces DF.RaidBuffs with every rank, group version
--- and item source of the four shared buffs (no Skyfury / Bronze there).
+-- and item source of the four shared buffs (no Skyfury / Bronze there), plus Forever's
+-- extras (Divine Spirit, Thorns, Salvation, a paladin blessing) and their per-member rules.
 function DF:UseFactoryForMissingBuff(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableMissingBuff")
 end
 
@@ -4441,29 +4708,149 @@ function DF:FactoryOwnsMissingBuff(db)
     return (DF.AuraContainer and DF.AuraContainer.IsSupported()) or false
 end
 
--- Tracked raid buffs per settings: class-detection = only YOUR class's buff;
--- manual = every enabled missingBuffCheck* key. Returns DF.RaidBuffs entries
--- ({spellIDOrTable, configKey, name, class}) in DF.RaidBuffs order.
-local function missingTrackedBuffs(db)
+-- ---- Per-unit rules (WoW Forever) --------------------------------------------
+-- Forever's DF.RaidBuffs entries (FilterRegistry/SpellDB_Forever.lua, generated)
+-- carry rule fields; retail's carry none, so every rule below is a no-op there:
+--   manaOnly   = only on classes that use mana (Arcane Intellect, Divine Spirit)
+--   notTank    = never on a tank (Salvation)
+--   tankOption = a setting that, when on, keeps the buff to tanks (Thorns)
+--   opt        = a Forever extra: its own switch counts under auto-detect too, and
+--                auto-detect tracks it only once the player knows a rank of it
+--   blessings  = the paladin blessing check: one cell, icon picked per member role
+-- Roles come from DF:GetUnitRole; unknown / NONE reads as DPS. A unit whose class or
+-- role can't be read passes every rule (a missing icon beats a hidden one).
+local MISSING_NO_MANA = { WARRIOR = true, ROGUE = true }
+local BLESSING_ROLE_KEY = {
+    TANK = "missingBuffBlessingTank", HEALER = "missingBuffBlessingHealer", DAMAGER = "missingBuffBlessingDPS",
+}
+local BLESSING_ROLE_DEFAULT = { TANK = "might", HEALER = "wisdom", DAMAGER = "might" }
+
+-- Does the player know any rank of these spells? Cached per id list; the cache
+-- clears on SPELLS_CHANGED (event frame below).
+local missingKnownCache = {}
+local function playerKnowsAny(ids)
+    local known = missingKnownCache[ids]
+    if known == nil then
+        known = false
+        local isKnown = IsPlayerSpell or IsSpellKnown
+        if isKnown then
+            for i = 1, #ids do
+                if isKnown(ids[i]) then known = true; break end
+            end
+        end
+        missingKnownCache[ids] = known
+    end
+    return known
+end
+
+local function missingUnitRole(unit)
+    local role = DF.GetUnitRole and DF:GetUnitRole(unit)
+    if role == "TANK" or role == "HEALER" then return role end
+    return "DAMAGER"
+end
+
+local function missingUnitPasses(info, unit, db)
+    if not (info.manaOnly or info.notTank or info.tankOption) or not unit then return true end
+    if info.manaOnly then
+        local _, cls = UnitClass(unit)
+        if cls and MISSING_NO_MANA[cls] then return false end
+    end
+    if info.notTank and missingUnitRole(unit) == "TANK" then return false end
+    if info.tankOption and db[info.tankOption] then
+        -- Solo there is no group role: the player's own frame keeps the check.
+        if missingUnitRole(unit) ~= "TANK" and IsInGroup and IsInGroup() then return false end
+    end
+    return true
+end
+
+-- The blessing check's cell for one member: the role's pick, as a derived entry
+-- (same ids, key and slot; its own icon, filter and signature). A paladin is checked
+-- for THEIR OWN blessing (HELPFUL|PLAYER): with several paladins each one is reminded
+-- to bless everyone. A paladin who knows neither the pick nor Kings gets no cell.
+-- Anyone else (manual mode) is checked for any paladin's blessing.
+local missingBlessingCells = {}
+local function missingBlessingCell(info, unit, db)
+    local role = missingUnitRole(unit)
+    local pick = db[BLESSING_ROLE_KEY[role]]
+    if not info.blessings[pick] then pick = BLESSING_ROLE_DEFAULT[role] end
+    local isPaladin = select(2, UnitClass("player")) == "PALADIN"
+    if isPaladin and not playerKnowsAny(info.blessings[pick]) then
+        if not playerKnowsAny(info.blessings.kings) then return nil end
+        pick = "kings"
+    end
+    local sig = info[2] .. ":" .. pick .. (isPaladin and ":own" or "")
+    local cell = missingBlessingCells[sig]
+    if not cell then
+        cell = { info[1], info[2], info[3], info[4],
+            icon = info.blessings[pick][1],
+            filter = isPaladin and "HELPFUL|PLAYER" or "HELPFUL",
+            sig = sig }
+        missingBlessingCells[sig] = cell
+    end
+    return cell
+end
+
+-- Tracked raid buffs per settings: class-detection = only YOUR class's buff(s);
+-- manual = every enabled missingBuffCheck* key; then the per-unit rules above.
+-- Returns DF.RaidBuffs entries ({spellIDOrTable, configKey, name, class}) in
+-- DF.RaidBuffs order (the blessing check as a derived entry).
+local function missingTrackedBuffs(db, unit)
     local list = {}
-    local playerKey
+    local classKeys
     if db.missingBuffClassDetection then
-        playerKey = DF.ClassToRaidBuff and DF.ClassToRaidBuff[select(2, UnitClass("player"))]
-        if not playerKey then return list end   -- class has no raid buff -> nothing to track
+        local v = DF.ClassToRaidBuff and DF.ClassToRaidBuff[select(2, UnitClass("player"))]
+        if not v then return list end   -- class has no raid buff -> nothing to track
+        classKeys = {}
+        if type(v) == "table" then   -- Forever: a list per class
+            for i = 1, #v do classKeys[v[i]] = true end
+        else
+            classKeys[v] = true
+        end
     end
     for i = 1, #DF.RaidBuffs do
         local info = DF.RaidBuffs[i]
-        if (playerKey and info[2] == playerKey) or (not playerKey and db[info[2]]) then
-            list[#list + 1] = info
+        local want
+        if classKeys then
+            want = classKeys[info[2]]
+                and (not info.opt or (db[info[2]] and playerKnowsAny(info[1])))
+        else
+            want = db[info[2]]
+        end
+        if want and missingUnitPasses(info, unit, db) then
+            if info.blessings then info = missingBlessingCell(info, unit, db) end
+            if info then list[#list + 1] = info end
         end
     end
     return list
+end
+DF._missingTrackedBuffs = missingTrackedBuffs   -- tests
+
+-- Forever: a role change or a newly learned rank changes what each member is
+-- checked for. Re-drive every frame once the burst settles (the drive rebuilds a
+-- frame's cells only when its signature moved).
+if DF.IS_FOREVER then
+    local missingRuleEvents = CreateFrame("Frame")
+    missingRuleEvents:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    missingRuleEvents:RegisterEvent("SPELLS_CHANGED")
+    local pending = false
+    missingRuleEvents:SetScript("OnEvent", function(_, event)
+        if event == "SPELLS_CHANGED" then wipe(missingKnownCache) end
+        if pending then return end
+        pending = true
+        C_Timer.After(0.2, function()
+            pending = false
+            -- Past the 0.1s throttle: a roster sweep a moment earlier may have read
+            -- the old roles, and this pass must not be the one it drops.
+            DF.lastMissingBuffUpdate = nil
+            if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
+        end)
+    end)
 end
 
 -- Structural signature: the tracked set (cell handles are created per entry).
 local function missingFactorySig(tracked)
     local keys = {}
-    for i = 1, #tracked do keys[i] = tracked[i][2] end
+    for i = 1, #tracked do keys[i] = tracked[i].sig or tracked[i][2] end
     return table.concat(keys, ",")
 end
 
@@ -4477,7 +4864,7 @@ local function buildMissingCellConfig(info, unit, size)
     return {
         unit = unit,
         mode = "missing",
-        filter = "HELPFUL",
+        filter = info.filter or "HELPFUL",   -- the paladin's own-blessing cell: HELPFUL|PLAYER
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
         -- ☠ MUST BE EXPLICIT, AND MUST BE 0. ApplyZOrder does
@@ -4545,7 +4932,7 @@ end
 local function styleMissingBadge(h, db, frame, info)
     local badge = h.GetBadgeFrame and h:GetBadgeFrame()
     if not badge then return end
-    local firstID = type(info[1]) == "table" and info[1][1] or info[1]
+    local firstID = info.icon or (type(info[1]) == "table" and info[1][1] or info[1])
     if not badge.dfIcon then
         badge.dfIcon = badge:CreateTexture(nil, "ARTWORK")
         badge.dfIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -4728,7 +5115,7 @@ function DF:DriveMissingBuffFactory(frame, db)
     -- Lazy strip + cells; recreate the cells when the tracked set changes (rare:
     -- settings toggle / class-detection flip). Handle creation is combat-guarded
     -- inside the factory (defers the container build to regen).
-    local tracked = missingTrackedBuffs(db)
+    local tracked = missingTrackedBuffs(db, frame.unit)
     if #tracked == 0 then
         -- Nothing to track (no manual buffs checked / class has no raid buff):
         -- drop any stale cells and keep the strip hidden.
@@ -4756,9 +5143,11 @@ function DF:DriveMissingBuffFactory(frame, db)
     if not cells or frame.missingFactorySig ~= sig then
         -- The one destructive edge in this row: every cell is destroyed and the set
         -- rebuilt. Worth seeing, and it only fires when the tracked-buff set moves.
-        DF:Debug("AURAROW", "missing buff: REBUILD cells - sig %s -> %s (%s)",
-            tostring(frame.missingFactorySig), tostring(sig),
-            cells and "replacing existing" or "first build")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "missing buff: REBUILD cells - sig %s -> %s (%s)",
+                tostring(frame.missingFactorySig), tostring(sig),
+                cells and "replacing existing" or "first build")
+        end
         if cells then
             for _, h in pairs(cells) do h:Destroy() end
         end
@@ -4866,13 +5255,21 @@ local function driveFactoryRowsNow(frame)
     -- Unlike the drives above, the sync has no version latch of its own: it re-walks its
     -- signatures every time. Skipped when this frame was already synced at the current
     -- version for this unit -- a layout switch's own sweep has always done so a frame earlier.
+    -- ☠ THE "IS ME" ANSWER IS THE THIRD KEY. A roster reshuffle can point the SAME raidN token
+    -- at a different player, you included, and Only on My Frame blocks then belong on a
+    -- different frame. Version and unit both read unchanged, so without this key the sync is
+    -- skipped and the reminder stays on whoever now holds your old token.
+    local ADF = DF.AuraDesigner and DF.AuraDesigner.Factory
     if DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
-        and DF.AuraDesigner and DF.AuraDesigner.Factory
+        and ADF
         and DF.UseFactoryForAD and DF:UseFactoryForAD(frame, db)
-        and not (frame.dfADSyncVer == DF.auraLayoutVersion and frame.dfADSyncUnit == frame.unit) then
+        and not (frame.dfADSyncVer == DF.auraLayoutVersion and frame.dfADSyncUnit == frame.unit
+            and (not ADF.ADGate or frame.dfADSyncMe == ADF.ADGate.frameIsMe(frame))) then
         DF.AuraDesigner.Factory:SyncFrame(frame)
     end
 end
+-- One frame's rows, for a frame the walk below doesn't reach.
+DF.DriveFactoryRowsNow = driveFactoryRowsNow
 
 -- DEBOUNCED to one pass per frame-render: GUI callbacks often bump the version
 -- several times in one click (Invalidate + UpdateAllFrames chains), and slider
@@ -4899,6 +5296,10 @@ function DF:RefreshFactoryRows()
         if DF.PinnedFrames and DF.PinnedFrames.ForEachActiveFrame then
             DF.PinnedFrames:ForEachActiveFrame(driveFactoryRowsNow)
         end
+        -- Group pet frames carry their own buff/debuff rows with pet-specific
+        -- placement (Frames/Pets.lua PET AURA ROWS); their filters and looks follow
+        -- the main rows, so the same edits re-drive them -- preview pets included.
+        if DF.RefreshPetAuras then DF:RefreshPetAuras() end
     end)
 end
 
@@ -5095,6 +5496,19 @@ local function RestoreParent(frame)
         reparentedFrames[frame] = nil
     end
 end
+
+-- ★ SHARED WITH OTHER MODULES. The three helpers above, for any code that hides a
+-- Blizzard frame of its own, so there is one implementation and one record of what
+-- was stripped and reparented:
+--   DF.BlizzardHide.StripEvents(frame, fullDisable)  -- needs frame.unit; see above
+--   DF.BlizzardHide.Reparent(frame)                  -- out of combat only
+--   DF.BlizzardHide.Restore(frame)                   -- back to the recorded parent
+-- Claim the frame first (DF:ClaimBlizzardFrame, Core.lua) when DandersFrames has
+-- handling of its own for it.
+DF.BlizzardHide = DF.BlizzardHide or {}
+DF.BlizzardHide.StripEvents = StripUnitFrameEvents
+DF.BlizzardHide.Reparent = ReparentToHidden
+DF.BlizzardHide.Restore = RestoreParent
 
 -- Function to restore all events on a frame (call Blizzard's setup function)
 local function RestoreUnitFrameEvents(frame)
@@ -5826,14 +6240,16 @@ local function checkFrameOverflow(frame)
                             if not okA or (issecretvalue and issecretvalue(canAssist)) then canAssist = "?" end
                             local inRange = frame.dfInRange
                             if issecretvalue and issecretvalue(inRange) then inRange = "secret" end
-                            DF:DebugWarn("AURAROW",
-                                "POOL GREW %s %s row group %s: %d -> %d — more than %d auras sat in"
-                                .. " this one group at once (latched even if since healed)"
-                                .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
-                                tostring(frame.unit), label, tostring(key), prev, n, prev,
-                                tostring(DF.playerIsDead), tostring(DF.playerInCombat),
-                                tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
-                                tostring(inRange))
+                            if DF:DebugActive("AURAROW") then
+                                DF:DebugWarn("AURAROW",
+                                    "POOL GREW %s %s row group %s: %d -> %d — more than %d auras sat in"
+                                    .. " this one group at once (latched even if since healed)"
+                                    .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
+                                    tostring(frame.unit), label, tostring(key), prev, n, prev,
+                                    tostring(DF.playerIsDead), tostring(DF.playerInCombat),
+                                    tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
+                                    tostring(inRange))
+                            end
                         end
                     end
                 end

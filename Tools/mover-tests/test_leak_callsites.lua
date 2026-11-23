@@ -179,7 +179,9 @@ check(panel:find("AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI
 -- 3. THE CONVERTED CALL SITES
 -- ============================================================
 local options = options_file_source("GUI/Pages/Options.lua")
-local modules = options_file_source("GUI/Pages/Modules.lua")
+-- The profile pages (Manage, Import / Export) moved to their own file with the
+-- Profiles rail item.
+local modules = options_file_source("GUI/Pages/Profiles.lua")
 local frames  = options_file_source("GUI/Pages/Frames.lua")
 local auras   = options_file_source("GUI/Pages/Auras.lua")
 local api     = df_file_source("Core/API.lua")

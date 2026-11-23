@@ -1403,3 +1403,41 @@ do
     NS.Session = nil
     NS.db = nil
 end
+
+-- ============================================================
+-- AN ELEMENT WITH NO FRAME YET (getFrame answers nil, getSize answers)
+-- A consumer whose frame only exists once something happens (a unit that is not
+-- there yet, a bar that has not been built) still gets a slab: getSize's size, at
+-- the record's position, reading "hidden". With "Show hidden movers" off it gets
+-- none, the same as an element whose frame is hidden.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    R:RegisterAddon("NF", { title = "NF" })
+    R:Register("NF", "ghost", { title = "ghost", getFrame = function() return nil end,
+        getSize = function() return 120, 50 end,
+        getPos = function() return { point = "TOPLEFT", x = -400, y = 300 } end,
+        onChanged = function() end })
+    P:Build()
+    local b = P.proxies["NF:ghost"]
+    check(b ~= nil and b:IsShown(), "no frame: a slab is still drawn")
+    if b then
+        eq(b:GetWidth(), 120, "no frame: the slab takes getSize's width")
+        eq(b:GetHeight(), 50, "no frame: ...and height")
+        local pt = b._lastPoint
+        -- TOPLEFT (-400, 300) of a 120x50 box: its centre is (-340, 275).
+        check(pt and pt[1] == "CENTER" and pt[4] == -340 and pt[5] == 275,
+              "no frame: the slab sits at the record's position")
+        eq(b.coords:GetText(), "hidden", "no frame: the coords say hidden")
+    end
+    P:DestroyAll()
+    NS.db.showHiddenMovers = false
+    P:Build()
+    check(P.proxies["NF:ghost"] == nil, "no frame, hidden movers off: no slab")
+    P:DestroyAll()
+    R:UnregisterAddon("NF")
+    R.ready = wasReady
+    NS.db = nil
+end

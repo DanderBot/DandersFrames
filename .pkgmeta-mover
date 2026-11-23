@@ -1,17 +1,20 @@
 package-as: DandersMover
 enable-nolib-creation: no
 
-# Second packager run (release.yml, `-m .pkgmeta-mover`): ships ONLY the
-# DandersMover folder to its own CurseForge project. Same move-folders shape
-# as .pkgmeta; everything else in the container is ignored.
+# Used by .github/workflows/release-mover.yml (`-m .pkgmeta-mover`) on
+# `mover-v*` tags: ships ONLY the DandersMover folder to its own CurseForge
+# project. Same move-folders shape as .pkgmeta; everything else in the
+# container is ignored.
 move-folders:
   DandersMover/DandersMover: DandersMover
 
 ignore:
   - DandersFrames
   - DandersFrames_Options
+  - DandersFrames_UnitFrames
   - CHANGELOG.md
   - RELEASE_NOTES.md
+  - RELEASE_NOTES_MOVER.md
   - CHANGELOG_ARCHIVE.md
   - README.md
   - TRANSLATING.md
@@ -27,16 +30,14 @@ ignore:
   - DandersUI
   # dev-only test consumer, never shipped
   - DandersMoverDemo
-  # its in-addon twin: the /mover demo frames (also cut from the TOC by do-not-package)
-  - DandersMover/Demo.lua
+  # The guides, for the repo. README and LICENSE do ship.
+  - DandersMover/docs
 
 manual-changelog:
-  # Written by release.yml: this build's section of CHANGELOG.md only.
-  filename: RELEASE_NOTES.md
+  # Written by release-mover.yml: the top section of DandersMover/CHANGELOG.md.
+  filename: RELEASE_NOTES_MOVER.md
   markup-type: markdown
 
 embedded-libraries:
   - libstub
   - callbackhandler
-optional-dependencies:
-  - danders-frames

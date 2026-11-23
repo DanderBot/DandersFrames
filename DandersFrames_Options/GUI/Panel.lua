@@ -16,13 +16,9 @@ local C_PANEL, C_ELEMENT, C_BORDER, C_ACCENT, C_RAID, C_HOVER, C_TEXT, C_TEXT_DI
 -- The window's own ground. Only the window is drawn in it -- every panel inside
 -- is C_PANEL over it -- which is why it has not been needed in this file before.
 local C_BACKGROUND = GUI.Colors.background
--- The BINDS tab's own accent. Not in GUI.Colors because it is not a MODE colour
--- the theme tracks (party purple / raid orange are); it is one tab's identity.
--- Hoisted out of its StyleButton call because the shared underline needs to wear
--- it too, and the two must not be able to disagree.
-local C_CLICKS = { r = 0.2, g = 0.8, b = 0.4 }
--- The GLOBAL tab's: see THE GLOBAL TAB in GUI/GUI.lua.
-local C_GLOBAL = GUI.GlobalAccent
+-- (Binds' green and GLOBAL's teal are the modules' own accents now: see
+-- GUI.ClicksAccent in GUI/ModuleRegistry.lua and GUI.GlobalAccent in GUI/GUI.lua.
+-- The rail and deck 2 read them through each module's accent().)
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -106,6 +102,34 @@ end
 
 function GUI.PageUsableWidth(childWidth)
     return (childWidth or 0) - 2 * SettingsBox.colMargin
+end
+
+-- ★ A PAGE'S OWN MINIMUM WINDOW WIDTH. GUI.PageMinWidths[pageName] = a number, or a
+-- function returning one (or nil) -- for a page that measures what it needs, such
+-- as one that reflows to a narrow layout and has to stop the window at that
+-- layout's width. Read by the panel's page-width bounds (with the wide pages and a
+-- module's deck row: the largest wins), whenever the page is selected. A page that
+-- only knows its number after its first build calls GUI.ApplyPageWidthBounds(name).
+GUI.PageMinWidths = GUI.PageMinWidths or {}
+function GUI:PageMinWidth(name)
+    local v = name and GUI.PageMinWidths[name]
+    if type(v) == "function" then
+        local ok, r = pcall(v)
+        v = ok and r or nil
+    end
+    return type(v) == "number" and v or nil
+end
+
+-- The window's width less the width a page's widgets get: what a page adds to its
+-- own content width to name a WINDOW width. Measured, not summed from the
+-- constants, so it can never disagree with the frames on screen; nil before the
+-- window exists.
+function GUI.PageChromeWidth()
+    local frame, content = DF.GUIFrame, GUI.contentFrame
+    if not (frame and content and frame.GetWidth and content.GetWidth) then return nil end
+    local fw, cw = frame:GetWidth() or 0, content:GetWidth() or 0
+    if fw <= 0 or cw <= 0 then return nil end
+    return fw - GUI.PageUsableWidth(GUI.PageChildWidth(cw))
 end
 
 -- ★ WHERE COLUMN 2 STARTS, in the page CHILD's x: the content box's midpoint. Its own
@@ -273,9 +297,11 @@ end
 -- capturing this value (see the assignment in BuildPage for why).
 --
 -- The parameter is named `self` because it IS the page.
-local function PageRefreshStates(self)
+local function PageRefreshStatesBody(self)
     if not self.children then return end
-    local db = DF.db[GUI.SelectedMode]
+    -- The table this page was built against when it has one of its own (a module
+    -- page -- GUI.PageBuildDb), else the frame mode's. hideOn / disableOn read it.
+    local db = (GUI.PageBuildDb and GUI.PageBuildDb(self)) or DF.db[GUI.SelectedMode]
     if not db then return end
 
     -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
@@ -351,6 +377,9 @@ local function PageRefreshStates(self)
                 local shouldDisable = widget.disableOn(db)
                 if widget.SetEnabled then
                     widget:SetEnabled(not shouldDisable)
+                    -- The kit's hover reads this to show widget.disableReason
+                    -- (DandersUI/Widgets.lua, WHY IS IT GREY?).
+                    rawset(widget, "dfGreyed", shouldDisable and true or nil)
                 end
             end
             
@@ -421,6 +450,12 @@ local function PageRefreshStates(self)
     -- Layout - adjust column positions based on available width
     local x1, maxY = SettingsBox.colMargin, 0
     local col2X = usesTwoColumns and GUI.Column2X(contentWidth) or x1
+    -- ★ A FILL WIDGET (widget.layoutFill, full width) takes the viewport height left
+    -- below where it lands, never less than its layoutHeight -- a panel that scrolls
+    -- inside itself (a designer island) on a page with other content above it.
+    -- Its bottom then ends the page, so the page has no scroll range of its own.
+    local FILL_PAD = 10
+    local fillBottom
     -- The page's TOP margin, deliberately still a literal: it happens to equal
     -- colMargin today, and tying the vertical rhythm to a horizontal number is
     -- how one edit moves the other axis by accident.
@@ -506,6 +541,11 @@ local function PageRefreshStates(self)
 
             if widget.layoutCol == "both" then
                 local startY = math.min(y1, y2)
+                if widget.layoutFill then
+                    h = math.max(h, math.floor((self:GetHeight() or 0) + startY - FILL_PAD))
+                    widget:SetHeight(SnapLen(widget, h))
+                    fillBottom = -startY + h
+                end
                 widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
                 y1 = startY - h
                 y2 = startY - h
@@ -526,6 +566,18 @@ local function PageRefreshStates(self)
         end
     end
     local contentH = maxY + 40 + bannerOffset
+    if fillBottom and fillBottom >= maxY then contentH = fillBottom + FILL_PAD end
+    -- A fill widget follows the viewport's height, which this pass does not re-run
+    -- for on its own (it runs on content and width changes).
+    if fillBottom and not self._fillHooked then
+        self._fillHooked = true
+        self:HookScript("OnSizeChanged", function(page, _, h)
+            if page._fillLastH ~= h and page.RefreshStates then
+                page._fillLastH = h
+                page:RefreshStates()
+            end
+        end)
+    end
 
     -- FOOTER: the See-Also bar is designed as one, so on a page whose
     -- content does not fill the viewport it should sit at the BOTTOM
@@ -570,6 +622,20 @@ local function PageRefreshStates(self)
     if self.child and GUI.contentFrame then
         self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))
     end
+end
+
+-- ☠ The page being swept answers the kit's getSettingsDB while the sweep runs.
+-- A boxed group's children read their predicates' table through that host call,
+-- which otherwise follows GUI.CurrentPageName -- and SelectTab shows and sweeps
+-- the new page BEFORE it sets that name. A module page swept on arrival read the
+-- PREVIOUS page's table: every gated control in a box greyed out with its
+-- feature switched on (Target's Portrait page, coming from Fading).
+local function PageRefreshStates(self)
+    local held = GUI.StatesPage
+    GUI.StatesPage = self
+    local ok, err = pcall(PageRefreshStatesBody, self)
+    GUI.StatesPage = held
+    if not ok then error(err, 0) end
 end
 GUI.PageRefreshStates = PageRefreshStates
 
@@ -643,29 +709,32 @@ function DF:CreateGUI()
     
     -- Default and saved sizes
     --
-    -- ★ 640x600 is the DEFAULT only: a narrower page is a longer one, so the height pays
-    -- for the width.
+    -- ★ 700x600 is the DEFAULT only: a narrower page is a longer one, so the height pays
+    -- for the width. (640 before the module rail; the rail's 62 was added on top so the
+    -- content box keeps the width it had.)
     --
     -- ⚠ IT STAYS SINGLE-COLUMN. The cutover is 590 CONTENT pixels (SettingsBox.minCol * 2
-    -- + colGutter), which is a 777px window once the two margins, the 155 nav and its gap
-    -- are paid for.
+    -- + colGutter), which is an 839px window once the 62 rail, the two margins, the 155
+    -- nav and its gap are paid for.
     --
     -- ⚠ guiDb.width/height are read below and win outright -- these two are what a
     -- profile with no stored size falls back to, which after the account-wide move (see
     -- DF:GetWindowState) means a fresh install and nothing else.
     --
-    -- ...and the RESIZE FLOOR is 520x400, deliberately: the default is not a minimum, and
+    -- ...and the RESIZE FLOOR is 580x400, deliberately: the default is not a minimum, and
     -- a user who wants it smaller than it opens should be able to drag it there. See
-    -- normalMinWidth below, and ApplyPageWidthBounds, which raises the floor to 850 on
-    -- the wide pages -- opening one of those from a 640 window widens it.
+    -- normalMinWidth below, and ApplyPageWidthBounds, which raises the floor to 912 on
+    -- the wide pages -- opening one of those from a 700 window widens it.
     --
     -- ⚠ THE NUMBERS THEMSELVES LIVE IN THE RESIDENT GUI.lua (GUI.WindowDefaults).
     -- `/df resetgui` writes the default back into the window state from Core.lua,
     -- which can run before this companion has ever loaded -- so a literal here
-    -- and a literal there would be free to disagree.
+    -- and a literal there would be free to disagree. DF:GetWindowState clamps a
+    -- saved width to the same floor.
     local defaultWidth  = GUI.WindowDefaults.width
     local defaultHeight = GUI.WindowDefaults.height
-    local minWidth, minHeight = 520, 400
+    -- minHeight 440: the module rail's six items and its divider need it.
+    local minWidth, minHeight = GUI.WindowDefaults.minWidth, GUI.WindowDefaults.minHeight
     local maxWidth, maxHeight = 1200, 900
     
     -- Load saved position and size. Account-wide, NOT per-profile: see
@@ -1051,15 +1120,16 @@ function DF:CreateGUI()
     GUI.UpdateProfileChip = UpdateProfileChip
 
     -- The title yields to the cluster rather than running under it: at the
-    -- window's 520 minimum a long build tag and a long profile name would
+    -- window's 580 minimum a long build tag and a long profile name would
     -- otherwise overlap. Two anchors + no wrap means the tag clips instead.
     versionTag:SetPoint("RIGHT", profileOverrideStar, "LEFT", -8, 0)
     versionTag:SetJustifyH("LEFT")
     versionTag:SetWordWrap(false)
 
-    -- Changelog overlay (covers full content area below title bar)
+    -- Changelog overlay (covers full content area below title bar, right of the
+    -- module rail -- GUI/Rail.lua)
     local changelogOverlay = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    changelogOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -30)
+    changelogOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", GUI.RailWidth, -30)
     changelogOverlay:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     changelogOverlay:SetFrameStrata("FULLSCREEN_DIALOG")
     changelogOverlay:SetFrameLevel(300)
@@ -1139,10 +1209,12 @@ function DF:CreateGUI()
         end
         return versions
     end
+    -- Home's What's new reads the same parse (GUI/Pages/Home.lua).
+    GUI.ParseChangelog = ParseChangelog
 
     -- ★ DEEP LINKS. A feature card whose category names a settings page is a
-    -- button: click closes the changelog and lands on that page (EUI's rule —
-    -- no target, no click, mouse off so nothing invites a dead click). Keys are
+    -- button: click closes the changelog and lands on that page (no target,
+    -- no click, mouse off so nothing invites a dead click). Keys are
     -- the changelog's own "(Category)" tags, normalised to lowercase alnum, so
     -- "Click-Casting" / "Click Casting" / "click casting" all resolve. Targets
     -- are either a sub-tab id (party/raid mode) or the "clicks" mode.
@@ -1173,7 +1245,10 @@ function DF:CreateGUI()
         textdesigner = "text_designer", text = "text_designer",
         range = "display_fading", fading = "display_fading", classcolors = "display_classcolors",
         tooltips = "display_tooltips", visibility = "display_visibility",
+        -- The Profiles rail item's pages; SelectTab takes the window there.
         profiles = "profiles_manage", importexport = "profiles_importexport",
+        autolayouts = "profiles_auto", autoprofiles = "profiles_auto",
+        changedsettings = "profiles_changed",
         debug = "debug_console", wizards = "wizards",
         clickcasting = "clicks",
     }
@@ -1185,12 +1260,15 @@ function DF:CreateGUI()
         if not target then return end
         changelogOverlay:Hide()
         if target == "clicks" then
-            if GUI.ClicksButton then GUI.ClicksButton:Click() end
+            GUI:SelectModule("clicks")
             return
         end
         -- Sub-tabs live under the party/raid modes; from Clicks, step back to
-        -- Party first (the toolbar button owns that transition and its cleanup).
-        if GUI.SelectedMode == "clicks" and GUI.PartyButton then GUI.PartyButton:Click() end
+        -- Party first (the group module owns that transition and its cleanup).
+        -- A Profiles page needs no frame mode: SelectTab takes it there directly.
+        if GUI.SelectedMode == "clicks" and not (GUI.IsProfilesPage and GUI.IsProfilesPage(target)) then
+            GUI:SelectModule("group", "party")
+        end
         C_Timer.After(0, function()
             if GUI.LinkToSetting then GUI:LinkToSetting({ page = target, flash = false }) end
         end)
@@ -1660,7 +1738,7 @@ function DF:CreateGUI()
     end)
     
     -- =========================================================================
-    -- DECK 2 (operation): mode tabs left, verbs right
+    -- DECK 2 (operation): the current module's tabs left, verbs right
     -- -------------------------------------------------------------------------
     -- The strip the mode tabs and Test/Unlock have always drawn in, now an
     -- actual frame -- which is what lets it DRAG (the buttons are its children,
@@ -1668,11 +1746,19 @@ function DF:CreateGUI()
     -- and what lets the two clusters be anchored to its edges rather than to
     -- absolute offsets into the window.
     --
+    -- It starts RIGHT OF THE MODULE RAIL (GUI/Rail.lua): the rail runs from
+    -- under the title bar to the footer down the window's left edge, and its
+    -- items replace the old Global / Party / Raid / Binds tabs. What deck 2's
+    -- left side shows is the CURRENT module's own tabs (Party / Raid for Group
+    -- Frames) or, for a module without tabs, its name -- built and painted by
+    -- GUI:BuildModuleShell / GUI:RefreshModuleShell, both in GUI/Rail.lua, so
+    -- this function (near Lua's 200-local limit) declares nothing for them.
+    --
     -- ⚠ NO STRATA OF ITS OWN. See the header note on deck 1: these buttons must
     -- stay at the window's DIALOG strata, where they have always been.
     -- =========================================================================
     local deck2 = CreateFrame("Frame", nil, frame)
-    deck2:SetPoint("TOPLEFT", 0, -30)
+    deck2:SetPoint("TOPLEFT", GUI.RailWidth, -30)
     deck2:SetPoint("TOPRIGHT", 0, -30)
     deck2:SetHeight(30)
     deck2:EnableMouse(true)
@@ -1682,41 +1768,10 @@ function DF:CreateGUI()
     deck2:SetFrameLevel(frame:GetFrameLevel() + 1)
     GUI.HeaderDeck2 = deck2
 
-    -- Global / Party / Raid / Binds
-    local btnGlobal = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    -- Head of the LEFT chain (Global <- Party <- Raid <- Clicks), so this offset
-    -- is what every button along it inherits. The +1 lifts the 24px button off
-    -- deck 2's centre onto the row the header has always used.
-    btnGlobal:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnGlobal, 12), 1)
-    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives the
-    -- label colour and the cell. `tabStripe = false` on all four: the underlines
-    -- are ONE bar that glides between them (modeUnderline below), not stripes
-    -- switching off here and on there.
-    GUI:StyleButton(btnGlobal, { tab = true, tabStripe = false, text = L["GLOBAL"], accent = C_GLOBAL, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.GlobalButton = btnGlobal
-
-    local btnParty = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    btnParty:SetPoint("LEFT", btnGlobal, "RIGHT", SnapLen(btnParty, 4), 0)
-    GUI:StyleButton(btnParty, { tab = true, tabStripe = false, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.PartyButton = btnParty  -- Store for external access
-
-    local btnRaid = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
-    GUI:StyleButton(btnRaid, { tab = true, tabStripe = false, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.RaidButton = btnRaid  -- Store for external access
-
-    -- Click Casting tab button
-    local btnClicks = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
-    GUI:StyleButton(btnClicks, { tab = true, tabStripe = false, text = L["BINDS"], accent = C_CLICKS, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.ClicksButton = btnClicks
-
-    -- ONE underline for the three mode tabs, which GLIDES from the tab that was
-    -- active to the one that now is (UI:CreateSelectionMarker). Parented to deck
-    -- 2 rather than to a tab, so it can sit BETWEEN two of them mid-glide.
-    -- UpdateThemeColors drives it, right where the three SetActive calls are.
-    local modeUnderline = GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })
-    GUI.ModeUnderline = modeUnderline
+    -- The rail, the module tabs (GUI.PartyButton / GUI.RaidButton, attached to
+    -- the registry so SetModuleLocked can grey them), their gliding underline
+    -- (GUI.ModeUnderline) and the module title. Clicks go to GUI:SelectModule.
+    GUI:BuildModuleShell(frame, deck2, SaveWindowPos)
 
     -- =========================================================================
     -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
@@ -1963,13 +2018,17 @@ function DF:CreateGUI()
         if db then
             if GUI.SelectedMode == "raid" then isLocked = db.raidLocked else isLocked = db.locked end
         end
+        -- On the Unit Frames module the button is that module's own session.
+        local unitOptions = GUI.UnitFrameOptions
+        local unitsOwn = unitOptions and unitOptions.MoverButtonOwned and unitOptions.MoverButtonOwned()
+        if unitsOwn then isLocked = not unitOptions.MoverSessionActive() end
 
         -- While an auto layout drives the raid frames, dragging the base position by
         -- accident is the bug we're preventing: disable the toolbar Unlock and steer
         -- users to the active layout's own Unlock button (Auto Layouts page). Only the
         -- UNLOCK action is blocked (isLocked) — locking from here still works to finish
         -- a session.
-        local layoutActive = (GUI.SelectedMode == "raid") and DF.AutoProfilesUI
+        local layoutActive = (not unitsOwn) and (GUI.SelectedMode == "raid") and DF.AutoProfilesUI
             and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive()
         if layoutActive and isLocked then
             btnLock.dfDisabled = true
@@ -2019,6 +2078,14 @@ function DF:CreateGUI()
     btnLock:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
     btnLock:SetScript("OnClick", function()
+        local unitOptions = GUI.UnitFrameOptions
+        if unitOptions and unitOptions.MoverButtonOwned and unitOptions.MoverButtonOwned() then
+            unitOptions.ToggleMoverSession()
+            UpdateLockButtonState()
+            UpdateTestButtonState()
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            return
+        end
         if btnLock.dfDisabled then
             local name = DF.AutoProfilesUI and DF.AutoProfilesUI.GetActiveLayoutName
                 and DF.AutoProfilesUI:GetActiveLayoutName()
@@ -2214,35 +2281,22 @@ function DF:CreateGUI()
     end
 
     local function UpdateThemeColors()
-        -- Mode buttons use the shared underline-tab style; SetActive drives the
-        -- accent label + the cell (each button's per-mode accent set at creation).
-        -- GLOBAL showing means none of the three is: the mode under it is only
-        -- remembered, not active.
-        local globalView = GUI.GlobalView and true or false
-        btnGlobal:SetActive(globalView)
-        btnParty:SetActive(not globalView and GUI.SelectedMode == "party")
-        btnRaid:SetActive(not globalView and GUI.SelectedMode == "raid")
-        btnClicks:SetActive(not globalView and GUI.SelectedMode == "clicks")
         -- The frame mode GLOBAL returns to when it is entered from BINDS.
         if GUI.SelectedMode == "party" or GUI.SelectedMode == "raid" then
             GUI._lastFrameMode = GUI.SelectedMode
         end
-        -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
-        -- the three is active and wearing that tab's own accent from the moment
-        -- it sets off.
+        -- The derived module id: ToggleGUI writes SelectedMode directly and
+        -- reaches here, so this is where a write that bypassed SelectModule is caught.
+        GUI:SyncSelectedModule()
+        -- The module rail and deck 2's left side (GUI/Rail.lua): the rail item
+        -- lit in its module's accent, and the current module's tabs -- Party /
+        -- Raid with the one shared underline glided onto the active tab in that
+        -- tab's own accent -- or the module's name.
         --
         -- ⚠ INSTANT WHILE THE WINDOW IS HIDDEN. This runs on every OnShow (see
         -- the note below the function), and a glide nobody can see would only
         -- leave the bar mid-flight for the next visible one to start from.
-        local activeMode = (globalView and btnGlobal)
-            or (GUI.SelectedMode == "raid" and btnRaid)
-            or (GUI.SelectedMode == "clicks" and btnClicks)
-            or btnParty
-        local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)
-            or (activeMode == btnRaid and C_RAID)
-            or (activeMode == btnClicks and C_CLICKS)
-            or C_ACCENT
-        modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
+        GUI:RefreshModuleShell(not frame:IsShown())
         SwitchMark("t:modes")
 
         -- Test button look via the shared toggle styling (matches how the Lock
@@ -2286,8 +2340,8 @@ function DF:CreateGUI()
         local nc = GetThemeColor()
         -- ⚠ GUI.navMarker, not the local: the nav is built ~400 lines BELOW this
         -- function, so the upvalue does not exist yet at this point in the file
-        -- and a bare `navMarker` here would resolve as a global. (modeUnderline
-        -- above is fine -- deck 2 is built first.) Guarded for the same reason:
+        -- and a bare `navMarker` here would resolve as a global. (The module
+        -- shell above is fine -- deck 2 is built first.) Guarded for the same reason:
         -- this can run before the nav exists.
         local rail = GUI.navMarker
         for name, btn in pairs(GUI.Tabs) do
@@ -2361,6 +2415,18 @@ function DF:CreateGUI()
     -- OnShow handler is composed with, not replaced.
     frame:HookScript("OnShow", function() UpdateThemeColors() end)
 
+    -- The test mode the Test button speaks for: the module showing's own
+    -- (GUI/ModuleRegistry.lua def.testModeId, a mode registered with
+    -- DF:RegisterTestMode), or nil: the party / raid test mode.
+    GUI.ModuleTestMode = function()
+        local def = GUI.GetModule and GUI:GetModule()
+        local id = def and def.testModeId
+        if type(id) == "function" then id = id() end
+        local mode = type(id) == "string" and DF.GetTestMode and DF:GetTestMode(id) or nil
+        if mode and mode.isPreviewOn and mode.togglePreview then return mode end
+        return nil
+    end
+
     -- Function to update test button state (called externally)
     UpdateTestButtonState = function()
         -- Both cues read the USER's claim -- the same thing the panel's toggle shows
@@ -2370,10 +2436,19 @@ function DF:CreateGUI()
         -- its OWN claim, and driving the glyph off that made a plain unlock look like
         -- the user had switched test mode on. Frames being visible during an unlock is
         -- unlock's business; the chat line explains it.
+        -- One popup for every mode (TestMode/TestMode.lua); the preview cue is
+        -- the mode this window shows: the module's own (def.testModeId, e.g.
+        -- Unit Frames' Units), else Party / Raid.
         local panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
-        local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
-        local userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
-        btnTest:SetActive(panelOpen)
+        local userWants
+        local mode = GUI.ModuleTestMode()
+        if mode then
+            userWants = mode.isPreviewOn()
+        else
+            local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
+            userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
+        end
+        btnTest:SetActive(panelOpen and true or false)
         btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
             .. (userWants and "preview" or "preview_off") .. ".png")
         -- White text/icon in both states (state shown by the toggle border/fill).
@@ -2385,6 +2460,17 @@ function DF:CreateGUI()
     -- Test button scripts
     btnTest:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btnTest:SetScript("OnClick", function(self, button)
+        -- ★ THE BUTTON FOLLOWS THE MODULE. A left click always opens the one
+        -- test popup, which lands on the module's own mode by itself (the mode's
+        -- isCurrent). A right click quick-toggles the preview of the mode this
+        -- window shows: the module's own (def.testModeId -- Unit Frames' Units),
+        -- else the party / raid test mode, as always.
+        local mode = GUI.ModuleTestMode()
+        if mode and button == "RightButton" then
+            mode.togglePreview()
+            UpdateTestButtonState()
+            return
+        end
         if button == "RightButton" then
             -- Quick toggle test mode
             DF:ToggleTestMode()
@@ -2400,220 +2486,12 @@ function DF:CreateGUI()
     -- OnEnter/OnLeave left a stuck theme-coloured border because its OnLeave reset
     -- to themeColor@0.5 rather than the neutral border.
 
-    -- GLOBAL: the mode under it is left exactly as it is (see THE GLOBAL TAB in
-    -- GUI/GUI.lua), so there is no test-mode or unlock hand-over to make here.
-    btnGlobal:SetScript("OnClick", function()
-        if GUI.GlobalView then return end
-        GUI:EnterView(true)
-        GUI.SelectTab(GUI:LastTabInView())
-    end)
+    -- The rail items and the deck-2 tabs are thin callers of GUI:SelectModule
+    -- (wired in GUI/Rail.lua); the registry (GUI/ModuleRegistry.lua) owns
+    -- everything a switch does: the Party/Raid sync, locking the departing
+    -- mode, carrying test mode across, ending a mover session first, and
+    -- GLOBAL's shortcut back to the mode it sat on.
 
-    -- Back from GLOBAL to the mode it sat on. No mode changes, so the switch in
-    -- the handlers below -- the sync, the locks, the test hand-over, a new search
-    -- index, a second refresh of the page and of every override dot -- has
-    -- nothing to do. This is GLOBAL's own path, the other way.
-    -- ☠ A MODE SWITCH MUST NOT OVERLAP A MOVER SESSION. The handlers below lock the
-    -- departing mode and carry test mode across, but with unsaved moves the lock is only a
-    -- PROMPT -- the switch ran on underneath it, and the prompt's answer then released the
-    -- session's claim against the wrong mode: test frames stuck on screen, or both groups
-    -- hidden (Aphoex, a15 #7). So the session is ended first and the click replayed after.
-    -- Not for the mover's own Configure (MoverBridge.openOptionsPage clicks these buttons
-    -- mid-session on purpose, flagged by _moverOwnedClick), and not for a click on the
-    -- mode already showing, which switches nothing.
-    local function DeferForMoverSession(btn, mode)
-        if GUI._moverOwnedClick then return false end
-        if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end
-        local B = DF.MoverBridge
-        if not (B and B.IsSessionActive and B:IsSessionActive()) then return false end
-        B:EndSessionThen(function() btn:Click() end)
-        return true
-    end
-    local function LeaveGlobalTo(mode)
-        if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
-        GUI:EnterView(false)
-        GUI.SelectTab(GUI:LastTabInView())
-        return true
-    end
-
-    btnParty:SetScript("OnClick", function()
-        if DeferForMoverSession(btnParty, "party") then return end
-        if LeaveGlobalTo("party") then return end
-        -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
-        -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
-        GUI.GlobalView = false
-        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
-        -- this file), so that mode's retained page builds stay valid.
-        DF:SyncLinkedSections()
-
-        -- Carry test mode across the mode switch (raid test -> party test)
-        local carryTest = false
-        -- Before switching tabs, clean up current mode's test mode and unlock state
-        if GUI.SelectedMode == "raid" then
-            -- Lock raid frames if unlocked. LockRaidFrames owns the WHOLE transition:
-            -- the db flag, the container, the mover, grid, panel and pinned chrome.
-            -- ⚠ Do NOT stamp raidLocked or poke the container here before calling: when
-            -- LockRaidFrames' combat guard refuses, the db would say locked while every
-            -- mover stayed on screen for the rest of the fight, and the Lock button then
-            -- offered Unlock. In combat the state stays UNLOCKED (the guard says so in
-            -- chat) and the user locks after regen. A direct SetMovable poke also fights
-            -- UpdatePermanentMoverVisibility, which owns container movability.
-            local raidDb = DF:GetRaidDB()
-            if not raidDb.raidLocked then
-                if DF.LockRaidFrames then DF:LockRaidFrames() end
-            end
-            -- Disable raid test mode if active
-            if DF.raidTestMode then
-                carryTest = true
-                -- Hand-over: stay in container/pinned test mode across the swap rather
-                -- than tearing every aura container down for live data we never show
-                -- and rebuilding it a moment later. Cleared below.
-                DF._testModeHandover = true
-                DF:HideRaidTestFrames(true)  -- silent
-                -- Hides directly rather than through the owners, so drop raid's
-                -- claims to match. carryTest re-claims in the scope we land in.
-                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
-            end
-        end
-
-        GUI.SelectedMode = "party"
-        GUI:SetAccent(GUI.GetThemeColorFor(false))
-        if DF.Search then
-            DF.Search:InvalidateRegistry()
-            DF.Search:RefreshIfActive()
-        end
-        -- The page on screen is still the OTHER mode's build until the refresh
-        -- below swaps it; repainting it here would be undone on the way back.
-        GUI._holdPageRepaint = true
-        UpdateThemeColors()
-        GUI._holdPageRepaint = nil
-        GUI:ShowNormalContent()
-        GUI:UpdateTabAvailability()
-        -- Cached, not forced: a mode switch shows the other mode's build if it
-        -- is still good rather than trashing the page and building a new one.
-        GUI:RefreshCurrentPageForModeSwitch()
-
-        -- Keep test mode active when switching modes (just switch which mode it runs in).
-        -- Carried as the USER's claim: they had a preview up and are still asking for
-        -- one, just in the other scope.
-        if carryTest and DF.SetTestModeOwner then
-            DF:SetTestModeOwner("party", "user", true, true)   -- silent: the mode swap is the visible event
-            -- ShowTestFrames (unlike ShowRaidTestFrames) doesn't refresh the GUI,
-            -- so the test panel's toggle label would stay on "Enable Test Mode".
-            -- Refresh it now that party test mode is active.
-            if DF.TestPanel and DF.TestPanel:IsShown() then
-                DF.TestPanel:UpdateStateNoCallback()
-            end
-        end
-        if carryTest then
-            -- End the hand-over and settle: ShowTestFrames can bail (combat, party
-            -- frames disabled), which would otherwise leave the engines parked in
-            -- test mode with nothing testing. Teardown re-reads the real flags, so
-            -- it is a no-op when the incoming mode did start.
-            DF._testModeHandover = nil
-            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
-        end
-    end)
-    btnRaid:SetScript("OnClick", function()
-        if DeferForMoverSession(btnRaid, "raid") then return end
-        if LeaveGlobalTo("raid") then return end
-        -- Leaving GLOBAL, if it was up -- see the Party handler.
-        GUI.GlobalView = false
-        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
-        -- this file), so that mode's retained page builds stay valid.
-        DF:SyncLinkedSections()
-
-        -- Carry test mode across the mode switch (party test -> raid test)
-        local carryTest = false
-        -- Before switching tabs, clean up current mode's test mode and unlock state
-        if GUI.SelectedMode == "party" then
-            -- Lock party frames if unlocked
-            local partyDb = DF:GetDB()
-            if not partyDb.locked then
-                partyDb.locked = true
-                if DF.partyContainer then
-                    DF.partyContainer:EnableMouse(false)
-                    DF.partyContainer:SetMovable(false)
-                end
-                if DF.LockFrames then DF:LockFrames() end
-            end
-            -- Disable party test mode if active
-            if DF.testMode then
-                carryTest = true
-                -- Hand-over: see the raid->party handler above.
-                DF._testModeHandover = true
-                DF:HideTestFrames(true)  -- silent
-                -- Hides directly rather than through the owners, so drop party's
-                -- claims to match. carryTest re-claims in the scope we land in.
-                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
-            end
-        end
-
-        GUI.SelectedMode = "raid"
-        GUI:SetAccent(GUI.GetThemeColorFor(true))
-        if DF.Search then
-            DF.Search:InvalidateRegistry()
-            DF.Search:RefreshIfActive()
-        end
-        -- See the Party handler.
-        GUI._holdPageRepaint = true
-        UpdateThemeColors()
-        GUI._holdPageRepaint = nil
-        GUI:ShowNormalContent()
-        GUI:UpdateTabAvailability()
-        -- Cached, not forced: a mode switch shows the other mode's build if it
-        -- is still good rather than trashing the page and building a new one.
-        GUI:RefreshCurrentPageForModeSwitch()
-
-        -- Keep test mode active when switching modes (just switch which mode it runs in).
-        -- Carried as the USER's claim: they had a preview up and are still asking for
-        -- one, just in the other scope.
-        if carryTest and DF.SetTestModeOwner then
-            DF:SetTestModeOwner("raid", "user", true, true)    -- silent: the mode swap is the visible event
-        elseif carryTest and DF.ShowRaidTestFrames then
-            DF:ShowRaidTestFrames()
-        end
-        if carryTest then
-            -- End the hand-over and settle; see the raid->party handler above.
-            DF._testModeHandover = nil
-            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
-        end
-    end)
-    
-    -- Click Casting tab click handler
-    btnClicks:SetScript("OnClick", function()
-        if DeferForMoverSession(btnClicks) then return end
-        GUI.GlobalView = false
-        -- Clean up any test/unlock state from previous mode
-        if GUI.SelectedMode == "party" then
-            local partyDb = DF:GetDB()
-            if partyDb and not partyDb.locked then
-                partyDb.locked = true
-                if DF.LockFrames then DF:LockFrames() end
-            end
-            if DF.testMode then DF:HideTestFrames(true) end
-            -- Leaving for a tab with no frames: nobody is asking for a preview
-            -- any more, so drop the claims rather than let them outlive it.
-            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
-        elseif GUI.SelectedMode == "raid" then
-            local raidDb = DF:GetRaidDB()
-            if raidDb and not raidDb.raidLocked then
-                raidDb.raidLocked = true
-                if DF.LockRaidFrames then DF:LockRaidFrames() end
-            end
-            if DF.raidTestMode then DF:HideRaidTestFrames(true) end
-            -- As above: no preview is wanted on a tab that has no frames.
-            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
-        end
-
-        GUI.SelectedMode = "clicks"
-        GUI:SetAccent(GUI.GetThemeColorFor(false))
-        if DF.Search then 
-            DF.Search:HideResults()
-        end
-        UpdateThemeColors()
-        GUI:ShowClickCastingContent()
-    end)
-    
     -- Tab container (left side) - with scrolling
     -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
     -- the page viewport is: these frames are anchored by two corners, nothing
@@ -2626,8 +2504,9 @@ function DF:CreateGUI()
     -- fractional baseline -- which is what is left of the nav ghost now that the
     -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, -64))
-    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, 36))
+    -- Right of the module rail (GUI.RailWidth, GUI/Rail.lua), then the usual pad.
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, GUI.RailWidth + PageBox.windowPad), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, GUI.RailWidth + PageBox.windowPad), SnapLen(frame, 36))
     tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
@@ -2894,7 +2773,7 @@ function DF:CreateGUI()
     -- CLICK CASTING PANEL (full width, replaces normal content when active)
     -- =========================================================================
     local clickCastPanel = CreateFrame("Frame", nil, frame)
-    clickCastPanel:SetPoint("TOPLEFT", 12, -64)
+    clickCastPanel:SetPoint("TOPLEFT", GUI.RailWidth + 12, -64)   -- right of the module rail
     clickCastPanel:SetPoint("BOTTOMRIGHT", -12, 36)
     CreateElementBackdrop(clickCastPanel)
     clickCastPanel:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
@@ -3039,16 +2918,18 @@ function DF:CreateGUI()
     end
     
     -- Store min width references for tab switching
-    local normalMinWidth = minWidth  -- 520
+    local normalMinWidth = minWidth  -- 580
     -- Shared minimum width for the "wide" pages (Binds/Click Casting and every
     -- page in WIDE_PAGES).
-    local wideMinWidth = 850
+    -- 850 before the module rail; + GUI.RailWidth so a wide page keeps the same
+    -- content width it had.
+    local wideMinWidth = 850 + GUI.RailWidth
 
-    -- Pages drawn full width rather than in card columns. They fit 640, but read
-    -- as a sliver of a tool there, so opening one widens the window to 850.
+    -- Pages drawn full width rather than in card columns. They fit 700, but read
+    -- as a sliver of a tool there, so opening one widens the window to 912.
     -- ☠ Hoisted to panel scope on purpose. This lived INSIDE SelectTab, which meant
     -- (a) it was rebuilt on every tab click, and (b) ShowNormalContent could not see it --
-    -- so returning from BINDS to PARTY/RAID reset the minimum to 520 while a wide page was
+    -- so returning from BINDS to PARTY/RAID reset the minimum to 580 while a wide page was
     -- still the visible one, and it could then be dragged narrow. Any new consumer of the
     -- wide-page rule reads THIS table; do not re-declare a local copy.
     local WIDE_PAGES = {
@@ -3063,6 +2944,15 @@ function DF:CreateGUI()
     -- Returns whether the page is a wide one, and whether the window just widened.
     local function ApplyPageWidthBounds(name)
         local wanted = WIDE_PAGES[name] and wideMinWidth or normalMinWidth
+        -- A sidebar module's view (Unit Frames) can carry more deck-2 tabs than the
+        -- 580 minimum leaves room for beside the Undo / Test / Unlock cluster:
+        -- its measured row (GUI:ModuleDeckMinWidth, GUI/Rail.lua) raises the floor.
+        local view = GUI.ModuleView and GUI.GetModule and GUI:GetModule(GUI.ModuleView)
+        local deckMin = view and GUI.ModuleDeckMinWidth and GUI:ModuleDeckMinWidth(view)
+        if deckMin and deckMin > wanted then wanted = deckMin end
+        -- A page's own measured minimum (GUI:PageMinWidth) raises the floor.
+        local own = GUI:PageMinWidth(name)
+        if own and own > wanted then wanted = own end
         frame:SetResizeBounds(wanted, minHeight, maxWidth, maxHeight)
         local widened = false
         if frame:GetWidth() < wanted then
@@ -3071,26 +2961,44 @@ function DF:CreateGUI()
         end
         return WIDE_PAGES[name], widened
     end
+    -- Published so a page that measures its own minimum after it is built can have
+    -- the window take it at once (GUI.PageMinWidths).
+    GUI.ApplyPageWidthBounds = ApplyPageWidthBounds
 
     -- Function to show normal Party/Raid content
     function GUI:ShowNormalContent()
         if clickCastPanel then clickCastPanel:Hide() end
+        if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
+        if GUI.HideModuleViews then GUI:HideModuleViews() end
         if tabFrame then tabFrame:Show() end
         if content then content:Show() end
 
         -- Restore the minimum width FOR THE PAGE WE ARE RETURNING TO -- not a blanket
-        -- normalMinWidth: resetting to 520 unconditionally leaves a wide page we are
-        -- returning to draggable down to 520 and squashed.
+        -- normalMinWidth: resetting to 580 unconditionally leaves a wide page we are
+        -- returning to draggable down to 580 and squashed.
         ApplyPageWidthBounds(GUI.CurrentPageName)
 
         -- Update tab availability for current mode (greys out tabs for disabled modes)
         GUI:UpdateTabAvailability()
     end
     
+    -- A rail item with a page of its own (Home, Modules) or none yet (GUI/Rail.lua,
+    -- PLACEHOLDER PANEL): the sidebar and page make way for it.
+    function GUI:ShowPlaceholderContent(def)
+        if tabFrame then tabFrame:Hide() end
+        if content then content:Hide() end
+        if clickCastPanel then clickCastPanel:Hide() end
+        -- Off Binds' wider minimum: nothing here needs it.
+        frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
+        GUI:PaintPlaceholderPanel(def)
+    end
+
     -- Function to show Click Casting content
     function GUI:ShowClickCastingContent()
         if tabFrame then tabFrame:Hide() end
         if content then content:Hide() end
+        if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
+        if GUI.HideModuleViews then GUI:HideModuleViews() end
         
         -- Set larger minimum width for clicks tab
         frame:SetResizeBounds(wideMinWidth, minHeight, maxWidth, maxHeight)
@@ -3116,6 +3024,19 @@ function DF:CreateGUI()
     -- =========================================================================
     -- Is this nav row in the sidebar for the tab now showing?
     function GUI:IsTabInView(btn)
+        -- PROFILES first: its own sidebar, whatever GLOBAL/mode sit underneath
+        -- (THE PROFILES SIDEBAR, GUI/GUI.lua). Its pages are on no other tab.
+        local isProfiles = GUI.IsProfilesPage and GUI.IsProfilesPage(btn.tabName) or false
+        if GUI.ProfilesView then return isProfiles end
+        if isProfiles then return false end
+        -- A page given to a module (GUI:SetPageModule) is on that module's sidebar
+        -- only, and that sidebar shows nothing else.
+        local owner = GUI.ModulePageOwner and GUI.ModulePageOwner[btn.tabName]
+        if GUI.ModuleView then
+            -- ...less the pages its current tab does not show (def.pageInView).
+            return owner == GUI.ModuleView and GUI:ModulePageInView(btn.tabName)
+        end
+        if owner then return false end
         if btn.partyOnly and GUI.SelectedMode == "raid" then return false end
         return GUI.IsGlobalPage(btn.tabName) == (GUI.GlobalView == true)
     end
@@ -3148,7 +3069,11 @@ function DF:CreateGUI()
 
     -- The page this tab showed last, else its first.
     function GUI:LastTabInView()
-        local last = GUI.GlobalView and GUI._lastGlobalPage or GUI._lastModePage
+        local last = (GUI.ProfilesView and GUI._lastProfilesPage)
+            or (GUI.ModuleView and GUI._lastModuleViewPage and GUI._lastModuleViewPage[GUI.ModuleView])
+            or (not GUI.ProfilesView and GUI.GlobalView and GUI._lastGlobalPage)
+            or (not GUI.ProfilesView and not GUI.GlobalView and GUI._lastModePage)
+            or nil
         local btn = last and GUI.Tabs[last]
         if btn and GUI:IsTabInView(btn) then return last end
         return GUI:FirstTabInView()
@@ -3167,6 +3092,7 @@ function DF:CreateGUI()
             switchMarks = { last = t0, t0 = t0 }
         end
         GUI.GlobalView = global and true or false
+        GUI:SyncSelectedModule()
         GUI:SetAccent(GUI.CurrentAccent())
         SwitchMark("accent")
         local held = GUI._redirectingTab
@@ -3205,12 +3131,22 @@ function DF:CreateGUI()
         end
         -- ★ A PAGE LIVES ON ONE TAB, and asking for it goes there: search results,
         -- cross-links and every "open in Filter Designer" land here, from either
-        -- side and from BINDS.
-        if GUI.Tabs[name] and (GUI.IsGlobalPage(name) ~= (GUI.GlobalView == true)
-                               or GUI.SelectedMode == "clicks") then
-            GUI:EnterView(GUI.IsGlobalPage(name))
+        -- side and from BINDS. The page's module is asked for through
+        -- SelectModule's page path, which changes the view only (EnterView) and
+        -- leaves the page to the rest of this function.
+        -- ...and when the page is on ANOTHER TAB of the module showing (a module
+        -- whose tabs each have pages of their own -- def.tabForPage), the same path
+        -- moves the tab.
+        if GUI.Tabs[name] and (GUI:ModuleForPage(name) ~= GUI.CurrentModuleId()
+                               or GUI:PageWantsOtherTab(name)) then
+            GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })
             SwitchMark("view")
         end
+        -- ★ A Profiles page wears its own accent (GUI.ProfilesPageAccents,
+        -- GUI/GUI.lua), so the accent moves with the PAGE here, before the page
+        -- is built or shown -- the marker, the crumb and the repaint below all
+        -- read it.
+        if GUI.ProfilesView and GUI.CurrentAccent then GUI:SetAccent(GUI.CurrentAccent(name)) end
 
         -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
         -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the
@@ -3409,18 +3345,27 @@ function DF:CreateGUI()
         GUI.CurrentPageName = name
         -- What each tab comes back to.
         if GUI.Tabs[name] then
-            if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end
+            if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name
+            elseif GUI.ModulePageOwner and GUI.ModulePageOwner[name] then
+                GUI._lastModuleViewPage = GUI._lastModuleViewPage or {}
+                GUI._lastModuleViewPage[GUI.ModulePageOwner[name]] = name
+            elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name
+            else GUI._lastModePage = name end
         end
         SwitchMark("nav")
         UpdateThemeColors()
         if ownsTrace and switchMarks then
             SwitchMark(GUI._lastRepaintNodes and format("theme(walked %d)", GUI._lastRepaintNodes) or "theme")
             local t0 = switchMarks.t0
-            DF:Debug("GUI", "switch to %s: %s | total %.1fms", name,
-                table.concat(switchMarks, " | "), debugprofilestop() - t0)
+            if DF:DebugActive("GUI") then
+                DF:Debug("GUI", "switch to %s: %s | total %.1fms", name,
+                    table.concat(switchMarks, " | "), debugprofilestop() - t0)
+            end
             switchMarks = nil
             C_Timer.After(0, function()
-                DF:Debug("GUI", "switch to %s: next frame began at +%.1fms", name, debugprofilestop() - t0)
+                if DF:DebugActive("GUI") then
+                    DF:Debug("GUI", "switch to %s: next frame began at +%.1fms", name, debugprofilestop() - t0)
+                end
             end)
         end
     end
@@ -3949,6 +3894,10 @@ function DF:CreateGUI()
         -- Update scroll child height
         local totalHeight = math.abs(y) + 20
         GUI.tabContainer:SetHeight(totalHeight)
+        -- A module's rows may carry a state glyph after their label (def.pageMark,
+        -- GUI/ModuleRegistry.lua). Repainted with every layout so a row that comes
+        -- into view shows its current state.
+        if GUI.RefreshPageMarks then GUI:RefreshPageMarks() end
     end
 
     -- Re-sync each category's expanded state from the current profile's saved
@@ -4045,8 +3994,10 @@ function DF:CreateGUI()
         end
     end
 
-    -- Pages in GUI/Pages/Modules.lua that opt out (page.singleModeBuild), named
-    -- here by tab rather than flagged at their CreateSubTab:
+    -- Pages that opt out (page.singleModeBuild), named here by tab rather than
+    -- flagged at their CreateSubTab (the two profiles_* pages are in
+    -- GUI/Pages/Profiles.lua, and are mode-neutral as well -- one build either
+    -- way -- so for them the opt-out only keeps a rebuild a rebuild):
     --   profiles_auto         -- its disabled scrim and sidebar hint are single
     --                            frames re-anchored to the LATEST build, and its
     --                            content follows the auto-layout editing state.
@@ -4063,6 +4014,32 @@ function DF:CreateGUI()
 
     local function BuildPage(page, builderFunc)
         if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end
+        -- The page's builder, kept so ANOTHER page can draw the same cards against a
+        -- settings table of its own (a page provider's pages -- see GUI.PageBuildDb).
+        -- Read-only: this page still builds through the closures below.
+        if page then page.dfBuilder = builderFunc end
+        -- ★ A PROFILES PAGE IS MODE-NEUTRAL (THE PROFILES SIDEBAR, GUI/GUI.lua): ONE
+        -- build, whatever mode sits under the Profiles view. Its builds are keyed on
+        -- a fixed name instead of GUI.SelectedMode, and bound to the party table only
+        -- so a profile switch (which replaces it) still reads as stale. A page that
+        -- needs a mode reads its own in-page choice.
+        if page and GUI.IsProfilesPage and GUI.IsProfilesPage(page.tabName) then page.modeNeutral = true end
+        -- ★ A MODULE-OWNED PAGE MAY KEY ITS OWN BUILDS (GUI.PageBuildKey / PageBuildDb,
+        -- GUI/ModuleRegistry.lua: a page's or its module's buildKey / buildDb). One
+        -- build is retained per key exactly as per mode -- a module with tabs keys by
+        -- tab and every tab keeps its own build. nil from either: the frame mode.
+        local function PageMode(self)
+            if self.modeNeutral then return "_neutral" end
+            local key = GUI.PageBuildKey and GUI.PageBuildKey(self)
+            if key ~= nil then return key end
+            return GUI.SelectedMode
+        end
+        local function PageDb(self)
+            if self.modeNeutral then return DF.db and DF.db.party end
+            local db = GUI.PageBuildDb and GUI.PageBuildDb(self)
+            if db ~= nil then return db end
+            return DF.db[GUI.SelectedMode]
+        end
         -- Move the build on screen into its mode's slot, hidden. Anchors and
         -- parent are kept -- it is coming back.
         local function StashActiveBuild(self)
@@ -4139,13 +4116,13 @@ function DF:CreateGUI()
         -- Called on first visit and whenever the cache is invalidated.
         -- Always finishes by calling RefreshStates() so callers don't need to.
         local function DoBuild(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             if not db then return end
 
             -- Bring this mode's previous build (if any) in, so the retire below
             -- takes THAT one and the other mode's build stays parked.
             if not self.singleModeBuild then
-                SwapToMode(self, GUI.SelectedMode)
+                SwapToMode(self, PageMode(self))
                 self._pendingShown = nil
             end
 
@@ -4158,7 +4135,7 @@ function DF:CreateGUI()
                 -- Marked in progress, so a builder that errors part-way leaves an
                 -- invalid build of THIS mode (retired next time) rather than one
                 -- still claiming whatever the previous build was.
-                self.builtForMode = GUI.SelectedMode
+                self.builtForMode = PageMode(self)
                 self.cacheValid = false
             end
             self.child.ThemeListeners = {}
@@ -4214,12 +4191,12 @@ function DF:CreateGUI()
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
                 local banner = GUI:CreateInfoBanner(parent, { dismissKey = "mode_disabled", notice = true, tone = "info" })
-                banner:SetText(GUI.SelectedMode == "raid"
+                banner:SetText((self.modeNeutral or GUI.SelectedMode == "raid")
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))
                 table.insert(self.children, banner)
                 banner.layoutCol = "both"
-                self.builtForMode = GUI.SelectedMode
+                self.builtForMode = PageMode(self)
                 self.builtForDisabled = true
                 self.cacheValid = true
                 self._builtDb = db
@@ -4235,6 +4212,7 @@ function DF:CreateGUI()
                 spacer:SetSize(1, h)
                 spacer.layoutHeight = h
                 spacer.layoutCol = col or "both"
+                spacer.isSpacer = true
                 table.insert(self.children, spacer)
                 return spacer
             end
@@ -4267,7 +4245,9 @@ function DF:CreateGUI()
                     Search.CurrentTab, Search.CurrentTabLabel, Search.CurrentSection
                 Search._captureEntries = capture
                 Search.CurrentTab = self.tabName
-                Search.CurrentTabLabel = self.tabLabel or self.tabName
+                -- A page may name itself differently in search results than in the
+                -- sidebar (searchTabLabel: one of several pages that share a label).
+                Search.CurrentTabLabel = self.searchTabLabel or self.tabLabel or self.tabName
                 Search.CurrentSection = nil
             end
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
@@ -4277,7 +4257,7 @@ function DF:CreateGUI()
                     prevTab, prevTabLabel, prevSection
             end
             self._searchEntries = capture
-            self.builtForMode = GUI.SelectedMode
+            self.builtForMode = PageMode(self)
             self.builtForDisabled = false
             self.cacheValid = true
             self._builtDb = db
@@ -4316,20 +4296,20 @@ function DF:CreateGUI()
         -- cheap visibility/layout pass; otherwise rebuild. This is the perf path
         -- that makes revisiting a tab cheap.
         page.RefreshCached = function(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
 
             -- Put the build on screen away and bring this mode's in, if the page
             -- was last built for the other mode. Nothing is trashed by this.
-            if not self.singleModeBuild then SwapToMode(self, GUI.SelectedMode) end
+            if not self.singleModeBuild then SwapToMode(self, PageMode(self)) end
 
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
             -- ⚠ Asked only when everything else says the cache is good, so a page
             -- with no key -- every page but one -- pays one table lookup for it.
             local keyFn = GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName]
             if self.cacheValid
-               and self.builtForMode == GUI.SelectedMode
+               and self.builtForMode == PageMode(self)
                and self.builtForDisabled == isDisabled
                and (self.singleModeBuild or BuildDbMatches(self, db))
                and (not keyFn or keyFn() == self.builtCacheKey) then
@@ -4344,7 +4324,7 @@ function DF:CreateGUI()
             -- DoBuild sets cacheValid and calls RefreshStates() before returning.
             -- Which test failed, for the GUI trace's BUILT mark.
             GUI._lastBuildReason = (not self.cacheValid and "invalid")
-                or (self.builtForMode ~= GUI.SelectedMode and "mode")
+                or (self.builtForMode ~= PageMode(self) and "mode")
                 or (self.builtForDisabled ~= isDisabled and "disabled")
                 or (not self.singleModeBuild and not BuildDbMatches(self, db) and "db")
                 or "key"
@@ -4359,7 +4339,7 @@ function DF:CreateGUI()
         -- mode build, because "data changed" is exactly what that build cannot have
         -- seen. It is retired when it is next rebuilt, not now.
         page.Refresh = function(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
             DoBuild(self)
@@ -4372,7 +4352,7 @@ function DF:CreateGUI()
         -- to re-run the builder -- registration happens there -- but it changes no
         -- data, so unlike Refresh() it leaves the other mode's build valid.
         page.RefreshForIndex = function(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             if not db then return end
             DoBuild(self)
         end
@@ -4386,8 +4366,8 @@ function DF:CreateGUI()
         -- cache key (GUI.PageCacheKeys) always answers nil -- its key can be a
         -- function of the index itself, and asking it from here would recurse.
         page.GetIndexEntries = function(self)
-            local mode = GUI.SelectedMode
-            local db = DF.db[mode]
+            local mode = PageMode(self)
+            local db = PageDb(self)
             if not db then return nil end
             if GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName] then return nil end
             local build
@@ -4440,6 +4420,11 @@ function DF:CreateGUI()
     if DF.SetupGUIPages then
         DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     end
+    -- ...then anyone else's (DF.GUIPageProviders, DandersFrames/GUI/GUI.lua):
+    -- after the built-in pages exist, before the first paint of the rail and
+    -- nav below. ☠ No new locals in this function (Lua's 200-local limit) -- the
+    -- loop lives in GUI/ModuleRegistry.lua.
+    if GUI.RunPageProviders then GUI:RunPageProviders(CreateCategory, CreateSubTab, BuildPage) end
     
     -- Setup Auto Profiles editing banner
     if DF.AutoProfilesUI and DF.AutoProfilesUI.SetupEditingBanner then

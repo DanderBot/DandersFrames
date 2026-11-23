@@ -174,7 +174,7 @@ function DF:ShowBindingTooltip(anchorFrame)
     local unit = anchorFrame.unit
     local isDead = false
     if anchorFrame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(anchorFrame.index, anchorFrame.isRaidFrame)
+        local testData = DF:GetTestDataForFrame(anchorFrame, anchorFrame.index, anchorFrame.isRaidFrame)
         isDead = testData and testData.status == "Dead"
     elseif unit and UnitExists(unit) then
         isDead = UnitIsDeadOrGhost(unit)
@@ -652,6 +652,782 @@ local InCombatLockdown = InCombatLockdown
 local RegisterUnitWatch = RegisterUnitWatch
 
 -- ============================================================
+-- RESTED INDICATOR BUILDER
+-- Three gold "Z"s (smallest to largest, stepping up and right)
+-- plus an optional ADD-blended glow around a host frame, in one of
+-- two styles:
+--   FILL  (default) a flat gold wash behind the host, 4px outset --
+--         the party/raid player-frame look
+--   OUTER a soft glow hanging OUTSIDE the host's edges (DF_OuterGlow,
+--         a nine-slice whose centre is never drawn), so nothing on the
+--         frame covers it; :SetGlowExtents widens it past the host, and
+--         :SetGlowRects traces the outline of several rects instead
+-- Animated: the Zs fade/scale in a staggered loop and the glow
+-- pulses. Static: all Zs at full alpha and base size, glow at a
+-- fixed alpha, no OnUpdate running.
+-- The caller anchors the returned frame.
+-- ============================================================
+
+local RESTED_Z = {
+    sizes    = {8, 11, 14},
+    offsetsX = {0, 5, 12},
+    offsetsY = {0, 3, 7},
+    width = 24, height = 18,
+    cycle = 2.0,
+}
+
+-- Per glow style: the pulse runs mid +/- amp (static = mid), and how far the
+-- glow's rect sits outside its host. FILL's numbers are the original look
+-- (0.15 - 0.45, static 0.3).
+local RESTED_GLOW = {
+    FILL  = { mid = 0.3,  amp = 0.15, outset = 4 },
+    OUTER = { mid = 0.75, amp = 0.25, outset = 0 },
+}
+
+-- The OUTER art: 64px, sliced 24 / 16 / 24 (corners / middle band / corners).
+-- Alpha is full at the inner edge and falls to nothing 24px out.
+local OUTER_GLOW_FILE = "Interface\\AddOns\\DandersFrames\\Media\\DF_OuterGlow"
+local OUTER_GLOW_SPREAD = 10
+local OG_LO, OG_HI = 24 / 64, 40 / 64
+-- { texcoords l, r, t, b; then point -> relativePoint pairs on the glow's rect;
+--   "wh" / "w" / "h" = which side(s) take the spread as a fixed size }
+local OUTER_GLOW_PIECES = {
+    { 0, OG_LO, 0, OG_LO,         { "BOTTOMRIGHT", "TOPLEFT" }, nil, "wh" },
+    { OG_LO, OG_HI, 0, OG_LO,     { "BOTTOMLEFT", "TOPLEFT" }, { "BOTTOMRIGHT", "TOPRIGHT" }, "h" },
+    { OG_HI, 1, 0, OG_LO,         { "BOTTOMLEFT", "TOPRIGHT" }, nil, "wh" },
+    { 0, OG_LO, OG_LO, OG_HI,     { "TOPRIGHT", "TOPLEFT" }, { "BOTTOMRIGHT", "BOTTOMLEFT" }, "w" },
+    { OG_HI, 1, OG_LO, OG_HI,     { "TOPLEFT", "TOPRIGHT" }, { "BOTTOMLEFT", "BOTTOMRIGHT" }, "w" },
+    { 0, OG_LO, OG_HI, 1,         { "TOPRIGHT", "BOTTOMLEFT" }, nil, "wh" },
+    { OG_LO, OG_HI, OG_HI, 1,     { "TOPLEFT", "BOTTOMLEFT" }, { "TOPRIGHT", "BOTTOMRIGHT" }, "h" },
+    { OG_HI, 1, OG_HI, 1,         { "TOPLEFT", "BOTTOMRIGHT" }, nil, "wh" },
+}
+
+-- A frame spanning the glow's rect, with the eight pieces hanging off its
+-- edges. Its own alpha is what the pulse drives.
+local function CreateOuterGlow(host, spread)
+    local glow = CreateFrame("Frame", nil, host)
+    glow:SetFrameLevel(host:GetFrameLevel())
+    glow.spread = spread
+    glow.pieces = {}
+    for i, p in ipairs(OUTER_GLOW_PIECES) do
+        local t = glow:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(OUTER_GLOW_FILE)
+        t:SetTexCoord(p[1], p[2], p[3], p[4])
+        t:SetVertexColor(1, 0.82, 0, 1)
+        t:SetBlendMode("ADD")
+        t:SetPoint(p[5][1], glow, p[5][2], 0, 0)
+        if p[6] then t:SetPoint(p[6][1], glow, p[6][2], 0, 0) end
+        if p[7] == "wh" then
+            t:SetSize(spread, spread)
+        elseif p[7] == "w" then
+            t:SetWidth(spread)
+        else
+            t:SetHeight(spread)
+        end
+        glow.pieces[i] = t
+    end
+    glow:Hide()
+    return glow
+end
+
+-- ------------------------------------------------------------
+-- OUTER glow along the outline of several rects
+-- The glow can follow the union of a few axis-aligned rects (an L or a step,
+-- say) instead of one box round them all. The union's outline is found on a
+-- grid made from the rects' edges:
+--   1. snap: edge values within GLOW_SNAP px of each other merge, growing a
+--      rect outwards by at most that much, so a 1-2px jog (a border poking
+--      past its neighbour) is a straight edge, not a corner pair;
+--   2. bridge: an empty run of cells with covered cells on BOTH sides (a gap
+--      between two rects, or a narrow notch) is filled when it is no wider
+--      than twice the spread -- the two glows would only overlap in it;
+--   3. every cell side between covered and empty is an edge; collinear runs
+--      merge into one strip. Each grid vertex is checked per empty quadrant:
+--      both neighbours covered = an inside corner (DF_OuterGlowInner, and the
+--      two strips stop short of it, so nothing is drawn twice); neither
+--      covered but the diagonal = an outside corner (the nine-slice's own).
+-- Rects are { left, top, right, bottom } in host units from the host's
+-- TOPLEFT, x to the right and y DOWNWARDS (the host itself = {0, 0, w, h}).
+-- ------------------------------------------------------------
+local OUTER_GLOW_INNER_FILE = "Interface\\AddOns\\DandersFrames\\Media\\DF_OuterGlowInner"
+local GLOW_SNAP = 3
+local floor, sort = math.floor, table.sort
+
+-- Texcoords per piece kind: edge strips and outside corners off DF_OuterGlow,
+-- inside corners off DF_OuterGlowInner (mirrored per quadrant).
+local GLOW_COORDS = {
+    TOP    = { OG_LO, OG_HI, 0, OG_LO },
+    BOTTOM = { OG_LO, OG_HI, OG_HI, 1 },
+    LEFT   = { 0, OG_LO, OG_LO, OG_HI },
+    RIGHT  = { OG_HI, 1, OG_LO, OG_HI },
+    OUT_TL = { 0, OG_LO, 0, OG_LO },
+    OUT_TR = { OG_HI, 1, 0, OG_LO },
+    OUT_BL = { 0, OG_LO, OG_HI, 1 },
+    OUT_BR = { OG_HI, 1, OG_HI, 1 },
+    IN_TL  = { 0, 1, 0, 1 },
+    IN_TR  = { 1, 0, 0, 1 },
+    IN_BL  = { 0, 1, 1, 0 },
+    IN_BR  = { 1, 0, 1, 0 },
+}
+
+local function Round(v) return floor(v + 0.5) end
+
+-- Merge same-facing edge values on one axis (field = the rect field) that sit
+-- within GLOW_SNAP of the run's first value. Low edges (left / top) take the
+-- run's least value, high edges its greatest, so rects only ever grow. Low and
+-- high edges are snapped apart: a gap between two rects is the bridge's job.
+local function SnapEdges(rects, field, low)
+    local vals = {}
+    for _, r in ipairs(rects) do vals[#vals + 1] = r[field] end
+    sort(vals)
+    local to = {}
+    local i = 1
+    while i <= #vals do
+        local j = i
+        while j < #vals and vals[j + 1] - vals[i] <= GLOW_SNAP do j = j + 1 end
+        for k = i, j do to[vals[k]] = low and vals[i] or vals[j] end
+        i = j + 1
+    end
+    for _, r in ipairs(rects) do r[field] = to[r[field]] end
+end
+
+local function UniqueSorted(rects, a, b)
+    local seen, out = {}, {}
+    for _, r in ipairs(rects) do
+        for _, v in ipairs({ r[a], r[b] }) do
+            if not seen[v] then seen[v] = true; out[#out + 1] = v end
+        end
+    end
+    sort(out)
+    return out
+end
+
+-- Fill empty runs bounded by covered cells on both sides and no longer than
+-- maxLen, along one axis. cells[i][j]; along = "x" walks i, "y" walks j.
+local function Bridge(cells, nx, ny, xs, ys, maxLen, along)
+    local changed = false
+    local outer, inner = (along == "x") and ny or nx, (along == "x") and nx or ny
+    local coords = (along == "x") and xs or ys
+    for o = 1, outer do
+        local function get(n) if along == "x" then return cells[n][o] end return cells[o][n] end
+        local function set(n) if along == "x" then cells[n][o] = true else cells[o][n] = true end end
+        local n = 1
+        while n <= inner do
+            if not get(n) then
+                local s = n
+                while n <= inner and not get(n) do n = n + 1 end
+                -- empty run s .. n-1
+                if s > 1 and n <= inner and coords[n] - coords[s] <= maxLen then
+                    for k = s, n - 1 do set(k) end
+                    changed = true
+                end
+            else
+                n = n + 1
+            end
+        end
+    end
+    return changed
+end
+
+-- The union of the rects as a cell grid: cells[i][j] = true where covered, cell
+-- (i, j) spanning xs[i]..xs[i + 1] by ys[j]..ys[j + 1]. Steps 1 and 2 above
+-- (snap, then bridge empty runs no longer than maxGap; 0 / nil = none). nil
+-- when no rect has an area.
+-- exact: skip the rounding and the snap -- the rects are already final (pixel-
+-- snapped by the caller, who needs the union as given rather than tidied).
+local function OutlineGrid(rects, maxGap, exact)
+    local work = {}
+    for _, r in ipairs(rects or {}) do
+        local l, t, rr, b = r[1], r[2], r[3], r[4]
+        if not exact then l, t, rr, b = Round(l), Round(t), Round(rr), Round(b) end
+        if rr > l and b > t then work[#work + 1] = { l, t, rr, b } end
+    end
+    if #work == 0 then return nil end
+    if not exact then
+        SnapEdges(work, 1, true); SnapEdges(work, 3, false)
+        SnapEdges(work, 2, true); SnapEdges(work, 4, false)
+    end
+
+    local xs, ys = UniqueSorted(work, 1, 3), UniqueSorted(work, 2, 4)
+    local nx, ny = #xs - 1, #ys - 1
+    local xi, yi = {}, {}
+    for i, v in ipairs(xs) do xi[v] = i end
+    for j, v in ipairs(ys) do yi[v] = j end
+    local cells = {}
+    for i = 1, nx do cells[i] = {} end
+    for _, r in ipairs(work) do
+        for i = xi[r[1]], xi[r[3]] - 1 do
+            for j = yi[r[2]], yi[r[4]] - 1 do cells[i][j] = true end
+        end
+    end
+    if maxGap and maxGap > 0 then
+        for _ = 1, 4 do
+            local a = Bridge(cells, nx, ny, xs, ys, maxGap, "x")
+            local b = Bridge(cells, nx, ny, xs, ys, maxGap, "y")
+            if not (a or b) then break end
+        end
+    end
+    return cells, xs, ys, nx, ny
+end
+DF.OutlineGrid = OutlineGrid
+
+-- The outline of an OutlineGrid union as closed loops of corners. Each loop is
+-- { n = corners, x = {}, y = {}, dx = {}, dy = {}, convex = {} }: edge k runs
+-- from corner k to corner k + 1 (n wraps to 1) in direction dx[k], dy[k] (one
+-- of them 0, the other +-1), and convex[k] says whether the outline turns
+-- outwards at corner k. Every loop runs with the covered side on its RIGHT
+-- (y downwards: clockwise round the outside, anticlockwise round a hole), so an
+-- edge's inside is always (-dy, dx). Where two covered cells meet only at a
+-- corner the tightest right turn is taken, so the two stay separate loops.
+local function OutlineLoops(cells, xs, ys, nx, ny)
+    local function C(i, j) return i >= 1 and i <= nx and j >= 1 and j <= ny and cells[i][j] == true end
+    local stride = ny + 2
+    local out, segs = {}, {}
+    local function Add(i1, j1, i2, j2)
+        local id = i1 * stride + j1
+        local list = out[id]
+        if not list then list = {}; out[id] = list end
+        local s = { i1, j1, i2, j2, i2 - i1, j2 - j1 }
+        list[#list + 1] = s
+        segs[#segs + 1] = s
+    end
+    for j = 1, ny + 1 do
+        for i = 1, nx do
+            local above, below = C(i, j - 1), C(i, j)
+            if below and not above then Add(i, j, i + 1, j)
+            elseif above and not below then Add(i + 1, j, i, j) end
+        end
+    end
+    for i = 1, nx + 1 do
+        for j = 1, ny do
+            local left, right = C(i - 1, j), C(i, j)
+            if left and not right then Add(i, j, i, j + 1)
+            elseif right and not left then Add(i, j + 1, i, j) end
+        end
+    end
+
+    local used, loops = {}, {}
+    -- Right turn first, then straight on, then left (cross > 0 is a right turn
+    -- with y downwards).
+    local function Next(seg, first)
+        local best, bestRank
+        for _, c in ipairs(out[seg[3] * stride + seg[4]] or {}) do
+            if not used[c] or c == first then
+                local cross = seg[5] * c[6] - seg[6] * c[5]
+                local rank = (cross > 0 and 1) or (cross == 0 and 2) or 3
+                if not bestRank or rank < bestRank then best, bestRank = c, rank end
+            end
+        end
+        return best
+    end
+    for _, first in ipairs(segs) do
+        if not used[first] then
+            local chain, seg = {}, first
+            repeat
+                used[seg] = true
+                chain[#chain + 1] = seg
+                seg = Next(seg, first)
+            until not seg or seg == first
+            -- corners only: a segment that carries on in the same direction
+            -- extends the edge before it
+            local lp = { n = 0, x = {}, y = {}, dx = {}, dy = {}, convex = {} }
+            local m = #chain
+            for k = 1, m do
+                local prev, s = chain[(k == 1) and m or k - 1], chain[k]
+                if prev[5] ~= s[5] or prev[6] ~= s[6] then
+                    local n = lp.n + 1
+                    lp.n = n
+                    lp.x[n], lp.y[n] = xs[s[1]], ys[s[2]]
+                    lp.dx[n], lp.dy[n] = s[5], s[6]
+                    lp.convex[n] = (prev[5] * s[6] - prev[6] * s[5]) > 0
+                end
+            end
+            if lp.n >= 4 then loops[#loops + 1] = lp end
+        end
+    end
+    return loops
+end
+DF.OutlineLoops = OutlineLoops
+
+-- The pieces that glow the outline of the rects' union, spread px wide:
+-- a list of { kind, x, y, w, h [, texcoords [, band]] } (host units, y
+-- downwards; kind keys GLOW_COORDS, which a cut piece overrides; band = the
+-- carry-on of a strip past a cut inside corner, the one piece that may overlap
+-- another -- a step's outside corner). nil / empty rects = none.
+local function GlowOutlinePieces(rects, spread)
+    local cells, xs, ys, nx, ny = OutlineGrid(rects, spread * 2)
+    if not cells then return {} end
+
+    local function C(i, j) return i >= 1 and i <= nx and j >= 1 and j <= ny and cells[i][j] == true end
+
+    local s = spread
+
+    -- How far the outline edge leaving vertex (i, j) along the empty quadrant
+    -- q's side runs (capped at s): horizontally (the edge on y = ys[j]) or
+    -- vertically (the edge on x = xs[i]).
+    local function EdgeRun(i, j, right, down, horizontal)
+        local len = 0
+        if horizontal then
+            local jq, jo = down and j or j - 1, down and j - 1 or j
+            local c, step = right and i or i - 1, right and 1 or -1
+            while len < s and C(c, jo) and not C(c, jq) do
+                len = len + xs[c + 1] - xs[c]; c = c + step
+            end
+        else
+            local iq, io = right and i or i - 1, right and i - 1 or i
+            local r, step = down and j or j - 1, down and 1 or -1
+            while len < s and C(io, r) and not C(iq, r) do
+                len = len + ys[r + 1] - ys[r]; r = r + step
+            end
+        end
+        return (len < s) and len or s
+    end
+
+    -- Corners first (the strips need the inside ones to stop short).
+    -- An inside-corner piece is cut to the edges beside it when they are
+    -- shorter than the spread (a step smaller than the glow), so it never
+    -- runs past an edge into the next corner's piece.
+    local pieces, inner = {}, {}
+    for i = 1, nx + 1 do
+        for j = 1, ny + 1 do
+            local TL, TR, BL, BR = C(i - 1, j - 1), C(i, j - 1), C(i - 1, j), C(i, j)
+            local vx, vy = xs[i], ys[j]
+            -- quadrant, covered?, its horizontal / vertical / diagonal neighbours, right?, down?
+            local quads = {
+                { "TL", TL, TR, BL, BR, false, false },
+                { "TR", TR, TL, BR, BL, true,  false },
+                { "BL", BL, BR, TL, TR, false, true },
+                { "BR", BR, BL, TR, TL, true,  true },
+            }
+            for _, q in ipairs(quads) do
+                if not q[2] then
+                    local right, down = q[6], q[7]
+                    if q[3] and q[4] then
+                        local w = EdgeRun(i, j, right, down, true)
+                        local h = EdgeRun(i, j, right, down, false)
+                        if w > 0 and h > 0 then
+                            -- canonical art: the corner at its bottom-right
+                            local u0, v0 = 1 - w / s, 1 - h / s
+                            local l, r = u0, 1
+                            if right then l, r = 1, u0 end
+                            local t, b = v0, 1
+                            if down then t, b = 1, v0 end
+                            pieces[#pieces + 1] = { "IN_" .. q[1], right and vx or vx - w, down and vy or vy - h, w, h, { l, r, t, b } }
+                            inner[vx .. "," .. vy .. q[1]] = { w, h }
+                            -- Cut short by a step: the long edge's glow carries on
+                            -- past the cut (its outer band only), so it does not
+                            -- end in a hard seam beside the step's corner piece.
+                            if h < s then
+                                local c = GLOW_COORDS[down and "BOTTOM" or "TOP"]
+                                local f = h / s
+                                local bt, bb
+                                if down then bt, bb = c[3] + (c[4] - c[3]) * f, c[4]
+                                else bt, bb = c[3], c[4] - (c[4] - c[3]) * f end
+                                pieces[#pieces + 1] = { down and "BOTTOM" or "TOP", right and vx or vx - w,
+                                    down and (vy + h) or (vy - s), w, s - h, { c[1], c[2], bt, bb }, true }
+                            end
+                            if w < s then
+                                local c = GLOW_COORDS[right and "RIGHT" or "LEFT"]
+                                local f = w / s
+                                local bl, br
+                                if right then bl, br = c[1] + (c[2] - c[1]) * f, c[2]
+                                else bl, br = c[1], c[2] - (c[2] - c[1]) * f end
+                                pieces[#pieces + 1] = { right and "RIGHT" or "LEFT", right and (vx + w) or (vx - s),
+                                    down and vy or vy - h, s - w, h, { bl, br, c[3], c[4] }, true }
+                            end
+                        end
+                    elseif not q[3] and not q[4] and q[5] then
+                        pieces[#pieces + 1] = { "OUT_" .. q[1], right and vx or vx - s, down and vy or vy - s, s, s }
+                    end
+                end
+            end
+        end
+    end
+    -- A strip stops short of an inside corner by that piece's extent along it.
+    local function Trim(x, y, quad, horizontal)
+        local c = inner[x .. "," .. y .. quad]
+        if not c then return 0 end
+        return horizontal and c[1] or c[2]
+    end
+
+    -- Horizontal edges: at ys[j], between row j-1 (above) and row j (below).
+    for j = 1, ny + 1 do
+        local i = 1
+        while i <= nx do
+            local above, below = C(i, j - 1), C(i, j)
+            if above ~= below then
+                local side = below and "TOP" or "BOTTOM"
+                local s0 = i
+                while i + 1 <= nx and C(i + 1, j - 1) == above and C(i + 1, j) == below do i = i + 1 end
+                local x1, x2, y = xs[s0], xs[i + 1], ys[j]
+                local qa, qb = "TR", "TL"
+                if side == "BOTTOM" then qa, qb = "BR", "BL" end
+                x1, x2 = x1 + Trim(x1, y, qa, true), x2 - Trim(x2, y, qb, true)
+                if x2 > x1 then
+                    pieces[#pieces + 1] = { side, x1, (side == "TOP") and (y - s) or y, x2 - x1, s }
+                end
+            end
+            i = i + 1
+        end
+    end
+    -- Vertical edges: at xs[i], between column i-1 (left) and column i (right).
+    for i = 1, nx + 1 do
+        local j = 1
+        while j <= ny do
+            local left, right = C(i - 1, j), C(i, j)
+            if left ~= right then
+                local side = right and "LEFT" or "RIGHT"
+                local s0 = j
+                while j + 1 <= ny and C(i - 1, j + 1) == left and C(i, j + 1) == right do j = j + 1 end
+                local y1, y2, x = ys[s0], ys[j + 1], xs[i]
+                local qa, qb = "BL", "TL"
+                if side == "RIGHT" then qa, qb = "BR", "TR" end
+                y1, y2 = y1 + Trim(x, y1, qa, false), y2 - Trim(x, y2, qb, false)
+                if y2 > y1 then
+                    pieces[#pieces + 1] = { side, (side == "LEFT") and (x - s) or x, y1, s, y2 - y1 }
+                end
+            end
+            j = j + 1
+        end
+    end
+    return pieces
+end
+DF.GlowOutlinePieces = GlowOutlinePieces
+
+-- Lay the pieces out on the glow frame from its texture pool (the pool only
+-- grows to the largest outline seen; spares are hidden).
+local function ApplyOutlinePieces(glow, host, pieces)
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+    for _, t in ipairs(glow.pieces) do t:Hide() end
+    local pool = glow.outlinePool
+    if not pool then pool = {}; glow.outlinePool = pool end
+    for n, p in ipairs(pieces) do
+        local t = pool[n]
+        if not t then
+            t = glow:CreateTexture(nil, "ARTWORK")
+            t:SetVertexColor(1, 0.82, 0, 1)
+            t:SetBlendMode("ADD")
+            pool[n] = t
+        end
+        local kind = p[1]
+        t:SetTexture(kind:sub(1, 3) == "IN_" and OUTER_GLOW_INNER_FILE or OUTER_GLOW_FILE)
+        local c = p[6] or GLOW_COORDS[kind]
+        t:SetTexCoord(c[1], c[2], c[3], c[4])
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", glow, "TOPLEFT", p[2], -p[3])
+        t:SetSize(p[4], p[5])
+        t:Show()
+    end
+    for n = #pieces + 1, #pool do pool[n]:Hide() end
+    glow.outlineCount = #pieces
+end
+
+local function RestedIndicator_OnUpdate(self, elapsed)
+    self.animTime = self.animTime + elapsed
+    local cycle = self.animTime % self.cycleDuration
+    local progress = cycle / self.cycleDuration
+
+    -- Each Z starts at a staggered point in the cycle (0, 0.15, 0.30)
+    for i, z in ipairs(self.zTexts) do
+        local zDelay = (i - 1) * 0.15
+        local zProgress = (progress - zDelay) % 1
+
+        local alpha, scale
+        if zProgress < 0.4 then
+            local t = zProgress / 0.4
+            alpha = t
+            scale = 0.5 + (t * 0.5)
+        elseif zProgress < 0.7 then
+            alpha = 1
+            scale = 1
+        else
+            local t = (zProgress - 0.7) / 0.3
+            alpha = 1 - t
+            scale = 1
+        end
+
+        z:SetAlpha(alpha)
+        DF:SafeSetFont(z, nil, z.baseSize * scale, "OUTLINE")
+    end
+
+    local glow = self.glow
+    if glow and glow:IsShown() then
+        local g = self.glowStyle
+        glow:SetAlpha(g.mid + math.sin(self.animTime * 3) * g.amp)
+    end
+end
+
+local function RestedIndicator_ApplyStatic(self)
+    for _, z in ipairs(self.zTexts) do
+        z:SetAlpha(1)
+        DF:SafeSetFont(z, nil, z.baseSize, "OUTLINE")
+    end
+    if self.glow then self.glow:SetAlpha(self.glowStyle.mid) end
+end
+
+local function RestedIndicator_OnShow(self)
+    self.animTime = 0
+    for _, z in ipairs(self.zTexts) do
+        z:Show()
+    end
+end
+
+local function RestedIndicator_OnHide(self)
+    for _, z in ipairs(self.zTexts) do
+        z:Hide()
+    end
+end
+
+-- Switch the loop on or off. Off stops the OnUpdate entirely.
+local function RestedIndicator_SetAnimated(self, animated)
+    animated = animated ~= false
+    self.animated = animated
+    if animated then
+        self:SetScript("OnUpdate", RestedIndicator_OnUpdate)
+    else
+        self:SetScript("OnUpdate", nil)
+        RestedIndicator_ApplyStatic(self)
+    end
+end
+
+-- Scale the Z group (font sizes, Z offsets and the container size).
+-- 1 = the party/raid player-frame look.
+local function RestedIndicator_SetZScale(self, scale)
+    scale = scale or 1
+    self.zScale = scale
+    for i, z in ipairs(self.zTexts) do
+        z.baseSize = RESTED_Z.sizes[i] * scale
+        z:ClearAllPoints()
+        z:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", RESTED_Z.offsetsX[i] * scale, RESTED_Z.offsetsY[i] * scale)
+        DF:SafeSetFont(z, nil, z.baseSize, "OUTLINE")
+    end
+    self:SetSize(RESTED_Z.width * scale, RESTED_Z.height * scale)
+    if not self.animated then RestedIndicator_ApplyStatic(self) end
+end
+
+-- Widen the glow's rect past its host by these amounts (host units; nil = 0),
+-- e.g. to take in a portrait beside the frame. The style's outset still applies.
+local function RestedIndicator_SetGlowExtents(self, left, right, top, bottom)
+    local glow, host = self.glow, self.glowHost
+    if not (glow and host) then return end
+    local o = self.glowStyle.outset
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", host, "TOPLEFT", -(o + (left or 0)), o + (top or 0))
+    glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", o + (right or 0), -(o + (bottom or 0)))
+    if glow.circlePool then DF:HideCircleBands(glow.circlePool) end
+    -- back from an outline (SetGlowRects): the nine-slice's own pieces again
+    if glow.outlinePool then
+        for _, t in ipairs(glow.outlinePool) do t:Hide() end
+        for _, t in ipairs(glow.pieces) do t:Show() end
+        glow.outlineCount = nil
+    end
+end
+
+-- ============================================================
+-- CIRCLE BANDS (a round frame's outline: DandersFrames_UnitFrames' Ring style)
+-- A coloured ring drawn as a WHITE texture cut by two masks: Blizzard's disc at
+-- the band's OUTER diameter (black outside it) and a HOLE mask -- white outside a
+-- disc, black inside, handed in by the frame that asked (`hole`, a texture path) --
+-- at its INNER diameter with CLAMPTOWHITE, so only the band shows and the middle
+-- stays clear. The same technique the ring frames' own bars use.
+--   owner  the frame the textures live on
+--   pool   a table kept by the caller (entries are reused; spares hidden)
+--   cx, cy the centre, in owner units from its TOPLEFT (y DOWN)
+--   bands  { { outer, inner, r, g, b, a }, ... } diameters; inner <= 0 = a disc
+--   opts   layer ("OVERLAY"), sublevel, blend
+-- A frame describes a round outline with a SHAPE SPEC instead of rects:
+--   { circle = { x = cx, y = cy, d = diameter }, hole = path }
+-- read by the rested glow (SetGlowRects) and the highlights (Features/Highlights.lua).
+-- ============================================================
+local CIRCLE_DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
+local CIRCLE_FILL = "Interface\\Buttons\\WHITE8X8"
+
+function DF:PaintCircleBands(owner, pool, cx, cy, bands, hole, opts)
+    local layer = (opts and opts.layer) or "OVERLAY"
+    local n = 0
+    for _, bnd in ipairs(bands or {}) do
+        local outer, inner = bnd[1], bnd[2]
+        if outer and outer > 0 then
+            n = n + 1
+            local e = pool[n]
+            if not e then
+                e = { tex = owner:CreateTexture(nil, layer, nil, opts and opts.sublevel or nil) }
+                e.tex:SetTexture(CIRCLE_FILL)
+                e.outer = owner:CreateMaskTexture()
+                e.outer:SetTexture(CIRCLE_DISC, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                e.tex:AddMaskTexture(e.outer)
+                e.inner = owner:CreateMaskTexture()
+                pool[n] = e
+            end
+            local t = e.tex
+            t:ClearAllPoints()
+            t:SetPoint("CENTER", owner, "TOPLEFT", cx, -cy)
+            t:SetSize(outer, outer)
+            e.outer:ClearAllPoints()
+            e.outer:SetPoint("CENTER", t, "CENTER", 0, 0)
+            e.outer:SetSize(outer, outer)
+            local cut = hole and inner and inner > 0
+            if cut then
+                if e.holePath ~= hole then
+                    e.inner:SetTexture(hole, "CLAMPTOWHITE", "CLAMPTOWHITE")
+                    e.holePath = hole
+                end
+                if not e.holeOn then
+                    t:AddMaskTexture(e.inner)
+                    e.holeOn = true
+                end
+                e.inner:ClearAllPoints()
+                e.inner:SetPoint("CENTER", t, "CENTER", 0, 0)
+                e.inner:SetSize(inner, inner)
+            elseif e.holeOn then
+                t:RemoveMaskTexture(e.inner)
+                e.holeOn = false
+            end
+            t:SetVertexColor(bnd[3] or 1, bnd[4] or 1, bnd[5] or 1, bnd[6] or 1)
+            if opts and opts.blend then t:SetBlendMode(opts.blend) end
+            t:Show()
+        end
+    end
+    for i = n + 1, #pool do pool[i].tex:Hide() end
+    return n
+end
+
+function DF:HideCircleBands(pool)
+    if not pool then return end
+    for i = 1, #pool do pool[i].tex:Hide() end
+end
+
+-- The rested glow round a CIRCLE (a shape spec, see CIRCLE BANDS): the OUTER
+-- style's soft falloff as GLOW_CIRCLE_STEPS thin bands outside the circle, from
+-- full at its edge to nothing `spread` out. FILL washes the disc itself.
+local GLOW_CIRCLE_STEPS = 5
+local function ApplyGlowCircle(self, spec)
+    local glow, host = self.glow, self.glowHost
+    local c = spec.circle
+    local o = self.glowStyle.outset
+    if self.glowStyleName ~= "OUTER" then
+        -- FILL is one texture: a square wash just past the circle (no masks on it).
+        local d = c.d + 2 * o
+        glow:ClearAllPoints()
+        glow:SetPoint("CENTER", host, "TOPLEFT", c.x, -c.y)
+        glow:SetSize(d, d)
+        return
+    end
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+    for _, t in ipairs(glow.pieces) do t:Hide() end
+    if glow.outlinePool then
+        for _, t in ipairs(glow.outlinePool) do t:Hide() end
+    end
+    glow.outlineCount = nil
+    local spread = glow.spread or OUTER_GLOW_SPREAD
+    local base = c.d + 2 * o
+    local step = spread / GLOW_CIRCLE_STEPS
+    local bands = {}
+    for j = 1, GLOW_CIRCLE_STEPS do
+        local inner = base + 2 * step * (j - 1)
+        bands[j] = { inner + 2 * step, inner, 1, 0.82, 0, 1 - (j - 0.5) / GLOW_CIRCLE_STEPS }
+    end
+    glow.circlePool = glow.circlePool or {}
+    DF:PaintCircleBands(glow, glow.circlePool, c.x, c.y, bands, spec.hole, { layer = "ARTWORK", blend = "ADD" })
+end
+
+-- Glow along the outline of several rects' union instead of one box: each
+-- rect { left, top, right, bottom } in host units from the host's TOPLEFT,
+-- x right, y DOWN (the host = {0, 0, width, height}). OUTER traces the
+-- outline (GlowOutlinePieces); FILL washes the rects' bounding box. nil or
+-- empty = the host's own rect (SetGlowExtents(0, 0, 0, 0)).
+local function RestedIndicator_SetGlowRects(self, rects)
+    local glow, host = self.glow, self.glowHost
+    if not (glow and host) then return end
+    -- A round frame (a circle shape spec): the glow follows the circle.
+    if type(rects) == "table" and type(rects.circle) == "table" then
+        return ApplyGlowCircle(self, rects)
+    end
+    if glow.circlePool then DF:HideCircleBands(glow.circlePool) end
+    if not rects or #rects == 0 then return self:SetGlowExtents(0, 0, 0, 0) end
+    local o = self.glowStyle.outset
+    if self.glowStyleName ~= "OUTER" then
+        local l, t, r, b
+        for _, rc in ipairs(rects) do
+            l = (l and l < rc[1]) and l or rc[1]
+            t = (t and t < rc[2]) and t or rc[2]
+            r = (r and r > rc[3]) and r or rc[3]
+            b = (b and b > rc[4]) and b or rc[4]
+        end
+        glow:ClearAllPoints()
+        glow:SetPoint("TOPLEFT", host, "TOPLEFT", l - o, -(t - o))
+        glow:SetSize(r - l + 2 * o, b - t + 2 * o)
+        return
+    end
+    local grown = {}
+    for n, rc in ipairs(rects) do grown[n] = { rc[1] - o, rc[2] - o, rc[3] + o, rc[4] + o } end
+    ApplyOutlinePieces(glow, host, GlowOutlinePieces(grown, glow.spread))
+end
+
+-- The glow's outline setter on its own (headless tests drive it without a whole
+-- indicator).
+DF._RestedSetGlowRects = RestedIndicator_SetGlowRects
+
+-- parent:   frame the Zs live on (frame level parent + 5)
+-- glowHost: optional frame; when given, a glow is built around it and stored
+--           as indicator.glow (the caller shows / hides it)
+-- opts:     optional { glowStyle = "FILL" | "OUTER", glowSpread = px (OUTER) }
+-- Returns the indicator frame, hidden, unanchored, animated.
+function DF:CreateRestedIndicator(parent, glowHost, opts)
+    local ind = CreateFrame("Frame", nil, parent)
+    ind:SetSize(RESTED_Z.width, RESTED_Z.height)
+    ind:SetFrameLevel(parent:GetFrameLevel() + 5)
+    ind:Hide()
+
+    ind.zTexts = {}
+    for i = 1, 3 do
+        local z = ind:CreateFontString(nil, "OVERLAY")
+        DF:SafeSetFont(z, nil, RESTED_Z.sizes[i], "OUTLINE")
+        z:SetText("Z")
+        z:SetTextColor(1, 0.82, 0, 1)
+        z:SetPoint("BOTTOMLEFT", ind, "BOTTOMLEFT", RESTED_Z.offsetsX[i], RESTED_Z.offsetsY[i])
+        z:SetAlpha(0)
+        z.baseSize = RESTED_Z.sizes[i]
+        ind.zTexts[i] = z
+    end
+
+    local styleName = (opts and opts.glowStyle == "OUTER") and "OUTER" or "FILL"
+    ind.glowStyleName = styleName
+    ind.glowStyle = RESTED_GLOW[styleName]
+    ind.SetGlowExtents = RestedIndicator_SetGlowExtents
+    ind.SetGlowRects = RestedIndicator_SetGlowRects
+    if glowHost then
+        local glow
+        if styleName == "OUTER" then
+            glow = CreateOuterGlow(glowHost, (opts and opts.glowSpread) or OUTER_GLOW_SPREAD)
+        else
+            glow = glowHost:CreateTexture(nil, "BACKGROUND", nil, -8)
+            glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+            glow:SetVertexColor(1, 0.82, 0, 0.3)
+            glow:SetBlendMode("ADD")
+            glow:Hide()
+        end
+        ind.glow = glow
+        ind.glowHost = glowHost
+        ind:SetGlowExtents(0, 0, 0, 0)
+    end
+
+    ind.animTime = 0
+    ind.cycleDuration = RESTED_Z.cycle
+    ind.zScale = 1
+    ind.SetAnimated = RestedIndicator_SetAnimated
+    ind.SetZScale = RestedIndicator_SetZScale
+    ind:SetScript("OnShow", RestedIndicator_OnShow)
+    ind:SetScript("OnHide", RestedIndicator_OnHide)
+    ind:SetAnimated(true)
+    return ind
+end
+
+-- ============================================================
 -- SAFE UNIT WATCH REGISTRATION (combat lockdown protection)
 -- ============================================================
 
@@ -890,9 +1666,7 @@ function DF:CreateFrameElements(frame, isRaid)
     -- MISSING HEALTH BAR (shows where health is missing)
     -- ========================================
     frame.missingHealthBar = CreateFrame("StatusBar", nil, frame)
-    local padding = db.framePadding or 0
-    frame.missingHealthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.missingHealthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- Anchored with the health bar below (DF:AnchorHealthBarsToPadding).
     DF:SafeSetStatusBarTexture(frame.missingHealthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.missingHealthBar:SetMinMaxValues(0, 1)
     frame.missingHealthBar:SetValue(0)
@@ -907,8 +1681,8 @@ function DF:CreateFrameElements(frame, isRaid)
     -- HEALTH BAR
     -- ========================================
     frame.healthBar = CreateFrame("StatusBar", nil, frame)
-    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- The one health-rect function (Frames/HealthRect.lua); also places the missing-health bar.
+    DF:AnchorHealthBarsToPadding(frame, db)
     DF:SafeSetStatusBarTexture(frame.healthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(1)
@@ -1012,7 +1786,7 @@ function DF:CreateFrameElementsExtended(frame, db)
     
     frame.leaderIcon.texture = frame.leaderIcon:CreateTexture(nil, "OVERLAY")
     frame.leaderIcon.texture:SetAllPoints()
-    frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+    DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-LeaderIcon")
     frame.leaderIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
@@ -1055,89 +1829,11 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- ========================================
     -- RESTED INDICATOR (solo mode) - Custom animated ZZZ with glow
     -- ========================================
-    frame.restedIndicator = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.restedIndicator:SetSize(24, 18)
-    frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)
-    frame.restedIndicator:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.restedIndicator:Hide()
-    
-    -- Create 3 Z FontStrings with increasing sizes
-    local zSizes = {8, 11, 14}
-    local zOffsets = {0, 5, 12}
-    local zYOffsets = {0, 3, 7}
-    
-    frame.restedIndicator.zTexts = {}
-    for i = 1, 3 do
-        local z = frame.restedIndicator:CreateFontString(nil, "OVERLAY")
-        DF:SafeSetFont(z, nil, zSizes[i], "OUTLINE")
-        z:SetText("Z")
-        z:SetTextColor(1, 0.82, 0, 1)
-        z:SetPoint("BOTTOMLEFT", frame.restedIndicator, "BOTTOMLEFT", zOffsets[i], zYOffsets[i])
-        z:SetAlpha(0)
-        z.baseSize = zSizes[i]
-        frame.restedIndicator.zTexts[i] = z
-    end
-
-    -- Create glow texture
-    frame.restedGlow = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    frame.restedGlow:SetPoint("TOPLEFT", frame, "TOPLEFT", -4, 4)
-    frame.restedGlow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 4, -4)
-    frame.restedGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
-    frame.restedGlow:SetVertexColor(1, 0.82, 0, 0.3)
-    frame.restedGlow:SetBlendMode("ADD")
-    frame.restedGlow:Hide()
-    
-    -- Animation state
-    frame.restedIndicator.animTime = 0
-    frame.restedIndicator.cycleDuration = 2.0
-    
-    -- OnUpdate script for custom animation
-    frame.restedIndicator:SetScript("OnUpdate", function(self, elapsed)
-        self.animTime = self.animTime + elapsed
-        local cycle = self.animTime % self.cycleDuration
-        local progress = cycle / self.cycleDuration
-        
-        for i, z in ipairs(self.zTexts) do
-            local zDelay = (i - 1) * 0.15
-            local zProgress = (progress - zDelay) % 1
-            
-            local alpha, scale
-            if zProgress < 0.4 then
-                local t = zProgress / 0.4
-                alpha = t
-                scale = 0.5 + (t * 0.5)
-            elseif zProgress < 0.7 then
-                alpha = 1
-                scale = 1
-            else
-                local t = (zProgress - 0.7) / 0.3
-                alpha = 1 - t
-                scale = 1
-            end
-            
-            z:SetAlpha(alpha)
-            local baseSize = z.baseSize
-            DF:SafeSetFont(z, nil, baseSize * scale, "OUTLINE")
-        end
-        
-        local glowAlpha = 0.2 + (math.sin(self.animTime * 3) * 0.15 + 0.1)
-        if frame.restedGlow and frame.restedGlow:IsShown() then
-            frame.restedGlow:SetAlpha(glowAlpha)
-        end
-    end)
-    
-    frame.restedIndicator:SetScript("OnShow", function(self)
-        self.animTime = 0
-        for _, z in ipairs(self.zTexts) do
-            z:Show()
-        end
-    end)
-    
-    frame.restedIndicator:SetScript("OnHide", function(self)
-        for _, z in ipairs(self.zTexts) do
-            z:Hide()
-        end
-    end)
+    -- The soft OUTER glow round the frame. Party/raid frames carry no portrait,
+    -- so the frame's own rect is the whole outline (SetGlowExtents 0,0,0,0).
+    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame, { glowStyle = "OUTER" })
+    frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)  -- Half on, half off corner
+    frame.restedGlow = frame.restedIndicator.glow
     
     
     -- ========================================
@@ -1160,7 +1856,7 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- happens to match the default just hides the split again.
     local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
-        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
+        + DF:ResolveResourceBarLevelOffset(frame, powerDB))
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
@@ -1291,9 +1987,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- MISSING HEALTH BAR (shows where health is missing)
     -- ========================================
     frame.missingHealthBar = CreateFrame("StatusBar", nil, frame)
-    local padding = db.framePadding or 0
-    frame.missingHealthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.missingHealthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- Anchored with the health bar below (DF:AnchorHealthBarsToPadding).
     DF:SafeSetStatusBarTexture(frame.missingHealthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.missingHealthBar:SetMinMaxValues(0, 1)  -- Will be updated dynamically with UnitHealthMax
     frame.missingHealthBar:SetValue(0)
@@ -1309,8 +2003,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- HEALTH BAR
     -- ========================================
     frame.healthBar = CreateFrame("StatusBar", nil, frame)
-    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+    -- The one health-rect function (Frames/HealthRect.lua); also places the missing-health bar.
+    DF:AnchorHealthBarsToPadding(frame, db)
     DF:SafeSetStatusBarTexture(frame.healthBar, db.healthTexture or DF.STOCK_BAR_TEXTURE)
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(1)
@@ -1400,7 +2094,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     
     frame.leaderIcon.texture = frame.leaderIcon:CreateTexture(nil, "OVERLAY")
     frame.leaderIcon.texture:SetAllPoints()
-    frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+    DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, "Interface\\GroupFrame\\UI-Group-LeaderIcon")
     frame.leaderIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
@@ -1443,100 +2137,11 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     -- RESTED INDICATOR (solo mode) - Custom animated ZZZ with glow
     -- ========================================
-    frame.restedIndicator = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.restedIndicator:SetSize(24, 18)
+    -- The soft OUTER glow round the frame. Party/raid frames carry no portrait,
+    -- so the frame's own rect is the whole outline (SetGlowExtents 0,0,0,0).
+    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame, { glowStyle = "OUTER" })
     frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)  -- Half on, half off corner
-    frame.restedIndicator:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.restedIndicator:Hide()
-    
-    -- Create 3 Z FontStrings with increasing sizes, going UP and to the right
-    -- Tighter spacing with some overlap
-    local zSizes = {8, 11, 14}  -- Smallest to largest (left to right)
-    local zOffsets = {0, 5, 12}  -- X positions (tighter, overlapping)
-    local zYOffsets = {0, 3, 7}  -- Y offsets going UP
-    
-    frame.restedIndicator.zTexts = {}
-    for i = 1, 3 do
-        local z = frame.restedIndicator:CreateFontString(nil, "OVERLAY")
-        DF:SafeSetFont(z, nil, zSizes[i], "OUTLINE")
-        z:SetText("Z")
-        z:SetTextColor(1, 0.82, 0, 1)  -- Yellow/gold color
-        z:SetPoint("BOTTOMLEFT", frame.restedIndicator, "BOTTOMLEFT", zOffsets[i], zYOffsets[i])
-        z:SetAlpha(0)
-        z.baseSize = zSizes[i]  -- PERFORMANCE FIX: Store base size to avoid table allocation in OnUpdate
-        frame.restedIndicator.zTexts[i] = z
-    end
-    
-    -- Create glow texture around the frame (more visible)
-    frame.restedGlow = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    frame.restedGlow:SetPoint("TOPLEFT", frame, "TOPLEFT", -4, 4)
-    frame.restedGlow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 4, -4)
-    frame.restedGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
-    frame.restedGlow:SetVertexColor(1, 0.82, 0, 0.3)  -- Yellow glow, more visible
-    frame.restedGlow:SetBlendMode("ADD")
-    frame.restedGlow:Hide()
-    
-    -- Animation state
-    frame.restedIndicator.animTime = 0
-    frame.restedIndicator.cycleDuration = 2.0  -- Full cycle duration
-    
-    -- OnUpdate script for custom animation
-    frame.restedIndicator:SetScript("OnUpdate", function(self, elapsed)
-        self.animTime = self.animTime + elapsed
-        local cycle = self.animTime % self.cycleDuration
-        local progress = cycle / self.cycleDuration
-        
-        -- Animate each Z with staggered timing
-        for i, z in ipairs(self.zTexts) do
-            -- Each Z starts at different times in the cycle (0, 0.15, 0.30)
-            local zDelay = (i - 1) * 0.15
-            local zProgress = (progress - zDelay) % 1
-            
-            -- Z fades in, scales up, then fades out
-            local alpha, scale
-            if zProgress < 0.4 then
-                -- Fade in and scale up (0 to 0.4)
-                local t = zProgress / 0.4
-                alpha = t
-                scale = 0.5 + (t * 0.5)  -- Scale from 50% to 100%
-            elseif zProgress < 0.7 then
-                -- Hold (0.4 to 0.7)
-                alpha = 1
-                scale = 1
-            else
-                -- Fade out (0.7 to 1.0)
-                local t = (zProgress - 0.7) / 0.3
-                alpha = 1 - t
-                scale = 1
-            end
-            
-            z:SetAlpha(alpha)
-            -- Scale effect by adjusting font size
-            -- PERFORMANCE FIX: Use stored baseSize instead of creating table every frame
-            local baseSize = z.baseSize
-            DF:SafeSetFont(z, nil, baseSize * scale, "OUTLINE")
-        end
-        
-        -- Animate glow pulsing (stronger pulse)
-        local glowAlpha = 0.2 + (math.sin(self.animTime * 3) * 0.15 + 0.1)
-        if frame.restedGlow and frame.restedGlow:IsShown() then
-            frame.restedGlow:SetAlpha(glowAlpha)
-        end
-    end)
-    
-    -- Start/stop animation
-    frame.restedIndicator:SetScript("OnShow", function(self)
-        self.animTime = 0
-        for _, z in ipairs(self.zTexts) do
-            z:Show()
-        end
-    end)
-    
-    frame.restedIndicator:SetScript("OnHide", function(self)
-        for _, z in ipairs(self.zTexts) do
-            z:Hide()
-        end
-    end)
+    frame.restedGlow = frame.restedIndicator.glow
     
     
     -- ========================================
@@ -1559,7 +2164,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- happens to match the default just hides the split again.
     local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
     frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
-        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
+        + DF:ResolveResourceBarLevelOffset(frame, powerDB))
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
@@ -1708,17 +2313,17 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             end
         elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" then
             -- Skip in test mode - test mode handles its own absorb display
-            if not DF.testMode and not DF.raidTestMode then
+            if not DF:FrameInTestScope(self, "any") then
                 DF:UpdateAbsorb(self)
             end
         elseif event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then
             -- Skip in test mode - test mode handles its own heal absorb display
-            if not DF.testMode and not DF.raidTestMode then
+            if not DF:FrameInTestScope(self, "any") then
                 DF:UpdateHealAbsorb(self)
             end
         elseif event == "UNIT_HEAL_PREDICTION" then
             -- Skip in test mode - test mode handles its own heal prediction display
-            if not DF.testMode and not DF.raidTestMode then
+            if not DF:FrameInTestScope(self, "any") then
                 DF:UpdateHealPrediction(self)
             end
         elseif event == "UNIT_CONNECTION" then
@@ -1863,6 +2468,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         end
         -- Frame Fade: hover may borrow the in-combat opacity (no-op unless enabled).
         if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
+        -- Hover-shown text (Text Designer) and anything else that answers hover.
+        if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(self, self.dfIsHovered) end
 
         -- Check if we're actually hovering a child element with SetPropagateMouseMotion
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]
@@ -1890,10 +2497,10 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         end
 
         -- Check for test mode (party or raid)
-        local inTestMode = (self.isRaidFrame and DF.raidTestMode) or (not self.isRaidFrame and DF.testMode)
+        local inTestMode = DF:FrameInTestScope(self, self.isRaidFrame and "raid" or "party")
 
         if inTestMode then
-            local testData = DF:GetTestUnitData(self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))
+            local testData = DF:GetTestDataForFrame(self, self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))
             if testData then
                 PositionFrameTooltip(self)
                 GameTooltip:AddLine(testData.name, 1, 1, 1)
@@ -1927,6 +2534,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             DF:UpdateHighlights(self)
         end
         if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
+        -- Hover-shown text (Text Designer) and anything else that answers hover.
+        if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(self, self.dfIsHovered) end
 
         -- Don't hide tooltip if we're moving to a child (our icon or private aura)
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]

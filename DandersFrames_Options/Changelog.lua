@@ -9,44 +9,108 @@ DF.CHANGELOG_TEXT = [===[
 
 ### New Features
 
-- (Bars) The Absorb, Heal Absorb, Heal Prediction, Reduced Max Health, Health and Resource bars get a **Tile** setting under their Texture, and the first four a **Tile Size** too: Auto uses the texture's own size, Fit to Bar repeats the pattern once per bar height, or set your own. New **Texture Layers** stack up to two more textures on top: a pattern and a shading layer, each with its own texture, colour, blend and tiling. A live preview shows the result at your frames' size, and a **Presets** dropdown fills the layers with a ready-made look you can then adjust; the changed-dots then show what you changed from that preset. Off by default, so your bars look exactly as before. (by Krathe, original idea by Aphoex)
-- (Bars) A **Mirror** tick leans striped and diagonal textures the other way, on the bar's own texture and on each layer, so the stripes can match another look. (by Krathe)
-- (Bars) Twelve new pattern textures for Texture Layers: Biohazard, Heart, Minus, Plus, Radioactive, Shield, Star and X designs. (art by Aphoex)
+- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. It starts switched off: say yes to the popup, or turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
+- (Unit Frames) Each frame can be drawn as bars or as **rings** round a round portrait. Use up to 8 rings to show health, power, class power, shields, heal absorbs and heal prediction. Find it on a frame's **Frame Style** page; settings a ring doesn't use grey out and say why.
+- (Unit Frames) Each frame has its own Text Designer template, and Player and Pet have their own Aura Designer. Link frames on the **Linked Frames** page so that changing one changes the other.
+- (Unit Frames) New **Units** test mode to preview every frame without a group or a target, and copy a page's settings from another frame or from your party and raid frames.
+- (Unit Frames) Target, focus, pet, boss and the other frames that fade out of range can now stay fully visible: untick **Fade When Out of Range** on the frame's **Fading** page.
+- (Settings) The settings window has a new layout: an icon bar down the left side replaces the Global / Party / Raid / Binds tabs. **Groups** holds your party and raid settings (switch between them with the Party and Raid tabs along the top), **Binds** is click-casting, and **Modules**, **Profiles** and **Global** sit at the bottom.
+- (Settings) New **Home** page: search every setting, jump to any part of the addon, see what's new in this version, and get a short **Needs attention** list of problems with a one-click fix, such as Blizzard frames still showing, a reload being needed, or test mode left on.
+- (Settings) New **Modules** page to turn Group Frames (with separate Party and Raid switches) and Click-Casting on or off in one place. Turned-off modules leave the icon bar.
+- (Profiles) Every profile tool now lives on the **Profiles** page: manage profiles, spec switching, Auto Layouts, click-casting profiles, import/export and changed settings. You can now **rename** profiles, and one import box accepts profile, click-casting and filter strings.
+
+- (Test Mode) The test popup is now a slim popout with a rail of modes. With Indicator Info on, click an element on a test frame to open its settings.
+- (Mover) An anchored element can mirror its target's position on X and Y.
+- (Rested Indicator) New soft outer glow style.
+- (Modules) Reset a module to its defaults from the **Modules** page.
+- (Icons) Combat and leader icons use sharper art.
+- (DandersMover) Frames anchored to another addon's frames now follow them automatically.
+- (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
+- (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction: the shield and incoming heals can run past the end of the health bar again, up to a full bar's length. Off (0%) by default. (by Krathe)
+- (Resource Bar) New **Placement** option in the resource bar's Position settings, for party, raid and unit frames: keep the bar **On Top of Health Bar** (as before), or put it **Below**, **Above**, **Left of** or **Right of** the health bar. Along a side the health bar shrinks to make room, so it never shows through the resource bar, and the side has its own **Offset X / Y** and **Frame Level**. Turn off **Match Health Bar Width** to set a shorter bar and use **Anchor** to pick where along the side it sits. Frames that don't show a resource bar keep the full health bar. (by Krathe)
+- (Frame) New **Keep Health Bar Inside Border** option (Border card): the health bar stops at the inner edge of the frame border instead of running under it, so a see-through border sits over the frame background on every side. The resource bar keeps inside the border too. Off by default. (by Krathe)
+- (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (never on tanks, off by default) and one paladin blessing per role. Find them on the new **Class Buffs (WoW Forever)** card; with auto-detect on, priests, druids and paladins watch the ones they can cast.
+- (Aura Designer) New **Only on My Frame** option for indicators and effects. Turn it on to show a buff, or a "missing" reminder such as Inner Fire, only on your own frame instead of on everyone's.
 
 ### Improvements
 
-- (Auras) Buff and debuff rows, the dispel overlay and Aura Designer indicators now set up and update during combat. Settings changed mid-fight apply straight away, and anything that first appears in a fight (a frame that gets its player late, an arena match) shows at once instead of only after combat. (by Krathe)
-- (Debuffs) Ticking both Non-Player and From Any Player covers every debuff, so the bar now treats it as All Debuffs: Max Debuffs is one limit for the row instead of one per ticked category. (by Krathe)
-- (Debuffs) The note under Max Debuffs now counts the categories your bar really uses, including any your Aura Designer debuff groups take over. (by Krathe)
-- (Tooltips) The in-combat and out-of-combat tooltip settings now follow whether you are in combat. (by Krathe)
-- (Performance) Joining a large group or switching auto layouts no longer freezes the game for several seconds: frames build once instead of dozens of times, and aura rows are built over a few frames instead of all in one. (by Krathe)
-- (Performance) Less work in raid combat: nameplate updates are skipped early, Text Designer only re-lays text out when it changes, and heal prediction no longer creates garbage on every update. (by Krathe)
-- (Performance) Other group members finding their spec no longer refreshes every frame mid-fight, which caused short stutters in raids. (by Krathe)
-- (Auto Layouts) After a loading screen the active layout is no longer dropped and re-applied while the group settles, which rebuilt every frame twice. (by Krathe)
-- (Auto Layouts) Joining a raid no longer flashes your base raid layout before the auto layout's, and frames show the right player's name and health straight away when the group reshuffles. (by Krathe)
-- (Performance) Hidden boss frames and ready checks do less work. (by Krathe)
-- (Auto Layouts) Switching from one auto layout to another, or back to your base layout, refreshes the frames once instead of twice, halving the pause. (by Krathe)
-- (Performance) With the Power Infusion helper set up, people joining or leaving a raid no longer re-checks your aura rows several times in a row. (by Krathe)
-- (Performance) Pulling no longer rebuilds every frame, which caused a short stutter on each pull. Entering combat now only updates the icons set to Hide in Combat. (by Krathe)
-- (Performance) Less memory churn from aura refreshes and click-casting setup, and threat changes on enemy nameplates no longer search through your raid frames. (by Krathe)
-- (Heal Prediction) Show Overheal now lights a spark at the end of the health bar when heals would overheal, instead of letting them spill past it. Absorbs, heal absorbs and incoming heals now never draw outside the health bar. (by Krathe)
-- (Absorbs) The Attached absorb's Clamp Mode setting is gone. Now that the shield stays inside the health bar, None and Max Health drew the same as Missing Health but without the overshield glow or overflow, so anyone using them moves to Missing Health. (by Krathe)
+- (Unit Frames) The **Linked Frames** page is easier to read: each linked pair folds away to one line showing how many parts are linked, mirrored or separate, and its group and column headings stand out.
+- (WoW Forever) Arcane Intellect and Divine Spirit no longer show as missing on warriors and rogues, who have no mana.
+- (Performance) Debug logging now costs nothing while it is off: diagnostics and log messages are skipped entirely instead of being built and thrown away, and turning logging off stops them at once. (by Krathe)
+- (Absorbs) The absorb and heal absorb Display Mode options have clearer names: Overlay on Health, Attached (overflows), Attached (wraps back) (was Attached + Overflow) and, for heal absorbs, Attached (into health). The dropdowns now have a tooltip that explains each mode. Saved settings are unchanged. (by Krathe)
 
 ### Bug Fixes
 
-- (Range) Out-of-range fading checks a player against every range spell you know before falling back to 40 yards, so classes such as Evoker no longer fade players who are in range. Spells replaced by hero talents are tried under their new form. (by Krathe)
-- (Range) Devourer Demon Hunters get their own range spells. (by Krathe)
-- (Range) The range shown for your range-check spell updates after a talent change, without a reload. (by Krathe)
-- (Raid Frames) With a name-list sort (role, class or custom order), a player who joins mid-combat now appears on your frames as soon as combat ends, and the Sorting page says which settings delay them. (by Krathe)
-- (Reduced Max Health) The health bar no longer runs under the reduced max health area after a frame refresh or resize. (by Krathe)
-- (Fonts) Fonts are correct straight away after a reload during combat. (by Krathe)
-- (Dispel) The dispel overlay and dispel symbols now show in battlegrounds and arena, and after logging in anywhere auras are restricted. They stayed blank until a /reload, while test mode looked fine. (by Krathe)
-- (Icons) **Hide In Combat** on the leader, raid marker, ready check, summon, phased, AFK, vehicle, raid role and ping icons now hides them as combat starts, instead of only once the fight was over. (by Krathe)
-- (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
-- (Heal Prediction) Joining a large group, or logging in inside one, no longer flashes extra frame-sized bars beside the raid frames. (by Krathe)
-- (Absorbs) Joining a large group no longer flashes absorb shields as boxes beside the raid frames, and leaving a group no longer flashes your heal absorb across your own frame. (by Krathe)
-- (Heal Prediction) The heal prediction bar is hidden on offline and dead players, like the absorb bars already were. (by Krathe)
-- (Borders) A class or role coloured frame border no longer gets stuck on the plain border colour after people join or the raid reshuffles. (by Krathe)
+- (Range) Fix enemy targets fading as out of range when a hunter is in melee range.
+- (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
+- (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
+- (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
+- (Unit Frames) Frame Fade's tick boxes now update your frames straight away, and hovering works with Separate Combat Fade.
+- (Unit Frames) The Unlock button on the Unit Frames pages now moves unit frames without showing other addons' movers.
+- (Unit Frames) Fix the cast bar vanishing mid-cast when pressing another spell while casting.
+- (Unit Frames) Turning the cast bar on or off on one frame no longer changes a linked frame.
+- (Unit Frames) The selection, hover and aggro outlines no longer include space for a hidden class power bar.
+- (Unit Frames) Target, Focus and Boss now have the important debuff highlight settings.
+- (Unit Frames) The global font "Apply to All" button now changes unit frame text too.
+- (Unit Frames) Reset Page on a Text page now resets the frame's text. A text template another frame also uses is left alone: the frame gets its own copy instead.
+- (Unit Frames) "Make Own Template" no longer moves a linked frame onto the new template too.
+- (Unit Frames) Turning a part on or off (portrait, power bar, auras, icons and so on) no longer changes a linked frame. Its look stays linked.
+- (Unit Frames) Picking a different text template on a linked frame no longer snaps back to the other frame's. That frame's text is unlinked, and a short note says so.
+- (Search) Fix search staying stuck on "Indexing settings..." after combat.
+- (Mover) Clicking now brings the mover controls back if they stayed faded after alt-tabbing.
+- (Test Mode) Turning off Color by Time Remaining now takes effect on test frames.
+- (Settings) Fix a large gap above Reduced Max Health and uneven resource colour swatches.
+- (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
+- (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
+- (WoW Forever) Flasks, potions, elixirs, Spirit of Redemption and Camp Benefits now show in aura filters, and shadow protection potions no longer count as the priest buff.
+- (WoW Forever) Prayer of Mending now shows on your frames and in the healing aura filter.
+
+## [5.6.2]
+
+### New Features
+
+- (WoW Forever) Names on frames now show the full name by default. A new **Name Format** option for name text in the Text Designer lets you switch to the first name only, the first name with a last initial, or initials. Max Length still applies to the result, so raise it if full names get cut short.
+
+### Bug Fixes
+
+- (WoW Forever) Fix your own frame disappearing from party frames when using Self Position First/Last, Sort by Class, Separate Melee & Ranged DPS or Alphabetical sorting.
+
+## [5.6.1]
+
+### Bug Fixes
+
+- (Text Designer) Text groups have their Items list back, so you can add, reorder, remove and customise the data a group shows again.
+
+## [5.6.0]
+
+### New Features
+
+- (Bars) New **Tile** and **Texture Layers** options for bar textures: repeat a pattern along the bar and stack up to two extra pattern and shading layers, with presets and a live preview. Off by default. (by Krathe, original idea by Aphoex)
+- (Bars) A **Mirror** option leans striped textures the other way. (by Krathe)
+- (Bars) Twelve new pattern textures for Texture Layers. (art by Aphoex)
+
+### Improvements
+
+- (Performance) Smoother raids: no more multi-second freezes when joining a large group or switching auto layouts, no stutter on pull, and less work during combat. (by Krathe)
+- (Auto Layouts) Joining a raid or switching layouts no longer flashes the wrong layout or rebuilds frames twice. (by Krathe)
+- (Auras) Buffs, debuffs, the dispel overlay and Aura Designer indicators now set up and update during combat. (by Krathe)
+- (Debuffs) Ticking both Non-Player and From Any Player now counts as All Debuffs, with one Max Debuffs limit. (by Krathe)
+- (Tooltips) The in-combat and out-of-combat tooltip settings now follow whether you are in combat. (by Krathe)
+- (Heal Prediction) Show Overheal now lights a spark at the end of the health bar, and absorbs and heals no longer draw outside the bar. (by Krathe)
+- (Absorbs) The Attached absorb's Clamp Mode setting is removed; existing setups move to Missing Health. (by Krathe)
+
+### Bug Fixes
+
+- (Range) Range fading now checks all your range spells, so classes such as Evoker no longer fade players who are in range. Devourer Demon Hunters get their own range spells, and talent changes apply without a reload. (by Krathe)
+- (Raid Frames) With a name-list sort, players who join mid-combat now appear as soon as combat ends. (by Krathe)
+- (Reduced Max Health) The health bar no longer runs under the reduced max health area after a refresh. (by Krathe)
+- (Fonts) Fonts are correct straight away after a reload in combat. (by Krathe)
+- (Dispel) The dispel overlay and symbols now show in battlegrounds, arena and after logging in where auras are restricted. (by Krathe)
+- (Icons) **Hide In Combat** status icons now hide as combat starts, not after it ends. (by Krathe)
+- (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again. (by Krathe)
+- (Absorbs) No more stray heal prediction bars or absorb boxes flashing beside the frames when joining or leaving a group. (by Krathe)
+- (Heal Prediction) Hidden on offline and dead players. (by Krathe)
+- (Borders) Class and role coloured borders no longer get stuck on the plain colour after the raid reshuffles. (by Krathe)
 
 ## [5.5.0]
 

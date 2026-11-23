@@ -17,6 +17,10 @@ local SW       = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n
 local CONTROLS = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
 local AUTOPROF = options_file_source("GUI/Pages/AutoProfiles.lua"):gsub("\r\n", "\n")
 local OPTIONS  = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
+local RAIL     = options_file_source("GUI/Rail.lua"):gsub("\r\n", "\n")
+-- The tab switches themselves: the bodies of the old tab handlers, now the
+-- built-in modules' onEnter (GUI/ModuleRegistry.lua).
+local REGISTRY = options_file_source("GUI/ModuleRegistry.lua"):gsub("\r\n", "\n")
 
 local function between(src, a, b)
     local s = src:find(a, 1, true)
@@ -38,7 +42,7 @@ if defs then
     if chunk then chunk(G, function(isRaid) return isRaid and RAID or PARTY end) end
 end
 local want = { "general_settings", "general_integrations", "general_nicknames", "general_fonts", "display_classcolors",
-               "auras_filterdesigner", "profiles_manage", "profiles_importexport", "profiles_changed_global", "debug_console" }
+               "auras_filterdesigner", "debug_console" }
 for _, id in ipairs(want) do
     check(G.IsGlobalPage and G.IsGlobalPage(id), "pages: " .. id .. " is on GLOBAL")
 end
@@ -49,6 +53,13 @@ for _, id in ipairs({ "general_frame", "auras_auradesigner", "text_designer",
                       "profiles_auto", "auras_buffs" }) do
     check(G.IsGlobalPage and not G.IsGlobalPage(id), "pages: " .. id .. " stays on Party/Raid")
 end
+-- The Profiles rail item's pages are neither GLOBAL's nor a mode's.
+for _, id in ipairs({ "profiles_manage", "profiles_spec", "profiles_auto", "profiles_clickcast",
+                      "profiles_importexport", "profiles_changed" }) do
+    check(G.IsProfilesPage and G.IsProfilesPage(id), "pages: " .. id .. " is a Profiles page")
+end
+check(G.IsProfilesPage and not G.IsProfilesPage("general_settings") and not G.IsProfilesPage("general_frame"),
+      "pages: ...and nothing else is")
 local ga = G.GlobalAccent or {}
 check(ga.r == 0.25 and ga.g == 0.78 and ga.b == 0.85, "accent: GLOBAL is teal-cyan")
 if G.CurrentAccent then
@@ -56,6 +67,21 @@ if G.CurrentAccent then
     check(G.CurrentAccent() == G.GlobalAccent, "accent: GLOBAL up -- its own")
     G.GlobalView = false; G.SelectedMode = "raid"
     check(G.CurrentAccent() == RAID, "accent: otherwise the mode's")
+    -- Profiles wears its PAGE's accent (GUI.ProfilesPageAccents), whatever is
+    -- under it: Auto Layouts is Raid's, Click Casting Binds' green, the rest teal.
+    G.GlobalView, G.ProfilesView = true, true
+    check(G.CurrentAccent("profiles_manage") == G.GlobalAccent, "accent: a Profiles page over GLOBAL wears teal")
+    G.GlobalView = false; G.SelectedMode = "party"
+    check(G.CurrentAccent("profiles_auto") == RAID, "accent: Auto Layouts wears Raid's, even over Party")
+    check(G.CurrentAccent("profiles_importexport") == G.GlobalAccent, "accent: ...another Profiles page, teal")
+    G.ClicksAccent = { r = 0.2, g = 0.8, b = 0.4 }
+    check(G.CurrentAccent("profiles_clickcast") == G.ClicksAccent, "accent: Click Casting wears Binds' green")
+    G.ClicksAccent = nil
+    G.CurrentPageName = "profiles_auto"
+    check(G.CurrentAccent() == RAID, "accent: no page asked for -- the page showing")
+    G.CurrentPageName = nil
+    G.SelectedMode = "raid"
+    G.GlobalView, G.ProfilesView = false, false
     G.SelectedMode = "party"
 end
 
@@ -75,7 +101,7 @@ local function tab(name, extra)
 end
 G.Tabs = {}
 for _, id in ipairs({ "general_settings", "general_frame", "general_fonts", "display_visibility",
-                      "display_classcolors", "debug_console" }) do
+                      "display_classcolors", "debug_console", "profiles_manage", "profiles_auto" }) do
     G.Tabs[id] = tab(id, id == "display_visibility" and { partyOnly = true } or nil)
 end
 G.Categories = {
@@ -83,8 +109,9 @@ G.Categories = {
     display = { children = { G.Tabs.display_classcolors, G.Tabs.display_visibility },
                 navSpec = { "display_visibility", "display_classcolors" } },
     debug   = { children = { G.Tabs.debug_console } },
+    profiles = { children = { G.Tabs.profiles_manage, G.Tabs.profiles_auto } },
 }
-G.CategoryOrder = { "general", "display", "debug" }
+G.CategoryOrder = { "general", "display", "profiles", "debug" }
 
 if G.IsTabInView and G.FirstTabInView and G.LastTabInView then
     G.GlobalView, G.SelectedMode = false, "party"
@@ -108,26 +135,55 @@ if G.IsTabInView and G.FirstTabInView and G.LastTabInView then
     G.SelectedMode = "party"
     G._lastModePage = "general_settings"
     eq(G:LastTabInView(), "general_frame", "land: ...as does one from the other tab")
+
+    -- PROFILES: its own sidebar, over whatever is underneath.
+    check(not G:IsTabInView(G.Tabs.profiles_manage), "view: Party does not list a Profiles page")
+    G.GlobalView = true
+    check(not G:IsTabInView(G.Tabs.profiles_manage), "view: ...nor does GLOBAL")
+    G.ProfilesView = true
+    check(G:IsTabInView(G.Tabs.profiles_manage) and G:IsTabInView(G.Tabs.profiles_auto),
+          "view: Profiles lists its pages, with GLOBAL under it")
+    check(not G:IsTabInView(G.Tabs.general_settings) and not G:IsTabInView(G.Tabs.general_frame),
+          "view: ...and nothing else")
+    eq(G:FirstTabInView(), "profiles_manage", "land: Profiles opens on Manage")
+    G._lastProfilesPage = "profiles_auto"
+    eq(G:LastTabInView(), "profiles_auto", "land: Profiles comes back to the page it showed last")
+    G._lastProfilesPage = "general_frame"
+    eq(G:LastTabInView(), "profiles_manage", "land: ...never to a page of another tab")
+    G._lastGlobalPage = "debug_console"
+    G.ProfilesView = false
+    eq(G:LastTabInView(), "debug_console", "land: GLOBAL's last page is still its own after Profiles")
+    G.GlobalView, G.SelectedMode = false, "party"
 end
 
 -- ---- the wiring ---------------------------------------------------------
 print("-- Global tab: the wiring")
-check(PANEL:find('GUI:StyleButton(btnGlobal, { tab = true, tabStripe = false, text = L["GLOBAL"], accent = C_GLOBAL,', 1, true) ~= nil,
-      "tab: a GLOBAL tab in its own accent")
-check(PANEL:find('btnGlobal:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnGlobal, 12), 1)', 1, true) ~= nil
-      and PANEL:find('btnParty:SetPoint("LEFT", btnGlobal, "RIGHT", SnapLen(btnParty, 4), 0)', 1, true) ~= nil,
-      "tab: ...left of PARTY, heading the chain")
-check(PANEL:find("btnParty:SetActive(not globalView and GUI.SelectedMode == \"party\")", 1, true) ~= nil
-      and PANEL:find("local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)", 1, true) ~= nil,
-      "tab: GLOBAL up lights it and not the mode under it; the underline wears its accent")
+-- GLOBAL is a rail item now (GUI/Rail.lua), in the bottom slot, in its own accent;
+-- deck 2 shows its name, and the Party/Raid tabs are hidden while it is up.
+check(REGISTRY:find('accent = function() return GUI.GlobalAccent end', 1, true) ~= nil
+      and REGISTRY:find('id = "global",', 1, true) ~= nil
+      and REGISTRY:find('slot = "bottom",', 1, true) ~= nil,
+      "tab: GLOBAL is a bottom-slot rail module in its own accent")
+check(PANEL:find("GUI:BuildModuleShell(frame, deck2, SaveWindowPos)", 1, true) ~= nil
+      and PANEL:find("GUI:RefreshModuleShell(not frame:IsShown())", 1, true) ~= nil,
+      "tab: the panel builds the rail and repaints it on every theme pass")
+check(RAIL:find("local on = (def == curDef)", 1, true) ~= nil
+      and RAIL:find("b:SetActive(isActive)", 1, true) ~= nil
+      and RAIL:find('deckCrumb:SetText(GUI:ModuleLabel(curDef) or "")', 1, true) ~= nil,
+      "tab: GLOBAL up hides the mode tabs and names itself; the mode under it is not lit")
 local sel = between(PANEL, "    local function SelectTab(name)", "        -- ☠ CLOSE OPEN MENUS FIRST.") or ""
-check(sel:find("GUI:EnterView(GUI.IsGlobalPage(name))", 1, true) ~= nil,
+check(sel:find("GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })", 1, true) ~= nil
+      and REGISTRY:find("onEnterForPage = function() GUI:EnterView(true) end", 1, true) ~= nil
+      and REGISTRY:find("onEnterForPage = function() GUI:EnterView(false) end", 1, true) ~= nil,
       "select: asking for a page switches to the tab it lives on (search, cross-links)")
-check(PANEL:find("if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end", 1, true) ~= nil,
+-- (A page given to a module of its own -- GUI:SetPageModule -- is remembered per
+-- module between the Profiles and GLOBAL arms; test_page_providers.lua pins it.)
+check(PANEL:find("if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name\n", 1, true) ~= nil
+      and PANEL:find("            elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name\n            else GUI._lastModePage = name end", 1, true) ~= nil,
       "select: each tab remembers its last page")
-for _, h in ipairs({ "btnParty", "btnRaid", "btnClicks" }) do
-    local body = between(PANEL, h .. ':SetScript("OnClick", function()', "DF:SyncLinkedSections()")
-              or between(PANEL, h .. ':SetScript("OnClick", function()', "-- Clean up any test/unlock state")
+for _, h in ipairs({ "EnterParty", "EnterRaid", "EnterClicks" }) do
+    local body = between(REGISTRY, "local function " .. h .. "()", "DF:SyncLinkedSections()")
+              or between(REGISTRY, "local function " .. h .. "()", "-- Clean up any test/unlock state")
               or ""
     check(body:find("GUI.GlobalView = false", 1, true) ~= nil, "leave: " .. h .. " leaves GLOBAL")
 end
@@ -140,7 +196,9 @@ check(SW:find("if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return fal
       "greyed: a GLOBAL page is never greyed by a mode being off")
 check(CONTROLS:find("GUI:SetAccent(GUI.CurrentAccent())", 1, true) ~= nil,
       "open: the window reopens in the accent of the tab it was closed on")
-check(AUTOPROF:find("local buttonsToDisable = {GUI.GlobalButton, GUI.PartyButton, GUI.ClicksButton}", 1, true) ~= nil,
+check(AUTOPROF:find('GUI:SetModuleLocked("global", editing)', 1, true) ~= nil
+      and AUTOPROF:find('GUI:SetModuleLocked("group", editing, "party")', 1, true) ~= nil
+      and AUTOPROF:find('GUI:SetModuleLocked("clicks", editing)', 1, true) ~= nil,
       "editing: GLOBAL is locked with Party and Binds while an auto layout is edited")
 check(OPTIONS:find("Settings on this page apply globally", 1, true) == nil,
       "settings: the 'applies globally' banner is gone -- the tab says it")
@@ -180,7 +238,7 @@ end
 
 print("-- Global tab: back to the mode it sat on is not a mode switch")
 do
-    local fn = PANEL:match("\n    local function LeaveGlobalTo%(mode%).-\n    end\n")
+    local fn = REGISTRY:match("\nlocal function LeaveGlobalTo%(mode%).-\nend\n")
     check(fn ~= nil, "leave: the shortcut can be read")
     local LeaveGlobalTo = fn and loadstring("local GUI = ...\n" .. fn .. "\nreturn LeaveGlobalTo")
     if LeaveGlobalTo then
@@ -198,13 +256,17 @@ do
         eq(leave("party"), false, "leave: from Party itself it does nothing")
     end
     -- A mover session is ended first (a15 #7), then the GLOBAL hand-off is asked.
-    check(PANEL:find('btnParty:SetScript("OnClick", function()\n        if DeferForMoverSession(btnParty, "party") then return end\n        if LeaveGlobalTo("party") then return end', 1, true) ~= nil
-      and PANEL:find('btnRaid:SetScript("OnClick", function()\n        if DeferForMoverSession(btnRaid, "raid") then return end\n        if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
+    -- (Behaviour: test_module_registry. Here: the buttons go through SelectModule.)
+    check(RAIL:find('b:SetScript("OnClick", function() GUI:SelectModule(moduleId, tabId) end)', 1, true) ~= nil
+      and RAIL:find("GUI:SelectModule(id)", 1, true) ~= nil
+      and REGISTRY:find("if not forPage and def.endsMoverSession and DeferForMoverSession(id, tabId) then", 1, true) ~= nil
+      and REGISTRY:find('local function EnterParty()\n    if LeaveGlobalTo("party") then return end', 1, true) ~= nil
+      and REGISTRY:find('local function EnterRaid()\n    if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
           "leave: both mode buttons end a mover session, then ask")
     -- The mover's own Configure clicks a mode button mid-session on purpose; that click,
     -- and a click on the mode already showing, must not end the session.
-    check(PANEL:find("if GUI._moverOwnedClick then return false end", 1, true) ~= nil
-      and PANEL:find("if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end", 1, true) ~= nil,
+    check(REGISTRY:find("if GUI._moverOwnedClick then return false end", 1, true) ~= nil
+      and REGISTRY:find("if tabId and id == CurrentModuleId() and GUI.SelectedMode == tabId then return false end", 1, true) ~= nil,
           "leave: Configure's own click and a same-mode click keep the session")
 end
 
@@ -213,7 +275,7 @@ do
     local ev = PANEL:match("\n    function GUI:EnterView%(global%)(.-)\n    end\n")
     check(ev ~= nil and ev:find("UpdateThemeColors()", 1, true) == nil,
           "switch: EnterView leaves the repaint to the SelectTab that follows it")
-    local _, holds = PANEL:gsub("GUI._holdPageRepaint = true\n        UpdateThemeColors%(%)\n        GUI._holdPageRepaint = nil", "")
+    local _, holds = REGISTRY:gsub("GUI._holdPageRepaint = true\n    GUI.UpdateThemeColors%(%)\n    GUI._holdPageRepaint = nil", "")
     eq(holds, 2, "switch: Party and Raid hold the walk until the build is swapped")
     check(PANEL:find("if isWide and (widened or (pageNow and not pageNow._widthSettled)) then", 1, true) ~= nil,
           "switch: a wide page's width nudge runs when the window widened or on its first showing only")

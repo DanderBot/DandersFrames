@@ -56,6 +56,7 @@ local BADGE_COLORS = P.BADGE_COLORS
 local placedIndicators = P.placedIndicators
 local ClearPlacedIndicators = P.ClearPlacedIndicators
 local RefreshPlacedIndicators = P.RefreshPlacedIndicators
+local RefreshLiveFramesThrottled = P.RefreshLiveFramesThrottled
 local RefreshPreviewEffects = P.RefreshPreviewEffects
 local CreateEnableBanner = P.CreateEnableBanner
 local CreateSpecDropdown = P.CreateSpecDropdown
@@ -602,14 +603,25 @@ local function GroupApply(kind)
     end
 end
 
+-- What a drag frame costs: the designer's preview at once, the real frames at the
+-- throttled rate every other designer slider runs at. The full apply waits for release.
+-- A debuff group's bump is GroupApply's, for the same record cache.
+local function GroupDrag(kind)
+    return function()
+        RefreshPlacedIndicators()
+        if kind == "debuff" then DF:InvalidateAuraLayout() end
+        RefreshLiveFramesThrottled()
+    end
+end
+
 -- ── PLACEMENT (every group kind) ──
 -- The controls bind the group record itself.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
     place(GUI:CreateDropdown(host, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", apply), 54)
-    place(GUI:CreateSlider(host, L["Offset X"], -150, 150, 1, group, "offsetX", apply, RefreshPlacedIndicators), 54)
-    place(GUI:CreateSlider(host, L["Offset Y"], -150, 150, 1, group, "offsetY", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Offset X"], -150, 150, 1, group, "offsetX", apply, GroupDrag(kind)), 54)
+    place(GUI:CreateSlider(host, L["Offset Y"], -150, 150, 1, group, "offsetY", apply, GroupDrag(kind)), 54)
 end
 
 -- ── GROWTH (every group kind) ──
@@ -628,16 +640,16 @@ local function BuildGroupGrowth(env, group, kind)
     end
 
     place(GUI:CreateGrowthControl(host, group, "growDirection", apply), 158)
-    place(GUI:CreateSlider(host, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow", apply, RefreshPlacedIndicators), 54)
-    place(GUI:CreateSlider(host, L["Spacing"], -5, 20, 1, group, "spacing", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow", apply, GroupDrag(kind)), 54)
+    place(GUI:CreateSlider(host, L["Spacing"], -5, 20, 1, group, "spacing", apply, GroupDrag(kind)), 54)
     if kind == "members" then return end
 
     -- Uniform per-group styling: one icon size + slot cap for every spell the
     -- group matches (no per-spell styling by design).
-    place(GUI:CreateSlider(host, L["Icon Size"], 8, 64, 1, group, "iconSize", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Icon Size"], 8, 64, 1, group, "iconSize", apply, GroupDrag(kind)), 54)
     -- Max Icons is STRUCTURAL (slot count is declared at container build) — the
     -- factory Rebuild path handles it (OOC-deferred).
-    place(GUI:CreateSlider(host, L["Max Icons"], 1, 20, 1, group, "maxIcons", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Max Icons"], 1, 20, 1, group, "maxIcons", apply, GroupDrag(kind)), 54)
 
     -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory re-applies it in
     -- place via ApplyTuning (OOC-immediate; self-defers in combat) — no rebuild.
@@ -1938,8 +1950,7 @@ end
 -- ============================================================
 local function ApplyEnabledState()
     if not S.mainFrame then return end
-    local adEnabled = DF.IsAuraDesignerEnabledForMode
-        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
+    local adEnabled = P.EditTargetEnabled()
     if S.enableBanner then
         S.enableBanner.checkbox:SetChecked(adEnabled)
     end
@@ -1968,10 +1979,18 @@ end
 -- hand-anchored inside one S.mainFrame that the page harness never sees. It is
 -- why this page had to force the window 210px wider than its own default.
 -- ============================================================
-local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
+local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef, opts)
     local prevDB = S.db  -- capture before overwrite to detect mode switch
+    local prevTarget = S.editTarget
     S.page = pageRef
     S.db = dbRef
+    -- What this build edits: the selected mode, or opts.target (P.EditTarget, in
+    -- Options.lua). Kept with the build so the template bar's rebuild and a page
+    -- taking the island back (below) build against the same thing.
+    S.editTarget = opts and opts.target or nil
+    S.buildOpts = opts
+    pageRef.dfADArgs = { db = dbRef, opts = opts }
+    local edit = P.EditTarget()
 
     local parent = S.page.child
 
@@ -1982,20 +2001,21 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- reference but changes frameWidth/Height — both must force a full rebuild so
     -- the preview mock resizes to the active layout's frame size.
     -- ========================================
-    local _adFDB = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or {}
+    local _adFDB = edit.db or {}
     local _adW, _adH = _adFDB.frameWidth or 125, _adFDB.frameHeight or 64
     -- Auto-layout identity: two raid layouts share the SAME S.db proxy and may share
     -- frame dimensions, so neither check below distinguishes them — without this,
     -- switching between same-size raid layouts reuses the stale S.page.
-    local _adLayout = (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
+    local _adLayout = edit.mode and (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
     -- Preset identity: switching the mode's preset keeps the same S.db/size/layout,
     -- so without this the stale S.page (bound to the old preset) would be reused.
-    local _adPreset = DF.GetModeDesignerPresetName
-        and DF:GetModeDesignerPresetName("aura", (GUI and GUI.SelectedMode) or "party")
+    local _adPreset = edit.name
     -- Editing identity: entering edit of the ACTIVE layout keeps the same table
     -- object (editingProfile == activeRuntimeProfile), so _adLayout alone
     -- misses the transition and the editing-banner offset is never applied.
-    local _adEditing = (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
+    -- (An edit target sits inside a page the harness has already moved clear of
+    -- the editing banner, so it takes no offset of its own.)
+    local _adEditing = edit.mode and (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
     -- ☠☠ THE ISLAND BELONGS TO ONE PAGE, AND TWO NAV ENTRIES NOW REACH THIS BUILDER. The
     -- Aura Designer page and the Power Infusion Helper page both call it, and the reuse path
     -- below REPARENTS S.mainFrame to whoever asked last -- so bouncing between them handed
@@ -2007,7 +2027,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- ⚠ Compared by IDENTITY, not by name: the harness can rebuild a page object, and a
     -- stale reference must read as "different" rather than matching a dead frame.
     local sameOwner = (S.mainFrameOwner == pageRef)
-    if S.mainFrame and sameOwner and prevDB == dbRef
+    if S.mainFrame and sameOwner and prevDB == dbRef and prevTarget == S.editTarget
        and S.mainFrame.dfBuiltFrameW == _adW and S.mainFrame.dfBuiltFrameH == _adH
        and S.mainFrame.dfBuiltLayout == _adLayout
        and S.mainFrame.dfBuiltPreset == _adPreset
@@ -2033,8 +2053,10 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
 
     -- Full build (first time, or mode switch)
     if S.mainFrame then
+        S.rebuilding = true
         S.mainFrame:Hide()
         S.mainFrame:SetParent(nil)
+        S.rebuilding = nil
     end
     wipe(placedIndicators)
     wipe(expandedCards)
@@ -2092,6 +2114,15 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- on return. S.mainFrame is created fresh per full build (the old one is hidden
     -- and unparented above), so this hook lands exactly once per frame.
     S.mainFrame:HookScript("OnHide", ClearPlacedIndicators)
+    -- ☠ AN EDIT TARGET ENDS WHEN ITS ISLAND GOES OUT OF VIEW. S.editTarget is read by
+    -- everything that asks P.EditTarget, and some of that runs off this page (the
+    -- Power Infusion Helper's sweep, on the Filter Designer's build). Left standing,
+    -- a page that was editing some other table would keep answering for it after
+    -- you had moved on. Its page's RefreshStates puts it back on the way in. Not
+    -- during a rebuild: the old frame is hidden after the new target is set.
+    S.mainFrame:HookScript("OnHide", function()
+        if not S.rebuilding then S.editTarget = nil end
+    end)
 
     -- Override RefreshStates: Aura Designer uses its own layout system.
     --
@@ -2115,6 +2146,24 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     S.page.RefreshStates = function(self)
         local pageH = self:GetHeight()
         self.child:SetHeight(pageH)
+        -- ☠ THE ISLAND IS ONE FRAME AND MORE THAN ONE PAGE BUILDS IT (the designer's
+        -- own, and any page editing a target). A page coming back into view while
+        -- another holds the island would show an empty child -- its cached build is
+        -- served, and the size check below says nothing changed. So it takes the
+        -- island back first, as a full build against what it last built for.
+        local args = self.dfADArgs
+        if S.mainFrameOwner ~= self then
+            BuildAuraDesignerIsland(GUI, self, args and args.db, args and args.opts)
+            return
+        end
+        -- ...and its edit target, which the island going out of view dropped (below).
+        -- A refresh run while it was away drew the mode's template, so a target
+        -- coming back repaints even at an unchanged size.
+        local want = args and args.opts and args.opts.target or nil
+        if S.editTarget ~= want then
+            S.editTarget, S.buildOpts = want, args and args.opts
+            self._lastRefreshStatesH = nil
+        end
         -- GUI.PageChildWidth, not a fourth copy of the arithmetic: this page's
         -- child is a page child like any other, and the `- 30` it carried was one
         -- of the copies that had to be found by grep when the corridor moved.
@@ -2152,7 +2201,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- overlay anchored to the top of the content frame; this custom AD S.page lays
     -- its own content out from the top too, so push everything down to clear it
     -- (otherwise the editing banner sits on top of the enable banner / preset bar).
-    if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
+    if _adEditing then
         yPos = -56
     end
 
@@ -2175,18 +2224,20 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- right side). Compact icon buttons keep the row within the S.page width.
     -- ========================================
     if GUI.CreateDesignerPresetBar then
-        local presetBar = GUI:CreateDesignerPresetBar(S.enableBanner, {
+        local barOpts = {
             kind = "aura",
             iconButtons = true,
-            getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
+            getMode = function() return P.EditTarget().mode or "party" end,
             onChange = function()
+                local tgt = S.editTarget
+                if tgt and tgt.onChange then tgt.onChange() end
                 -- Re-invoke the build NEXT frame: the dfBuiltPreset guard then
                 -- forces a full rebuild so the editor rebinds to the newly chosen
                 -- preset. Deferred so we don't tear down the bar from inside its
                 -- own click handler.
                 if C_Timer and C_Timer.After then
                     C_Timer.After(0, function()
-                        if DF.BuildAuraDesignerPage then DF.BuildAuraDesignerPage(GUI, S.page, S.db) end
+                        if DF.BuildAuraDesignerPage then DF.BuildAuraDesignerPage(GUI, S.page, S.db, nil, nil, S.buildOpts) end
                         DF:InvalidateAuraLayout()
                         DF:UpdateAllFrames()
                         local E = DF.AuraDesigner and DF.AuraDesigner.Engine
@@ -2194,7 +2245,10 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
                     end)
                 end
             end,
-        })
+        }
+        -- A target's own reference rides on the same bar (getRef / setRef / ...).
+        for k, v in pairs(S.editTarget and S.editTarget.bar or {}) do barOpts[k] = v end
+        local presetBar = GUI:CreateDesignerPresetBar(S.enableBanner, barOpts)
         -- Row 2 reflows (B2): the spec dropdown moved onto the tab strip, so
         -- the preset bar takes the whole row.
         presetBar:SetPoint("LEFT", S.enableBanner, "LEFT", 10, -18)
@@ -2456,8 +2510,10 @@ end
 -- The designer always builds its island. `Add` and `AddSpace` are still
 -- accepted so BuildPage's contract is unchanged; the island does not use them.
 -- ============================================================
-function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
-    return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
+-- `opts.target` edits a template some other settings table names, instead of the
+-- selected mode's (WHAT THE EDITOR EDITS, Options.lua). Without it nothing changes.
+function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace, opts)
+    return BuildAuraDesignerIsland(guiRef, pageRef, dbRef, opts)
 end
 
 -- ============================================================
@@ -2483,7 +2539,7 @@ function DF:AuraDesigner_RefreshPage()
 
     -- Account for editing banner offset (50px) when editing an auto layout
     local editingOffset = 0
-    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+    if not S.editTarget and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
         editingOffset = 50
     end
     S.mainFrame:ClearAllPoints()

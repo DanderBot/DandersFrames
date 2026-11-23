@@ -127,11 +127,25 @@ end
 -- BuildFilterDesignerPage assigns into. Same trap as `GUI`, noted further up.
 local SelectFilter   -- forward declaration; assigned in DF:BuildFilterDesignerPage
 
-local function ImportNamed(def)
+-- Select the imported filter in the designer when its page has been built,
+-- and say in chat where to find it unless the paste was the designer's own:
+-- from Profiles > Import / Export (`outside`) the designer is not on screen
+-- even once it has been built, so selecting it there alone shows nothing.
+local function ShowImported(id, outside)
+    if SelectFilter then
+        SelectFilter("custom", id)
+        if not outside then return end
+    end
     local R = DF.FilterRegistry
-    if not R or not SelectFilter then return end
+    local f = R and id and R:GetCustomFilter(id)
+    DF:Say(format(L["Filter imported: %s. Find it in the Filter Designer."], (f and f.name) or tostring(id)))
+end
+
+local function ImportNamed(def, outside)
+    local R = DF.FilterRegistry
+    if not R then return end
     if not R:IsCustomFilterNameTaken(def.name) then
-        SelectFilter("custom", R:ImportFilterPayload(def))
+        ShowImported(R:ImportFilterPayload(def), outside)
         return
     end
     ChainPopup(function()
@@ -143,7 +157,7 @@ local function ImportNamed(def)
                 text = Trim(text or "")
                 if text == "" then return end
                 def.name = text     -- decoded payload is ours; safe to retitle
-                SelectFilter("custom", R:ImportFilterPayload(def))
+                ShowImported(R:ImportFilterPayload(def), outside)
             end)
     end)
 end
@@ -158,6 +172,57 @@ local function ShowFilterStringError(title, errKey)
             buttons = { { label = L["OK"] } },
         })
     end)
+end
+
+-- ★ ONE IMPORT FLOW FOR A FILTER STRING, wherever it was pasted: the Filter
+-- Designer's "+ Import Filter" and Profiles > Import / Export's paste box
+-- (GUI/Pages/Profiles.lua) both run this. Decode, then ask only when the
+-- content or the name already exists. Returns false when the string was refused
+-- (the error popup is already up), true when the import went ahead or is asking.
+-- outside: the paste was not the designer's own (Profiles > Import / Export),
+-- so the import always confirms in chat -- see ShowImported.
+function DF.ImportFilterString(text, outside)
+    local R = DF.FilterRegistry
+    if not R or not text or Trim(text) == "" then return false end
+    local def, err = R:DecodeFilterString(text)
+    if not def then
+        ShowFilterStringError(L["Import Filter"], err)
+        return false
+    end
+    -- A newly imported filter is not in any selection yet (IsCustomOn defaults
+    -- false), so nothing on screen changes until the user ticks it -- no
+    -- DirectFilterChangedProxy here, matching the New and Duplicate paths.
+    local match = R:FindContentMatch(def)
+    if not match then
+        -- No content match, but the NAME can still collide -- that is the case
+        -- nothing checked: two rows reading the same thing with different spells
+        -- behind them. ImportNamed asks only if it does.
+        ImportNamed(def, outside)
+        return true
+    end
+    -- Content-equal filter already present. Profile import silently reuses it,
+    -- which is right there; here it would mean pasting a string and watching
+    -- nothing happen. Ask instead.
+    local existing = R:GetCustomFilter(match)
+    local message = format(
+        L["You already have a filter with these spells: \"%s\". Import a separate copy anyway?"],
+        (existing and existing.name) or match)
+    ChainPopup(function()
+        DF:ShowPopupAlert({
+            title   = L["Import Filter"],
+            message = message,
+            buttons = {
+                { label = L["Import as Copy"], onClick = function()
+                    ImportNamed(def, outside)
+                end },
+                { label = L["Use Existing"], onClick = function()
+                    if SelectFilter then SelectFilter("custom", match) end
+                end },
+                { label = L["Cancel"] },
+            },
+        })
+    end)
+    return true
 end
 
 -- Deleting a custom filter must also unhook it from every profile's
@@ -179,7 +244,9 @@ local function ScrubDeletedFilter(cfId)
     -- a dangling reference survives a "fix".
     local ParseRef = DF.ParseADFilterRef
     if not ParseRef then
-        DF:DebugWarn("FILTER", "ScrubDeletedFilter: DF:ParseADFilterRef unavailable -- @custom: references in AD effect keys, triggers and conditions were NOT scrubbed for '%s'", tostring(cfId))
+        if DF:DebugActive("FILTER") then
+            DF:DebugWarn("FILTER", "ScrubDeletedFilter: DF:ParseADFilterRef unavailable -- @custom: references in AD effect keys, triggers and conditions were NOT scrubbed for '%s'", tostring(cfId))
+        end
     end
 
     -- One array of layout-group records: nil the deleted id from every
@@ -671,7 +738,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- runs, and nothing happens. That is indistinguishable from a dead link and
         -- it is what a page-id typo looks like from the outside, so say so.
         if not (GUI.Pages and GUI.Pages[pageId]) then
-            DF:DebugWarn("GUI", "Filter Designer banner link points at unregistered page '%s'", tostring(pageId))
+            if DF:DebugActive("GUI") then
+                DF:DebugWarn("GUI", "Filter Designer banner link points at unregistered page '%s'", tostring(pageId))
+            end
             return
         end
         local section = BANNER_LINK_SECTION[pageId]
@@ -1695,48 +1764,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             message     = L["Paste a filter string to import:"],
             multiline   = true,
             acceptLabel = L["Import"],
-            onAccept    = function(text)
-                if not text or Trim(text) == "" then return end
-                local def, err = R:DecodeFilterString(text)
-                if not def then
-                    ShowFilterStringError(L["Import Filter"], err)
-                    return
-                end
-                -- A newly imported filter is not in any selection yet
-                -- (IsCustomOn defaults false), so nothing on screen changes
-                -- until the user ticks it — no DirectFilterChangedProxy here,
-                -- matching the New and Duplicate paths.
-                local match = R:FindContentMatch(def)
-                if not match then
-                    -- No content match, but the NAME can still collide -- that is the
-                    -- case nothing checked: two rows reading the same thing with
-                    -- different spells behind them. ImportNamed asks only if it does.
-                    ImportNamed(def)
-                    return
-                end
-                -- Content-equal filter already present. Profile import silently
-                -- reuses it, which is right there; here it would mean pasting a
-                -- string and watching nothing happen. Ask instead.
-                local existing = R:GetCustomFilter(match)
-                local message = format(
-                    L["You already have a filter with these spells: \"%s\". Import a separate copy anyway?"],
-                    (existing and existing.name) or match)
-                ChainPopup(function()
-                    DF:ShowPopupAlert({
-                        title   = L["Import Filter"],
-                        message = message,
-                        buttons = {
-                            { label = L["Import as Copy"], onClick = function()
-                                ImportNamed(def)
-                            end },
-                            { label = L["Use Existing"], onClick = function()
-                                SelectFilter("custom", match)
-                            end },
-                            { label = L["Cancel"] },
-                        },
-                    })
-                end)
-            end,
+            -- The same flow Profiles > Import / Export runs (DF.ImportFilterString).
+            onAccept    = function(text) DF.ImportFilterString(text) end,
         })
     end)
 
@@ -2147,7 +2176,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- A filter that is selected but has no row is a deleted one whose reference
         -- outlived it. Selecting it still opens the right-hand pane's empty state,
         -- which is a truthful landing; say so rather than pulsing nothing.
-        DF:DebugWarn("GUI", "Filter Designer: no row for %s filter '%s'", tostring(kind), tostring(key))
+        if DF:DebugActive("GUI") then
+            DF:DebugWarn("GUI", "Filter Designer: no row for %s filter '%s'", tostring(kind), tostring(key))
+        end
     end
 
     -- ========== SPELL LIST POOLS ==========

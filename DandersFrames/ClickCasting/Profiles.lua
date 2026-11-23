@@ -353,6 +353,48 @@ function CC:SetActiveProfile(profileName)
     return true
 end
 
+-- ============================================================
+-- RESET THE ACTIVE PROFILE (the Modules page's Reset on Click-Casting)
+-- The class's ACTIVE click-cast profile becomes what a new one is (the template):
+-- every binding, custom macro and saved consumable goes, and its options return
+-- to their defaults. Bindings are precious, so nothing else is touched: the
+-- class's other profiles, the loadout assignments, and the settings every profile
+-- shares (CC.db: disable while mounted / flying, target on cast, auto-create).
+-- With no binding left our frames fall back to plain click-to-target and the menu.
+--
+-- ⚠ options.enabled is KEPT: it is the module's on/off switch (CC.db.enabled
+-- mirrors it), and a reset never turns a module on or off.
+-- ⚠ IN PLACE: CC.profile and the legacy CC.db.bindings / customMacros / options
+-- references all point into this table.
+-- ⚠ Out of combat only: ApplyBindings rewrites secure attributes on every frame.
+-- ============================================================
+function CC:ResetActiveProfile()
+    if InCombatLockdown() then
+        DF:Err(L["Cannot use this action in combat."])
+        return false
+    end
+    if not self.db then return false end
+    local profile, profileName = self:GetActiveProfile()
+    if type(profile) ~= "table" then return false end
+    local enabled = type(profile.options) == "table" and profile.options.enabled
+
+    local fresh = self:CreateEmptyProfile()
+    for k in pairs(profile) do profile[k] = nil end
+    for k, v in pairs(fresh) do profile[k] = v end
+    profile.options.enabled = enabled and true or false
+
+    self.profile = profile
+    self.db.bindings = profile.bindings
+    self.db.customMacros = profile.customMacros
+    self.db.options = profile.options
+    self.db.enabled = profile.options.enabled
+
+    self:ApplyBindings()
+    if self.RefreshUIIfLoaded then self:RefreshUIIfLoaded() end
+    DF:Say(format(L["%s reset to defaults in profile %s."], L["Click-Casting"], profileName))
+    return true
+end
+
 -- Create a new profile
 function CC:CreateProfile(profileName, copyFrom)
     local classData = self:GetClassData()

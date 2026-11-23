@@ -42,6 +42,8 @@ function DF:DeepCopy(t)
     return c
 end
 function DF:StampFreshProfileMigrations(p) p._stamped = true end
+-- The profile-root table registry, empty (its own suite: test_profile_root_tables.lua).
+function DF:ApplyProfileRootDefaults() end
 function DF:GetCurrentProfile() return DandersFramesDB_v2.currentProfile end
 DF.GUI = { RefreshSettingsFont = function() refreshes = refreshes + 1 end }
 local activated

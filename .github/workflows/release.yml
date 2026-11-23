@@ -23,6 +23,12 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
+      # DandersMover has its own tags (mover-v*, release-mover.yml). The packager and
+      # generate_changelog.sh name builds after the nearest tag, so drop the mover's
+      # from this throwaway checkout or a DandersFrames build could take its name.
+      - name: Hide DandersMover tags
+        run: git tag -l 'mover-*' | xargs -r git tag -d > /dev/null
+
       - name: Check if build is needed
         id: guard
         run: |
@@ -32,11 +38,21 @@ jobs:
             exit 0
           fi
 
-          # Branch pushes: skip if only docs/CI files changed
+          # Branch pushes: skip if every commit in the push only touched docs, CI or
+          # DandersMover. Diffs the whole push (before..HEAD), not just the newest
+          # commit, so code changes earlier in a multi-commit push still build.
+          # DandersMover ships on its own (release-mover.yml); the DandersFrames zip
+          # still bundles it, so mover changes reach DandersFrames testers with the
+          # next DandersFrames build.
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            BEFORE="HEAD~1"
+          fi
           DOMINATED=true
-          for f in $(git diff --name-only HEAD~1..HEAD 2>/dev/null); do
+          for f in $(git diff --name-only "$BEFORE"..HEAD 2>/dev/null); do
             case "$f" in
-              *.md|*.sh|.github/*|.gitignore|.pkgmeta|DandersFrames/Core/Changelog.lua|DandersFrames_Options/Changelog.lua) ;;
+              *.md|*.sh|.github/*|.gitignore|.pkgmeta|.pkgmeta-mover|DandersFrames/Core/Changelog.lua|DandersFrames_Options/Changelog.lua) ;;
+              DandersMover/*|DandersMoverDemo/*) ;;
               *) DOMINATED=false; break ;;
             esac
           done
@@ -126,18 +142,6 @@ jobs:
       - name: Package and Release
         if: steps.guard.outputs.skip != 'true'
         uses: BigWigsMods/packager@v2
-        env:
-          CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Package DandersMover (standalone CurseForge project)
-        if: steps.guard.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/')
-        uses: BigWigsMods/packager@v2
-        with:
-          # ./ prefix is load-bearing: the packager validates the release dir as
-          # "absolute or inside .", and a bare .release-mover fails that check
-          # (v5.4.0-alpha.1's mover upload died on exactly this).
-          args: -m .pkgmeta-mover -r ./.release-mover
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

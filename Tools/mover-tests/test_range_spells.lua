@@ -48,7 +48,7 @@ local STUBS = {
     UnitCanAttack = function() return S.hostile end,
     UnitIsDeadOrGhost = function() return S.dead end,
     UnitIsConnected = function() return true end,
-    IsInGroup = function() return true end,
+    IsInGroup = function() return S.inGroup ~= false end,
     IsInRaid = function() return false end,
     GetTime = function() return S.now end,
     time = function() return 0 end,
@@ -63,7 +63,7 @@ local STUBS = {
             local g = {}
             function g:CreateAnimation() return { SetDuration = function() end } end
             function g:SetLooping() end
-            function g:SetScript() end
+            function g:SetScript(kind, fn) S.scripts = S.scripts or {}; S.scripts[kind] = fn end
             function g:Play() end
             return g
         end
@@ -84,6 +84,7 @@ local function loadRange(class, setup)
         DebugWarn = function(_, cat, fmt, ...) S.warns[#S.warns + 1] = string.format(fmt, ...) end,
         DebugActive = function() return S.debugOn end,
         MemTestDisabled = function() return false end,
+        FrameInTestScope = function() return false end,   -- no test mode
         UnitIsUnit = function(a, b) return a == b end,
     }
     load_df_file_into("Features/Range.lua", DF)
@@ -291,6 +292,61 @@ do  -- hostile backups
     unload()
 end
 
+do  -- hostile: any "in range" wins (a hunter in melee: the shot says no, the melee spell yes)
+    local DF = loadRange("HUNTER", function()
+        S.specID = 253
+        S.known[193455], S.known[75], S.known[195645] = true, true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile, S.combat = true, true
+    S.inRange[193455], S.inRange[75], S.inRange[195645] = false, true, nil
+    eq(rangeOf(DF), true, "first spell false, second true -> in range")
+    S.inRange[75], S.inRange[195645] = false, true
+    eq(rangeOf(DF), true, "a melee spell's true overrides the shots' false")
+    S.inRange[195645] = false
+    eq(rangeOf(DF), false, "every spell false -> out of range")
+    S.inRange[193455], S.inRange[75], S.inRange[195645] = nil, nil, nil
+    eq(rangeOf(DF), true, "no spell answers -> assume in range")
+    S.inRange[193455], S.inRange[75] = nil, false
+    eq(rangeOf(DF), false, "a lone false with the rest nil -> out of range")
+    unload()
+
+    -- Survival knows its melee spells; the class list carries one for an unknown spec
+    DF = loadRange("HUNTER", function()
+        S.specID = 255
+        S.known[259491], S.known[75], S.known[186270] = true, true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[259491], S.inRange[75], S.inRange[186270] = false, false, true
+    eq(rangeOf(DF), true, "Survival in melee: Raptor Strike keeps the enemy in range")
+    unload()
+
+    DF = loadRange("HUNTER", function()
+        S.specIndex, S.specID = nil, nil
+        S.known[75], S.known[195645] = true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[75], S.inRange[195645] = false, true
+    eq(rangeOf(DF), true, "the hunter class list carries a melee spell too")
+    unload()
+
+    -- a chosen spell that answers still decides alone: no widening by the auto list
+    DF = loadRange("HUNTER", function()
+        S.specID = 253
+        S.known[193455], S.known[75], S.known[195645] = true, true, true
+    end)
+    DF.db.party.rangeCheckSpellID = 195645
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[195645], S.inRange[193455], S.inRange[75] = false, true, true
+    eq(rangeOf(DF), false, "a chosen spell's false is not overridden by a longer auto spell")
+    S.inRange[195645] = nil
+    eq(rangeOf(DF), true, "a chosen spell that can't check the unit falls to the any-true auto list")
+    unload()
+end
+
 do  -- paladin rez: Intercession behind Redemption
     local DF = loadRange("PALADIN", function()
         S.specID = 65
@@ -303,4 +359,59 @@ do  -- paladin rez: Intercession behind Redemption
     S.inRange[391054] = true
     eq(rangeOf(DF), true, "and its in-range answer stands")
     unload()
+end
+
+-- ============================================================
+-- STANDALONE FRAMES AND THE RANGE REGISTRY
+-- The solo shortcut (everyone in range when not grouped) is a group-frame rule; a
+-- standalone frame is range-checked whatever the group. Frames registered with
+-- DF:RegisterRangeFrame are polled on every tick, before the group-header gate;
+-- with no registrations the tick is the group walk it always was.
+-- ============================================================
+do
+    local DF = loadRange("PRIEST", function() S.specID = 256 end)
+    DF:RefreshRangeSpell()
+    S.inGroup, S.interact = false, false   -- solo, out of interact distance
+    DF:ClearRangeCache()
+    local party = { unit = "party1" }
+    DF:UpdateRange(party)
+    eq(party.dfInRange, true, "solo: a group frame takes the in-range shortcut")
+    local standalone = { unit = "target", dfStandalone = true }
+    DF:UpdateRange(standalone)
+    eq(standalone.dfInRange, false, "solo: a standalone frame is really checked")
+
+    local tick = S.scripts and S.scripts.OnLoop
+    check(tick ~= nil, "the range tick is captured")
+    local walked = 0
+    DF.GroupHeadersReady = function() return false end
+    DF.GetContentType = function() return nil end
+    DF.IteratePartyFrames = function() walked = walked + 1 end
+    if tick then
+        tick()
+        eq(walked, 0, "no registrations, headers not ready: the tick does nothing")
+        local polled = { unit = "target", dfStandalone = true, IsShown = function() return true end }
+        local hidden = { unit = "focus", dfStandalone = true, IsShown = function() return false end }
+        DF:RegisterRangeFrame(polled)
+        DF:RegisterRangeFrame(hidden)
+        DF:ClearRangeCache()
+        tick()
+        eq(polled.dfInRange, false, "a registered frame is polled even before any group header is ready")
+        eq(hidden.dfInRange, nil, "a hidden registered frame is skipped")
+        eq(walked, 0, "and the group walk still waits for its headers")
+        DF:UnregisterRangeFrame(polled)
+        polled.dfInRange = nil
+        tick()
+        eq(polled.dfInRange, nil, "an unregistered frame is no longer polled")
+        DF.GroupHeadersReady = function() return true end
+        tick()
+        eq(walked, 1, "headers ready: the party walk runs as before")
+    end
+    unload()
+end
+
+print("-- Highlights: the in-raid party-frame shortcut skips standalone frames")
+do
+    local hsrc = df_file_source("Features/Highlights.lua"):gsub("\r\n", "\n")
+    check(hsrc:find("if not frame%.dfIsTestFrame and not frame%.dfStandalone and not frame%.isRaidFrame\n%s*and not frame%.isArenaFrame and IsInRaid%(%) then"),
+        "UpdateHighlights: standalone frames are exempt from the in-raid hide")
 end

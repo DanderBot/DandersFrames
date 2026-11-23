@@ -1417,6 +1417,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the control behind it says another. (The Tooltips page hoisted its five
         -- Anchor To tables for exactly this reason.)
         local colorModes = { CLASS= L["Class Color"], CUSTOM= L["Custom Color"], PERCENT= L["Health Gradient"] }
+        -- A page may offer more modes than these (page.extraHealthColorModes, value ->
+        -- label): the reaction modes, for frames that can show hostile units (see
+        -- DF.StandaloneHealthColorModes). The party/raid page sets none.
+        if type(self.extraHealthColorModes) == "table" then
+            for k, v in pairs(self.extraHealthColorModes) do colorModes[k] = v end
+        end
         local orientOptions = {
             HORIZONTAL= L["Left to Right"], HORIZONTAL_INV= L["Right to Left"],
             VERTICAL= L["Bottom to Top"], VERTICAL_INV= L["Top to Bottom"],
@@ -1459,6 +1465,21 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local customColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Health Color"], db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
             customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
+
+            -- ...and with the reaction modes on offer, their four colours (the
+            -- profile's reactionColors table, shared by every frame that uses them),
+            -- shown while a reaction mode is picked.
+            if type(self.extraHealthColorModes) == "table" and DF.db and type(DF.db.reactionColors) == "table" then
+                for _, rc in ipairs({ { "hostile", L["Hostile"] }, { "neutral", L["Neutral"] },
+                                      { "friendly", L["Friendly"] }, { "tapped", L["Tapped"] } }) do
+                    local swatch = group:AddWidget(GUI:CreateColorPicker(parent, rc[2], DF.db.reactionColors, rc[1],
+                        false, nil, function() DF:RefreshAllVisibleFrames() end, true), 35)
+                    swatch.hideOn = function(d)
+                        local modes = DF.StandaloneHealthColorModes
+                        return not (modes and d and modes[d.healthColorMode])
+                    end
+                end
+            end
         end
 
         -- The mode in the dropdown's own words, and the alpha ONLY when it is
@@ -1597,9 +1618,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Adding, removing or moving a stop changes the ROW SET, so the page has to be
         -- rebuilt for the captions and stepper bounds to stay truthful. A colour edit
         -- does not, and must not — rebuilding under an open colour picker closes it.
+        -- ⚠ `self`, the page being BUILT, not pageHealthBar: another page can draw
+        -- these cards (page.dfBuilder), and it is that page that has to rebuild.
         local function GradRebuild()
             GradApply()
-            if pageHealthBar and pageHealthBar.Refresh then pageHealthBar:Refresh() end
+            local pg = self or pageHealthBar
+            if pg and pg.Refresh then pg:Refresh() end
         end
 
         do
@@ -2021,7 +2045,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Its own group under the looks: an extra the bar can show, not how the
         -- bar looks. ☠ ITS ENABLE IS THE HEADER TICK (see the page note). A
         -- pin: the overlay's texture, colour and blend are how it LOOKS.
-        Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
+        Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, 1)
         local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
             BuildReducedMaxHealthGroup)
         BuildReducedMaxHealthGroup({
@@ -2118,6 +2142,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local anchorOptions = {
             TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"], CENTER= L["Center"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
+        }
+
+        -- Where the bar sits against the health bar: over it, or a strip of its own on one
+        -- side (DF:GetResourceBarRoomEdge). The strip keys are frame edges.
+        local placementOptions = {
+            OVER = L["On Top of Health Bar"], BOTTOM = L["Below Health Bar"], TOP = L["Above Health Bar"],
+            LEFT = L["Left of Health Bar"], RIGHT = L["Right of Health Bar"],
+            _order = { "OVER", "BOTTOM", "TOP", "LEFT", "RIGHT" },
         }
 
         -- Keep Orientation (Horizontal/Vertical) and Reverse Fill as two explicit
@@ -2220,6 +2252,23 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return format("%d/%d", on, #RB_CLASS_LIST)
         end
 
+        -- ★ PLACEMENT: on top of the health bar (the bar goes wherever Anchor and the offsets
+        -- put it), or along one side of the frame with the health bar stopping at it
+        -- (DF:GetResourceBarRoomEdge, DF:GetHealthBarInsets). The side fixes one axis, so Anchor, Match and the length
+        -- still place the bar along it. The offsets and Frame Level swap to the strip's own
+        -- keys (DF:LayoutResourceBar, DF:ResolveResourceBarLevelOffset), so each placement keeps
+        -- its own and neither default moves the other.
+        -- StripOn is the same test the layout runs. The Placement dropdown renames controls in
+        -- the Size card too, so it re-flows every mounted panel, not just its own group.
+        local function StripOn(d) return DF:GetResourceBarRoomEdge(d) ~= nil end
+        -- Whether the bar's LENGTH runs up and down: a left or right strip, whatever the
+        -- Orientation; otherwise the Orientation. The Size card's words follow it.
+        local function LengthVertical(d)
+            local edge = DF:GetResourceBarRoomEdge(d)
+            if edge then return edge == "LEFT" or edge == "RIGHT" end
+            return d.resourceBarOrientation == "VERTICAL"
+        end
+
         -- ===== SIZE (the first card under "Layout") =====
         -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION. resourceBarWidth and resourceBarHeight
         -- are ORIENTATION-RELATIVE keys: Width is the bar's LENGTH along its fill axis, Height its
@@ -2243,8 +2292,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
             local rbMatch = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Health Bar Width"], db, "resourceBarMatchWidth", function()
-                -- RefreshStates so the Adjust For Frame Border row appears/disappears with the tick.
+                -- RefreshStates so the Adjust For Frame Border row appears/disappears with the tick,
+                -- and ReflowMounted so a pinned Position panel re-greys the Anchor (a matched
+                -- Placement strip runs the whole side).
                 tools2.refreshStates()
+                tools.ReflowMounted()
                 DF:UpdateAllFrames()
             end), 30)
             -- ☠ THE SECOND SENTENCE IS THE ONE THAT WAS MISSING, AND IT COST A BUG REPORT.
@@ -2258,29 +2310,37 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             rbMatch.tooltip = L["Keeps the resource bar exactly as long as the health bar, following the frame when it resizes. The matched size slider greys out while this is on; Thickness stays yours. Because the bar is pinned by its ends, the Anchor only takes effect along the other axis."]
             rbMatch.refreshContent = function(w, d)
                 if w.label then
-                    w.label:SetText((d.resourceBarOrientation == "VERTICAL")
+                    w.label:SetText(LengthVertical(d)
                         and L["Match Health Bar Height"] or L["Match Health Bar Width"])
                 end
             end
 
-            -- Only meaningful while Match is on, so it sits directly under the switch it
-            -- modifies and hides with it. DETERMINISTIC: on (default — matches what
-            -- stable 5.2.0 renders; see the key's note in Config.lua) = tuck inside the
-            -- frame border band, off = full health-bar length. The first cut gated
-            -- an alpha-based auto rule instead and read as doing nothing with an opaque
-            -- border -- an option whose two states can render the
+            -- Only meaningful while the bar is pinned by its ends (Match) or sits along a side
+            -- (Placement), where it sets how far in from that side the bar sits -- so it sits
+            -- directly under the switch and hides without either. DETERMINISTIC: on (default — matches what stable 5.2.0
+            -- renders; see the key's note in Config.lua) = tuck inside the frame border band,
+            -- off = run under it. The first cut gated an alpha-based auto rule instead and read
+            -- as doing nothing with an opaque border -- an option whose two states can render the
             -- same pixels is broken as a control, whatever the tooltip says. "Frame
             -- Border" in the name because the resource bar has a border of its OWN on
             -- this page, and a bare "Border" could be either.
             local rbAdjust = group:AddWidget(GUI:CreateCheckbox(parent, L["Adjust For Frame Border"], db, "resourceBarMatchAdjustFrameBorder", function() DF:UpdateAllFrames() end), 30)
-            rbAdjust.tooltip = L["Shortens the bar so it sits inside the frame border instead of spanning its full length. Leave off to keep the bar exactly as long as the health bar, with the frame border overlapping its ends."]
-            rbAdjust.hideOn = function(d) return not d.resourceBarMatchWidth end
+            rbAdjust.tooltip = L["Keeps the bar inside the frame border. Leave off to keep the bar as long as the health bar, overlapping the frame border where the two meet."]
+            rbAdjust.hideOn = function(d) return not (d.resourceBarMatchWidth or StripOn(d)) end
+            -- With the health bar kept inside the border the bar is too, so both positions
+            -- would draw the same pixels (DF:LayoutResourceBar, DF:GetResourceBarStripInset).
+            rbAdjust.disableOn = function(d) return DF:BarsInsideFrameBorder(d) end
+            rbAdjust.disableReason = function(d)
+                return DF:BarsInsideFrameBorder(d)
+                    and L["Keep Health Bar Inside Border is on (Frame page), so the resource bar keeps inside the border too"]
+                    or nil
+            end
 
             local widthSlider = group:AddWidget(GUI:CreateSlider(parent, L["Width"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
             widthSlider.disableOn = function(d) return d.resourceBarMatchWidth end
             widthSlider.refreshContent = function(w, d)
                 if w.label then
-                    w.label:SetText((d.resourceBarOrientation == "VERTICAL") and L["Height"] or L["Width"])
+                    w.label:SetText(LengthVertical(d) and L["Height"] or L["Width"])
                 end
             end
             group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
@@ -2293,7 +2353,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- that reads "Height".
         local function ResourceSizeSummary(d)
             if not d then return "" end
-            local vertical = d.resourceBarOrientation == "VERTICAL"
+            local vertical = LengthVertical(d)
             local parts = {}
             if d.resourceBarMatchWidth then
                 parts[#parts + 1] = vertical and L["Match Health Bar Height"] or L["Match Health Bar Width"]
@@ -2311,9 +2371,38 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function() DF:UpdateAllFrames() end), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            local placement = group:AddWidget(GUI:CreateDropdown(parent, L["Placement"], placementOptions, db, "resourceBarPlacement", function()
+                tools2.refreshStates()
+                tools.ReflowMounted()
+                DF:UpdateAllFrames()
+            end), 55)
+            placement.tooltip = L["On Top of Health Bar draws the resource bar over the health bar, wherever Anchor and the offsets put it. The other choices run it along that side of the frame and shorten the health bar to make room, so the health bar can't show through when the frame fades. Frames that don't show a resource bar keep the whole health bar."]
+            -- A detached bar (unit frames) sits outside the frame and has no side to run along.
+            placement.disableOn = function(d) return d.resourceBarDetached and true or false end
+            placement.disableReason = function(d)
+                return d.resourceBarDetached and format(L["Turn off %s to change this"], L["Detach"]) or nil
+            end
+
+            local anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "resourceBarAnchor", function() DF:UpdateAllFrames() end), 55)
+            -- Along a side only the anchor's part along that side counts, and only for a bar
+            -- shorter than the side, so the tooltip says which.
+            anchor.tooltip = L["Where the bar sits on the frame. Along a side (Placement), only the Anchor's part along that side counts, and only for a bar shorter than the side: left, centre or right on a top or bottom side; top, middle or bottom on a left or right side."]
+            anchor.disableOn = function(d) return StripOn(d) and d.resourceBarMatchWidth end
+            anchor.disableReason = function(d)
+                return (StripOn(d) and d.resourceBarMatchWidth)
+                    and L["The bar runs the whole side while it matches the health bar"] or nil
+            end
+            -- Two pairs, one shown at a time: On Top's offsets measure from the frame edge,
+            -- the strip's from its seat on its side, and each placement keeps its own.
+            local offX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            offX.hideOn = StripOn
+            local offY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            offY.hideOn = StripOn
+            local function NotStrip(d) return not StripOn(d) end
+            local stripX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "resourceBarStripX", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            stripX.hideOn = NotStrip
+            local stripY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarStripY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
+            stripY.hideOn = NotStrip
         end
 
         -- ☠ THE POSITION CARD: the builder above, then Frame Level (see the page
@@ -2323,20 +2412,27 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- builder's group gate greys it with the rest of Position.
         local function BuildResourcePositionCardGroup(tools2)
             BuildResourcePositionGroup(tools2)
-            tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            -- Two sliders, one shown at a time, as for the offsets.
+            local level = tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            level.hideOn = StripOn
+            local stripLevel = tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarStripFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            stripLevel.hideOn = function(d) return not StripOn(d) end
         end
 
-        -- The anchor in the dropdown's own words, and the offsets only when they
-        -- are doing something -- a card reading "0, 1" on every default profile is
-        -- noise (the Border row's rule). Both numbers go in together: an X with no
-        -- Y beside it reads as a coordinate with a missing half.
+        -- A strip leads with its side; the anchor only when it places the bar (a strip that
+        -- matches the health bar runs the whole side). Then the offsets in force, only when
+        -- they are doing something -- a card reading "0, 1" on every default profile is noise
+        -- (the Border row's rule). Both numbers go in together: an X with no Y beside it reads
+        -- as a coordinate with a missing half.
         local function ResourcePositionSummary(d)
             if not d then return "" end
+            local strip = StripOn(d)
             local parts = {}
+            if strip then parts[#parts + 1] = placementOptions[d.resourceBarPlacement] end
             local anchor = anchorOptions[d.resourceBarAnchor]
-            if anchor then parts[#parts + 1] = anchor end
-            local x = math.floor(tonumber(d.resourceBarX) or 0)
-            local y = math.floor(tonumber(d.resourceBarY) or 0)
+            if anchor and not (strip and d.resourceBarMatchWidth) then parts[#parts + 1] = anchor end
+            local x = math.floor(tonumber(d[strip and "resourceBarStripX" or "resourceBarX"]) or 0)
+            local y = math.floor(tonumber(d[strip and "resourceBarStripY" or "resourceBarY"]) or 0)
             if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
             return table.concat(parts, " \194\183 ")
         end
@@ -2502,11 +2598,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF:RefreshAllVisibleFrames()
                 tools2.refreshStates()  -- re-evaluate the custom colour picker's hideOn
             end), 54)
+            rbColorMode.fullRow = true   -- the swatches below pair up on their own
             rbColorMode.tooltip = L["Power Type gives each resource its own game colour — blue mana, yellow energy, red rage. Class colours every bar by the unit's class instead, and Custom uses one fixed colour for everyone."]
 
             -- Custom colour — only shown in Custom mode.
             local resourceCustomColor = GUI:CreateColorPicker(parent, L["Custom Color"], db, "resourceBarCustomColor", false, function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true)
             resourceCustomColor.hideOn = function() return (db.resourceBarColorMode or "POWER_TYPE") ~= "CUSTOM" end
+            resourceCustomColor.fullRow = true
             group:AddWidget(resourceCustomColor, 30)
 
             -- ☠ THE SEED AND THE TEN THAT FOLLOW IT STAY WHERE THEY WERE, inside the
@@ -2629,6 +2727,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         })
         CloseSection(band)
 
+        -- Unit frame pages add their Detached card here (UnitFrames/Pages.lua,
+        -- UFO.ExtraCards; Frames/Bars.lua DETACHED RESOURCE BAR). The party / raid
+        -- page never sets the table, so it never draws the card.
+        local ufCards = rawget(self, "dfExtraCards")
+        local detachedCard = type(ufCards) == "table" and ufCards.resource_detached
+        if detachedCard then
+            detachedCard({ OpenSection = OpenSection, CloseSection = CloseSection, db = db,
+                           offRow = ResourceOffRow, col = 1 })
+        end
+
         -- The category header the four Style cards sit under.
         Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
         local band = OpenSection(L["Bar Style"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
@@ -2742,14 +2850,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- shield and the heal absorb builders BOTH read them, and each is a closure of
         -- its own. Same tables, same values, one declaration.
         local modeOptions = {
-            OVERLAY = L["Overlay (on health bar)"],
-            ATTACHED = L["Attached to Health"],
-            ATTACHED_OVERFLOW = L["Attached + Overflow"],
+            OVERLAY = L["Overlay on Health"],
+            ATTACHED = L["Attached (overflows)"],
+            ATTACHED_OVERFLOW = L["Attached (wraps back)"],
             FLOATING = L["Floating Bar"],
         }
         local healModeOptions = {
-            OVERLAY = L["Overlay (on health bar)"],
-            ATTACHED = L["Attached to Health"],
+            OVERLAY = L["Overlay on Health"],
+            ATTACHED = L["Attached (into health)"],
             FLOATING = L["Floating Bar"],
         }
         local orientOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
@@ -2783,10 +2891,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             local function add(w, h) return group:AddWidget(w, h) end
 
-            add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
+            local absorbModeDropdown = add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55, 1)
+            absorbModeDropdown.tooltip = L["Overlay on Health: the whole shield is drawn over the health bar from its empty end.\nAttached (overflows): the shield fills the missing health and, with Overflow above 0, runs on past the end of the bar. Show Overshield Glow marks when it reaches the end.\nAttached (wraps back): the shield fills the missing health, and once it no longer fits the whole shield is drawn back over the health from the end of the bar.\nFloating Bar: a separate bar you place anywhere on the frame.\nOnly Attached (overflows) draws past the end of the bar."]
+
+            -- Directly under the mode that uses it, so it shows where Attached (overflows) is picked.
+            local absorbBreakout = add(GUI:CreateSlider(parent, L["Overflow (%)"], 0, 100, 5, db, "absorbBarBreakout", nil, function() DF:UpdateAllFrames() end, true), 55, 1)
+            absorbBreakout.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbBreakout.tooltip = L["How far the shield may run past the end of the health bar, as a share of the bar's length. 0 keeps it inside the bar."]
 
             local textureOptions = DF:GetTextureList()
             local stripeTextures = {
@@ -2916,10 +3030,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             add(GUI:CreateLabel(parent, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
 
-            add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
+            local healAbsorbModeDropdown = add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55, 1)
+            healAbsorbModeDropdown.tooltip = L["Overlay on Health: the heal absorb is drawn over the health bar from its start.\nAttached (into health): the heal absorb runs back from the end of the current health and never goes past zero.\nFloating Bar: a separate bar you place anywhere on the frame."]
 
             local healTextureOptions = DF:GetTextureList()
             local healStripeTextures = {
@@ -3093,6 +3208,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- The spark is drawn on the attached display only; Floating has no bar end to mark.
             overhealCheckbox.hideOn = function(d) return d.healPredictionMode == "FLOATING" end
             overhealCheckbox.tooltip = L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."]
+
+            local healBreakout = group:AddWidget(GUI:CreateSlider(parent, L["Overflow (%)"], 0, 100, 5, db, "healPredictionBreakout", nil, function() DF:UpdateAllFrames() end, true), 55)
+            healBreakout.disableOn = function(d) return not d.healPredictionEnabled end
+            healBreakout.hideOn = function(d) return d.healPredictionMode == "FLOATING" end
+            healBreakout.tooltip = L["How far incoming heals may run past the end of the health bar, as a share of the bar's length. 0 keeps them inside the bar."]
 
             -- ⚠ tools2.refreshStates, and nothing else. This pick drives the two
             -- FLOATING ROWS' own hideOn, which live on the page rather than in this
@@ -3445,4 +3565,4 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- name made this the obvious place to look for buff filtering -- which it is not.
     local pageBuffs = CreateSubTab("auras", "auras_buffs", L["Buff Bar"])
     DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
-end
+end

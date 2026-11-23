@@ -157,6 +157,17 @@ function GUI:IsTabDisabledForCurrentMode(tabName)
     if GUI.AlwaysAccessiblePages[tabName] then return false end
     -- A GLOBAL page belongs to neither mode, so neither mode being off greys it.
     if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return false end
+    -- Nor does a page given to a module of its own (GUI:SetPageModule).
+    if GUI.ModulePageOwner and GUI.ModulePageOwner[tabName] then return false end
+    -- A Profiles page is mode-neutral (GUI/Pages/Profiles.lua): the mode under
+    -- it says nothing. Auto Layouts is the one that is Raid's whatever sits
+    -- underneath, so it greys with Raid alone.
+    if GUI.IsProfilesPage and GUI.IsProfilesPage(tabName) then
+        if tabName == "profiles_auto" then
+            return DF.db ~= nil and DF.db.raidEnabled == false
+        end
+        return false
+    end
     if GUI.SelectedMode == "party" and DF.db and DF.db.partyEnabled == false then return true end
     if GUI.SelectedMode == "raid"  and DF.db and DF.db.raidEnabled  == false then return true end
     return false
@@ -381,6 +392,14 @@ do
         -- The plain outline skull: a slashed or badged one blurs to a blob at
         -- card size.
         dead       = ICONS .. "skull.png",
+        -- The Profiles pages' cards (GUI/Pages/Profiles.lua).
+        profile    = ICONS .. "account_circle.png",
+        character  = ICONS .. "person.png",
+        clickcast  = ICONS .. "mouse.png",
+        import     = ICONS .. "download.png",
+        export     = ICONS .. "upload.png",
+        copy       = ICONS .. "content_copy.png",
+        changed    = ICONS .. "edit_square.png",
     }
 end
 
@@ -1619,11 +1638,30 @@ function GUI:CreateButtonRow(parent, buttons, opts)
     return row
 end
 
+-- A designer's template bar: which named template the thing being edited uses,
+-- plus the library actions (New / Duplicate / Rename / Delete).
+--
+-- By default it points a MODE at a template (opts.getMode, "party" when absent).
+-- A caller editing something other than a mode -- a settings table that names its
+-- own template -- passes the reference as two callbacks instead:
+--   opts.getRef()      the template name it uses now
+--   opts.setRef(name)  point it at `name`
+-- and may add:
+--   opts.getLabel()    the dropdown's text, when the reference is not a plain name
+--                      (nil = the name)
+--   opts.leadItems / opts.tailItems   { { label, onClick }, ... } listed before /
+--                      after the library in the dropdown
+--   opts.listUsers(name)   who else draws with `name` (the sharing glyph's list)
+--   opts.registryKey   its slot for GUI:RefreshDesignerPresetBars (default: kind),
+--                      so it never takes the slot of the mode's own bar
+-- The raid auto-layout states are a mode's only; a reference never shows them.
 function GUI:CreateDesignerPresetBar(parent, opts)
     opts = opts or {}
     local kind = opts.kind or "aura"
     local getMode = opts.getMode or function() return "party" end
     local onChange = opts.onChange or function() end
+    local getRef, setRef = opts.getRef, opts.setRef
+    if not (getRef and setRef) then getRef, setRef = nil, nil end
 
     local bar = CreateFrame("Frame", nil, parent)
     bar:SetHeight(24)
@@ -1634,7 +1672,14 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local function CurrentName()
+        if getRef then return getRef() or DF.DEFAULT_PRESET end
         return DF:GetModeDesignerPresetName(kind, getMode())
+    end
+
+    -- Point whatever this bar edits at `name`.
+    local function SetCurrent(name)
+        if setRef then return setRef(name) end
+        DF:SetModeDesignerPreset(kind, getMode(), name)
     end
 
     -- True while editing a raid auto-layout (the only context with an "inherit
@@ -1644,6 +1689,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     -- PARTY preset bar must not show layout state, and its "Inherit (Global)"
     -- click must never clear the RAID layout's override.
     local function IsEditingLayout()
+        if getRef then return false end
         return getMode() == "raid"
             and DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()
     end
@@ -1653,6 +1699,10 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local function CurrentLabel()
         if IsEditingLayout() and DF.IsLayoutDesignerInheriting and DF:IsLayoutDesignerInheriting(kind) then
             return L["Inherit (Global)"]
+        end
+        if opts.getLabel then
+            local text = opts.getLabel()
+            if text then return text end
         end
         return CurrentName()
     end
@@ -1731,9 +1781,11 @@ function GUI:CreateDesignerPresetBar(parent, opts)
                 if DF.InheritLayoutDesignerPreset then DF:InheritLayoutDesignerPreset(kind) end
             end)
         end
+        for _, item in ipairs(opts.leadItems or {}) do AddItem(item.label, item.onClick) end
         for _, name in ipairs(DF:ListDesignerPresets(kind)) do
-            AddItem(name, function() DF:SetModeDesignerPreset(kind, getMode(), name) end)
+            AddItem(name, function() SetCurrent(name) end)
         end
+        for _, item in ipairs(opts.tailItems or {}) do AddItem(item.label, item.onClick) end
         menu:SetHeight(-y + 4)
     end
     ddBtn:SetScript("OnClick", function()
@@ -1770,6 +1822,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         if IsEditingLayout() and DF.IsLayoutDesignerInheriting and DF:IsLayoutDesignerInheriting(kind) then
             return {}   -- inheriting: this bar isn't sitting on a preset of its own
         end
+        if opts.listUsers then return opts.listUsers(CurrentName()) or {} end
         return (DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers(kind, CurrentName(), getMode())) or {}
     end
 
@@ -1841,7 +1894,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         PromptPresetName(L["Name the new template:"], EditingLayoutName() or "", L["Create"], function(text)
             local n = DF:CreateDesignerPreset(kind, text)
             if n then
-                DF:SetModeDesignerPreset(kind, getMode(), n)
+                SetCurrent(n)
                 bar:Refresh(); onChange()
             end
         end)
@@ -1854,7 +1907,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         PromptPresetName(L["Name the duplicated template:"], cur .. " copy", L["Duplicate"], function(text)
             local n = DF:DuplicateDesignerPreset(kind, cur, text)
             if n then
-                DF:SetModeDesignerPreset(kind, getMode(), n)
+                SetCurrent(n)
                 bar:Refresh(); onChange()
             end
         end)
@@ -2052,7 +2105,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     -- overwrites its own entry, and a torn-down bar is hidden, so nothing
     -- accumulates.
     GUI._designerPresetBars = GUI._designerPresetBars or {}
-    GUI._designerPresetBars[kind] = bar
+    GUI._designerPresetBars[opts.registryKey or kind] = bar
     return bar
 end
 
@@ -2195,6 +2248,9 @@ function GUI:CreateSeeAlso(parent, links)
     -- page instead of floating wherever the content happened to end. See the
     -- footer block in the page layout.
     container.isPageFooter = true
+    -- The links it was made from, so a page drawing another page's content can
+    -- point them at its own pages instead.
+    container.dfLinks = links
     CreateElementBackdrop(container, {
         bgColor     = { 0.1, 0.1, 0.1, 0.5 },
         borderColor = { 0.3, 0.3, 0.3, 0.8 },
@@ -2604,8 +2660,10 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     -- runs this exact click; see the Dot* hooks below.
     local function OnCheckClick(self)
         local val = self:GetChecked()
-        DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
-            tostring(dbKey), tostring(overrideKey), tostring(val))
+        if DF:DebugActive("GUI") then
+            DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
+                tostring(dbKey), tostring(overrideKey), tostring(val))
+        end
 
         -- ☠ THE HOST BRACKET, NOT A SECOND COPY OF IT. What stood here was the
         -- runtime-redirect gate and the override record written out by hand --
@@ -2724,11 +2782,28 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     opts = opts or {}
     local segW = opts.segmentWidth or 26
     local h = opts.height or 18
-    local pad = 1   -- track lip around the buttons
+    -- opts.rounded: ONE rounded track (radius 6, the darker inset ground, a 1px
+    -- ring) with each choice a rounded pill inside it (radius 4, StyleButton's
+    -- `segment` look: nothing at rest, a neutral plate on hover, the accent tint
+    -- when selected), a 2px lip and 2px between pills. Absent: the square boxed
+    -- buttons it always drew, unchanged.
+    local rounded = opts.rounded and true or false
+    local pad = rounded and 2 or 1   -- track lip around the buttons
+    local segGap = rounded and 2 or 0
 
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    container:SetSize(segW * #segments + pad * 2, h + pad * 2)
-    CreateElementBackdrop(container)   -- the recessed track behind every segment
+    container:SetSize(segW * #segments + segGap * math.max(#segments - 1, 0) + pad * 2, h + pad * 2)
+    if rounded then
+        local ground, edge = GUI.Colors.background, C_BORDER
+        GUI:CreateRoundedSurface(container, {
+            radius = 6, borderWidth = 1,
+            fill   = { ground.r, ground.g, ground.b, 1 },
+            border = { edge.r, edge.g, edge.b, 1 },
+        })
+    else
+        CreateElementBackdrop(container)   -- the recessed track behind every segment
+    end
+    container.dfSegmentRounded = rounded
 
     -- One read/write pair for both pathways, so the click handler and Refresh
     -- can't drift apart. Explicit ifs, not `a and b or c` — a stored value of
@@ -2743,16 +2818,35 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
         return false
     end
 
+    -- seg.tooltip: a string (the title; opts.tooltipLines under it, shared by every
+    -- segment), a full ShowTooltip spec ({ title, lines }), or a function returning
+    -- one -- asked at hover time, so a tooltip can name what it acts on right now.
+    -- seg.accent: this segment's own accent when selected (a neutral one for an
+    -- "off" choice, so only the choices that DO something wear the theme accent).
+    -- opts.fontSize: the label size (9, the terse unit pickers' size).
+    local function TooltipSpec(seg)
+        local t = seg.tooltip
+        if type(t) == "function" then t = t() end
+        if type(t) == "table" then return t.title and t or nil end
+        if type(t) == "string" then return { title = t, lines = opts.tooltipLines } end
+        return nil
+    end
+
     local buttons = {}
     for i, seg in ipairs(segments) do
         local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-        GUI:StyleButton(btn, { width = segW, height = h, text = seg.label })
-        GUI:SetSettingsFont(btn.Text, 9, "")
-        btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * segW, -pad)
+        -- A rounded track's pills keep the width they were given (fitText off): the
+        -- caller sized the track, and a grown pill would run into its neighbour.
+        local look = { width = segW, height = h, text = seg.label, accent = seg.accent }
+        if rounded then look.segment, look.rounded, look.fitText = true, 4, false end
+        GUI:StyleButton(btn, look)
+        GUI:SetSettingsFont(btn.Text, opts.fontSize or 9, "")
+        btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * (segW + segGap), -pad)
         btn.value = seg.value
         if seg.tooltip then
             btn:HookScript("OnEnter", function(self)
-                GUI:ShowTooltip(self, { title = seg.tooltip, lines = opts.tooltipLines })
+                local spec = TooltipSpec(seg)
+                if spec then GUI:ShowTooltip(self, spec) end
             end)
             btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         end

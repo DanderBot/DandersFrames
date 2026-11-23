@@ -546,6 +546,7 @@ do
     local updates = 0
     local DF = { GUI = host, L = host.hooks.L }
     function DF:Debug() end
+    function DF:DebugActive() return true end
     function DF:UpdateAll() updates = updates + 1 end
     function DF:ThrottledUpdateAll() end
     DandersFrames = DF

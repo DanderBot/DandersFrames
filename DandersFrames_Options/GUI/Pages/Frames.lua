@@ -25,7 +25,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             DF.GlobalFontTemp = {
                 font = db.nameFont or "Fonts\\FRIZQT__.TTF",
                 outline = db.nameTextOutline or "OUTLINE",
-                scope = "both",
+                scope = "all",
             }
         end
 
@@ -112,10 +112,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], DF.GlobalFontTemp, "outline", function() end), 55)
             group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], DF.GlobalFontTemp, "outline", function() end), 30)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Apply to"], {
-                both = L["Both"], party = L["Party"], raid = L["Raid"],
-                _order = { "both", "party", "raid" },
-            }, DF.GlobalFontTemp, "scope", function() end), 55)
+            -- "all" is every frame type there is: Party, Raid and, with the module
+            -- installed, the Unit Frames (UF:ApplyGlobalFont owns their half).
+            local scopeOptions = { all = L["All"], party = L["Party"], raid = L["Raid"],
+                _order = { "all", "party", "raid" } }
+            if DF.UnitFrames and DF.UnitFrames.ApplyGlobalFont then
+                scopeOptions.unitframes = L["Unit Frames"]
+                scopeOptions._order[#scopeOptions._order + 1] = "unitframes"
+            end
+            group:AddWidget(GUI:CreateDropdown(parent, L["Apply to"], scopeOptions, DF.GlobalFontTemp, "scope", function() end), 55)
 
             -- Themed Apply button
             local applyBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -251,19 +256,26 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             applyBtn:SetScript("OnClick", function()
                 local font = DF.GlobalFontTemp.font
                 local outline = DF.GlobalFontTemp.outline
-                local scope = DF.GlobalFontTemp.scope or "both"
+                local scope = DF.GlobalFontTemp.scope or "all"
+                -- A scratch table from before "all" existed said "both".
+                if scope == "both" then scope = "all" end
 
                 -- Clear font family cache so new fonts are created
                 if DF.ClearFontCache then DF:ClearFontCache() end
 
                 for _, mode in ipairs({ "party", "raid" }) do
-                    if (scope == "both" or scope == mode) and DF.db and DF.db[mode] then
+                    if (scope == "all" or scope == mode) and DF.db and DF.db[mode] then
                         ApplyFontToMode(DF.db[mode], font, outline)
                     end
                 end
+                -- The unit frames keep their own per-unit tables and templates.
+                local UF = DF.UnitFrames
+                if (scope == "all" or scope == "unitframes") and UF and UF.ApplyGlobalFont then
+                    UF:ApplyGlobalFont(font, outline)
+                end
 
                 DF:UpdateAllFrames()
-                if scope ~= "party" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
+                if (scope == "all" or scope == "raid") and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
                 if DF.ApplyPetSettings then DF:ApplyPetSettings() end
                 if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
                 if DF.UpdateTestPersonalTargetedSpells then DF:UpdateTestPersonalTargetedSpells() end

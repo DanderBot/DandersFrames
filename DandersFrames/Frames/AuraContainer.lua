@@ -91,6 +91,30 @@ local DBG = "AURACONTAINER"
 -- Runtime A/B: /df debug ownpreview (AuraContainer.ToggleOwnPreview).
 AuraContainer._ownTestPreview = true
 
+-- ★ IS THIS HANDLE IN TEST SHAPE? Test mode (AuraContainer._testMode) puts every test
+-- handle in it. A PREVIEW frame (frame.dfPreview: a standalone frame that only ever
+-- shows test data, see DF:FrameInTestScope) is in it always, with or without test
+-- mode, so its rows preview the moment it is shown and never parse a real unit.
+-- h._previewFrame is resolved once, at Create.
+-- ⚠ HANDLE-LEVEL QUESTIONS ONLY: the shape a handle builds, its preview slot count,
+-- its preview timers, its tuning and test-count rebuilds. The CLIENT-WIDE ones -- the
+-- provider bounce, the safety sweeps, the latch registries, the live re-parse kick --
+-- stay on _testMode, because outside test mode the live frames are on screen and only
+-- the preview frame is not.
+-- ⚠ Own-frame preview only. The engine route (/df debug ownpreview OFF) needs the
+-- global sample provider, which only test mode switches, so there a preview frame
+-- takes the test shape only while test mode is on, as every other test frame does.
+-- Party, raid and pinned frames never carry dfPreview: for them this is _testMode.
+local function testShapeFor(h)
+    if AuraContainer._testMode then return true end
+    return (h and h._previewFrame and AuraContainer._ownTestPreview) and true or false
+end
+AuraContainer._testShapeFor = testShapeFor
+
+-- A group's cap: the row's Max, or a consumer's per-group override (PER-GROUP CAPS,
+-- Handle:SetGroupMaxOverrides). Forward-declared: build() reads it.
+local groupMaxFor
+
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder = false, false
@@ -183,7 +207,9 @@ function AuraContainer.IsSupported()
     if _supported == nil then
         local ok, res = pcall(probeSupported)
         _supported = (ok and res) and true or false
-        DF:Debug(DBG, "IsSupported probe -> %s (toc=%s)", tostring(_supported), tostring(select(4, GetBuildInfo())))
+        if DF:DebugActive(DBG) then
+            DF:Debug(DBG, "IsSupported probe -> %s (toc=%s)", tostring(_supported), tostring(select(4, GetBuildInfo())))
+        end
     end
     return _supported
 end
@@ -371,8 +397,10 @@ local function setContainerProviderDeaf(c, deaf)
         -- from birth (Blizzard's own OnLoad_Intrinsic registers the event), so there is no
         -- window in which this can succeed. INFO, not WARN — the rebirth fallback is the
         -- real mechanism and nothing here needs acting on.
-        DF:Debug(DBG, "provider deafening refused (EXPECTED, rebirth fallback owns"
-            .. " Edit Mode): %s", tostring(err))
+        if DF:DebugActive(DBG) then
+            DF:Debug(DBG, "provider deafening refused (EXPECTED, rebirth fallback owns"
+                .. " Edit Mode): %s", tostring(err))
+        end
         return
     end
 
@@ -390,12 +418,16 @@ local function setContainerProviderDeaf(c, deaf)
     -- means we believe we are deaf and are not, and a SUCCESS means the engine stopped
     -- refusing — which invalidates the 68914 finding this whole section is built on.
     if AuraContainer._providerDeafOK then
-        DF:DebugWarn(DBG, "provider deafening SUCCEEDED (%s) — the 68914 refusal no longer"
-            .. " holds on this build. Re-check the Edit Mode rebirth fallback and the"
-            .. " forbidden-aspect notes above; they describe a build that has changed.", why)
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "provider deafening SUCCEEDED (%s) — the 68914 refusal no longer"
+                .. " holds on this build. Re-check the Edit Mode rebirth fallback and the"
+                .. " forbidden-aspect notes above; they describe a build that has changed.", why)
+        end
     else
-        DF:DebugWarn(DBG, "provider deafening %s — containers are NOT deaf while we believe"
-            .. " they are; Edit Mode may render live auras.", why)
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "provider deafening %s — containers are NOT deaf while we believe"
+                .. " they are; Edit Mode may render live auras.", why)
+        end
     end
 end
 
@@ -453,7 +485,9 @@ function AuraContainer._probeEditModeSource(c)
     if not ok then
         AuraContainer._editSourceOK = false
         AuraContainer._editSourceWhy = "refused: " .. tostring(err)
-        DF:DebugWarn(DBG, "per-container sample source refused: %s", tostring(err))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "per-container sample source refused: %s", tostring(err))
+        end
         return
     end
 
@@ -673,14 +707,18 @@ local SWEEP_INTERVAL = 30
 -- the AURACONTAINER debug channel is on so normal users pay nothing.
 local flowCounts, flowTotal = {}, 0
 local flowFrame = CreateFrame("Frame")
+local syncFlowWatch
 flowFrame:SetScript("OnEvent", function(_, _, unit)
+    -- Re-checked per event so turning the channel off stops the counting at once, not at
+    -- the next sweep.
+    if not DF:DebugActive(DBG) then syncFlowWatch() return end
     if unit then
         flowTotal = flowTotal + 1
         flowCounts[unit] = (flowCounts[unit] or 0) + 1
     end
 end)
 local flowArmed = false
-local function syncFlowWatch()
+function syncFlowWatch()
     local want = (DF.DebugActive and DF:DebugActive(DBG)) and true or false
     if want == flowArmed then return end
     flowArmed = want
@@ -699,10 +737,12 @@ local function flushFlowLog()
             if not flowCounts[u] and #zeroed < 10 then zeroed[#zeroed + 1] = u end
         end
     end
-    DF:Debug(DBG, "auraflow %ds: events=%d units=%d zeroflow=%s",
-        SWEEP_INTERVAL, flowTotal,
-        (function() local c = 0; for _ in pairs(flowCounts) do c = c + 1 end; return c end)(),
-        (#zeroed > 0) and table.concat(zeroed, ",") or "-")
+    if DF:DebugActive(DBG) then
+        DF:Debug(DBG, "auraflow %ds: events=%d units=%d zeroflow=%s",
+            SWEEP_INTERVAL, flowTotal,
+            (function() local c = 0; for _ in pairs(flowCounts) do c = c + 1 end; return c end)(),
+            (#zeroed > 0) and table.concat(zeroed, ",") or "-")
+    end
     wipe(flowCounts); flowTotal = 0
 end
 
@@ -849,13 +889,15 @@ local function checkContradiction(unit, polarity)
     local latch = "contra:" .. polarity .. "|" .. ctx
     if sentinelWarned[latch] then return end
     sentinelWarned[latch] = true
-    DF:DebugWarn(DBG,
-        "PARK/POLARITY DRIFT on %s: %q matched %d (plain %s=%s) — %s [%s]. Parked slots"
-        .. " are held dark by the enable bit; the string is a canary only.",
-        tostring(unit), str, contra, polarity, tostring(plain),
-        (plain and contra == plain) and "NEGATION IGNORED (equals plain)"
-            or "contradiction resolved to something else",
-        ctx)
+    if DF:DebugActive(DBG) then
+        DF:DebugWarn(DBG,
+            "PARK/POLARITY DRIFT on %s: %q matched %d (plain %s=%s) — %s [%s]. Parked slots"
+            .. " are held dark by the enable bit; the string is a canary only.",
+            tostring(unit), str, contra, polarity, tostring(plain),
+            (plain and contra == plain) and "NEGATION IGNORED (equals plain)"
+                or "contradiction resolved to something else",
+            ctx)
+    end
 end
 
 local function checkPartition(unit)
@@ -867,14 +909,17 @@ local function checkPartition(unit)
     local latch = "partition|" .. ctx
     if sentinelWarned[latch] then return end
     sentinelWarned[latch] = true
-    DF:DebugWarn(DBG,
-        "PLAYER-token partition broken on %s: HELPFUL=%d but PLAYER=%d + !PLAYER=%d [%s] —"
-        .. " the '!' negation machinery has drifted; every negation-token dedup lattice"
-        .. " (debuff row, debuff groups, othersOnly, dispel gap) is suspect.",
-        tostring(unit), all, mine, others, ctx)
+    if DF:DebugActive(DBG) then
+        DF:DebugWarn(DBG,
+            "PLAYER-token partition broken on %s: HELPFUL=%d but PLAYER=%d + !PLAYER=%d [%s] —"
+            .. " the '!' negation machinery has drifted; every negation-token dedup lattice"
+            .. " (debuff row, debuff groups, othersOnly, dispel gap) is suspect.",
+            tostring(unit), all, mine, others, ctx)
+    end
 end
 
 local function checkParkSentinel()
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     -- The player every sweep (cheap, and the baseline every other reading is compared
     -- against), plus one rotating group member.
@@ -913,10 +958,8 @@ local OOR_MIN_UNITS  = 2      -- per half, before the comparison means anything
 local OOR_MIN_AURAS  = 3      -- per half; tiny samples swing the ratio wildly
 local function checkOutOfRangeAttribution()
     if sentinelWarned.oorAttribution then return end
-    -- ⚠ CHANNEL-GATED, unlike the park sentinel above. That one is five C calls; this
-    -- walks the whole group at two calls a unit — 80 in a full raid, every sweep, for a
-    -- verdict only a log reader will ever see. Same contract as the flow watch and the
-    -- pool-growth sampler: investigation tools cost nothing while nobody is investigating.
+    -- ⚠ CHANNEL-GATED, like every diagnostic on this sweep: investigation tools cost
+    -- nothing while nobody is investigating.
     if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     if not IsInGroup() then return end
@@ -1012,6 +1055,7 @@ end
 local SLOT_ACCUM_WARN = 24
 local accumWarned = setmetatable({}, { __mode = "k" })
 local function checkSlotAccumulation()
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     local byOwner
     for h in pairs(AuraContainer._slotHandles or {}) do
         local ow = h.owner
@@ -1111,17 +1155,19 @@ local function checkDarkMismatch()
             if okRead and not secretEn and isEnabled == dark then
                 if not darkWarned[h.key] then
                     darkWarned[h.key] = true
-                    DF:DebugWarn(DBG,
-                        "SLOT ENABLE DRIFT: slot %s on %s — believed %s (parked=%s death=%s"
-                        .. " vis=%s) but the engine slot is %s (pushOK=%s%s). Re-pushing.",
-                        tostring(h.key), tostring(h.owner and h.owner.unit),
-                        dark and "DARK" or "LIVE",
-                        tostring(h.parked and true or false),
-                        tostring(h._deathLatched and true or false),
-                        tostring(slotVisDark(h)),
-                        isEnabled and "ENABLED" or "DISABLED",
-                        tostring(h._pushOK),
-                        h._pendingTuning and ", replay queued" or "")
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG,
+                            "SLOT ENABLE DRIFT: slot %s on %s — believed %s (parked=%s death=%s"
+                            .. " vis=%s) but the engine slot is %s (pushOK=%s%s). Re-pushing.",
+                            tostring(h.key), tostring(h.owner and h.owner.unit),
+                            dark and "DARK" or "LIVE",
+                            tostring(h.parked and true or false),
+                            tostring(h._deathLatched and true or false),
+                            tostring(slotVisDark(h)),
+                            isEnabled and "ENABLED" or "DISABLED",
+                            tostring(h._pushOK),
+                            h._pendingTuning and ", replay queued" or "")
+                    end
                 end
                 pcall(h._pushFilter, h)
             end
@@ -1145,14 +1191,16 @@ local function checkDarkMismatch()
                 if okRead and not secretEn and isEnabled == dark then
                     if not groupDriftWarned[h] then
                         groupDriftWarned[h] = true
-                        DF:DebugWarn(DBG,
-                            "GROUP ENABLE DRIFT: %s on %s — believed %s (death=%s vis=%s)"
-                            .. " but the engine group is %s. Re-pushing.",
-                            tostring(key), tostring(h.config and h.config.unit),
-                            dark and "DARK" or "LIVE",
-                            tostring(h._deathLatched and true or false),
-                            tostring(handleVisDark(h)),
-                            isEnabled and "ENABLED" or "DISABLED")
+                        if DF:DebugActive(DBG) then
+                            DF:DebugWarn(DBG,
+                                "GROUP ENABLE DRIFT: %s on %s — believed %s (death=%s vis=%s)"
+                                .. " but the engine group is %s. Re-pushing.",
+                                tostring(key), tostring(h.config and h.config.unit),
+                                dark and "DARK" or "LIVE",
+                                tostring(h._deathLatched and true or false),
+                                tostring(handleVisDark(h)),
+                                isEnabled and "ENABLED" or "DISABLED")
+                        end
                     end
                     pcall(h._pushEngineDark, h)
                     break   -- one push corrects every key on this handle
@@ -1249,7 +1297,9 @@ function AuraContainer.SetTestMode(on)
     on = on and true or false
     if (AuraContainer._testMode or false) == on then return end
     AuraContainer._testMode = on
-    DF:Debug(DBG, "SetTestMode -> %s", tostring(on))
+    if DF:DebugActive(DBG) then
+        DF:Debug(DBG, "SetTestMode -> %s", tostring(on))
+    end
 
     -- TEST HANDLES ONLY. A container has to be REBUILT across a test transition
     -- because the two shapes declare different groups and groups can never be
@@ -1288,6 +1338,9 @@ function AuraContainer.SetTestMode(on)
     -- DF.testMode/raidTestMode). The asymmetry is what makes it worth naming: a false NEGATIVE
     -- silently corrupts what is on screen, a false POSITIVE only costs one extra rebuild.
     -- (Parent-driven handles are skipped here too — see skipNested at file scope.)
+    -- ⚠ A PREVIEW frame's handles (testShapeFor) are test-shaped on both sides of the
+    -- transition, so for them the rebuild below changes nothing; they are rebuilt anyway
+    -- because they are test-frame handles, which costs one rebuild and nothing else.
     local function rebuildAll()
         -- PERF timing (debug-gated): every test handle's container is rebuilt
         -- across a test transition -- the other synchronous cost of SetTestMode.
@@ -2252,7 +2305,9 @@ local function styleButton_regions(slot, config)
                     end)
                     if not okA and not warnedBorder then
                         warnedBorder = true
-                        DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(errA))
+                        if DF:DebugActive(DBG) then
+                            DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(errA))
+                        end
                     end
                     -- AURA DESIGNER CANVAS ONLY — the same branch, the same guard and the
                     -- same reasoning as the icon cue's holder further down. A plain frame
@@ -2273,7 +2328,9 @@ local function styleButton_regions(slot, config)
             end
             if not ok and not warnedBorder then
                 warnedBorder = true
-                DF:DebugWarn(DBG, "DF.Border on aura button failed (taint?): %s", tostring(err))
+                if DF:DebugActive(DBG) then
+                    DF:DebugWarn(DBG, "DF.Border on aura button failed (taint?): %s", tostring(err))
+                end
             end
         end
     end
@@ -2687,7 +2744,9 @@ local function styleButton_regions(slot, config)
                 end)
                 if not ok and not warnedPandemicBorder then
                     warnedPandemicBorder = true
-                    DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(err))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(err))
+                    end
                 end
             end
         end
@@ -2912,7 +2971,9 @@ local function bindNative(slot, config)
             slot._dfDurSpec = durSpecKey
         elseif not warnedCurve then
             warnedCurve = true
-            DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
+            end
         end
     end
 
@@ -2992,7 +3053,9 @@ local function bindNative(slot, config)
             slot._boundPandemic = true
         elseif not warnedPandemicRegion then
             warnedPandemicRegion = true
-            DF:DebugWarn(DBG, "AddPandemicRegion failed (build still ok): %s", tostring(err))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "AddPandemicRegion failed (build still ok): %s", tostring(err))
+            end
         end
     end
 
@@ -3034,8 +3097,10 @@ local function bindNative(slot, config)
             slot._boundPandemicAnim = true
         elseif not warnedPandemicAnim then
             warnedPandemicAnim = true
-            DF:DebugWarn(DBG, "AddPandemicActiveAnimation failed, flash stays self-driven: %s",
-                tostring(errA))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "AddPandemicActiveAnimation failed, flash stays self-driven: %s",
+                    tostring(errA))
+            end
         end
     end
 
@@ -3130,7 +3195,9 @@ local function bindNative(slot, config)
                 slot._boundPandemicCover = true
             elseif not warnedPandemicCover then
                 warnedPandemicCover = true
-                DF:DebugWarn(DBG, "AddPandemicRegion (cover) failed: %s", tostring(err))
+                if DF:DebugActive(DBG) then
+                    DF:DebugWarn(DBG, "AddPandemicRegion (cover) failed: %s", tostring(err))
+                end
             end
         end
     end
@@ -3196,7 +3263,9 @@ local function bindNative(slot, config)
                 if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(0) end
                 if not warnedDispelBorder then
                     warnedDispelBorder = true
-                    DF:DebugWarn(DBG, "AddDispelTypeTexture failed (build still ok): %s", tostring(err))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "AddDispelTypeTexture failed (build still ok): %s", tostring(err))
+                    end
                 end
             end
         end
@@ -3218,7 +3287,9 @@ local function bindNative(slot, config)
             end)
             if not ok and not warnedDispelText then
                 warnedDispelText = true
-                DF:DebugWarn(DBG, "SetDispelTypeText failed (build still ok): %s", tostring(err))
+                if DF:DebugActive(DBG) then
+                    DF:DebugWarn(DBG, "SetDispelTypeText failed (build still ok): %s", tostring(err))
+                end
             end
         end
     end
@@ -3242,6 +3313,9 @@ local AXIS = {
 
 -- DF growth token -> AnchorUtil.FlowDirection member name.
 local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
+
+-- The corners a layout's rowPoint may name (resolveGrowthLayout).
+local ROW_POINTS = { TOPLEFT = true, TOPRIGHT = true, BOTTOMLEFT = true, BOTTOMRIGHT = true }
 
 -- Translate DF's layout vocabulary (anchor/growth/wrap/size/spacing/offset/scale) onto
 -- the container's NATIVE flow layout. Every setter here is a LIVE mutator (each just
@@ -3337,6 +3411,16 @@ local function resolveGrowthLayout(L)
     else
         out.hName = FLOW_NAME[primary] or "Right"
         out.vName = FLOW_NAME[secondary] or "Down"
+    end
+    -- ★ L.rowPoint (optional): the ROW's own corner placed on the frame's anchor point,
+    -- and the corner the flow starts from. Default: the anchor itself, as always. Icons
+    -- in a row line up on the flow corner's edges, so a row hanging OUTSIDE an edge
+    -- names the corner nearest that edge (under the frame: TOPLEFT on the frame's
+    -- BOTTOMLEFT) and a bigger icon (an important debuff) grows away from the frame
+    -- instead of back into it. The offsets then place that corner.
+    -- Corners only, directional growth only: a CENTER row pins its centre-of-edge.
+    if not out.center and ROW_POINTS[L.rowPoint] then
+        out.pinPoint, out.flowAnchor = L.rowPoint, L.rowPoint
     end
     return out
 end
@@ -3725,10 +3809,10 @@ end
 --
 -- Declared once rather than inlined as a closure so the pcall stays allocation-free on this
 -- per-button-per-pass path -- same reasoning as ProbeSlotArt.
-local function placeButton(b, scale, anchor, parent, x, y)
+local function placeButton(b, scale, point, parent, anchor, x, y)
     b:SetScale(scale)
     b:ClearAllPoints()
-    b:SetPoint(anchor, parent, anchor, x, y)
+    b:SetPoint(point, parent, anchor, x, y)
 end
 
 local function layoutRow(handle)
@@ -3741,6 +3825,9 @@ local function layoutRow(handle)
     local scale = tonumber(L.scale) or 1
     local anchor = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
     local growth = (type(L.growth) == "string" and L.growth) or "RIGHT_DOWN"
+    -- The button's own corner: the layout's rowPoint when it names one (see
+    -- resolveGrowthLayout), else the anchor -- the same pin the flow uses.
+    local point = (ROW_POINTS[L.rowPoint] and growth:sub(1, 6) ~= "CENTER") and L.rowPoint or anchor
     local wrap = L.wrap or #handle.buttons
     if wrap < 1 then wrap = #handle.buttons end
 
@@ -3767,7 +3854,7 @@ local function layoutRow(handle)
             x = ppSnapScaled(x, scale)
             y = ppSnapScaled(y, scale)
         end
-        if not pcall(placeButton, b, scale, anchor, handle.frame, x, y) and not warnedLayout then
+        if not pcall(placeButton, b, scale, point, handle.frame, anchor, x, y) and not warnedLayout then
             warnedLayout = true
             DF:DebugWarn(DBG, "layoutRow: slot %d refused placement (forbidden subtree?)", i)
         end
@@ -3847,7 +3934,9 @@ function NativeBackend:build()
     if not ok or not c then
         if not warnedCreate then
             warnedCreate = true
-            DF:DebugWarn(DBG, "CreateFrame(AuraContainer) failed: %s", tostring(c))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "CreateFrame(AuraContainer) failed: %s", tostring(c))
+            end
         end
         self.container = nil
         return
@@ -3857,7 +3946,8 @@ function NativeBackend:build()
     -- the current _testMode flag: entering the preview rebuilds while _testMode is
     -- already true, and the container being retired at that moment is the LIVE one --
     -- exactly the one worth parking, since leaving the preview asks for it straight back.
-    self.builtInTestMode = AuraContainer._testMode and true or false
+    -- (A preview frame's handle is test-shaped outside test mode too: testShapeFor.)
+    self.builtInTestMode = testShapeFor(handle)
     -- ☠ The structural key THIS container was built with, captured here and never read
     -- from the handle at park time. Handle:Rebuild writes the INCOMING key to
     -- _structKey before _rebuild runs, so a park that keyed off the handle would file
@@ -3909,7 +3999,9 @@ function NativeBackend:build()
     end
     -- TEST MODE (P5): the sample provider feeds any requested token identically, but
     -- test frames carry fabricated units — parse "player" so presence is guaranteed.
-    local testMode = AuraContainer._testMode
+    -- The handle's own answer (testShapeFor): a preview frame's rows take this shape
+    -- outside test mode too. Captured once; every branch below reads this local.
+    local testMode = testShapeFor(handle)
     local unit = testMode and "player" or config.unit
     if type(unit) == "string" then pcall(function() c:SetUnit(unit) end) end
 
@@ -3924,7 +4016,7 @@ function NativeBackend:build()
         local pol = resolveEnum(_G.CustomAuraContainerAuraProcessingPolicy, config.processingPolicy.policy)
         if pol ~= nil then
             local okPol, errPol = pcall(function() c:SetAuraProcessingPolicy(pol, config.processingPolicy.options) end)
-            if not okPol then DF:DebugWarn(DBG, "SetAuraProcessingPolicy failed: %s", tostring(errPol)) end
+            if not okPol and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "SetAuraProcessingPolicy failed: %s", tostring(errPol)) end
         end
     end
 
@@ -3954,7 +4046,9 @@ function NativeBackend:build()
     -- on top of each other. Only a consumer that wants that (config.stackSlots) gets it;
     -- anyone else falls back to groups, which flow side by side.
     if isSingleSlot and #filters ~= 1 and not config.stackSlots then
-        DF:DebugWarn(DBG, "singleSlot config has %d filter records; using groups", #filters)
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "singleSlot config has %d filter records; using groups", #filters)
+        end
         isSingleSlot = false
     end
     local maxCount = handle:_slotCount()
@@ -4140,7 +4234,9 @@ function NativeBackend:build()
                 pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
                 self.slotButtons["dfTestSlot"] = btn
             elseif not okSlot then
-                DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
+                if DF:DebugActive(DBG) then
+                    DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
+                end
             end
         else
             for k = 1, maxCount do
@@ -4162,7 +4258,9 @@ function NativeBackend:build()
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = slotStyle
                 else
-                    DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
+                    end
                 end
             end
         end
@@ -4174,7 +4272,9 @@ function NativeBackend:build()
             handle._idGateSourceRelative = true
         end
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
-            DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "filter rejected by IsValidFilterString: %s (group skipped)", tostring(f))
+            end
         else
             local key = rec.key or ("df" .. i)
             if isOverlay then
@@ -4201,7 +4301,7 @@ function NativeBackend:build()
                 if okSlot and btn then
                     pcall(btn.SetAllPoints, btn, handle.frame)
                     self.slotButtons[key] = btn
-                elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
+                elseif not okSlot and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             elseif isSingleSlot then
                 -- Same declaration as the overlay branch, different GEOMETRY: an
                 -- overlay button covers the whole host, a row button is icon-sized
@@ -4229,7 +4329,9 @@ function NativeBackend:build()
                     pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
                     self.slotButtons[key] = btn
                 elseif not okSlot then
-                    DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
+                    end
                 end
             else
                 -- A record carrying its own style (or an onInit) needs its OWN init
@@ -4242,14 +4344,16 @@ function NativeBackend:build()
                     recLayout = recordGroupLayout(groupLayout, rec.style)
                 end
                 local okGroup, err = pcall(c.AddAuraGroup, c, key, f,
-                    { maxFrameCount = maxCount, initializeFrame = groupInit,
+                    { maxFrameCount = groupMaxFor(handle, key, maxCount), initializeFrame = groupInit,
                       layout = recLayout, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = rec.style
                 else
-                    DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
+                    if DF:DebugActive(DBG) then
+                        DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
+                    end
                 end
             end
         end
@@ -4313,8 +4417,10 @@ function NativeBackend:build()
         handle.badge:Show()
     end
 
-    DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
-        tostring(config.unit), tostring(config.mode or "row"), #filters)
+    if DF:DebugActive(DBG) then
+        DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
+            tostring(config.unit), tostring(config.mode or "row"), #filters)
+    end
 
     -- ★ WHAT DID EACH GROUP ACTUALLY BUILD WITH? The line above reports only the
     -- group COUNT, which cannot tell a correctly filtered row from one that fell
@@ -4405,7 +4511,7 @@ end
 function NativeBackend:setUnit(unit)
     -- Test mode parses "player" regardless of the frame's (fabricated) unit; the
     -- handle's config still tracks the live token for the rebuild back.
-    if AuraContainer._testMode then return end
+    if testShapeFor(self.handle) then return end
     local c = self.container
     if c and type(unit) == "string" then
         pcall(function() c:SetUnit(unit) end)
@@ -4487,7 +4593,7 @@ function NativeBackend:applyGroupTuning()
     -- (one group per preview slot) — tuning them in place would not re-stamp that paint.
     -- Handle:ApplyTuning rebuilds the preview instead, so this path is never reached in
     -- test mode; guard anyway.
-    if AuraContainer._testMode then return end
+    if testShapeFor(self.handle) then return end
     -- OVERLAY declares AuraSLOTs, not groups, so groupKeys is empty and the group
     -- setters have nothing to act on — it needs the slot-side setters instead. The
     -- cfByKey derivation below is shared: build() keys slots and groups identically
@@ -4595,7 +4701,7 @@ function NativeBackend:applyGroupTuning()
                     fsMissing = fsMissing or key
                 end
             end
-            pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
+            pcall(c.SetAuraGroupMaxFrameCount, c, key, groupMaxFor(self.handle, key, maxCount))
             -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
             -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
             pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
@@ -4606,8 +4712,10 @@ function NativeBackend:applyGroupTuning()
     end
     if fsMissing and not warnedFilterString then
         warnedFilterString = true
-        DF:DebugWarn(DBG, "filter-string tune rejected for key '%s' (mode=%s) — a consumer let a KEY-SET change onto the tuning path; that must stay structural.",
-            tostring(fsMissing), tostring(mode))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "filter-string tune rejected for key '%s' (mode=%s) — a consumer let a KEY-SET change onto the tuning path; that must stay structural.",
+                tostring(fsMissing), tostring(mode))
+        end
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
     -- dirty but cannot ARM the private-side processor — without the bounce the change
@@ -4735,9 +4843,15 @@ end
 
 local function testPoolOffset(config, poolSize, count)
     if config.testEntries or not poolSize or poolSize < 2 then return 0 end
-    local u = config.unit
-    if type(u) ~= "string" then return 0 end
-    local n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
+    -- config.testSeed (a number) stands in for the token's number on a frame whose token
+    -- has none -- standalone frames on "target", "focus", "pet" would otherwise all draw
+    -- the same window. Party and raid rows never set it, so their windows are unchanged.
+    local n = tonumber(config.testSeed)
+    if not n then
+        local u = config.unit
+        if type(u) ~= "string" then return 0 end
+        n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
+    end
     local step = math.max(1, count or 1)
     -- ☠ SCRAMBLE THE SLOT, DO NOT WALK IT. When the count divides the pool the windows
     -- tile into `slots` disjoint runs, and handing them out as (n * step) makes the offset
@@ -4776,7 +4890,7 @@ function Handle:_slotCount()
     -- Capping HERE rather than clamping only in the painter is what actually fixes it:
     -- the count decides how many buttons the flow lays out, so an uncapped count draws
     -- duplicate icons no matter what the painter does with the index.
-    if AuraContainer._testMode then
+    if testShapeFor(self) then
         return testSlotCount(self.config, testPoolFor(self.config))
     end
     return self.config.max or 1
@@ -4863,11 +4977,20 @@ function AuraContainer.BindDurationTextPreview(fs, durSpec, dur, store, key)
     if not (fs and durSpec and dur) then return false end
     if not (C_DurationUtil and C_DurationUtil.CreateDurationTextBinding) then return false end
     local b = store and store[key]
+    -- A binding can be given a colour curve but not have one taken away, and this one
+    -- outlives the setting that asked for it: with Color by Time Remaining unticked,
+    -- only a new binding stops the countdown ramping.
+    local curveKey = key and (key .. "HasCurve")
+    if b and store[curveKey] and not durSpec.colorCurve then
+        b:SetEnabled(false)
+        b = nil
+    end
     if not b then
         b = C_DurationUtil.CreateDurationTextBinding()
         if store then store[key] = b end
         b:SetFontString(fs)
     end
+    if store then store[curveKey] = durSpec.colorCurve and true or nil end
     b:SetDuration(dur)
     -- Options mirrored from bindNative's live SetDurationText block so the preview
     -- formats identically (same formatter object, same texts, same cadence). Guards
@@ -4926,7 +5049,9 @@ local function armTestDuration(handle, slot, d, offset)
         end
     end)
     if not ok then
-        DF:DebugWarn(DBG, "armTestDuration failed (falling back to ticker): %s", tostring(err))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "armTestDuration failed (falling back to ticker): %s", tostring(err))
+        end
     end
     return ok
 end
@@ -4982,7 +5107,7 @@ local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
         -- Same gen guard as the re-arm: a repaint or teardown must not leave a stale
         -- closure showing the cue on a slot that has moved on.
         if handle._destroyed or slot._dfTestGen ~= gen then return end
-        if not AuraContainer._testMode then return end
+        if not testShapeFor(handle) then return end
         setShown(true)
     end)
 end
@@ -4998,7 +5123,7 @@ end
 local function scheduleTestRearm(handle, slot, d, gen, delay)
     C_Timer.After(delay, function()
         if handle._destroyed or slot._dfTestGen ~= gen then return end
-        if not AuraContainer._testMode or not slot._dfTestDurObj then return end
+        if not testShapeFor(handle) or not slot._dfTestDurObj then return end
         local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
         if ok then
             -- Re-drive the swipe on the same edge as the duration, or it loops out of step
@@ -5282,7 +5407,12 @@ function Handle:_paintTestSlot(slot, index)
     -- the throw silently aborted this paint and took the ring tint with it).
     -- LAST in the paint so any residual error can't take other art down.
     -- Index-keyed + handle-owned: rebuilds reposition instead of leaking;
-    -- _teardownContainer hides the lot. Clicks pass through.
+    -- _teardownContainer hides the lot.
+    -- ★ CLICKS ARE HANDED TO THE TEST FRAME, not passed through. Click-through
+    -- left nothing under an aura to catch them in game, so Indicator Info's click
+    -- to open settings never fired on an aura. The tip takes the click and hands it
+    -- to the test frame it sits on. Tips exist only on test-mode containers, never
+    -- on live frames, so no click casting is in the way.
     -- ☠ CONTAINER-ONLY BLOCK, AND THE GUARD IS self.frame, NOT the tooltips flag.
     -- Everything below needs a REAL handle: self.frame to parent and level the hover
     -- frame against, and self:_positionTestTip (which in turn calls self:_slotCount).
@@ -5298,7 +5428,16 @@ function Handle:_paintTestSlot(slot, index)
             tip = CreateFrame("Frame", nil, self.frame)
             self._testTips[index] = tip
             tip:EnableMouse(true)
-            if tip.SetMouseClickEnabled then tip:SetMouseClickEnabled(false) end
+            tip:SetScript("OnMouseUp", function(s, button)
+                local TL = DF.TestLabels
+                if not (TL and TL.HandleClick) then return end
+                local owner = s:GetParent()
+                for _ = 1, 8 do
+                    if not owner or owner.dfIsTestFrame then break end
+                    owner = owner.GetParent and owner:GetParent() or nil
+                end
+                if owner and owner.dfIsTestFrame then TL:HandleClick(owner, button) end
+            end)
             local handle = self
             tip:SetScript("OnEnter", function(s)
                 if not GameTooltip then return end
@@ -5722,7 +5861,7 @@ function Handle:_positionTestTip(tip, index)
         + ((pAxis.x * col + sAxis.x * row) * (sx + spX) + pAxis.x * leadExtra) * scale
     local y = (L.offsetY or 0)
         + ((pAxis.y * col + sAxis.y * row) * strideY + pAxis.y * leadExtra + vSign * inset) * scale
-    tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
+    tip:SetPoint(G.pinPoint, self.frame, G.anchor, x, y)
 end
 
 -- Build the per-button styling callback Blizzard invokes (securecallfunction) for each
@@ -5795,6 +5934,45 @@ function styleConfigFor(handle, button)   -- assigns the forward-declared local
     return handle.config
 end
 
+-- ★ RECORD HIGHLIGHT (recStyle.highlight = { db, prefix }): a second DF.Border ring
+-- on every button of one record, drawn from that db's `<prefix>Border*` keys -- the
+-- purgeable-buff ring (Features/Auras.lua SplitBuffRowForPurge). Its holder shares
+-- the PANDEMIC_BORDER rung (both trace the edge over everything; the ladder's budget
+-- note says share a rung, never add one), and DF.Border sits inside it, so the
+-- holder is the only thing shown / hidden and the pieces stay ours. The db is read
+-- on every restyle, so a colour change reaches standing buttons without a rebuild.
+-- STATIC only, as every row border (the animation filter's reasons, above).
+local function applyRecordHighlight(button, handle, hl)
+    if not button then return end
+    if not (hl and hl.db and hl.prefix and DF.Border) then
+        if button.dfRecHighlightHolder then button.dfRecHighlightHolder:SetShown(false) end
+        return
+    end
+    if not button.dfRecHighlightHolder then
+        button.dfRecHighlightHolder = makeHolder(button.dfLevelHost or button, LEVELS.PANDEMIC_BORDER)
+        local ok, w = pcall(function()
+            return DF.Border:New(button.dfRecHighlightHolder, {
+                solidOnly = true, secretRect = true, frameLevelOffset = 0,
+            })
+        end)
+        if ok then button.dfRecHighlight = w end
+    end
+    if not button.dfRecHighlight then return end
+    local lay = handle and handle.config and handle.config.layout
+    local sx = lay and (lay.sizeX or lay.size) or nil
+    local sy = lay and (lay.sizeY or lay.size) or sx
+    local ok = pcall(function()
+        local spec = DF.Border:BuildSpec(hl.db, hl.prefix,
+            { unit = handle and handle.config and handle.config.unit, frame = button, iconMode = true })
+        if not spec then return end
+        spec.knownWidth, spec.knownHeight = sx, sy
+        spec.animation = nil
+        if spec.renderScale == nil then spec.renderScale = tonumber(lay and lay.scale) or 1 end
+        DF.Border:Apply(button.dfRecHighlight, spec)
+    end)
+    button.dfRecHighlightHolder:SetShown(ok and true or false)
+end
+
 function applyRecordStyle(button, handle, recStyle)
     if not recStyle then
         -- Styled -> plain TRANSITION (own-preview pool only): a native button belongs
@@ -5803,8 +5981,11 @@ function applyRecordStyle(button, handle, recStyle)
         -- a stamped badge shown unless the off-path runs here. Size needs no revert:
         -- _acceptSlot has just re-sized the button from the shared layout.
         if button and button.dfImpBadgeHost then button.dfImpBadgeHost:SetShown(false) end
+        if button and button.dfRecHighlightHolder then button.dfRecHighlightHolder:SetShown(false) end
         return
     end
+
+    applyRecordHighlight(button, handle, recStyle.highlight)
 
     if recStyle.scale and recStyle.scale ~= 1 then
         local lay = handle.config and handle.config.layout
@@ -5899,7 +6080,7 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
     -- Captured, not read through handle.backend at call time: a re-adopted park swaps
     -- the backend out from under closures that belong to a different container.
     local testShape = self.backend and self.backend.builtInTestMode
-    if testShape == nil then testShape = AuraContainer._testMode end
+    if testShape == nil then testShape = testShapeFor(self) end
     return function(button)
         local ok, err = pcall(function()
             if handle._destroyed or handle._gen ~= gen or not button then return end
@@ -5967,8 +6148,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
         -- and leaves the stage to the error text.
         if not ok and not warnedInitFrame then
             warnedInitFrame = true
-            DF:DebugWarn(DBG, "initializeFrame failed (slot art may be incomplete): %s",
-                tostring(err))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "initializeFrame failed (slot art may be incomplete): %s",
+                    tostring(err))
+            end
         end
         -- ☠☠ THE CONSUMER HOOK GETS ITS OWN CALL, OUTSIDE THE SHARED PCALL ABOVE. Last inside it,
         -- any throw in the mouse setters, _acceptSlot or _bindNativeSlot would skip straight past
@@ -5989,8 +6172,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
             local okHook, errHook = pcall(onInit, button)
             if not okHook and not warnedInitHook then
                 warnedInitHook = true
-                DF:DebugWarn(DBG, "initializeFrame consumer hook failed (slot carriers "
-                    .. "will be missing until the out-of-combat rebuild): %s", tostring(errHook))
+                if DF:DebugActive(DBG) then
+                    DF:DebugWarn(DBG, "initializeFrame consumer hook failed (slot carriers "
+                        .. "will be missing until the out-of-combat rebuild): %s", tostring(errHook))
+                end
             end
         end
     end
@@ -6133,8 +6318,11 @@ function Handle:_applyVisibility()
     -- Composition: consumer intent + the death latch.
     -- ☠ ASKED, NOT REMEMBERED — see unitVisLatched. self._visLatched is a memo of the
     -- last application and must never be the authority here: a retarget would carry it.
-    local want = (self._intendedShown ~= false) and not self._deathLatched
-        and not handleVisDark(self)
+    -- ⚠ A PREVIEW frame's rows ignore both latches. They show sample auras under a REAL
+    -- token ("target"), and the latches are unit state from the live frames -- a dead or
+    -- out-of-world real target would otherwise blank the preview of a target frame.
+    local latched = (not self._previewFrame) and (self._deathLatched or handleVisDark(self))
+    local want = (self._intendedShown ~= false) and not latched
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -6422,7 +6610,9 @@ function Handle:ApplyStyle(style, layout)
         end)
         if not ok and not warnedRestyle then
             warnedRestyle = true
-            DF:DebugWarn(DBG, "ApplyStyle restyle failed: %s", tostring(err))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "ApplyStyle restyle failed: %s", tostring(err))
+            end
         end
     end
 
@@ -6484,6 +6674,51 @@ end
 -- Rebuild/SetFilter.
 -- Applies at once, in combat too: the native tuning setters are live mutators with no
 -- combat gate.
+-- ============================================================
+-- PER-GROUP CAPS (Handle:SetGroupMaxOverrides)
+-- Blizzard caps each aura GROUP at its maxFrameCount and has no container-wide cap,
+-- so a row split into several groups can show up to N x Max. A consumer that knows
+-- how to share the row's Max between its groups hands the caps here: key -> count.
+-- Build and every tuning pass honour them (never above the row's Max), and a change
+-- is pushed in place with SetAuraGroupMaxFrameCount -- a live mutator with its own
+-- equality guard, legal in combat (no combat check in Blizzard_AuraContainer) --
+-- then the container is bounced so it lands on this pass, not the next aura event.
+-- nil drops every override (every group back to the row's Max). Test-shaped
+-- (preview) handles keep their own one-per-slot groups and are left alone.
+-- ============================================================
+function groupMaxFor(handle, key, maxCount)
+    local o = handle and handle._groupMax
+    local n = o and o[key]
+    if type(n) ~= "number" then return maxCount end
+    if n < 0 then n = 0 end
+    if type(maxCount) == "number" and n > maxCount then n = maxCount end
+    return math.floor(n)
+end
+
+local function sameCaps(a, b)
+    if a == b then return true end
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    for k, v in pairs(a) do if b[k] ~= v then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+
+function Handle:SetGroupMaxOverrides(caps)
+    if type(caps) ~= "table" then caps = nil end
+    if sameCaps(self._groupMax, caps) then return false end
+    self._groupMax = caps
+    if testShapeFor(self) then return true end
+    local be = self.backend
+    local c = be and be.container
+    if not (c and be.groupKeys and c.SetAuraGroupMaxFrameCount) then return true end
+    local maxCount = self:_slotCount()
+    for _, key in ipairs(be.groupKeys) do
+        pcall(c.SetAuraGroupMaxFrameCount, c, key, groupMaxFor(self, key, maxCount))
+    end
+    pcall(bounceContainer, c)
+    return true
+end
+
 function Handle:ApplyTuning(tuning)
     if type(tuning) == "table" then
         self.config.max = tuning.max
@@ -6501,7 +6736,7 @@ function Handle:ApplyTuning(tuning)
     end
     -- Test mode: the preview's per-slot pin groups can't be tuned in place
     -- (maxFrameCount = 1 by design) — rebuild so the preview honours the new cap.
-    if AuraContainer._testMode then
+    if testShapeFor(self) then
         self:_rebuild()
         return
     end
@@ -6711,7 +6946,9 @@ function Handle:Refresh()
     if not ok then
         if not warnedRefresh then
             warnedRefresh = true
-            DF:DebugWarn(DBG, "Refresh bounce failed: %s", tostring(res))
+            if DF:DebugActive(DBG) then
+                DF:DebugWarn(DBG, "Refresh bounce failed: %s", tostring(res))
+            end
         end
         return false
     end
@@ -6944,7 +7181,7 @@ end
 function Handle:_readoptParked()
     local p = self._parked
     if not p then return false end
-    if AuraContainer._testMode then return false end
+    if testShapeFor(self) then return false end
     if type(self._structKey) ~= "string" or self._structKey == "" then return false end
     if p.key ~= self._structKey then return false end
     local be = p.backend
@@ -7146,9 +7383,11 @@ function Handle:_queueOp(op)
     -- that path is the documented frame-leak case — so it must leave a trace. Only an actual
     -- change of pending op logs.
     if cur and cur ~= self._pendingOp then
-        DF:DebugWarn("AURACONTAINER", "combat op upgrade: %s + %s -> %s (unit=%s)",
-            tostring(cur), tostring(op), tostring(self._pendingOp),
-            tostring(self.config and self.config.unit))
+        if DF:DebugActive("AURACONTAINER") then
+            DF:DebugWarn("AURACONTAINER", "combat op upgrade: %s + %s -> %s (unit=%s)",
+                tostring(cur), tostring(op), tostring(self._pendingOp),
+                tostring(self.config and self.config.unit))
+        end
     end
     self:_registerRegen()
 end
@@ -7233,7 +7472,7 @@ function Handle:SetTestMax(n)
     n = tonumber(n)
     if self.config.testMax == n then return end
     self.config.testMax = n
-    if AuraContainer._testMode then self:_rebuild() end
+    if testShapeFor(self) then self:_rebuild() end
 end
 
 -- ============================================================
@@ -7674,7 +7913,9 @@ local function ensureOwner(frame, unit)
 
     local ok, c = pcall(CreateFrame, "AuraContainer", nil, anchor, "CustomAuraContainerTemplate")
     if not ok or not c then
-        DF:DebugWarn(DBG, "SlotOwner: CreateFrame(AuraContainer) failed: %s", tostring(c))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "SlotOwner: CreateFrame(AuraContainer) failed: %s", tostring(c))
+        end
         return nil
     end
     setContainerProviderDeaf(c, not AuraContainer._testMode)
@@ -7785,10 +8026,12 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     for _ in pairs(owner.slots) do slotCount = slotCount + 1 end
     if slotCount >= SLOT_OWNER_WARN_AT and not owner._warnedSlotGrowth then
         owner._warnedSlotGrowth = true
-        DF:DebugWarn(DBG,
-            "SlotOwner: %d slots on one frame (unit=%s). Slots are add-only and never "
-            .. "freed -- if this climbs with a slider drag, the Frame Level struct key "
-            .. "is minting them.", slotCount, tostring(owner.unit))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG,
+                "SlotOwner: %d slots on one frame (unit=%s). Slots are add-only and never "
+                .. "freed -- if this climbs with a slider drag, the Frame Level struct key "
+                .. "is minting them.", slotCount, tostring(owner.unit))
+        end
     end
 
     local filter = spec.filter or "HELPFUL"
@@ -7844,9 +8087,9 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
                 -- _bindNativeSlot do for a per-indicator container, so a migrated
                 -- consumer renders byte-identically without owning any render code.
                 local okR, errR = pcall(styleButton_regions, b, config)
-                if not okR then DF:DebugWarn(DBG, "SlotOwner styleButton_regions: %s", tostring(errR)) end
+                if not okR and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "SlotOwner styleButton_regions: %s", tostring(errR)) end
                 local okB, errB = pcall(bindNative, b, config)
-                if not okB then DF:DebugWarn(DBG, "SlotOwner bindNative: %s", tostring(errB)) end
+                if not okB and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "SlotOwner bindNative: %s", tostring(errB)) end
                 -- After sizing (styleButton_regions owns SetSize), before the seal.
                 layoutSlotButton(b, config, owner.anchor)
             end
@@ -7863,12 +8106,14 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
             end
             if spec.onInit then
                 local okI, err = pcall(spec.onInit, b, host)
-                if not okI then DF:DebugWarn(DBG, "SlotOwner onInit failed: %s", tostring(err)) end
+                if not okI and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "SlotOwner onInit failed: %s", tostring(err)) end
             end
         end,
     })
     if not okS or not btn then
-        DF:DebugWarn(DBG, "SlotOwner: AddAuraSlot(%s) failed: %s", slotKey, tostring(btn))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "SlotOwner: AddAuraSlot(%s) failed: %s", slotKey, tostring(btn))
+        end
         return nil
     end
 
@@ -8376,19 +8621,21 @@ function SlotHandle:ApplyStyle(style, layout)
     -- Dropping the pass is safe: the caller re-drives on its own version gate, and the
     -- config we just stored above is what initializeFrame will style from when it runs.
     if not btn.dfLevelHost then
-        DF:Debug(DBG, "SlotHandle:ApplyStyle deferred -- no dfLevelHost yet (key=%s)",
-            tostring(self.key))
+        if DF:DebugActive(DBG) then
+            DF:Debug(DBG, "SlotHandle:ApplyStyle deferred -- no dfLevelHost yet (key=%s)",
+                tostring(self.key))
+        end
         return false
     end
     local ok, err = pcall(styleButton_regions, btn, cfg)
-    if not ok then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
+    if not ok and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
     -- ☠ bindNative too, exactly as Handle:ApplyStyle does. Its binds are keyed on spec
     -- identity, not bind-once, so this is how a duration-format / zeroText /
     -- updateInterval / dispel-palette change reaches a LIVE slot. Without it those would
     -- silently keep the spec they were created with and the signature entries below could
     -- not be reduced.
     local okB, errB = pcall(bindNative, btn, cfg)
-    if not okB then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle bindNative: %s", tostring(errB)) end
+    if not okB and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle bindNative: %s", tostring(errB)) end
     -- Re-anchor after restyle: anchor/offset/scale are live cosmetics (dragging an
     -- indicator moves it now, not on the next reload), and styleButton_regions has just
     -- re-run SetSize, so the pin has to follow it.
@@ -8439,8 +8686,10 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     if not (owner and owner.container and type(unit) == "string") then return false end
     if owner.unit == unit then return true end
     -- One line per AD slot-owner retarget (roster changes only, not per event).
-    DF:Debug("AURACONTAINER", "AD slots: retarget %s -> %s%s", tostring(owner.unit), unit,
-        InCombatLockdown() and " (in combat)" or "")
+    if DF:DebugActive("AURACONTAINER") then
+        DF:Debug("AURACONTAINER", "AD slots: retarget %s -> %s%s", tostring(owner.unit), unit,
+            InCombatLockdown() and " (in combat)" or "")
+    end
     -- Applies in combat too, like Handle:SetUnit; reparseContainer below falls back to a
     -- mark-only UpdateAllAuras there.
     -- Commit owner.unit only if the engine took the retarget: the equality guard above
@@ -8449,9 +8698,11 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     -- new unit, so they are skipped on failure too.
     local ok = pcall(owner.container.SetUnit, owner.container, unit)
     if not ok then
-        DF:DebugWarn(DBG, "slot owner retarget REFUSED: %s -> %s (owner left on the old"
-            .. " token so a repeat call retries; the container is still bound to it)",
-            tostring(owner.unit), tostring(unit))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "slot owner retarget REFUSED: %s -> %s (owner left on the old"
+                .. " token so a repeat call retries; the container is still bound to it)",
+                tostring(owner.unit), tostring(unit))
+        end
         return false
     end
     owner.unit = unit
@@ -8465,9 +8716,11 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     -- reports rather than repairs. If it ever fires, the repair is a container rebuild.
     local okU, bound = pcall(owner.container.GetUnit, owner.container)
     if okU and type(bound) == "string" and bound ~= unit then
-        DF:DebugWarn(DBG, "slot owner retarget MISMATCH: asked for %s, container is bound"
-            .. " to %s — this frame will render %s's auras until it is rebuilt.",
-            tostring(unit), tostring(bound), tostring(bound))
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "slot owner retarget MISMATCH: asked for %s, container is bound"
+                .. " to %s — this frame will render %s's auras until it is rebuilt.",
+                tostring(unit), tostring(bound), tostring(bound))
+        end
     end
     -- ⚠ The death latch is UNIT state, so a retarget re-seeds it from the registry the
     -- same way Handle:SetUnit does: the new unit may already be dead, and that edge
@@ -8535,7 +8788,7 @@ local function timedBuild(h)
     local t0 = debugprofilestop()
     local ok, err = pcall(h._build, h)
     buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
-    if not ok then DF:DebugWarn(DBG, "paced build failed: %s", tostring(err)) end
+    if not ok and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "paced build failed: %s", tostring(err)) end
 end
 
 local function drainBuilds(self)
@@ -8553,7 +8806,7 @@ local function drainBuilds(self)
             local onBuilt = h.backend and h.config.onBuilt
             if onBuilt then
                 local ok, err = pcall(onBuilt, h)
-                if not ok then DF:DebugWarn(DBG, "onBuilt failed: %s", tostring(err)) end
+                if not ok and DF:DebugActive(DBG) then DF:DebugWarn(DBG, "onBuilt failed: %s", tostring(err)) end
             end
         end
     end
@@ -8624,10 +8877,16 @@ function AuraContainer:Create(parent, config)
     -- the pinned ones, both long before any consumer drives a row onto them.
     -- Bounded walk: the anchor's parent is usually the unit frame, but AD hangs
     -- containers off the healthBar / background anchor / aura-bar strip instead.
+    -- A PREVIEW frame (dfPreview, stamped with dfIsTestFrame before its elements are
+    -- built) also marks the handle _previewFrame: test-shaped always (testShapeFor).
     local ancestor = parent
     for _ = 1, 6 do
         if not ancestor then break end
-        if ancestor.dfIsTestFrame then h._testFrame = true break end
+        if ancestor.dfIsTestFrame then
+            h._testFrame = true
+            if ancestor.dfPreview then h._previewFrame = true end
+            break
+        end
         ancestor = ancestor.GetParent and ancestor:GetParent() or nil
     end
     if cfg.mode == "missing" then
@@ -9008,12 +9267,14 @@ function AuraContainer.ReconcileLatches(reason)
         GateLog("reconcile (%s): cleared %d stale latch(es)", reason or "sweep", cleared)
     end
     if healed > 0 then
-        DF:DebugWarn(DBG, "reconcile (%s): %d container(s) were held DARK for a unit that"
-            .. " is not latched — a retarget stranded the verdict, or a retune dropped its PLAYER"
-            .. " token. Healed. This is the"
-            .. " blanking failure class (auras missing until /reload); if it recurs, the"
-            .. " actuation has found another way to outlive its unit.",
-            tostring(reason or "sweep"), healed)
+        if DF:DebugActive(DBG) then
+            DF:DebugWarn(DBG, "reconcile (%s): %d container(s) were held DARK for a unit that"
+                .. " is not latched — a retarget stranded the verdict, or a retune dropped its PLAYER"
+                .. " token. Healed. This is the"
+                .. " blanking failure class (auras missing until /reload); if it recurs, the"
+                .. " actuation has found another way to outlive its unit.",
+                tostring(reason or "sweep"), healed)
+        end
     end
 end
 
@@ -9239,7 +9500,9 @@ function AuraContainer.ToggleOwnPreview()
     AuraContainer._ownTestPreview = not AuraContainer._ownTestPreview or nil
     local n = 0
     for h in pairs(AuraContainer._handles or {}) do
-        if h.builtInTestMode or AuraContainer._testMode then
+        -- A preview frame's handle changes shape with the toggle in or out of test mode
+        -- (testShapeFor), so it always rebuilds.
+        if h.builtInTestMode or AuraContainer._testMode or h._previewFrame then
             n = n + 1
             pcall(function() h:_rebuild() end)
         end

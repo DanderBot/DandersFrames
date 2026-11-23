@@ -131,7 +131,15 @@ function P:GetUnlockFrame()
     -- peek up while the OTHER Alt's own press stands. IsAltKeyDown() reads the client's
     -- lagging state: after an alt-tab, or a burst of fast taps, it answers "down" for a
     -- second or two after a real release.
-    f:SetScript("OnEvent", function(_, _, key, down)
+    f:SetScript("OnEvent", function(_, event, key, down)
+        -- A click ends a peek whatever the Alt state says: reaching for a faded control
+        -- must bring it back, even when the release was lost to an alt-tab and the
+        -- client's own answer still says the key is down (P:WatchPeek).
+        if event == "GLOBAL_MOUSE_DOWN" then
+            P.altDown = {}
+            P:SetPeek(false)
+            return
+        end
         if key ~= "LALT" and key ~= "RALT" then return end
         P.altDown[key] = (down == 1 or down == true) or nil
         P:SetPeek(next(P.altDown) ~= nil)
@@ -630,7 +638,10 @@ function P:Build(filter, animate)
         self.peeking = false          -- Cancel above restored alpha 1
         self.altDown = {}
         self:WatchPeek(false)
-        if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
+        if f.RegisterEvent then
+            f:RegisterEvent("MODIFIER_STATE_CHANGED")
+            f:RegisterEvent("GLOBAL_MOUSE_DOWN")
+        end
         if animate then NS.Fx.FadeIn(f, FADE_IN) else f:Show() end
     end
     local n = 0
@@ -808,7 +819,10 @@ function P:DestroyAll()
     self.overlayUp = false
     self:WatchPeek(false)
     if self.unlockFrame then
-        if self.unlockFrame.UnregisterEvent then self.unlockFrame:UnregisterEvent("MODIFIER_STATE_CHANGED") end
+        if self.unlockFrame.UnregisterEvent then
+            self.unlockFrame:UnregisterEvent("MODIFIER_STATE_CHANGED")
+            self.unlockFrame:UnregisterEvent("GLOBAL_MOUSE_DOWN")
+        end
         self.peeking = false
         self.altDown = {}
         self.unlockFrame:SetAlpha(1)
@@ -1129,9 +1143,9 @@ local function buildLegend()
     f.entries[3] = entry(f.entries[2], C_ROOT,     L["Anchor root"])
 
     -- Session verbs on the same row, right-aligned: the strip doubles as the
-    -- action bar (EUI has a separate one; ours merges into the legend so there
-    -- is a single top element). Declared widths are floors -- fitText grows
-    -- them for longer localisations, and Layout re-measures.
+    -- action bar, merged into the legend so there is a single top element.
+    -- Declared widths are floors -- fitText grows them for longer
+    -- localisations, and Layout re-measures.
     --
     -- These are the verbs SPELLED OUT. The element panel carries the same five
     -- as a compact icon row, which is the copy you reach for while working on a
@@ -1513,6 +1527,14 @@ function P:ShowZones(el)
     if not w then return end
     local descendants = {}
     for _, d in ipairs(Registry:Descendants(el.id)) do descendants[d.id] = true end
+    -- A mirrored child drags its parent along (Session:MirrorPartner), so the parent
+    -- and everything hanging off it move during the drag: zones measured on them now
+    -- would be stale by the first frame. They are left out for this drag.
+    local m = NS.Session and NS.Session.mirror
+    if m then
+        descendants[m.partner.id] = true
+        for _, d in ipairs(Registry:Descendants(m.partner.id)) do descendants[d.id] = true end
+    end
     local n = 0
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)

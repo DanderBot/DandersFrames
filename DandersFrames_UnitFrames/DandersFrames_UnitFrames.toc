@@ -1,0 +1,44 @@
+## Interface: 120105, 16001
+## Title: DandersFrames |cffa66bffUnit Frames|r
+## Notes: Player, target, target of target, focus, pet and boss frames, drawn and configured by DandersFrames.
+## Author: Danders
+## Version: v6.0.0-alpha.4
+## Category: Danders
+## DefaultState: disabled
+## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
+## RequiredDeps: DandersFrames
+## OptionalDeps: DandersMover
+## AllowAddOnTableAccess: 1
+
+# ============================================================
+# DandersFrames Unit Frames -- resident companion
+# ============================================================
+# No SavedVariables: every setting lives in the active DandersFrames profile
+# (DF.db.unitframes, registered as a profile-root table), so profiles, import
+# and export carry it with everything else.
+# No DandersUI embed: this addon draws no settings widgets. Its pages live in
+# DandersFrames_Options.
+# Load order: Core (namespace, db accessors) -> Links (linked frames: before
+# Defaults, whose migrate hook and mirrored target defaults use it) -> Defaults (registers the profile
+# table) -> Units (spawning, events) -> Elements (the registry + kit the next four
+# register into) -> Rings (the ring frame style) -> Portrait / CastBar / ClassPower / Indicators -> Preview
+# (sample frames) -> Boss (the boss container) -> BlizzardHide -> Mover -> LivePaint (drag painters).
+
+Core.lua
+Links.lua
+Defaults.lua
+Units.lua
+Elements.lua
+Rings.lua
+Portrait.lua
+CastBar.lua
+ClassPower.lua
+Indicators.lua
+LivePaint.lua
+Preview.lua
+Boss.lua
+BlizzardHide.lua
+Mover.lua
+#@do-not-package@
+RingProbe.lua
+#@end-do-not-package@

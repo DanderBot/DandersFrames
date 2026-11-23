@@ -87,7 +87,7 @@ local pairs, ipairs = pairs, ipairs
 -- ============================================================
 
 local CONTENT_CATEGORIES = {
-    "group", "identity", "health", "power", "shields", "status", "threat",
+    "group", "identity", "health", "power", "shields", "status", "threat", "shapes",
 }
 
 -- These label tables read L["..."], which at file-scope returns the enUS
@@ -106,6 +106,7 @@ local function RefreshLocaleStrings()
         status   = L["Status"],
         threat   = L["Threat & Range"],
         group    = L["Group"],
+        shapes   = L["Shapes"],
     }
 
     CONTENT_TYPES = {
@@ -114,6 +115,9 @@ local function RefreshLocaleStrings()
         { key = "class",             label = L["Class"],                      category = "identity" },
         { key = "group_number",      label = L["Group Number"],               category = "identity" },
         { key = "level",             label = L["Level"],                      category = "identity" },
+        { key = "level_difficulty",  label = L["Level (Difficulty Color)"],   category = "identity" },
+        { key = "classification",    label = L["Classification"],             category = "identity" },
+        { key = "target_name",       label = L["Target Name"],                category = "identity" },
         { key = "race",              label = L["Race"],                       category = "identity" },
         { key = "faction",           label = L["Faction"],                    category = "identity" },
         { key = "custom_static",     label = L["Custom Static Text"],         category = "identity" },
@@ -139,12 +143,16 @@ local function RefreshLocaleStrings()
         -- { key = "incoming_heal_mine",label = L["Incoming Heal From Me Only"], category = "shields"  },
         -- Status
         { key = "status_text",       label = L["Dead / Offline / Ghost"],     category = "status"   },
+        { key = "status_afk",        label = L["Dead / Offline / Ghost / AFK"], category = "status" },
         -- Threat & Range
         { key = "aggro_flag",        label = L["Aggro Flag"],                 category = "threat"   },
         { key = "threat_percent",    label = L["Threat on Current Target"],   category = "threat"   },
         { key = "range_text",        label = L["In-Range / OOR Text"],        category = "threat"   },
         -- Group
         { key = "group",             label = L["Text Group"],                 category = "group"    },
+        -- Shapes: a plain backing shape other elements can anchor to (Render.lua
+        -- BACKGROUND ELEMENTS)
+        { key = "backdrop",          label = L["Background"],                 category = "shapes"   },
     }
 end
 
@@ -365,6 +373,28 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
     place(labelEdit, EDIT_BOX_ROW_H)
     end  -- not isGroupItem
 
+    -- Background: size, shape, layer and colour (no text, so the Appearance
+    -- section's font controls do nothing for it).
+    if ct.key == "backdrop" then
+        local function bdCB()
+            if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+        end
+        elem.width = elem.width or 60
+        elem.height = elem.height or 18
+        elem.shape = elem.shape or "BOX"
+        elem.layer = elem.layer or "FRONT"
+        elem.color = elem.color or { r = 0, g = 0, b = 0, a = 0.6 }
+        place(GUI:CreateSlider(parent, L["Width"], 4, 300, 1, elem, "width", bdCB, bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateSlider(parent, L["Height"], 4, 120, 1, elem, "height", bdCB, bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateDropdown(parent, L["Shape"],
+            { BOX = L["Rounded Box"], PILL = L["Pill"], _order = { "BOX", "PILL" } }, elem, "shape", bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateDropdown(parent, L["Layer"],
+            { FRONT = L["In Front of the Bars"], BEHIND = L["Behind the Bars"], _order = { "FRONT", "BEHIND" } },
+            elem, "layer", bdCB), FIELD_ROW_HEIGHT)
+        place(GUI:CreateColorPicker(parent, L["Color"], elem, "color", true, bdCB), FIELD_ROW_HEIGHT)
+        return y - SECTION_GAP
+    end
+
     -- Numeric types: abbreviate checkbox
     if ct.key == "hp_current" or ct.key == "hp_max" or ct.key == "hp_deficit"
        or ct.key == "power_current" or ct.key == "power_deficit"
@@ -410,9 +440,9 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         place(hidePct, FIELD_ROW_HEIGHT)
 
     -- Name: length cap + truncate mode
-    elseif ct.key == "name" then
+    elseif ct.key == "name" or ct.key == "target_name" then
         -- Surnames only exist on WoW Forever.
-        if DF.IS_FOREVER then
+        if DF.IS_FOREVER and ct.key == "name" then
             elem.nameFormat = elem.nameFormat or "FULL"
             local formatOpts = {
                 FIRST = L["First Name"],
@@ -974,6 +1004,16 @@ local function BuildAnchorTargets(tdDB, currentElem)
     MarkDescendants(currentElem.id)
 
     local opts = { FRAME = L["Frame"] }
+    -- Spots on a ring frame (Render.lua SPOT ANCHORS). Offered on a unit frame's
+    -- page (the island's target.ringAnchors); a Bars frame falls back to its edges.
+    if P.offerRingAnchors or (currentElem.anchorTo and DF.TextDesigner.Render
+            and DF.TextDesigner.Render.SPOTS and DF.TextDesigner.Render.SPOTS[currentElem.anchorTo]) then
+        opts.RING_ABOVE = L["Ring: Above"]
+        opts.RING_BELOW = L["Ring: Below"]
+        opts.RING_CENTER = L["Ring: Center"]
+        opts.RING_GAP_LEFT = L["Ring: Left Side"]
+        opts.RING_GAP_RIGHT = L["Ring: Right Side"]
+    end
     for _, other in ipairs(tdDB.elements) do
         if other.id ~= currentElem.id and not descendants[other.id] then
             local optLabel
@@ -1049,6 +1089,19 @@ local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group
     local anchorTargets = BuildAnchorTargets(tdDB, elem)
     local anchorToDrop = GUI:CreateDropdown(parent, L["Anchor To"], anchorTargets, elem, "anchorTo", metaCB)
     place(anchorToDrop, FIELD_ROW_HEIGHT)
+
+    -- Show on Hover (Render.lua SHOW ON HOVER): fades in while the mouse is over
+    -- the frame; Slide In starts it that far out and slides it home.
+    local hoverCheck = GUI:CreateCheckbox(parent, L["Show on Hover"], elem, "showOnHover", function()
+        if parent.RefreshStates then parent:RefreshStates() end
+        metaCB()
+    end)
+    hoverCheck.tooltip = L["Only show this while the mouse is over the frame, fading in and out."]
+    place(hoverCheck, FIELD_ROW_HEIGHT)
+    elem.hoverSlide = elem.hoverSlide or 0
+    local slide = GUI:CreateSlider(parent, L["Slide In"], -40, 40, 1, elem, "hoverSlide", metaCB, metaCB)
+    slide.disableOn = function() return not elem.showOnHover end
+    place(slide, FIELD_ROW_HEIGHT)
 
     return y - SECTION_GAP
 end
@@ -1655,8 +1708,10 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
         if DF.TextDesigner.FullRebuildCards then
             DF.TextDesigner.FullRebuildCards(capturedGUI, capturedPage, capturedTdDB, capturedState)
         end
-        DF:Debug("TD", "Deleted element id=%d (remaining=%d)",
-            elem.id, #capturedTdDB.elements)
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Deleted element id=%d (remaining=%d)",
+                elem.id, #capturedTdDB.elements)
+        end
     end
 
     local deleteBtn = GUI:CreateCloseButton(header, {
@@ -1695,7 +1750,9 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     eyeBtn:SetScript("OnClick", function()
         elem.enabled = not elem.enabled
         updateEyeIcon()
-        DF:Debug("TD", "Element %d enabled=%s", elem.id, tostring(elem.enabled))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Element %d enabled=%s", elem.id, tostring(elem.enabled))
+        end
         if state.UpdateTabCounts then state.UpdateTabCounts(tdDB) end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
@@ -2396,7 +2453,9 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     eyeBtn:SetScript("OnClick", function()
         elem.enabled = not elem.enabled
         updateEyeIcon()
-        DF:Debug("TD", "Group %d enabled=%s", elem.id, tostring(elem.enabled))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Group %d enabled=%s", elem.id, tostring(elem.enabled))
+        end
         if state.UpdateTabCounts then state.UpdateTabCounts(tdDB) end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
@@ -2773,7 +2832,9 @@ local function CreateEnableBanner(GUI, parent, tdDB, onToggle)
         tdDB,
         "enabled",
         function()
-            DF:Debug("TD", "Enable Text Designer = %s", tostring(tdDB.enabled))
+            if DF:DebugActive("TD") then
+                DF:Debug("TD", "Enable Text Designer = %s", tostring(tdDB.enabled))
+            end
             if onToggle then onToggle() end
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end
@@ -2797,15 +2858,53 @@ end
 -- hand-anchored inside frames the page harness never sees. It is why this page
 -- had to force the settings window 210px wider than its own default.
 -- ============================================================
-local function BuildTextDesignerIsland(GUI, page, db)
+-- ============================================================
+-- WHAT THE PAGE EDITS
+-- ------------------------------------------------------------
+-- By default the template the selected MODE uses. A caller editing a settings
+-- table that names its own template passes opts.target instead:
+--   target.getName()   the template it uses now (a name in the library)
+--   target.sizeDB      the settings table the preview's frame size comes from
+--   target.bar         extra GUI:CreateDesignerPresetBar opts (getRef / setRef /
+--                      getLabel / leadItems / tailItems / listUsers / registryKey)
+--   target.onChange()  after the template choice changed
+--   target.getSizeDB()  optional: the size table, asked each time (wins over sizeDB)
+--   target.decorateMock(mock, chrome)  optional: dress the static mock for the
+--                      target (a Ring-style unit frame draws its rings on it, from
+--                      fixed sample values). `chrome` is the mock's own bar art
+--                      ({ textures = {...}, backdrop = {bg, border} }) to hide or
+--                      restore. Called at build and on every geometry refresh.
+--   target.ringAnchors  the Anchor To lists offer the ring spots, the mock shows
+--                      faint markers on them and a Show Hover State switch
+-- Returns the template's config, its name, and the size table.
+-- ============================================================
+local function TDEditTarget(GUI, db, target)
+    if target then
+        local name = target.getName and target.getName() or nil
+        local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+        local cfg = lib and ((name and lib[name]) or lib[DF.DEFAULT_PRESET]) or nil
+        local size = target.getSizeDB and target.getSizeDB() or nil
+        return cfg, name, size or target.sizeDB or db or {}
+    end
+    local mode = (GUI and GUI.SelectedMode) or "party"
+    local cfg = DF.GetModeBaseTextDesigner and DF:GetModeBaseTextDesigner(mode)
+    local name = DF.GetModeDesignerPresetName and DF:GetModeDesignerPresetName("text", mode)
+    return cfg, name, (DF.GetDB and DF:GetDB(mode)) or {}
+end
+DF.TextDesigner._EditTarget = TDEditTarget
+
+local function BuildTextDesignerIsland(GUI, page, db, opts)
+    local target = opts and opts.target or nil
     -- TD is mode-tabbed: edit the preset the active mode uses (edited == used,
     -- so live frames stay in sync with the editor). EnsureDB guarantees the
     -- preset carries the full TD schema.
-    local _tdEditMode = (GUI and GUI.SelectedMode) or "party"
     -- Base variant: the editor edits your base raid preset, not the active runtime
     -- auto-layout's overlay (it edits the layout only while IN edit-auto-layout).
-    local tdDB = (DF.GetModeBaseTextDesigner and DF:GetModeBaseTextDesigner(_tdEditMode))
-        or (DF.TextDesigner:EnsureDB(db))
+    -- A target (above) names its own template and its own frame size instead.
+    local tdDB, _tdTargetName, _tdSizeDB = TDEditTarget(GUI, db, target)
+    tdDB = tdDB or (DF.TextDesigner:EnsureDB(db))
+    -- Ring spots in every Anchor To on this page (a unit frame's target asks).
+    P.offerRingAnchors = (target and target.ringAnchors) and true or false
     DF.TextDesigner:EnsureDB({ textDesigner = tdDB })
     local state = GetState(page)
 
@@ -2831,6 +2930,12 @@ local function BuildTextDesignerIsland(GUI, page, db)
         if state.previewPanel and state.previewPanel.RefreshGeometry then
             state.previewPanel.RefreshGeometry()
         end
+        -- ONE PREVIEW BINDING FOR EVERY TEXT DESIGNER PAGE. Preview binds one mock
+        -- frame and one template at a time, and more than one page can build this
+        -- island; whichever is on screen takes the binding back, or its edits paint
+        -- the other page's mock.
+        local PV = DF.TextDesigner.Preview
+        if state.mockFrame and PV and PV.Bind then PV:Bind(state.mockFrame, tdDB) end
     end
 
     -- Detect mode change OR auto-layout switch: tear down every cached widget so
@@ -2838,24 +2943,24 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- reference; an auto-layout switch keeps the SAME raid db but changes
     -- frameWidth/Height — both must rebuild so the preview mock resizes to the
     -- active layout's frame size.
-    local _tdMode = (GUI and GUI.SelectedMode) or "party"
-    local _tdFDB = (DF.GetDB and DF:GetDB(_tdMode)) or {}
+    local _tdFDB = _tdSizeDB or {}
     local _tdW, _tdH = _tdFDB.frameWidth or 125, _tdFDB.frameHeight or 64
     -- Auto-layout identity: two raid layouts share the SAME db proxy (DF.db.raid)
     -- and may share frame dimensions, so neither check above distinguishes them.
     -- Without this, switching between same-size raid layouts reuses the stale page
     -- (cards bound to the previous layout's elements; Preview never re-Init'd), so
     -- TD edits stop showing on the preview/test frames until /reload.
-    local _tdLayout = (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
+    local _tdLayout = (not target) and (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
     -- Editing identity: entering edit of the CURRENTLY-ACTIVE layout keeps the
     -- same table object (editingProfile == activeRuntimeProfile), so _tdLayout
     -- alone misses the transition and the page never rebuilds with the editing
     -- banner offset (-56) — the banner overlays the preset/controls bars (and
     -- exiting leaves a stale gap).
-    local _tdEditing = (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
+    -- (A target sits inside a page the harness has already moved clear of that banner.)
+    local _tdEditing = (not target) and (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
     -- Preset identity: switching the mode's preset keeps the same db/size/layout,
     -- so without this the stale page (bound to the old preset) would be reused.
-    local _tdPreset = DF.GetModeDesignerPresetName and DF:GetModeDesignerPresetName("text", _tdMode)
+    local _tdPreset = _tdTargetName
     if state.built and (state.activeDB ~= db or state.builtFrameW ~= _tdW or state.builtFrameH ~= _tdH or state.builtLayout ~= _tdLayout or state.builtPreset ~= _tdPreset or state.builtEditing ~= _tdEditing) then
         if state.cardFrames then
             for _, card in pairs(state.cardFrames) do
@@ -2903,6 +3008,8 @@ local function BuildTextDesignerIsland(GUI, page, db)
         if state.groupEmptyMsg      then state.groupEmptyMsg:Hide();      state.groupEmptyMsg:ClearAllPoints()      end
         if state.disabledOverlay    then state.disabledOverlay:Hide();    state.disabledOverlay:ClearAllPoints()    end
         if state.scaleSlider        then state.scaleSlider:Hide();        state.scaleSlider:ClearAllPoints()        end
+        if state.hoverToggle        then state.hoverToggle:Hide();        state.hoverToggle:ClearAllPoints()        end
+        state.hoverToggle = nil
         if state.tabContents       then
             for _, frame in pairs(state.tabContents) do
                 frame:Hide()
@@ -2954,17 +3061,18 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- While editing a raid auto-layout, the AutoProfiles editing banner (~50px)
     -- overlays the top of the content frame; push the top row down to clear it.
     local _tdTopY = -8  -- top gap; kept equal to the Aura Designer's yPos for a consistent header gap
-    if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
+    if _tdEditing then
         _tdTopY = -56
     end
 
     -- ── PRESET BAR (which named preset this mode uses + library management) ──
     local presetBar
     if GUI.CreateDesignerPresetBar then
-        presetBar = GUI:CreateDesignerPresetBar(page.child, {
+        local barOpts = {
             kind = "text",
             getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
             onChange = function()
+                if target and target.onChange then target.onChange() end
                 -- Re-invoke the build NEXT frame: the builtPreset check above sees
                 -- the changed preset and rebuilds (rebinding the editor + preview
                 -- to the new preset). Deferred so we don't tear the bar down from
@@ -2972,13 +3080,16 @@ local function BuildTextDesignerIsland(GUI, page, db)
                 -- rebuild's teardown path runs.
                 if C_Timer and C_Timer.After then
                     C_Timer.After(0, function()
-                        if DF.BuildTextDesignerPage then DF.BuildTextDesignerPage(GUI, page, db) end
+                        if DF.BuildTextDesignerPage then DF.BuildTextDesignerPage(GUI, page, db, nil, nil, opts) end
                         if DF.TextDesigner and DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
                         if DF.UpdateAllFrames then DF:UpdateAllFrames() end
                     end)
                 end
             end,
-        })
+        }
+        -- A target's own reference rides on the same bar (getRef / setRef / ...).
+        for k, v in pairs(target and target.bar or {}) do barOpts[k] = v end
+        presetBar = GUI:CreateDesignerPresetBar(page.child, barOpts)
         -- Anchored BELOW the controls box further down (after the box exists).
         state.presetBar = presetBar
     end
@@ -3036,16 +3147,23 @@ local function BuildTextDesignerIsland(GUI, page, db)
     previewLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Mock unit frame (centred in panel) — visual clone of AD's mockFrame.
+    -- STATIC: fixed fills, no unit, no events, nothing animated but the designer's
+    -- own hover fade. A target may dress it (target.decorateMock: a Ring frame's
+    -- rings) -- still static.
     local mockFrame
+    local chrome = { textures = {}, backdrop = { {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1} } }
+    previewPanel.mockChrome = chrome
     do
-        local mode = (GUI and GUI.SelectedMode) or "party"
-        local frameDB = (DF.GetDB and DF:GetDB(mode)) or DF.PartyDefaults or {}
+        local frameDB = _tdSizeDB or DF.PartyDefaults or {}
         local FRAME_W = frameDB.frameWidth or 125
         local FRAME_H = frameDB.frameHeight or 64
         local POWER_H = frameDB.powerBarHeight or 4
         local showPower = frameDB.showPowerBar
 
         mockFrame = CreateFrame("Frame", nil, previewPanel, "BackdropTemplate")
+        -- A target that offers Show Hover State drives the hover itself; the plain
+        -- mock always draws Show on Hover elements shown (TextDesigner/Preview.lua).
+        mockFrame.dfTDHoverToggle = (target and target.ringAnchors) and true or nil
         mockFrame:SetSize(FRAME_W, FRAME_H)
         mockFrame:SetPoint("CENTER", previewPanel, "CENTER", 0, -4)
         mockFrame:SetScale((tdDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1))
@@ -3068,6 +3186,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
             healthBg:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, 1)
         end
         healthBg:SetColorTexture(0, 0, 0, 0.4)
+        chrome.textures[#chrome.textures + 1] = healthBg
 
         -- Health bar fill (72% health, placeholder)
         local healthFill = mockFrame:CreateTexture(nil, "ARTWORK")
@@ -3084,6 +3203,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
         -- frame width read at build, so a live resize has to re-derive them or the bar
         -- keeps the old frame's proportions inside the new outline.
         previewPanel.healthFill = healthFill
+        chrome.textures[#chrome.textures + 1] = healthFill
 
         -- Missing health region
         local missingHealth = mockFrame:CreateTexture(nil, "ARTWORK")
@@ -3096,6 +3216,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
         missingHealth:SetWidth(FRAME_W * 0.28)
         missingHealth:SetColorTexture(0, 0, 0, 0.4)
         previewPanel.missingHealth = missingHealth
+        chrome.textures[#chrome.textures + 1] = missingHealth
 
         -- Power bar (only if enabled in current frame settings)
         if showPower then
@@ -3116,6 +3237,9 @@ local function BuildTextDesignerIsland(GUI, page, db)
             powerBorder:SetPoint("BOTTOMRIGHT", mockFrame, "BOTTOMRIGHT", -1, POWER_H)
             powerBorder:SetHeight(1)
             powerBorder:SetColorTexture(0.2, 0.2, 0.2, 1)
+            chrome.textures[#chrome.textures + 1] = powerBg
+            chrome.textures[#chrome.textures + 1] = powerFill
+            chrome.textures[#chrome.textures + 1] = powerBorder
         end
 
         -- Anchor dots disabled until drag-to-place is implemented (Phase 2).
@@ -3134,12 +3258,19 @@ local function BuildTextDesignerIsland(GUI, page, db)
     previewPanel.RefreshGeometry = function()
         local m = state.mockFrame
         if not m then return end
-        local fdb = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
+        local _, _, fdb = TDEditTarget(GUI, db, target)
+        fdb = fdb or DF.PartyDefaults or {}
         local w = fdb.frameWidth or 125
         local h = fdb.frameHeight or 64
         m:SetSize(w, h)
         if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
         if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
+        if target and target.decorateMock then
+            target.decorateMock(m, previewPanel.mockChrome)
+            -- Ring spots may have moved: put the text back on them.
+            local PV = DF.TextDesigner.Preview
+            if PV and PV.RefreshPreview then PV:RefreshPreview() end
+        end
 
         -- Preview Scale is relative to the LIVE frame, so the window's own scale is
         -- divided back out (GUI.PreviewUnscale).
@@ -3175,6 +3306,35 @@ local function BuildTextDesignerIsland(GUI, page, db)
     scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
     scaleSlider:SetSize(220, 30)
     state.scaleSlider = scaleSlider
+
+    -- A unit frame's page (target.ringAnchors): Show Hover State (holds the mock's
+    -- hover on, so Show on Hover text and a dimmed portrait can be styled) and faint
+    -- markers on the ring spots the Anchor To list offers.
+    if target and target.ringAnchors then
+        local hoverState = { on = mockFrame._tdForceHover and true or false }
+        local hoverToggle = GUI:CreateCheckbox(previewPanel, L["Show Hover State"], hoverState, "on", function()
+            mockFrame._tdForceHover = hoverState.on and true or nil
+            if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(mockFrame, hoverState.on) end
+        end)
+        hoverToggle:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", 0, -6)
+        state.hoverToggle = hoverToggle
+        if DF.TextDesigner.Render and DF.TextDesigner.Render.SpotRegion then
+            local markers = mockFrame._tdSpotMarkers or {}
+            mockFrame._tdSpotMarkers = markers
+            for key in pairs(DF.TextDesigner.Render.SPOTS) do
+                local spot = DF.TextDesigner.Render.SpotRegion(mockFrame, key)
+                local m = markers[key]
+                if not m then
+                    m = spot:CreateTexture(nil, "OVERLAY")
+                    m:SetSize(4, 4)
+                    m:SetPoint("CENTER", spot, "CENTER", 0, 0)
+                    m:SetColorTexture(1, 1, 1, 0.35)
+                    markers[key] = m
+                end
+                m:Show()
+            end
+        end
+    end
 
     -- Placeholder note so users know this panel is purely cosmetic for now.
     local previewNote = previewPanel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -3268,6 +3428,8 @@ end
 -- still accepted so BuildPage's contract is unchanged; the island does not use
 -- them.
 -- ============================================================
-function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
-    return BuildTextDesignerIsland(GUI, page, db)
+-- `opts.target` edits a template some other settings table names, instead of the
+-- selected mode's (WHAT THE PAGE EDITS, above). Without it nothing changes.
+function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace, opts)
+    return BuildTextDesignerIsland(GUI, page, db, opts)
 end

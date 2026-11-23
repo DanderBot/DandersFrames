@@ -199,7 +199,7 @@ end
 -- ---- every banner can be closed ----
 print("-- Banner: every banner carries a x")
 local FILES = { "FilterRegistry/UI/Options.lua", "GUI/Pages/Frames.lua", "GUI/Pages/Indicators.lua",
-                "GUI/Pages/Modules.lua", "GUI/Pages/NicknamesPage.lua", "GUI/Pages/Auras.lua",
+                "GUI/Pages/Modules.lua", "GUI/Pages/Profiles.lua", "GUI/Pages/NicknamesPage.lua", "GUI/Pages/Auras.lua",
                 "GUI/Panel.lua", "GUI/SettingsWidgets.lua", "AuraDesigner/UI/Indicators.lua",
                 "ClickCasting/UI/Dialogs.lua", "Debug/ProfilerUI.lua" }
 local sites, keys = 0, {}

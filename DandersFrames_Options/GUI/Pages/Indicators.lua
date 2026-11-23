@@ -40,7 +40,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- that unit. EVERY writer of showBuffs needs this, not just the checkbox.
                 DF:RefreshAllVisibleFrames()
             elseif data == "openAD" then
-                if GUI.SelectTab then GUI.SelectTab("auras_auradesigner") end
+                -- The page this builder runs on may have an Aura Designer page of its
+                -- own (GUI.PageLinkFor); false means none, and the link goes nowhere.
+                local target = GUI.PageLinkFor and GUI.PageLinkFor(self, "auras_auradesigner")
+                    or "auras_auradesigner"
+                if target and GUI.SelectTab then GUI.SelectTab(target) end
             end
         end
 
@@ -49,8 +53,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ Per-MODE enable now, not the shared template's field (see
             -- DF:IsAuraDesignerEnabledForMode). Reading the preset made this banner
             -- follow whichever mode last toggled it.
-            local adEnabled = DF.IsAuraDesignerEnabledForMode
-                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party"))
+            local adEnabled = DF.IsAuraDesignerEnabledForDB
+                and DF:IsAuraDesignerEnabledForDB(d)
             if adEnabled and d.showBuffs then
                 b:SetHTML(L["Aura Designer is active alongside Buffs."] .. " " ..
                     adLink("openAD", L["Open Aura Designer"]), adOnLink)
@@ -68,8 +72,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         adBanner.hideOn = function(d)
-            return not (DF.IsAuraDesignerEnabledForMode
-                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party")))
+            return not (DF.IsAuraDesignerEnabledForDB
+                and DF:IsAuraDesignerEnabledForDB(d))
         end
 
         Add(adBanner, 32, "both")
@@ -93,8 +97,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
         adPromoBanner.hideOn = function(d)
             -- hide when AD IS active
-            return (DF.IsAuraDesignerEnabledForMode
-                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party"))) and true or false
+            if DF.IsAuraDesignerEnabledForDB and DF:IsAuraDesignerEnabledForDB(d) then return true end
+            -- ...or when this page has no Aura Designer to open (GUI.PageLinkFor).
+            return GUI.PageLinkFor ~= nil and GUI.PageLinkFor(self, "auras_auradesigner") == false
         end
         Add(adPromoBanner, 32, "both")
 
@@ -349,8 +354,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ NEVER reassign buffFilterSelection or its inner tables: the aura
         -- pipeline holds references to them and a fresh table strands every
         -- holder. Create-if-missing, then mutate in place.
+        -- ⚠ THE TABLE THIS PAGE IS BUILT FOR, resolved live: a page built against a
+        -- settings table of its own (GUI.PageBuildDb -- a unit frame's page) must tick
+        -- ITS selection, not the frame mode's. Every other control here writes `db`;
+        -- a mode-only lookup left these ticks editing Party while the unit's own
+        -- selection never moved. Without one, the frame mode's table, as before.
         local function BuffSelection()
-            local mdb = DF.db and DF.db[GUI.SelectedMode or "party"]
+            local mdb = (GUI.PageBuildDb and GUI.PageBuildDb(self))
+                or (DF.db and DF.db[GUI.SelectedMode or "party"])
             if not mdb then return nil end
             mdb.buffFilterSelection = mdb.buffFilterSelection or {}
             local sel = mdb.buffFilterSelection
@@ -1253,6 +1264,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             CloseSection(band)
         end)
+        -- Unit frame pages add their Purgeable card here (UnitFrames/Pages.lua,
+        -- UFO.ExtraCards; Features/Auras.lua SplitBuffRowForPurge). The party / raid
+        -- page never sets the table, so it never draws (or defers) the card.
+        local ufCards = rawget(self, "dfExtraCards")
+        local purgeableCard = type(ufCards) == "table" and ufCards.buffs_purgeable
+        if purgeableCard then
+            tools.DeferCard("buffs_purgeable", function()
+                purgeableCard({ OpenSection = OpenSection, CloseSection = CloseSection, db = db,
+                                offRow = BuffsOffRow, col = 1 })
+            end)
+        end
         -- The cards mount by group (tools.MountCardGroups), so a group's cards
         -- stand together in a one-column window as well as two. Expand All /
         -- Collapse All first, at "both": they act on every card.
@@ -1272,9 +1294,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { label = L["Text"], col = 1, keys = {
                 "buffs_duration", "buffs_stack", "buffs_caster",
             } },
-            -- Its only card hides without the factory row, so the heading must too.
+            -- Its cards hide without the factory row, so the heading must too.
+            -- buffs_purgeable is a unit frame page's only (deferred above when it is).
             { label = L["Effects"], col = 1, keys = {
-                "buffs_pandemic",
+                "buffs_pandemic", "buffs_purgeable",
             }, hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end },
         })
 
@@ -3045,6 +3068,75 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             CloseSection(band)
         end)
 
+        -- ===== CLASS BUFFS (WOW FOREVER) (a Content card) =====
+        -- Forever's extra checks: Divine Spirit, Thorns, Salvation and one paladin
+        -- blessing per role (FilterRegistry/SpellDB_Forever.lua's DF.RaidBuffs). Unlike
+        -- the manual list these switches count under auto-detect too (a priest, druid or
+        -- paladin watches the ones they can cast), so the card does NOT hide with
+        -- auto-detect -- only off Forever, where none of these exist.
+        local function HideForeverBuffs()
+            return not DF.IS_FOREVER
+        end
+
+        local blessingOptions = {
+            might = L["Blessing of Might"], wisdom = L["Blessing of Wisdom"], kings = L["Blessing of Kings"],
+        }
+
+        local function BuildMissingForeverBuffsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- The buff row's exclude list follows these switches (an untracked extra
+            -- stays on the buff bar), so the row re-drives as well.
+            local function refreshForever()
+                tools2.refreshStates()
+                refreshMissing()
+                DF:UpdateAllAuras()
+            end
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Also checked with auto-detect on, for the buffs your class can cast."], 250), 35)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Divine Spirit (Priest)"], db, "missingBuffCheckSpirit", refreshForever), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Thorns (Druid)"], db, "missingBuffCheckThorns", refreshForever), 30)
+            local thornsTank = group:AddWidget(GUI:CreateCheckbox(parent, L["Thorns on Tanks Only"], db, "missingBuffThornsTankOnly", refreshForever), 30)
+            thornsTank.disableOn = function(d) return not d.missingBuffCheckThorns end
+            local salvation = group:AddWidget(GUI:CreateCheckbox(parent, L["Blessing of Salvation (Paladin)"], db, "missingBuffCheckSalvation", refreshForever), 30)
+            salvation.tooltip = L["Never checked on tanks. Off by default: on some game versions Salvation replaces your other blessing on that player."]
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Paladin Blessing"], db, "missingBuffCheckBlessing", refreshForever), 30)
+            local function BlessingOff(d) return not d.missingBuffCheckBlessing end
+            local tank = group:AddWidget(GUI:CreateDropdown(parent, L["Tank Blessing"], blessingOptions, db, "missingBuffBlessingTank", refreshForever), 55)
+            tank.disableOn = BlessingOff
+            local healer = group:AddWidget(GUI:CreateDropdown(parent, L["Healer Blessing"], blessingOptions, db, "missingBuffBlessingHealer", refreshForever), 55)
+            healer.disableOn = BlessingOff
+            local dps = group:AddWidget(GUI:CreateDropdown(parent, L["DPS Blessing"], blessingOptions, db, "missingBuffBlessingDPS", refreshForever), 55)
+            dps.disableOn = BlessingOff
+            dps.tooltip = L["A paladin is reminded about their own blessing, so several paladins each cover everyone. If you don't know the chosen blessing, Kings is used."]
+            group.disableChildrenOn = HideMissingBuffOptions
+        end
+
+        local MISSING_FOREVER_KEYS = {
+            "missingBuffCheckSpirit", "missingBuffCheckThorns",
+            "missingBuffCheckSalvation", "missingBuffCheckBlessing",
+        }
+        local function MissingForeverBuffsSummary(d)
+            if not d then return "" end
+            local on = 0
+            for _, k in ipairs(MISSING_FOREVER_KEYS) do
+                if d[k] then on = on + 1 end
+            end
+            return format("%d/%d", on, #MISSING_FOREVER_KEYS)
+        end
+
+        tools.DeferCard("missingbuffs_forever", function()
+            -- Hidden off Forever (header and band together); greys with the page gate.
+            -- Decides which buffs are WATCHED, so no pin.
+            local band = OpenSection(L["Class Buffs (WoW Forever)"], "missingbuffs_forever", 1, MissingForeverBuffsSummary,
+                MissingOffRow, HideForeverBuffs)
+            BuildMissingForeverBuffsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
+        end)
+
         -- ===== ICON STYLE (an Appearance card) =====
         local function BuildMissingAppearanceGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -3202,7 +3294,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         Add(tools.SectionControls(self.child), 24, "both")
         tools.MountCardGroups(Add, {
             { label = L["Content"], col = 1, keys = {
-                "missingbuffs_settings", "missingbuffs_buffs",
+                "missingbuffs_settings", "missingbuffs_buffs", "missingbuffs_forever",
             } },
             { label = L["Layout"], col = 1, keys = {
                 "missingbuffs_position",

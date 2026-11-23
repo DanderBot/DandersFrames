@@ -194,12 +194,10 @@ function DF:CreateStatusIcons(frame)
     -- ========================================
     frame.combatIcon = CreateStatusIcon(overlay, 16)
     frame.combatIcon:SetPoint("TOPLEFT", frame, "TOPLEFT", 2, -2)  -- free corner (avoids the CENTER cluster + BG-carrier)
-    -- Classic crossed-swords combat glyph. UI-StateIcon is a sheet (swords +
-    -- resting); crop to the swords quadrant. Set directly (NOT SetUpgradedStatusIcon,
-    -- which would reset the texcoord to the full sheet). ApplyIconSettings leaves
-    -- texcoord alone, so this crop persists.
-    frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
-    frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
+    -- Crossed swords: the modern atlas, else the legacy sheet's swords quadrant
+    -- (Frames/Core.lua SetCombatStatusIcon). ApplyIconSettings leaves texcoord
+    -- alone, so the fallback crop persists.
+    DF:SetCombatStatusIcon(frame.combatIcon.texture)
 end
 
 -- ============================================================
@@ -1292,7 +1290,7 @@ afkTickerFrame:SetScript("OnUpdate", function(self, elapsed)
                     for i = 1, #pool do
                         local frame = pool[i]
                         if frame and frame.dfTestIndex and frame.afkIcon and frame.afkIcon:IsShown() then
-                            local testData = DF:GetTestUnitData(frame.dfTestIndex, frame.isRaidFrame, frame.isPinnedBossFrame)
+                            local testData = DF:GetTestDataForFrame(frame, frame.dfTestIndex, frame.isRaidFrame, frame.isPinnedBossFrame)
                             if testData and testData.isAFK then
                                 DF:UpdateTestStatusIcons(frame, testData)
                             end

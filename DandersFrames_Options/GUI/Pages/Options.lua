@@ -130,6 +130,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         btn.refreshContent = UpdateAppearance
         btn.UpdateModeText = UpdateAppearance
         btn.rightAlign = true  -- Flag for layout system
+        -- What this row acts on, so a page drawing this page's content against a
+        -- table of its own can put its own row in place of this one.
+        btn.dfCopyRow = { prefixes = prefixes, sectionName = sectionName, pageId = pageId }
         
         -- Copy tooltip (HookScript so it composes with the StyleButton hover).
         btn:HookScript("OnEnter", function(self)
@@ -347,8 +350,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     GUI.CreateResetOnlyButton = CreateResetOnlyButton
 
-    -- Define category order
-    GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
+    -- Define category order. "profiles" is the Profiles rail item's own sidebar
+    -- (GUI/Pages/Profiles.lua): GUI:IsTabInView shows it there and nowhere else.
+    GUI.CategoryOrder = {"general", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
     
     -- ========================================
     -- CATEGORY: General
@@ -1135,7 +1139,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "Enable Element-Specific Alpha" toggle is off. The frame-level alpha
         -- slider is the alternate variant (shown only when element-specific is
         -- off) so it keeps a hideOn, not a grey.
-        local function HideOOROptions(d)
+        -- ★ UNIT FRAMES ONLY: Fade When Out of Range (rangeFadeEnabled). The unit frame
+        -- page leaves its switch here (page.dfRangeFade, read with rawget so a party /
+        -- raid build never finds one -- see UFO.RangeFadeSwitch): `gate` is true while
+        -- the switch is off, `elementGate` is that or element alpha off. With no switch,
+        -- both stay what they always were.
+        local ufRangeFade = rawget(self, "dfRangeFade")
+        local RangeFadeOff = ufRangeFade and ufRangeFade.gate or nil
+        local HideOOROptions = ufRangeFade and ufRangeFade.elementGate or function(d)
             return not d.oorEnabled
         end
 
@@ -1339,6 +1350,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Frame-level alpha (shown when element-specific is disabled)
             local frameLevelAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Out of Range)"], 0.1, 1.0, 0.05, db, "rangeFadeAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             frameLevelAlpha.hideOn = HideFrameLevelAlpha
+            frameLevelAlpha.disableOn = RangeFadeOff
         end
 
         -- ===== ELEMENT-SPECIFIC ALPHA =====
@@ -1390,6 +1402,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local oorPower = group:AddWidget(GUI:CreateSlider(parent, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "oorPowerBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorPower.disableOn = HideOOROptions
 
+            -- Unit frame pages add their portrait's alpha here; party / raid never set it.
+            local ufOOR = rawget(self, "dfOORExtras")
+            if type(ufOOR) == "function" then ufOOR(group, parent, db, HideOOROptions) end
+
             local oorMissingBuff = group:AddWidget(GUI:CreateSlider(parent, L["Missing Buff Alpha"], 0.0, 1.0, 0.05, db, "oorMissingBuffAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorMissingBuff.disableOn = HideOOROptions
 
@@ -1438,7 +1454,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- and the builder stamps self.rangeSpellInput / rangeSpellInfoLabel
         -- for the range helpers -- a pinned second copy would re-point them.
         Add(GUI:CreateHeader(self.child, L["Range"]), 40, 1)
-        local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)
+        if ufRangeFade then ufRangeFade.build(self, db, Add) end
+        local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary, RangeFadeOff)
         BuildRangeCheckGroup({
             group = rangeBand, parent = self.child,
             refreshStates = function() self:RefreshStates() end,
@@ -1451,7 +1468,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the in-body checkbox ran: it greys the twelve here and swaps the
         -- frame-level slider in the card above in or out. How faded each
         -- element is is how it LOOKS, so it is pinnable.
-        local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil,
+        local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, RangeFadeOff, nil,
             BuildElementAlphaGroup, {
                 db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
                 onChanged = function()
@@ -2231,6 +2248,103 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         CloseSection(band)
 
+        -- ===== AURAS (Buffs, Debuffs -- column 2, under Appearance) =====
+        -- One row of each on every pet frame (Frames/Pets.lua PET AURA ROWS). Only
+        -- WHERE the row sits and how many it shows are pet settings; what it shows
+        -- and how the icons look follow the Buffs / Debuffs pages.
+        --
+        -- ⚠ A do-block: the builder runs once per row, and this page's builder is a
+        -- single function close to Lua's 200-local ceiling, so nothing here may leave
+        -- a local behind at page scope.
+        --
+        -- ⚠ ONLY WHERE THE CONTAINER EXISTS. Pet rows have no pre-12.1 path, so on a
+        -- client without it the cards would be live controls wired to nothing.
+        if DF.FactoryOwnsBuffRow and DF:FactoryOwnsBuffRow(db) then
+            Add(GUI:CreateHeader(self.child, L["Auras"]), 40, 2)
+
+            -- Every control re-drives the rows through the aura layout version: the
+            -- same debounced pass the Buffs / Debuffs pages use (DF:RefreshFactoryRows
+            -- -> DF:RefreshPetAuras), previews included.
+            local function ApplyPetAuras()
+                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            end
+
+            -- The two rows differ only in their keys and labels.
+            local PET_AURA_ROWS = {
+                { title = L["Buffs"], key = "pets_buffs", show = "petShowBuffs", showLabel = L["Show Buffs"],
+                  maxLabel = L["Max Buffs"], prefix = "petBuff" },
+                { title = L["Debuffs"], key = "pets_debuffs", show = "petShowDebuffs", showLabel = L["Show Debuffs"],
+                  maxLabel = L["Max Debuffs"], prefix = "petDebuff" },
+            }
+
+            for _, row in ipairs(PET_AURA_ROWS) do
+                local function RowOff(d) return not d[row.show] end
+
+                -- ☠ THE SHOW TICK IS THE HEADER'S on the page (hoistToggle), built in
+                -- the body only for a pinned panel, which has no header of its own.
+                local function BuildPetAuraRowGroup(tools2)
+                    local group, parent = tools2.group, tools2.parent
+
+                    group.disableChildrenOn = function(d) return not d.petEnabled end
+
+                    if not tools2.hoistToggle then
+                        group:AddWidget(GUI:CreateCheckbox(parent, row.showLabel, db, row.show, function()
+                            ApplyPetAuras()
+                            GateRefresh(tools2)
+                        end), 30)
+                    end
+
+                    local maxSlider = group:AddWidget(GUI:CreateSlider(parent, row.maxLabel, 0, 6, 1, db, row.prefix .. "Max",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    maxSlider.disableOn = RowOff
+
+                    local sizeSlider = group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 8, 24, 1, db, row.prefix .. "Size",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    sizeSlider.disableOn = RowOff
+
+                    local anchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorValues, db, row.prefix .. "Anchor",
+                        ApplyPetAuras), 55)
+                    anchor.disableOn = RowOff
+
+                    local growth = group:AddWidget(GUI:CreateGrowthControl(parent, db, row.prefix .. "Growth", ApplyPetAuras), 155)
+                    growth.disableOn = RowOff
+
+                    local offX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, row.prefix .. "OffsetX",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    offX.disableOn = RowOff
+
+                    local offY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, row.prefix .. "OffsetY",
+                        ApplyPetAuras, ApplyPetAuras, true), 55)
+                    offY.disableOn = RowOff
+                end
+
+                -- How many, in the slider's own words.
+                local function PetAuraRowSummary(d)
+                    if not d then return "" end
+                    return format("%s %d", row.maxLabel, tonumber(d[row.prefix .. "Max"]) or 0)
+                end
+
+                -- How the pets LOOK, so pinnable; greys with the page gate.
+                local rowBand = OpenSection(row.title, row.key, 2, PetAuraRowSummary, PetsOffRow, nil,
+                    BuildPetAuraRowGroup, {
+                        db = db, key = row.show, label = row.showLabel,
+                        disableOn = PetsOffRow,
+                        onChanged = function()
+                            ApplyPetAuras()
+                            self:RefreshStates()
+                            tools.ReflowMounted()
+                        end,
+                    })
+                rowBand.disableChildrenOn = function(d) return not d.petEnabled end
+                BuildPetAuraRowGroup({
+                    group = rowBand, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                    hoistToggle = true,
+                })
+                CloseSection(rowBand)
+            end
+        end
+
         -- ===== NAME TEXT (the first Text card -- opened after Position, see
         -- NAME TEXT, AS A CARD) =====
         local function BuildPetNameTextGroup(tools2)
@@ -2444,6 +2558,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- party (typical intent) and "disabling" DF party also enables
         -- Blizzard party (so the user isn't left with no frames).
         local function PromptReloadAfterModeToggle(mode)
+            -- A mode ticked back on here makes the Modules page's master-switch
+            -- stash meaningless (GUI/Pages/ModulesPage.lua, GF.Settle).
+            if GUI.GroupFrames and GUI.GroupFrames.Settle then GUI.GroupFrames.Settle() end
             if not DF:EnableFlagsDifferFromLoaded() then return end
             if not DF.ShowPopupAlert then return end
 
@@ -2579,6 +2696,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateLabel(parent,
                 L["Completely enable or disable the Party or Raid frame system. Disabled modes are never created, consuming zero performance in the background. Requires a UI reload to apply."],
                 260), 80)
+            -- The same two switches, plus the Group Frames master, live on the
+            -- settings window's Modules page (GUI/Pages/ModulesPage.lua). These
+            -- stay and keep working; the line points there.
+            local modulesLink = format("|cffffffff|HdfModules|h%s|h|r", L["Modules page"])
+            local note = GUI:CreateLink(parent, format(L["Turn modules on or off on the %s."], modulesLink), {
+                width = GUI:GroupInnerWidth(group),
+                onLinkClick = function() GUI:SelectModule("modules") end,
+            })
+            group:AddWidget(note, (note.layoutHeight or 16) + 2)
         end
 
         -- The modes that are running, always: "Party · Raid", "Raid only",
@@ -2653,6 +2779,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 "hideDefaultPlayerFrame"
             ), 30)
             disablePlayerCheck.tooltip = L["Hides the default Blizzard player portrait and health bar."]
+            -- ★ ANOTHER MODULE MAY OWN THE PLAYER FRAME (GUI.PlayerFrameOwnerNote: a
+            -- function answering one line saying so, or nil). Then these two ticks
+            -- do nothing, so they leave the card and that line stands in for them.
+            -- The settings themselves are kept for when it stops.
+            local function PlayerOwnerNote()
+                local fn = GUI.PlayerFrameOwnerNote
+                local note = type(fn) == "function" and fn() or nil
+                return type(note) == "string" and note or nil
+            end
+            disablePlayerCheck.hideOn = function() return PlayerOwnerNote() ~= nil end
 
             local playerRaidOnlyCheck = group:AddWidget(GUI:CreateCheckbox(
                 parent, L["Only in a Raid Group"],
@@ -2667,6 +2803,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return not (p and p.hideDefaultPlayerFrame)
             end
             playerRaidOnlyCheck.tooltip = L["Hides the Blizzard player frame only while you are in a raid group. In a party or solo it shows as normal."]
+            playerRaidOnlyCheck.hideOn = function() return PlayerOwnerNote() ~= nil end
+            local ownerNote = group:AddWidget(GUI:CreateLabel(parent, PlayerOwnerNote() or "", 250), 30)
+            ownerNote.hideOn = function() return PlayerOwnerNote() == nil end
+            ownerNote.refreshContent = function()
+                local t = PlayerOwnerNote()
+                if t then ownerNote:SetText(t) end
+            end
 
             -- Visual divider to separate the related sub-option (Show Side Menu only
             -- applies once a Blizzard frame is disabled).
@@ -3373,6 +3516,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 sizeMin = 1, sizeMax = 16, sizeStep = 1,
                 noShowToggle = tools2.hoistToggles or nil,
             })
+            -- In the Border card because what it changes is how a see-through border looks:
+            -- the border tints whatever is under it, and this makes that the frame
+            -- background on every side (DF:BarsInsideFrameBorder). The border pass after
+            -- the full update re-places the health bar and a kept-inside resource bar in
+            -- raid mode too, which the raid branch of UpdateFrames does not reach.
+            local inside = tools2.group:AddWidget(GUI:CreateCheckbox(tools2.parent, L["Keep Health Bar Inside Border"], db, "healthInsideFrameBorder", function()
+                UpdateFrames()
+                DF:LightweightUpdateBorder()
+            end), 30)
+            inside.tooltip = L["Stops the health bar at the inner edge of the frame border instead of running under it, so the border sits over the frame background rather than over health. The resource bar keeps inside the border too."]
+            inside.disableOn = function(d) return d.frameShowBorder == false end
+            inside.disableReason = L["Turn on Show Border to use this"]
         end
         local function BuildBorderShadowGroup(tools2)
             GUI:CreateBorderShadowControls(tools2.group, db, "frame", {

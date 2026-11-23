@@ -121,6 +121,14 @@ local function CreateTestFrame(index, isRaid)
         if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
         if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
     end)
+    -- Indicator Info's click-to-open-settings (TestMode/Labels.lua). A no-op unless
+    -- that option is on and an element is marked under the cursor; it refuses in
+    -- combat and during a mover session itself. Looked up per click: Labels.lua
+    -- loads after this file.
+    frame:SetScript("OnClick", function(self, button)
+        local TL = DF.TestLabels
+        if TL and TL.HandleClick then TL:HandleClick(self, button) end
+    end)
 
     -- Hide by default
     frame:Hide()

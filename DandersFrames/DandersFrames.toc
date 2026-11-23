@@ -3,7 +3,7 @@
 ## Notes: Custom party/raid frames for WoW Midnight 12.0
 ## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons. Secret aura tracking techniques from Harrek's Advanced Raid Frames (used with permission).
 ## Author: Danders
-## Version: v5.6.2
+## Version: v6.0.0-alpha.4
 ## X-Curse-Project-ID: 1389690
 ## X-Wago-ID: RNL9B46o
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
@@ -107,6 +107,7 @@ Frames\Colors.lua
 Frames\Border.lua
 Frames\TextStyle.lua
 Frames\AuraContainer.lua
+Frames\HealthRect.lua
 Frames\Create.lua
 Frames\Headers.lua
 Frames\Update.lua
@@ -131,6 +132,9 @@ Frames\Pets.lua
 # live rendering calls into test mode, so the entry points must always exist.
 # ☠ It MUST load before TestMode.lua, which overwrites every stub.
 TestMode\Shim.lua
+# The test popup's mode registry. Resident so any module or addon can register a
+# mode at any time; the load-on-demand popup reads it when it builds.
+TestMode\Modes.lua
 
 # Features
 Features\Auras.lua
@@ -202,6 +206,13 @@ ClickCasting\Profiles.lua
 ClickCasting\Frames.lua
 ClickCasting\Bindings.lua
 ClickCasting\Events.lua
+
+# Needs attention registry (the settings Home renders it). After everything its
+# checks read; the checks are lazy, so this only orders definitions.
+Features\Attention.lua
+
+# One-time offer of the Unit Frames module, which ships switched off.
+Features\UnitFramesInvite.lua
 
 # External API (for Wago UI Packs, etc.)
 Core\API.lua

@@ -323,11 +323,19 @@ end
 
 -- The mode tabs go through the cached path, and the Sync no longer needs its
 -- pages invalidated (it copies into the existing tables -- section 3).
-eq(count(panel, "        GUI:RefreshCurrentPageForModeSwitch()"), 2,
+-- The mode tabs' switch bodies live in the module registry (group.onEnter).
+local registry = options_file_source("GUI/ModuleRegistry.lua"):gsub("\r\n", "\n")
+-- The built-in modules only: a sidebar module's tab switch (GUI:SidebarModule,
+-- further down the file) takes the same cached path; test_page_providers.lua pins it.
+local builtinsEnd = registry:find("-- SIDEBAR MODULES OF THEIR OWN", 1, true)
+check(builtinsEnd ~= nil, "modebuilds: found the end of the built-in modules")
+local builtins = registry:sub(1, (builtinsEnd or (#registry + 1)) - 1)
+eq(count(builtins, "    GUI:RefreshCurrentPageForModeSwitch()"), 2,
    "modebuilds: both mode tabs refresh through the cached path")
-eq(count(panel, "        GUI:UpdateTabAvailability()\n        GUI:RefreshCurrentPage()"), 0,
+eq(count(panel, "        GUI:UpdateTabAvailability()\n        GUI:RefreshCurrentPage()")
+   + count(registry, "    GUI:UpdateTabAvailability()\n    GUI:RefreshCurrentPage()"), 0,
    "modebuilds: no mode tab forces a rebuild any more")
-eq(count(panel, "        DF:SyncLinkedSections()\n"), 2, "modebuilds: both mode tabs still sync")
+eq(count(registry, "    DF:SyncLinkedSections()\n"), 2, "modebuilds: both mode tabs still sync")
 eq(count(panel, "InvalidateSyncedPages()"), 0,
    "modebuilds: ...and no longer throw the synced pages' other-mode builds away (that rebuilt them every switch)")
 
@@ -370,15 +378,17 @@ end
 -- opt-out does not have to live in Modules.lua). Pin both halves: the name is in
 -- the set, and it is the tab that page is really created under.
 local panelSrc = options_file_source("GUI/Panel.lua")
+-- The two Profiles pages moved to GUI/Pages/Profiles.lua with the rail item.
+local profilesSrc = options_file_source("GUI/Pages/Profiles.lua")
 for _, pair in ipairs({
-    { "pageAutoProfiles", "profiles_auto" },
-    { "pageImportExport", "profiles_importexport" },
-    { "pageDebugConsole", "debug_console" },
+    { "pageAutoProfiles", "profiles_auto", profilesSrc },
+    { "pageImportExport", "profiles_importexport", profilesSrc },
+    { "pageDebugConsole", "debug_console", modules },
 }) do
-    local v, tab = pair[1], pair[2]
+    local v, tab, src = pair[1], pair[2], pair[3]
     check(panelSrc:find("%s" .. tab .. " = true,") ~= nil,
           "modebuilds: " .. v .. " is opted out of the retained builds (by tab name)")
-    check(modules:find("local " .. v .. " = CreateSubTab%([^,]+, \"" .. tab .. "\"") ~= nil,
+    check(src:find("local " .. v .. " = CreateSubTab%([^,]+, \"" .. tab .. "\"") ~= nil,
           "modebuilds: " .. v .. " is really created under tab " .. tab)
 end
 check(panelSrc:find("if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end", 1, true) ~= nil,

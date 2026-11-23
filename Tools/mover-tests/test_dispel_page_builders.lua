@@ -114,7 +114,9 @@ end
 local PAGE
 do
     local a = SRC:find('BuildPage(pageDispel, function(self, db, Add, AddSpace, AddSyncPoint)', 1, true)
-    local b = SRC:find('CreateCategory("profiles", L["Profiles"])', 1, true)
+    -- The Profiles pages moved to GUI/Pages/Profiles.lua; their category is
+    -- still created here, by the call that builds them.
+    local b = SRC:find('DF:SetupProfilesPages(GUI, CreateCategory, CreateSubTab, BuildPage)', 1, true)
     check(a ~= nil and b ~= nil and b > a, "the Dispel Overlay page builder is locatable by its own ends")
     PAGE = SRC:sub(a or 1, b or 1)
 end

@@ -160,7 +160,7 @@ do
           and r[1].candidateFilters.excludeDispelTypes.Bleed,
           "dwarf: Hide By Me also hides own bleeds")
     local drive = src:sub(src:find("function DF:DriveDebuffFactory", 1, true) or 1)
-    check(drive:find("frame.dfDebuffFactoryVersion ~= ver or selfMoved then", 1, true) ~= nil,
+    check(drive:find("frame.dfDebuffFactoryVersion ~= ver or selfMoved", 1, true) ~= nil,
           "dwarf: a frame reassigned to or from the player re-plans without a layout bump")
     local fac = df_file_source("AuraDesigner/Factory.lua"):gsub("\r\n", "\n")
     check(fac:find("resolveDebuffGroup(group, dedupOn and claimedSoFar or nil, racialSelf)", 1, true) ~= nil
@@ -272,6 +272,40 @@ do
         eq(count(d, {}, nil), #byMe,
            "group count: no frame to ask, the ceiling (claims included) -- never an under-count")
         eq(count(d, { {} }, nil), #byMe, "group count: a unitless frame is not asked")
+
+        -- A standalone frame's own table (DF:InitStandaloneFrame) is asked of THAT
+        -- frame, never of a party frame: the party frame here carries a By Me claim,
+        -- the standalone one none.
+        local party = { unit = "party1" }
+        local own = { unit = "target", dfDB = d }
+        local function countFor(standalone)
+            local asked
+            local DF = {
+                GetRaidDB = function() return "raid-db" end,
+                IteratePartyFrames = function(_, cb) cb(party) end,
+                GetClaimedDebuffCategories = function(_, f)
+                    asked = f
+                    if f == party then return { dispellable = true } end
+                    return nil
+                end,
+                StandaloneFrames = { [standalone] = true },
+            }
+            return lift(build, DF)(d), asked
+        end
+        local n, asked = countFor(own)
+        eq(asked, own, "group count: a standalone table asks its own frame")
+        eq(n, #plain, "group count: ...with that frame's claims, not the party frame's")
+        n, asked = countFor({ dfDB = d })
+        eq(asked, nil, "group count: its frame has no unit yet -- no party frame is borrowed")
+        eq(n, #byMe, "group count: ...the ceiling instead")
+        n, asked = countFor({ unit = "focus", dfDB = {} })
+        eq(asked, party, "group count: a standalone frame on another table is ignored")
+        n, asked = countFor({ unit = "target", dfDB = d, dfPreview = true })
+        eq(asked, nil, "group count: a preview frame on the table is never the frame asked")
+        eq(n, #byMe, "group count: ...the ceiling instead (no party frame borrowed either)")
+        local hdr = df_file_source("Frames/Headers.lua")
+        check(hdr:find("DF.StandaloneFrames[frame] = true", 1, true) ~= nil,
+              "group count: DF:InitStandaloneFrame records the frame (weak-keyed)")
     end
 end
 

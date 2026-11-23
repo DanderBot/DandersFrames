@@ -153,11 +153,11 @@ print("-- Text Designer: the page is the split panel")
 do
     check(AURAS:find("DF.BuildTextDesignerPage(GUI, self, db, Add, AddSpace)", 1, true) ~= nil,
           "harness: the page registration passes Add and AddSpace through")
-    check(TD:find("function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)", 1, true) ~= nil,
+    check(TD:find("function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace, opts)", 1, true) ~= nil,
           "harness: ...and the entry point takes them")
     check(TD:find("BuildTextDesignerRowsPage", 1, true) == nil,
           "harness: the designer has no rows arm")
-    check(TD:find("return BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
+    check(TD:find("return BuildTextDesignerIsland(GUI, page, db, opts)", 1, true) ~= nil,
           "harness: ...and builds the split panel")
     check(TOC:find("TextDesigner\\UI\\Rows.lua", 1, true) == nil,
           "toc: the row page is gone from the companion's manifest")
@@ -195,6 +195,12 @@ print("-- Text Designer: the Content section's census")
 do
     checkCensus(census(funcBody(TD, "local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, yStart, isGroupItem, group)")), {
         { "editbox",  "Label (optional)",   "elem", "label" },
+        -- background (a shape, no text)
+        { "slider",   "Width",              "elem", "width" },
+        { "slider",   "Height",             "elem", "height" },
+        { "dropdown", "Shape",              "elem", "shape" },
+        { "dropdown", "Layer",              "elem", "layer" },
+        { "colorpicker", "Color",           "elem", "color" },
         -- numeric amounts
         { "checkbox", "Abbreviate",         "elem", "abbreviate" },
         { "checkbox", "Hide when 0",        "elem", "hideWhenZero" },
@@ -277,6 +283,8 @@ do
         { "slider",   "Offset X",  "elem", "offsetX" },
         { "slider",   "Offset Y",  "elem", "offsetY" },
         { "dropdown", "Anchor To", "elem", "anchorTo" },
+        { "checkbox", "Show on Hover", "elem", "showOnHover" },
+        { "slider",   "Slide In",  "elem", "hoverSlide" },
     }, "position")
     checkPlaced(funcBody(TD, "local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group)"), "position")
 
@@ -448,7 +456,7 @@ do
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
     check(WIDE:find("text_designer", 1, true) ~= nil,
-          "wide: the Text Designer widens the window to 850")
+          "wide: the Text Designer widens the window to 912 (850 + the rail)")
     check(WIDE:find("auras_auradesigner", 1, true) ~= nil,
           "wide: ...as does the Aura Designer")
 end
@@ -499,7 +507,7 @@ do
     -- ---- class two: the preset bar --------------------------------------
     -- ...and the split panel, which still has the 850px the labels were chosen
     -- for, still gets them.
-    local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
+    local ISLAND = TD:gsub("\r\n", "\n"):match('local barOpts = {(.-)\n        }\n')
     check(ISLAND ~= nil, "narrow: the split panel's own preset bar can be read")
     check((ISLAND or ""):find("iconButtons", 1, true) == nil,
           "narrow: ...and it is untouched -- it keeps the labelled actions")
@@ -540,7 +548,7 @@ do
           "diet: ...which is the shared bar's own option, not a copy here")
     -- ...and the split panel, which has the 850px the labels were chosen for, is
     -- untouched: it asks for neither the icons nor the menu.
-    local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
+    local ISLAND = TD:gsub("\r\n", "\n"):match('local barOpts = {(.-)\n        }\n')
     check(ISLAND ~= nil, "diet: the split panel's own preset bar can be read")
     check((ISLAND or ""):find("overflowActions", 1, true) == nil,
           "diet: ...and keeps its four labelled buttons")

@@ -1,0 +1,430 @@
+local addonName, NS = ...
+local UI = NS.__DandersUI
+if not UI then return end
+
+-- ============================================================
+-- ICON RAIL -- a vertical list of icon + label items down a window's edge.
+-- The navigation a settings window uses for its top-level places (one item
+-- per module). Two slots: "top" items stack down from the top edge, "bottom"
+-- items stack up from the bottom edge, and the gap between them is whatever
+-- is left over.
+--
+-- Each item: hover plate, accent-tinted active state, a selection marker on
+-- its left edge (the y-axis CreateSelectionMarker, so the bar GLIDES between
+-- items), an optional badge ("New", a count), a disabled state (dim + deaf)
+-- and a tooltip through ShowTooltip.
+--
+--   local rail = host:CreateIconRail(parent, {
+--       width = 62, onSelect = function(id) ... end,
+--   })
+--   rail:SetItems({
+--       { id = "a", icon = "Interface\\...\\x.png", label = "A",
+--         tooltip = "Long name" or { title = ..., lines = ... },
+--         accent = {r,g,b} or function() return {r,g,b} end,
+--         slot = "top" | "bottom",
+--         dividerAfter = true },   -- a hairline between this item and the next
+--   })
+--   rail:Select("a")          -- paints only; onSelect fires on a USER click
+--   rail:SetBadge("a", "New") / rail:SetBadge("a", nil)
+--   rail:SetDisabled("a", true)
+--   rail:SetFilled("a", true)  -- a solid accent plate: an item that is ON (a
+--                              -- mode toggle), apart from the selection marker
+--   rail:GetContentHeight()    -- the height the items and dividers need
+--
+-- Compact sizes: opts.width / itemHeight / iconSize / spacing as before, plus
+-- opts.iconTop (icon's inset from the item's top edge, 8), opts.labelGap (icon
+-- to label, 3) and opts.labelInset (label's side inset, 2 each side).
+--
+-- label / tooltip / accent may be functions, resolved on every paint, so a
+-- language override or a mode-following accent is picked up without a rebuild.
+--
+-- ☠ NOTHING HERE NAMES A CONSUMER. Which items exist, what a click does and
+-- what is locked are the caller's business; the rail only draws them.
+-- Part of the BASE manifest (DandersUI.xml), not the load-on-demand options
+-- half: a standalone host with no options companion uses it for its own
+-- settings window (moved there at MINOR 44).
+-- ============================================================
+
+local CreateFrame = CreateFrame
+local ipairs, type, pairs = ipairs, type, pairs
+
+local C_TEXT, C_TEXT_DIM, C_HOVER, C_NOTICE =
+      UI.Colors.text, UI.Colors.textDim, UI.Colors.hover, UI.Colors.notice
+local WHITE = "Interface\\Buttons\\WHITE8x8"
+
+-- The kit's disabled alpha (CreateSlider, CreateCheckbox, StyleButton's
+-- SetEnabled and CreateGlyphButton all use it).
+local DISABLED_ALPHA = 0.4
+
+-- A divider: inset from the rail's sides, with this much air above and below.
+local DIVIDER_INSET, DIVIDER_GAP = 12, 6
+
+local function Resolve(v)
+    if type(v) == "function" then return v() end
+    return v
+end
+
+local function Unpack(c, dr, dg, db)
+    if type(c) ~= "table" then return dr, dg, db end
+    return c.r or c[1] or dr, c.g or c[2] or dg, c.b or c[3] or db
+end
+
+function UI:CreateIconRail(parent, opts)
+    local host = self
+    opts = opts or {}
+    local width    = opts.width or 62
+    local itemH    = opts.itemHeight or 48
+    local iconSize = opts.iconSize or 20
+    local spacing  = opts.spacing or 2
+    local padTop   = opts.paddingTop or 6
+    local padBot   = opts.paddingBottom or 6
+    local font     = opts.font or "DFFontHighlightSmall"
+    local iconTop  = opts.iconTop or 8
+    local labelGap = opts.labelGap or 3
+    local labelIn  = opts.labelInset or 2
+    local badgeC   = opts.badgeColor or C_NOTICE
+
+    local rail = CreateFrame("Frame", nil, parent)
+    rail:SetWidth(width)
+
+    local buttons = {}     -- id -> button (pooled across SetItems)
+    local items = {}       -- id -> item def (current set)
+    local list = {}        -- current ids, in the order given
+    local disabled = {}    -- id -> true
+    local badges = {}      -- id -> text
+    local filled = {}      -- id -> true
+    local selected
+
+    local marker = host:CreateSelectionMarker(rail, {
+        axis = "y", thickness = opts.markerThickness or 3,
+    })
+    rail.Marker = marker
+
+    local function AccentOf(id)
+        local item = items[id]
+        local c = item and Resolve(item.accent)
+        if type(c) ~= "table" then c = host:GetAccent() end
+        return c
+    end
+
+    -- One paint for every state, so hover, select, disable and a theme change
+    -- cannot each leave the item in a different half-state.
+    local function Paint(btn)
+        local id = btn.railId
+        local isSel = (id == selected)
+        local isOff = disabled[id] and true or false
+        btn:SetAlpha(isOff and DISABLED_ALPHA or 1)
+        if filled[id] then
+            -- ON, not "current": a solid accent plate with the glyph and label
+            -- in full text colour on it. Wins over the selected and hover looks;
+            -- the selection marker still says which item is current.
+            local r, g, b = Unpack(AccentOf(id), 1, 1, 1)
+            btn.Plate:SetColorTexture(r, g, b, (btn.hovered and not isOff) and 1 or 0.85)
+            btn.Plate:Show()
+            btn.Icon:SetVertexColor(1, 1, 1)
+            btn.Label:SetTextColor(1, 1, 1)
+        elseif isSel then
+            local r, g, b = Unpack(AccentOf(id), 1, 1, 1)
+            btn.Plate:SetColorTexture(r, g, b, 0.18)
+            btn.Plate:Show()
+            btn.Icon:SetVertexColor(r, g, b)
+            btn.Label:SetTextColor(r, g, b)
+        elseif btn.hovered and not isOff then
+            btn.Plate:SetColorTexture(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.75)
+            btn.Plate:Show()
+            btn.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        else
+            btn.Plate:Hide()
+            btn.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            btn.Label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        end
+        local badge = badges[id]
+        if badge then
+            btn.Badge:SetText(badge)
+            btn.Badge:Show()
+        else
+            btn.Badge:Hide()
+        end
+    end
+
+    local function TooltipSpec(btn)
+        local item = items[btn.railId]
+        if not item then return nil end
+        local t = Resolve(item.tooltip)
+        if type(t) == "table" then return t end
+        if type(t) == "string" and t ~= "" then return { title = t } end
+        local label = Resolve(item.label)
+        if type(label) == "string" and label ~= "" then return { title = label } end
+        return nil
+    end
+
+    local function MakeButton(id)
+        local btn = CreateFrame("Button", nil, rail)
+        btn.railId = id
+        btn.hovered = false
+        btn:SetSize(width, itemH)
+        btn:RegisterForClicks("LeftButtonUp")
+
+        -- A colour texture, not WHITE8x8 + SetVertexColor: on the window's
+        -- first show the selected plate drew at full alpha with a white label
+        -- until the item was hovered (author's /fstack, 2026-10-31). The
+        -- colour and alpha live in the texture itself now, and the rail
+        -- repaints every item once it is actually on screen (OnShow below).
+        local plate = btn:CreateTexture(nil, "BACKGROUND")
+        plate:SetColorTexture(1, 1, 1, 0)
+        plate:SetAllPoints(btn)
+        plate:Hide()
+        btn.Plate = plate
+
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(iconSize, iconSize)
+        icon:SetPoint("TOP", btn, "TOP", 0, -iconTop)
+        btn.Icon = icon
+
+        local label = btn:CreateFontString(nil, "OVERLAY", font)
+        label:SetPoint("TOP", icon, "BOTTOM", 0, -labelGap)
+        label:SetWidth(width - labelIn * 2)
+        label:SetJustifyH("CENTER")
+        label:SetWordWrap(false)
+        btn.Label = label
+
+        local badge = btn:CreateFontString(nil, "OVERLAY", font)
+        badge:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -3, -3)
+        badge:SetTextColor(Unpack(badgeC, 1, 0.82, 0))
+        badge:Hide()
+        btn.Badge = badge
+
+        btn:SetScript("OnEnter", function(s)
+            s.hovered = true
+            Paint(s)
+            local spec = TooltipSpec(s)
+            if spec then host:ShowTooltip(s, spec) end
+        end)
+        btn:SetScript("OnLeave", function(s)
+            s.hovered = false
+            Paint(s)
+            host:HideTooltip()
+        end)
+        btn:SetScript("OnClick", function(s)
+            if disabled[s.railId] then return end
+            if opts.onSelect then opts.onSelect(s.railId) end
+        end)
+        buttons[id] = btn
+        return btn
+    end
+
+    -- Dividers: hairlines between groups of items (an item's dividerAfter),
+    -- pooled and re-placed on every layout.
+    local dividers = {}
+    local function Divider(n)
+        local d = dividers[n]
+        if not d then
+            d = rail:CreateTexture(nil, "ARTWORK")
+            d:SetTexture(WHITE)
+            d:SetHeight(1)
+            local c = UI.Colors.border
+            d:SetVertexColor(c.r, c.g, c.b, 1)
+            dividers[n] = d
+        end
+        d:ClearAllPoints()
+        d:SetWidth(width - DIVIDER_INSET * 2)
+        d:Show()
+        return d
+    end
+
+    -- Lay the current set out: top slot down from the top, bottom slot up from
+    -- the bottom (so the LAST bottom item sits on the bottom edge).
+    local function Layout()
+        local top, bottom = {}, {}
+        for _, id in ipairs(list) do
+            local item = items[id]
+            if item.slot == "bottom" then bottom[#bottom + 1] = id else top[#top + 1] = id end
+        end
+        local used = 0
+        -- prev is the last region placed (an item or a divider); gap is the
+        -- space to leave under it.
+        local prev, gap
+        for _, id in ipairs(top) do
+            local btn = buttons[id]
+            btn:ClearAllPoints()
+            if prev then
+                btn:SetPoint("TOP", prev, "BOTTOM", 0, -gap)
+            else
+                btn:SetPoint("TOP", rail, "TOP", 0, -padTop)
+            end
+            prev, gap = btn, spacing
+            if items[id].dividerAfter then
+                used = used + 1
+                local d = Divider(used)
+                d:SetPoint("TOP", btn, "BOTTOM", 0, -DIVIDER_GAP)
+                prev, gap = d, DIVIDER_GAP
+            end
+        end
+        prev, gap = nil, nil
+        for i = #bottom, 1, -1 do
+            local btn = buttons[bottom[i]]
+            btn:ClearAllPoints()
+            if prev then
+                btn:SetPoint("BOTTOM", prev, "TOP", 0, gap)
+            else
+                btn:SetPoint("BOTTOM", rail, "BOTTOM", 0, padBot)
+            end
+            prev, gap = btn, spacing
+            -- dividerAfter on the item ABOVE this one draws between the two.
+            local above = bottom[i - 1]
+            if above and items[above].dividerAfter then
+                used = used + 1
+                local d = Divider(used)
+                d:SetPoint("BOTTOM", btn, "TOP", 0, DIVIDER_GAP)
+                prev, gap = d, DIVIDER_GAP
+            end
+        end
+        for n = used + 1, #dividers do dividers[n]:Hide() end
+    end
+
+    local function RepaintAll()
+        for _, id in ipairs(list) do
+            local b = buttons[id]
+            if b then Paint(b) end
+        end
+    end
+    rail:SetScript("OnShow", function()
+        RepaintAll()
+        if C_Timer and C_Timer.After then C_Timer.After(0, RepaintAll) end
+    end)
+
+    function rail:SetItems(newItems)
+        items, list = {}, {}
+        for _, item in ipairs(newItems or {}) do
+            if type(item) == "table" and item.id ~= nil and not items[item.id] then
+                items[item.id] = item
+                list[#list + 1] = item.id
+            end
+        end
+        for id, btn in pairs(buttons) do
+            if not items[id] then btn:Hide() end
+        end
+        for _, id in ipairs(list) do
+            local btn = buttons[id] or MakeButton(id)
+            local item = items[id]
+            if item.icon then btn.Icon:SetTexture(item.icon) end
+            btn.Label:SetText(Resolve(item.label) or "")
+            btn:Show()
+        end
+        Layout()
+        if selected and not items[selected] then
+            selected = nil
+            marker:Clear()
+        end
+        self:Refresh(true)
+        return self
+    end
+
+    -- The ids currently shown, in the order given.
+    function rail:GetItemIds()
+        local out = {}
+        for i = 1, #list do out[i] = list[i] end
+        return out
+    end
+
+    function rail:GetItem(id) return items[id] and buttons[id] or nil end
+
+    -- Mark an item as the current one. Paints only: onSelect is the USER's
+    -- click, so a consumer can call this from its own state without looping.
+    function rail:Select(id, instant)
+        local btn = id ~= nil and items[id] and buttons[id]
+        selected = btn and id or nil
+        if btn then
+            marker:SetTo(btn, AccentOf(id), instant)
+        else
+            marker:Clear()
+        end
+        for _, bid in ipairs(list) do Paint(buttons[bid]) end
+        return self
+    end
+
+    function rail:GetSelected() return selected end
+
+    function rail:SetBadge(id, text)
+        if text == "" then text = nil end
+        if badges[id] == text then return self end
+        badges[id] = text
+        if items[id] and buttons[id] then Paint(buttons[id]) end
+        return self
+    end
+
+    function rail:GetBadge(id) return badges[id] end
+
+    -- Greyed and deaf, the kit's disabled look. A disabled item can still be
+    -- the selected one (the caller decides what is current).
+    function rail:SetDisabled(id, isDisabled)
+        disabled[id] = isDisabled and true or nil
+        local btn = buttons[id]
+        if btn then
+            btn:EnableMouse(not isDisabled)
+            if isDisabled then btn.hovered = false end
+            if items[id] then Paint(btn) end
+        end
+        return self
+    end
+
+    function rail:IsDisabled(id) return disabled[id] == true end
+
+    -- ON / OFF, separate from selection (see Paint). A mode toggle at the top of
+    -- a rail is filled while it is the active one, while the selection marker
+    -- belongs to whatever the rail lists below it.
+    function rail:SetFilled(id, isFilled)
+        isFilled = isFilled and true or nil
+        if filled[id] == isFilled then return self end
+        filled[id] = isFilled
+        if items[id] and buttons[id] then Paint(buttons[id]) end
+        return self
+    end
+
+    function rail:IsFilled(id) return filled[id] == true end
+
+    -- The height the current set needs end to end: the top slot, the bottom
+    -- slot, their dividers and the paddings. A surface that sizes itself to its
+    -- rail (rather than the rail to the surface) reads this after SetItems.
+    function rail:GetContentHeight()
+        local n, dividersUsed = #list, 0
+        for i, id in ipairs(list) do
+            local item = items[id]
+            local nextId = list[i + 1]
+            -- Same rule Layout follows: a divider draws only between two items
+            -- of the same slot.
+            if item.dividerAfter and nextId and (items[nextId].slot == "bottom") == (item.slot == "bottom") then
+                dividersUsed = dividersUsed + 1
+            end
+        end
+        if n == 0 then return padTop + padBot end
+        local h = padTop + padBot + n * itemH
+        -- Every item but the first in each slot sits `spacing` under the one
+        -- before it, unless a divider sits between them (the divider's own gaps
+        -- replace the spacing).
+        local tops, bottoms = 0, 0
+        for _, id in ipairs(list) do
+            if items[id].slot == "bottom" then bottoms = bottoms + 1 else tops = tops + 1 end
+        end
+        local joins = math.max(tops - 1, 0) + math.max(bottoms - 1, 0)
+        h = h + (joins - dividersUsed) * spacing + dividersUsed * (DIVIDER_GAP * 2 + 1)
+        return h
+    end
+
+    -- Re-resolve labels and accents (a language change, an accent that moved).
+    function rail:Refresh(instant)
+        for _, id in ipairs(list) do
+            local btn = buttons[id]
+            btn.Label:SetText(Resolve(items[id].label) or "")
+            Paint(btn)
+        end
+        if selected and buttons[selected] then
+            marker:SetTo(buttons[selected], AccentOf(selected), instant ~= false)
+        end
+        return self
+    end
+
+    return rail
+end
+UI.CreateIconRailNative = UI.CreateIconRail

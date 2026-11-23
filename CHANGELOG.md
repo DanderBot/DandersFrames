@@ -1,5 +1,49 @@
 # DandersFrames Changelog
 
+## [6.0.0]
+
+### New Features
+
+- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. It starts switched off: say yes to the popup, or turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
+- (Unit Frames) Draw each frame as bars or as **rings** round a round portrait, with up to 8 rings for health, power, class power, shields, heal absorbs and heal prediction. Find it on a frame's **Frame Style** page.
+- (Unit Frames) Each frame has its own Text Designer template, and Player and Pet have their own Aura Designer. Link frames on the **Linked Frames** page so changing one changes the other, preview everything with the **Units** test mode, and copy a page's settings from another frame or from your party and raid frames.
+- (Settings) New settings layout: an icon bar down the left side replaces the Global / Party / Raid / Binds tabs. **Groups** holds your party and raid settings, **Binds** is click-casting, and **Modules**, **Profiles** and **Global** sit at the bottom.
+- (Settings) New **Home** page: search every setting, jump to any part of the addon, see what's new, and get a short **Needs attention** list with one-click fixes, such as Blizzard frames still showing or test mode left on.
+- (Settings) New **Modules** page to turn Group Frames (Party and Raid separately), Click-Casting and Unit Frames on or off, or reset one to its defaults.
+- (Profiles) Every profile tool now lives on the **Profiles** page: profiles, spec switching, Auto Layouts, click-casting profiles, import/export and changed settings. You can now **rename** profiles, and one import box accepts profile, click-casting and filter strings.
+- (Pet Frames) Pet frames can now show buffs and debuffs. Set their size, count and position on the new **Buffs** and **Debuffs** cards of the **Pet Frames** page; what they show follows your main buff and debuff settings.
+- (Aura Designer) New **Only on My Frame** option for indicators and effects: show a buff, or a "missing" reminder such as Inner Fire, only on your own frame.
+- (Resource Bar) New **Placement** option: keep the bar on top of the health bar (as before), or put it **Below**, **Above**, **Left of** or **Right of** it. Along a side the health bar shrinks to make room, and the bar gets its own offsets and frame level. Turn off **Match Health Bar Width** for a shorter bar and use **Anchor** to place it. (by Krathe)
+- (Frame) New **Keep Health Bar Inside Border** option on the Border card, so a see-through border sits over the frame background on every side. Off by default. (by Krathe)
+- (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction, so shields and incoming heals can run past the end of the health bar, up to a full bar's length. Off by default. (by Krathe)
+- (Test Mode) The test popup is now a slim popout with a rail of modes. With Indicator Info on, click an element on a test frame to open its settings.
+- (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (off by default) and one paladin blessing per role, on the new **Class Buffs (WoW Forever)** card.
+- (Mover) An anchored element can mirror its target's position on X and Y.
+- (Rested Indicator) New soft outer glow style.
+- (Icons) Combat and leader icons use sharper art.
+- (DandersMover) Frames anchored to another addon's frames now follow them automatically.
+- (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
+
+### Improvements
+
+- (Absorbs) Clearer names for the absorb and heal absorb Display Mode options, with a tooltip explaining each. Saved settings are unchanged. (by Krathe)
+- (Performance) Debug logging now costs nothing while it is off. (by Krathe)
+- (WoW Forever) Arcane Intellect and Divine Spirit no longer show as missing on warriors and rogues.
+
+### Bug Fixes
+
+- (Range) Fix enemy targets fading as out of range when a hunter is in melee range.
+- (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
+- (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
+- (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
+- (Search) Fix search staying stuck on "Indexing settings..." after combat.
+- (Mover) Clicking now brings the mover controls back if they stayed faded after alt-tabbing.
+- (Test Mode) Turning off Color by Time Remaining now takes effect on test frames.
+- (Settings) Fix a large gap above Reduced Max Health and uneven resource colour swatches.
+- (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everyone else.
+- (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
+- (WoW Forever) Flasks, potions, elixirs, Spirit of Redemption, Camp Benefits and Prayer of Mending now show in aura filters, and shadow protection potions no longer count as the priest buff.
+
 ## [5.6.2]
 
 ### New Features

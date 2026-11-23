@@ -102,13 +102,8 @@ local function SetHealthBarValue(bar, unit, frame)
     -- Set bar range and value
     bar:SetMinMaxValues(0, 100)
 
-    -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    -- The frame's own settings (GetFrameDB: party, raid, or the frame's own table).
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     SetBarValueSmoothed(bar, pct, db and db.smoothBars)
 
     -- Health threshold fading (curve-based, no Lua-side secret comparison)
@@ -493,18 +488,91 @@ function DF:RegisterRaidFrame(frame)
     end
 end
 
+-- Set a frame's raid flag AND its registry entry together. For frames whose raid
+-- status can change after creation (pinned frames follow IsInRaid()): resetting
+-- only the field would leave a stale registry entry, and DF:IsRaidFrame would keep
+-- answering "raid" -- so a pinned frame created in a raid read raid settings in a party.
+function DF:SetRaidFrameFlag(frame, isRaid)
+    if not frame then return end
+    isRaid = isRaid and true or false
+    frame.isRaidFrame = isRaid
+    self.raidFrameRegistry[frame] = isRaid or nil
+end
+
 -- Check if a frame is a raid frame (checks external registry first, then field)
 function DF:IsRaidFrame(frame)
     if not frame then return false end
     return frame.isRaidFrame or self.raidFrameRegistry[frame] or false
 end
 
+-- ============================================================
+-- TEST SCOPE
+-- Does test mode apply to THIS frame -- should it show test data and leave live
+-- updates alone? Every per-frame test-mode decision asks this instead of reading
+-- DF.testMode / DF.raidTestMode itself.
+--
+--   scope nil      the frame's own mode (raid frame -> raid test mode, else party)
+--   scope "any"    either test mode
+--   scope "raid" / "party"  that mode, for callers that already worked out which
+--                  pool the frame belongs to (frame.isRaidFrame vs DF:IsRaidFrame
+--                  can differ after the secure template wipes the field)
+--
+-- Party, raid and pinned frames get exactly the answer the inline checks gave.
+-- A standalone frame (DF:InitStandaloneFrame) is in no group, so the group test
+-- modes never apply to it -- unless it is a PREVIEW frame (frame.dfPreview), which
+-- only ever shows test data.
+-- ============================================================
+function DF:FrameInTestScope(frame, scope)
+    if frame and frame.dfStandalone then
+        return frame.dfPreview and true or false
+    end
+    if scope == "any" then
+        return (DF.testMode or DF.raidTestMode) and true or false
+    end
+    local isRaid
+    if scope == "raid" then
+        isRaid = true
+    elseif scope == "party" then
+        isRaid = false
+    else
+        isRaid = DF:IsRaidFrame(frame)
+    end
+    if isRaid then return DF.raidTestMode and true or false end
+    return DF.testMode and true or false
+end
+
+-- ============================================================
+-- TEST DATA FOR A FRAME
+-- The fake unit a test frame paints. A frame that carries its own
+-- (frame.dfTestData, a table shaped like DF:GetTestUnitData's answer) gets that;
+-- every other frame gets the shared test-unit lookup.
+--
+--   DF:GetTestDataForFrame(frame)             the frame's own pool slot:
+--       GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+--   DF:GetTestDataForFrame(frame, index, ...) the lookup with exactly those
+--       arguments, for callers that resolve the slot themselves
+--
+-- ⚠ GetTestUnitData lives in the options companion; TestMode/Shim.lua stubs it to
+-- nil until that loads, so this answers nil then (unless the frame has its own).
+-- ============================================================
+function DF:GetTestDataForFrame(frame, ...)
+    if frame and frame.dfTestData then return frame.dfTestData end
+    if not DF.GetTestUnitData then return nil end
+    if select("#", ...) > 0 then return DF:GetTestUnitData(...) end
+    if not frame then return nil end
+    return DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
+end
+
 -- Helper to get correct DB based on frame type
 function DF:GetFrameDB(frame)
-    -- Pinned frames with Hide Auras / Hide Status Icons carry an effective DB that
-    -- forces the relevant show flags off over the mode base — so every aura/icon
-    -- updater (which all read GetFrameDB(frame).<flag>) hides via its existing path.
-    if frame and frame.dfPinnedEffDB then return frame.dfPinnedEffDB end
+    -- ★ A FRAME MAY CARRY ITS OWN SETTINGS TABLE (frame.dfDB), and then that is the
+    -- answer. Two kinds set it:
+    --   * Pinned frames with Hide Auras / Hide Status Icons: an effective DB that
+    --     forces the relevant show flags off over the mode base -- so every aura/icon
+    --     updater (which all read GetFrameDB(frame).<flag>) hides via its existing path.
+    --   * Standalone frames (DF:InitStandaloneFrame, Frames/Headers.lua), which are
+    --     neither party nor raid and read their own table outright.
+    if frame and frame.dfDB then return frame.dfDB end
     if frame and DF:IsRaidFrame(frame) then
         return DF:GetRaidDB()
     else
@@ -815,6 +883,8 @@ local LEGACY_STATUS_ICON_ATLAS = {
     ["Interface\\Vehicles\\UI-Vehicles-Raid-Icon"]     = "RaidFrame-Icon-Vehicle",
     ["Interface\\GroupFrame\\UI-Group-MainTankIcon"]   = "RaidFrame-Icon-MainTank",
     ["Interface\\GroupFrame\\UI-Group-MainAssistIcon"] = "RaidFrame-Icon-MainAssist",
+    ["Interface\\GroupFrame\\UI-Group-LeaderIcon"]     = "UI-HUD-UnitFrame-Player-Group-LeaderIcon",
+    -- No modern assistant atlas exists: UI-Group-AssistantIcon stays the file.
 }
 
 -- Render a known legacy status-icon texture as its modern atlas (sharper),
@@ -825,10 +895,27 @@ function DF:SetUpgradedStatusIcon(region, legacyTexture)
     if not region or not legacyTexture then return end
     local atlas = LEGACY_STATUS_ICON_ATLAS[legacyTexture]
     if atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+        -- SetAtlas keeps an earlier SetTexCoord crop (see SetIconTextureOrAtlas).
+        region:SetTexCoord(0, 1, 0, 1)
         region:SetAtlas(atlas)
     else
         region:SetTexture(legacyTexture)
         region:SetTexCoord(0, 1, 0, 1)
+    end
+end
+
+-- The combat icon: the modern crossed-swords atlas, or the swords quadrant of
+-- the legacy UI-StateIcon sheet (swords + resting) when the atlas is missing.
+-- Owns the texcoord state like SetUpgradedStatusIcon.
+local COMBAT_ICON_ATLAS = "UI-HUD-UnitFrame-Player-CombatIcon"
+function DF:SetCombatStatusIcon(region)
+    if not region then return end
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(COMBAT_ICON_ATLAS) then
+        region:SetTexCoord(0, 1, 0, 1)
+        region:SetAtlas(COMBAT_ICON_ATLAS)
+    else
+        region:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
+        region:SetTexCoord(0.5, 1.0, 0, 0.49)
     end
 end
 

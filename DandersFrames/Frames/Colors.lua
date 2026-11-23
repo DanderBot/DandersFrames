@@ -84,13 +84,8 @@ end
 local function SetBarValue(bar, value, frame, smoothOverride)
     if not bar or not bar.SetValue then return end
 
-    -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
+    -- The frame's own settings (GetFrameDB: party, raid, or the frame's own table).
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
     -- smoothOverride lets a specific bar gate on its own key (e.g. resourceBarSmooth)
     -- instead of the global health-bar smoothBars toggle.
     local smoothEnabled
@@ -261,6 +256,102 @@ function DF:GetHealthGradientColor(percent, db, testClass, prefix)
     }
 end
 
+-- ============================================================
+-- REACTION / TAPPED HEALTH COLOURS
+-- Two healthColorMode values for frames that can show hostile units:
+--   REACTION        every unit by its reaction to the player; a tapped NPC grey
+--   CLASS_REACTION  players by class colour, everything else as REACTION
+-- ⚠ STANDALONE FRAMES ONLY. The party/raid Health Bar page does not offer them
+-- (its dropdown lists CLASS / CUSTOM / PERCENT); DF.StandaloneHealthColorModes
+-- names the extra values for a page that does.
+-- The colours are a profile-root table (reactionColors), defaults below.
+-- ☠ Every unit read here can come back SECRET for some units in restricted
+-- content, and a secret may not be branched on: each is folded to "unknown"
+-- first, and an unknown reaction is the neutral colour.
+-- ============================================================
+DF.StandaloneHealthColorModes = { REACTION = true, CLASS_REACTION = true }
+
+DF.ReactionColorDefaults = {
+    hostile  = { r = 0.80, g = 0.30, b = 0.22 },
+    neutral  = { r = 0.90, g = 0.70, b = 0.00 },
+    friendly = { r = 0.00, g = 0.60, b = 0.10 },
+    tapped   = { r = 0.50, g = 0.50, b = 0.50 },
+}
+
+if DF.RegisterProfileRootTable then
+    DF:RegisterProfileRootTable("reactionColors", {
+        defaults = DF.ReactionColorDefaults,
+        exportCategory = "colors",
+    })
+end
+
+local function IsSecret(v)
+    return issecretvalue ~= nil and issecretvalue(v) and true or false
+end
+
+local function ReactionColor(key)
+    local t = DF.db and DF.db.reactionColors
+    local c = type(t) == "table" and t[key]
+    if type(c) ~= "table" or type(c.r) ~= "number" then c = DF.ReactionColorDefaults[key] end
+    return c
+end
+
+-- Test frames carry real unit tokens, so their answer comes from the stamps the
+-- test painter writes (dfClassToken, dfTestTapped, dfTestReaction) instead of
+-- from whoever that token really is. No stamped reaction = neutral.
+local function TestReactionColor(frame, mode)
+    if mode == "CLASS_REACTION" and frame.dfClassToken then
+        local cc = DF:GetClassColor(frame.dfClassToken)
+        if cc then return cc.r, cc.g, cc.b end
+    end
+    local key = "neutral"
+    if frame.dfTestTapped then
+        key = "tapped"
+    else
+        local reaction = frame.dfTestReaction
+        if type(reaction) == "number" then
+            if reaction <= 3 then key = "hostile" elseif reaction >= 5 then key = "friendly" end
+        end
+    end
+    local c = ReactionColor(key)
+    return c.r, c.g, c.b
+end
+
+-- r, g, b for `unit` under REACTION or CLASS_REACTION. `frame` (optional) lets a
+-- test frame answer from its stamps.
+function DF:GetReactionHealthColor(unit, mode, frame)
+    if frame and frame.dfIsTestFrame then return TestReactionColor(frame, mode) end
+    if not unit then
+        local c = ReactionColor("neutral")
+        return c.r, c.g, c.b
+    end
+    if mode == "CLASS_REACTION" then
+        local isPlayer = UnitIsPlayer(unit)
+        if IsSecret(isPlayer) then isPlayer = false end
+        if isPlayer then
+            local _, class = UnitClass(unit)
+            if not IsSecret(class) and class then
+                local cc = DF:GetClassColor(class)
+                if cc then return cc.r, cc.g, cc.b end
+            end
+        end
+    end
+    local tapped = UnitIsTapDenied and UnitIsTapDenied(unit)
+    if IsSecret(tapped) then tapped = false end
+    if tapped then
+        local c = ReactionColor("tapped")
+        return c.r, c.g, c.b
+    end
+    local reaction = UnitReaction(unit, "player")
+    if IsSecret(reaction) or type(reaction) ~= "number" then reaction = nil end
+    local key = "neutral"
+    if reaction then
+        if reaction <= 3 then key = "hostile" elseif reaction >= 5 then key = "friendly" end
+    end
+    local c = ReactionColor(key)
+    return c.r, c.g, c.b
+end
+
 -- Apply health bar colors based on settings
 function DF:ApplyHealthColors(frame)
     if not frame or not frame.healthBar then return end
@@ -306,6 +397,18 @@ function DF:ApplyHealthColors(frame)
                 if not deadFadeActive then
                     tex:SetAlpha(classColorAlpha)
                 end
+            end
+        end
+    elseif mode == "REACTION" or mode == "CLASS_REACTION" then
+        -- Reaction / tapped colours (standalone frames; see REACTION / TAPPED HEALTH
+        -- COLOURS above). Same channels and alpha rule as the CLASS branch below.
+        local r, g, b = DF:GetReactionHealthColor(unit, mode, frame)
+        frame.healthBar:SetStatusBarColor(r, g, b)
+        local tex = frame.healthBar:GetStatusBarTexture()
+        if tex then
+            tex:SetVertexColor(r, g, b)
+            if not deadFadeActive then
+                tex:SetAlpha(classColorAlpha)
             end
         end
     elseif mode == "CLASS" then

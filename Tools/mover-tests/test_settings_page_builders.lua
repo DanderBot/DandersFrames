@@ -164,6 +164,9 @@ local BLIZZARD_FRAMES = {
     { "separator", "(none)",                        "(none)",                              14 },
     { "checkbox",  "Hide Blizzard Player Frame",    "(none)",                              30 },
     { "checkbox",  "Only in a Raid Group",          "(none)",                              30 },
+    -- Stands in for the two player ticks while another module owns the player
+    -- frame (GUI.PlayerFrameOwnerNote); hidden otherwise. Its text is that note.
+    { "label",     "(none)",                        "(none)",                              30 },
     { "separator", "(none)",                        "(none)",                              14 },
     { "checkbox",  "Show Party/Raid Side Menu",     "DF.db.party.showBlizzardSideMenu",    30 },
 }

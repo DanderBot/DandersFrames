@@ -4188,6 +4188,10 @@ function DF:ToggleGUI()
         if not DF.GUIFrame then
             DF:CreateGUI()
         end
+
+        -- Where the window was last (account window state). Read NOW: the
+        -- repaint on show below records the auto-pick over it.
+        local lastModule = GUI.LastModuleOnOpen and GUI:LastModuleOnOpen()
         
         -- Auto-detect mode based on current group status
         -- ARENA FIX: Arena returns IsInRaid()=true but uses party-style layout/settings.
@@ -4221,7 +4225,22 @@ function DF:ToggleGUI()
             AutoProfilesUI:RefreshTabOverrideStars()
         end
         
+        -- First open after an update (spec Q2): marked seen here, and the
+        -- window lands on Home, whose What's new replaces the old auto-shown
+        -- changelog overlay (the full changelog is one click away there).
+        -- GUI:ModuleToOpen (GUI/Rail.lua) also sends a module that has since
+        -- been switched off -- it left the rail -- to Home.
+        local updated = false
+        if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
+            DandersFramesDB_v2.lastSeenVersion = DF.VERSION
+            updated = true
+        end
+        if GUI.ModuleToOpen then lastModule = GUI:ModuleToOpen(lastModule, updated) end
+
         DF.GUIFrame:Show()
+        -- Back to the module it was on (GUI/Rail.lua). Group Frames keeps the
+        -- party/raid pick above; only WHICH module is remembered.
+        if GUI.RestoreModuleOnOpen then GUI:RestoreModuleOnOpen(lastModule) end
         -- Through the page cache, not a forced rebuild: opening the window
         -- changes no data, and the rebuild leaked the page on screen on every
         -- open. Why that is safe is written at GUI.RefreshCurrentPageCached
@@ -4232,11 +4251,9 @@ function DF:ToggleGUI()
             GUI:RefreshCurrentPage()
         end
 
-        -- Auto-show changelog on first open after update
-        if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
-            DandersFramesDB_v2.lastSeenVersion = DF.VERSION
-            if GUI.ShowChangelog then GUI:ShowChangelog() end
-        end
+        -- No Home to land on (it did not register): the update still shows the
+        -- changelog, as it always did.
+        if updated and lastModule ~= "home" and GUI.ShowChangelog then GUI:ShowChangelog() end
     end
 end
 
@@ -4882,7 +4899,24 @@ function GUI:CreatePopoutPageTools(page)
     -- db as a FUNCTION, which is what the kit contract asks for: the row
     -- re-resolves on every refresh, so a mode switch is followed rather than
     -- frozen at the table this build captured.
-    local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
+    -- ...and a page built against a table of its own (a module page --
+    -- GUI.PageBuildDb) hands its panels that table, not the frame mode's.
+    local function RowDB()
+        local own = GUI.PageBuildDb and GUI.PageBuildDb(page)
+        if own then return own end
+        return DF.db and DF.db[GUI.SelectedMode]
+    end
+
+    -- ★ A PAGE MAY SHOW ONLY SOME OF ITS CARDS: page.sectionFilter(key) answering
+    -- false takes that card off the page. The card is still BUILT -- the builder's
+    -- code around it runs exactly as it always does -- but it never shows, and the
+    -- controls in it register nothing with search (SuppressRegistration from the
+    -- card's OpenSection to its CloseSection). For a page that draws another page's
+    -- cards against a table of its own and only some of them apply.
+    local function CardFilteredOut(key)
+        return page.sectionFilter ~= nil and page.sectionFilter(key) == false
+    end
+    local function Never() return true end
 
     -- The width a full-width band is CONSTRUCTED at, asked for rather than
     -- guessed: GUI.PageUsableWidth is the same helper the layout pass stretches
@@ -5096,6 +5130,11 @@ function GUI:CreatePopoutPageTools(page)
     --                that reads best as a list of headers -- Icons)
 
     local function OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, extra)
+        local filtered = CardFilteredOut(key)
+        if filtered then
+            hideFn = Never
+            builder = nil   -- no pin on a card that never shows
+        end
         local pin
         if builder then
             -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
@@ -5138,6 +5177,9 @@ function GUI:CreatePopoutPageTools(page)
             BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
                            kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })
         section.hideOn = hideFn
+        -- Marked, so a caller can tell "filtered off this page" from a card that
+        -- hides on a condition (a bare header over only filtered cards goes too).
+        if filtered then section.dfFilteredOut = true end
         -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
         -- page and GUI.ColumnWidth). Without it the header bar would stay
         -- half-width over a full-width band on the one-column fold. The header
@@ -5150,10 +5192,19 @@ function GUI:CreatePopoutPageTools(page)
         local band = GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })
         band.layoutColFill = true
         band.hideOn = hideFn
+        if filtered then band.dfFilteredOut = true end
         band.dfSectionCol = col
         section:RegisterChild(band)
         if extra and extra.twoTrack then WireTwoTrack(band) end
         if extra and extra.quietLabels then band.dfQuietLabels = true end
+        if filtered then
+            -- Held until this card's CloseSection; see CardFilteredOut.
+            local Search = DF.Search
+            if Search then
+                band.dfHeldSuppress = { held = Search.SuppressRegistration }
+                Search.SuppressRegistration = true
+            end
+        end
         return band
     end
 
@@ -5165,6 +5216,11 @@ function GUI:CreatePopoutPageTools(page)
     local function CloseSection(Add, band)
         if band.dfTwoTrack then StampFullRows(band) end
         if band.dfQuietLabels then QuietLabels(band) end
+        local held = rawget(band, "dfHeldSuppress")
+        if held then
+            band.dfHeldSuppress = nil
+            if DF.Search then DF.Search.SuppressRegistration = held.held end
+        end
         Add(band, nil, band.dfSectionCol)
     end
 
@@ -5186,6 +5242,14 @@ function GUI:CreatePopoutPageTools(page)
         for _, grp in ipairs(groups) do
             local header = GUI:CreateHeader(page.child, grp.label)
             if grp.hideOn then header.hideOn = grp.hideOn end
+            -- A group whose every card is filtered off the page loses its header too.
+            if page.sectionFilter then
+                local any = false
+                for _, key in ipairs(grp.keys) do
+                    if not CardFilteredOut(key) then any = true break end
+                end
+                if not any then header.hideOn = Never end
+            end
             Add(header, 40, grp.col)
             for _, key in ipairs(grp.keys) do
                 local mount = deferredMounts[key]

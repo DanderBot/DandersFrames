@@ -62,7 +62,9 @@ end)
 local function QueueRosterUpdate()
     gruBurstCount = gruBurstCount + 1
     gruEventCount = gruEventCount + 1
-    DF:Debug("ROSTER", "QueueRosterUpdate: GRU #%d (burst #%d), members=%d", gruEventCount, gruBurstCount, GetNumGroupMembers())
+    if DF:DebugActive("ROSTER") then
+        DF:Debug("ROSTER", "QueueRosterUpdate: GRU #%d (burst #%d), members=%d", gruEventCount, gruBurstCount, GetNumGroupMembers())
+    end
     rosterThrottleFrame:Show()  -- Showing already-shown frame = no-op
 end
 
@@ -693,9 +695,11 @@ function DF:InitializeHeaderChild(frame)
         DF:RegisterRaidFrame(frame)
     end
 
-    DF:Debug("LAYOUT", "InitializeHeaderChild: parent=%s isRaid=%s isArena=%s isPinned=%s",
-        frame:GetParent() and frame:GetParent():GetName() or "nil",
-        tostring(isRaid), tostring(isArena), tostring(isPinned))
+    if DF:DebugActive("LAYOUT") then
+        DF:Debug("LAYOUT", "InitializeHeaderChild: parent=%s isRaid=%s isArena=%s isPinned=%s",
+            frame:GetParent() and frame:GetParent():GetName() or "nil",
+            tostring(isRaid), tostring(isArena), tostring(isPinned))
+    end
     
     -- Get appropriate DB and set frame size
     -- Arena frames use PARTY settings (same as party frames)
@@ -812,8 +816,9 @@ function DF:InitializeHeaderChild(frame)
                 DF:RosterDebugCount("OnAttributeChanged(unit)-SKIPPED-same-guid")
                 -- Update unitFrameMap: remove old entry only if this frame owns it
                 -- Skip for pinned frames - they share units with main frames
-                -- and must not overwrite or remove main frame entries
-                if not self.isPinnedFrame or self.isPinnedBossFrame then
+                -- and must not overwrite or remove main frame entries.
+                -- Standalone frames (DF:InitStandaloneFrame) never enter the map.
+                if not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame) then
                     if unitFrameMap[oldUnit] == self then
                         unitFrameMap[oldUnit] = nil
                     end
@@ -851,14 +856,17 @@ function DF:InitializeHeaderChild(frame)
             end
 
             DF:RosterDebugCount("OnAttributeChanged(unit)-PROCESSED")
-            DF:Debug("ROSTER", "OnAttributeChanged: %s -> %s (isRaid=%s)",
-                tostring(oldUnit), tostring(actualUnit), tostring(self.isRaidFrame))
+            if DF:DebugActive("ROSTER") then
+                DF:Debug("ROSTER", "OnAttributeChanged: %s -> %s (isRaid=%s)",
+                    tostring(oldUnit), tostring(actualUnit), tostring(self.isRaidFrame))
+            end
             
             -- Clear old unit's cache
             if oldUnit then
                 -- Remove from unitFrameMap (only if this frame owns the entry)
                 -- Skip for pinned frames - they must not remove main frame entries
-                if (not self.isPinnedFrame or self.isPinnedBossFrame) and unitFrameMap[oldUnit] == self then
+                if not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame)
+                    and unitFrameMap[oldUnit] == self then
                     unitFrameMap[oldUnit] = nil
                 end
                 -- Clear legacy DF.playerFrame if this frame was the player
@@ -904,7 +912,8 @@ function DF:InitializeHeaderChild(frame)
                 -- Clear phased cache for new unit (force fresh evaluation)
                 if DF.ResetPhasedCache then DF:ResetPhasedCache(actualUnit) end
                 -- Skip unitFrameMap for pinned frames (except boss-type pinned frames)
-                if not self.isPinnedFrame or self.isPinnedBossFrame then
+                -- and for standalone frames, which dispatch their own unit events.
+                if not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame) then
                     unitFrameMap[actualUnit] = self
                 end
                 local cacheGuid = UnitGUID(actualUnit)
@@ -926,8 +935,9 @@ function DF:InitializeHeaderChild(frame)
                     -- setting secure paths and swap frame refs on it, and
                     -- UpdateAllFrames drives its unit watch and its click-cast
                     -- registration from it. A pinned frame must NEVER be adopted
-                    -- here -- it hands all of that the wrong frame.
-                    if not self.isPinnedFrame then
+                    -- here -- it hands all of that the wrong frame. Nor a standalone
+                    -- frame, for the same reason.
+                    if not self.isPinnedFrame and not self.dfStandalone then
                         DF.playerFrame = self
                     end
                 end
@@ -967,23 +977,26 @@ function DF:InitializeHeaderChild(frame)
             -- changes, ASSIGNEDROLE re-sorts) that ApplyPartyGroupSorting cannot
             -- cover due to combat lockdown. Coalesced per sortType per frame so
             -- Blizzard reshuffling N children only produces one callback.
-            local sortType
-            if self.isArenaFrame then
-                sortType = "arena"
-            elseif self.isRaidFrame then
-                sortType = "raid"
-            else
-                sortType = "party"
-            end
-            DF._sortCallbackPending = DF._sortCallbackPending or {}
-            if not DF._sortCallbackPending[sortType] then
-                DF._sortCallbackPending[sortType] = true
-                C_Timer.After(0, function()
-                    DF._sortCallbackPending[sortType] = nil
-                    if DF.FireAPICallback then
-                        DF:FireAPICallback("OnFramesSorted", sortType)
-                    end
-                end)
+            -- A standalone frame is in no group, so it has no sort to report.
+            if not self.dfStandalone then
+                local sortType
+                if self.isArenaFrame then
+                    sortType = "arena"
+                elseif self.isRaidFrame then
+                    sortType = "raid"
+                else
+                    sortType = "party"
+                end
+                DF._sortCallbackPending = DF._sortCallbackPending or {}
+                if not DF._sortCallbackPending[sortType] then
+                    DF._sortCallbackPending[sortType] = true
+                    C_Timer.After(0, function()
+                        DF._sortCallbackPending[sortType] = nil
+                        if DF.FireAPICallback then
+                            DF:FireAPICallback("OnFramesSorted", sortType)
+                        end
+                    end)
+                end
             end
         end
     end)
@@ -994,7 +1007,7 @@ function DF:InitializeHeaderChild(frame)
         frame.unit = currentUnit
         -- Skip unitFrameMap for pinned frames - they share units with main frames
         -- (boss-type pinned frames are allowed: boss1-8 units are only in these frames)
-        if not frame.isPinnedFrame or frame.isPinnedBossFrame then
+        if not frame.dfStandalone and (not frame.isPinnedFrame or frame.isPinnedBossFrame) then
             unitFrameMap[currentUnit] = frame
         end
         local num = currentUnit:match("%d+")
@@ -1035,6 +1048,8 @@ function DF:InitializeHeaderChild(frame)
         end
         -- Frame Fade: hover may borrow the in-combat opacity (no-op unless enabled).
         if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
+        -- Hover-shown text (Text Designer) and anything else that answers hover.
+        if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(self, self.dfIsHovered) end
 
         -- Binding tooltip (independent of unit tooltip settings)
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
@@ -1095,6 +1110,8 @@ function DF:InitializeHeaderChild(frame)
             DF:UpdateHighlights(self)
         end
         if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
+        -- Hover-shown text (Text Designer) and anything else that answers hover.
+        if DF.OnFrameHoverChanged then DF:OnFrameHoverChanged(self, self.dfIsHovered) end
 
         -- Stop tooltip refresh ticker
         if DF.StopTooltipRefresh then DF:StopTooltipRefresh() end
@@ -1122,7 +1139,7 @@ function DF:InitializeHeaderChild(frame)
         -- can dispatch to this frame the instant it becomes visible.
         -- Without this, frames shown after RebuildUnitFrameMap() are
         -- invisible to event dispatch until the next rebuild.
-        if self.unit and (not self.isPinnedFrame or self.isPinnedBossFrame) then
+        if self.unit and not self.dfStandalone and (not self.isPinnedFrame or self.isPinnedBossFrame) then
             unitFrameMap[self.unit] = self
         end
 
@@ -1137,8 +1154,10 @@ function DF:InitializeHeaderChild(frame)
         C_Timer.After(0.05, function()
             self._dfShowRefreshQueued = nil
             if self and self.unit and self:IsVisible() then
-                DF:Debug("LAYOUT", "OnShow refresh: %s (headerChild=%s isRaid=%s)",
-                    self.unit or "?", tostring(self.dfIsHeaderChild), tostring(self.isRaidFrame))
+                if DF:DebugActive("LAYOUT") then
+                    DF:Debug("LAYOUT", "OnShow refresh: %s (headerChild=%s isRaid=%s)",
+                        self.unit or "?", tostring(self.dfIsHeaderChild), tostring(self.isRaidFrame))
+                end
                 -- Apply layout in case settings changed while hidden
                 -- SKIP for raid combined (grouped) children — SetSize triggers SecureGroupHeader_Update
                 -- which repositions every sibling, causing visible frame jumping on roster changes.
@@ -1202,6 +1221,65 @@ function DF:InitializeHeaderChild(frame)
     if DF:DebugActive("HEADERS") then
         headerDebug("Initialized child frame:", frame:GetName(), "Size:", frameWidth, "x", frameHeight)
     end
+end
+
+-- ============================================================
+-- STANDALONE FRAMES
+-- A frame built from DandersUnitButtonTemplate that is NOT a group-header child:
+-- it shows one fixed unit and reads its own settings table. The template's OnLoad
+-- runs InitializeHeaderChild inside CreateFrame, before the caller can say what
+-- the frame is, so the caller marks it straight after creation:
+--
+--   local f = CreateFrame("Button", name, parent, "DandersUnitButtonTemplate,SecureUnitButtonTemplate")
+--   DF:InitStandaloneFrame(f, myDB)
+--   f:SetAttribute("unit", unit)
+--
+-- What it changes:
+--   * DF:GetFrameDB(f) returns `db` (frame.dfDB), so every updater reads it;
+--   * the parent-name classification is undone -- never raid, arena or pinned;
+--   * the frame never enters unitFrameMap (the shared roster dispatch) and is
+--     never adopted as DF.playerFrame -- the caller dispatches its own unit
+--     events -- and its unit changes fire no OnFramesSorted;
+--   * the resource bar's role gates do not apply (DF:ShouldShowResourceBar).
+-- ⚠ `.unit` stays where it is. The ping mixin (PingableType_UnitFrameMixin) reads
+-- `self.unit or self:GetAttribute("unit")`, so it is the field the mixin wants,
+-- and every header child and pinned boss frame already carries it.
+-- ============================================================
+function DF:InitStandaloneFrame(frame, db)
+    if not frame or type(db) ~= "table" then
+        DF:DebugError("LAYOUT", "InitStandaloneFrame: needs a frame and a settings table")
+        return nil
+    end
+    frame.dfStandalone = true
+    frame.dfDB = db
+    -- Weak-keyed: who asks "which frame reads this table" (DF:GetDebuffRowGroupCount)
+    -- finds it here; a frame that is gone takes its entry with it.
+    DF.StandaloneFrames = DF.StandaloneFrames or setmetatable({}, { __mode = "k" })
+    DF.StandaloneFrames[frame] = true
+    frame.isRaidFrame = false
+    frame.isArenaFrame = false
+    frame.isPinnedFrame = false
+    frame.isPinnedBossFrame = nil
+    frame.dfIsRaidCombinedChild = false
+    if DF.raidFrameRegistry then DF.raidFrameRegistry[frame] = nil end
+    -- Anything the template's init claimed before the caller could mark the frame
+    -- (only possible when a unit attribute was already set at OnLoad).
+    local released = false
+    for unit, f in pairs(unitFrameMap) do
+        if f == frame then
+            unitFrameMap[unit] = nil
+            released = true
+        end
+    end
+    if DF.playerFrame == frame then DF.playerFrame = nil end
+    if released and DF.RebuildUnitFrameMap then DF:RebuildUnitFrameMap() end
+    -- The creation-time size and elements came from the party table; lay the
+    -- frame out again from its own. Size is protected, so not in combat.
+    if DF.ApplyFrameLayout and not InCombatLockdown() then
+        DF:ApplyFrameLayout(frame)
+    end
+    DF:Debug("LAYOUT", "InitStandaloneFrame: %s", frame.GetName and frame:GetName() or "?")
+    return frame
 end
 
 
@@ -3455,9 +3533,11 @@ function DF:UpdateRaidHeaderLayoutAttributes()
         return
     end
 
-    DF:Debug("ROSTER", "UpdateRaidHeaderLayoutAttributes: layout changed (horizontal=%s->%s, spacing=%s->%s)",
-        tostring(lastLayoutHorizontal), tostring(horizontal),
-        tostring(lastLayoutSpacing), tostring(spacing))
+    if DF:DebugActive("ROSTER") then
+        DF:Debug("ROSTER", "UpdateRaidHeaderLayoutAttributes: layout changed (horizontal=%s->%s, spacing=%s->%s)",
+            tostring(lastLayoutHorizontal), tostring(horizontal),
+            tostring(lastLayoutSpacing), tostring(spacing))
+    end
     lastLayoutHorizontal = horizontal
     lastLayoutSpacing = spacing
 
@@ -3491,7 +3571,9 @@ function DF:UpdateRaidHeaderLayoutAttributes()
         end
     end
 
-    DF:Debug("HEADERS", "Updated header layout attributes: horizontal=%s", tostring(horizontal))
+    if DF:DebugActive("HEADERS") then
+        DF:Debug("HEADERS", "Updated header layout attributes: horizontal=%s", tostring(horizontal))
+    end
 end
 
 -- Update raid position attributes - SECURE ONLY (no Lua fallback for debugging)
@@ -3609,7 +3691,9 @@ function DF:UpdatePlayerGroupTracking()
     local oldGroup = DF.cachedPlayerGroup
     DF.cachedPlayerGroup = DF:GetPlayerRaidGroup()
     
-    DF:Debug("HEADERS", "Player group tracking: %s -> %s", tostring(oldGroup), tostring(DF.cachedPlayerGroup))
+    if DF:DebugActive("HEADERS") then
+        DF:Debug("HEADERS", "Player group tracking: %s -> %s", tostring(oldGroup), tostring(DF.cachedPlayerGroup))
+    end
     
     -- If group changed and we have the handler, update attributes
     if oldGroup ~= DF.cachedPlayerGroup and DF.raidPositionHandler then
@@ -3712,8 +3796,10 @@ function DF:ApplyRaidGroupSorting()
     local db = DF:GetRaidDB()
     if not db.raidUseGroups then return end
 
-    DF:Debug("RAIDPOS", "ApplyRaidGroupSorting ENTRY: members=%d anchor=(%.1f,%.1f)",
-        GetNumGroupMembers(), db.raidAnchorX or 0, db.raidAnchorY or 0)
+    if DF:DebugActive("RAIDPOS") then
+        DF:Debug("RAIDPOS", "ApplyRaidGroupSorting ENTRY: members=%d anchor=(%.1f,%.1f)",
+            GetNumGroupMembers(), db.raidAnchorX or 0, db.raidAnchorY or 0)
+    end
 
     -- FrameSort integration: yield sorting to FrameSort when active
     if DF:IsFrameSortActive() then return end
@@ -3939,7 +4025,9 @@ function DF:ApplyRaidGroupSorting()
                         local ch = header:GetAttribute("child" .. ci)
                         if ch and ch:IsShown() then childCountAfter = childCountAfter + 1 end
                     end
-                    DF:Debug("ROSTER", "  Group %d: Hide/Show (sortChanged=%s), children -> %d", i, tostring(sortChanged), childCountAfter)
+                    if DF:DebugActive("ROSTER") then
+                        DF:Debug("ROSTER", "  Group %d: Hide/Show (sortChanged=%s), children -> %d", i, tostring(sortChanged), childCountAfter)
+                    end
                 end
             end
         end
@@ -5076,7 +5164,9 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
     end
     DF._updatingRaidHeaderVisibility = true
 
-    DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: skipReposition=%s", tostring(skipReposition))
+    if DF:DebugActive("VISIBILITY") then
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: skipReposition=%s", tostring(skipReposition))
+    end
 
     -- Don't show live frames while in test mode
     -- IMPORTANT: Clear the recursion guard before returning, otherwise all future
@@ -5334,7 +5424,9 @@ function DF:UpdateRaidFlatFrameSizes()
     local frameWidth = db.frameWidth or 80
     local frameHeight = db.frameHeight or 40
 
-    DF:Debug("FLATRAID", "UpdateRaidFlatFrameSizes: %s x %s", tostring(frameWidth), tostring(frameHeight))
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "UpdateRaidFlatFrameSizes: %s x %s", tostring(frameWidth), tostring(frameHeight))
+    end
 
     if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
         for i = 1, 40 do
@@ -6903,8 +6995,10 @@ function DF:ApplyHeaderSettings_Now()
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
     
-    DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatFrameAnchor=%s",
-        tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatFrameAnchor))
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatFrameAnchor=%s",
+            tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatFrameAnchor))
+    end
     
     -- Apply orientation from growDirection, growthAnchor, and selfPosition settings
     local horizontal = (db.growDirection == "HORIZONTAL")
@@ -6924,8 +7018,10 @@ function DF:ApplyHeaderSettings_Now()
     else
         -- Combined/flat mode: use raidFlatFrameAnchor (different setting to the grouped one)
         local raidGrowFrom = raidDb.raidFlatFrameAnchor or "START"
-        DF:Debug("FLATRAID", "ApplyHeaderSettings:   FLAT MODE: SetRaidOrientation(%s, %s)",
-            tostring(raidHorizontal), raidGrowFrom)
+        if DF:DebugActive("FLATRAID") then
+            DF:Debug("FLATRAID", "ApplyHeaderSettings:   FLAT MODE: SetRaidOrientation(%s, %s)",
+                tostring(raidHorizontal), raidGrowFrom)
+        end
         DF:SetRaidOrientation(raidHorizontal, raidGrowFrom)
     end
 
@@ -7413,8 +7509,10 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
     -- 3. Update position handler for group layout
     -- Frame updates (role icons, dispel, etc.) happen via OnAttributeChanged and UNIT_* events
     if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
-        DF:Debug("ROSTER", "EVENT: %s, members=%d, inRaid=%s, combat=%s",
-            event, GetNumGroupMembers(), tostring(IsInRaid()), tostring(InCombatLockdown()))
+        if DF:DebugActive("ROSTER") then
+            DF:Debug("ROSTER", "EVENT: %s, members=%d, inRaid=%s, combat=%s",
+                event, GetNumGroupMembers(), tostring(IsInRaid()), tostring(InCombatLockdown()))
+        end
         DF:RosterDebugEvent("Headers.lua:" .. event)
         
         -- Only if headers are fully initialized
@@ -7544,9 +7642,11 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         -- PLAYER_ENTERING_WORLD runs immediately
         gruEventCount = 0  -- Reset GRU counter for this zone-in
         local isInInstance, instanceType = IsInInstance()
-        DF:Debug("ROSTER", "PEW: isInitialLogin=%s, isReload=%s, inRaid=%s, inGroup=%s, members=%d, inInstance=%s, instanceType=%s",
-            tostring(arg1), tostring(arg2), tostring(IsInRaid()), tostring(IsInGroup()),
-            GetNumGroupMembers(), tostring(isInInstance), tostring(instanceType or "nil"))
+        if DF:DebugActive("ROSTER") then
+            DF:Debug("ROSTER", "PEW: isInitialLogin=%s, isReload=%s, inRaid=%s, inGroup=%s, members=%d, inInstance=%s, instanceType=%s",
+                tostring(arg1), tostring(arg2), tostring(IsInRaid()), tostring(IsInGroup()),
+                GetNumGroupMembers(), tostring(isInInstance), tostring(instanceType or "nil"))
+        end
 
         -- FIX: Clear ALL caches to force re-validation of all frames
         -- This fixes health desync when WoW shuffles unit slots without changing unit strings
@@ -7634,7 +7734,9 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         -- Without this, all UNIT_HEALTH events are silently dropped until something
         -- else triggers OnAttributeChanged (e.g., a roster change).
         DF:RebuildUnitFrameMap()
-        DF:Debug("ROSTER", "PEW: initial RebuildUnitFrameMap done, mapSize=%d", DF.unitFrameMap and DF:CountUnitFrameMap() or -1)
+        if DF:DebugActive("ROSTER") then
+            DF:Debug("ROSTER", "PEW: initial RebuildUnitFrameMap done, mapSize=%d", DF.unitFrameMap and DF:CountUnitFrameMap() or -1)
+        end
         
         -- Explicitly refresh all visible frames after a small delay
         -- This catches cases where unit attributes don't change but the player behind
@@ -7642,9 +7744,13 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         C_Timer.After(0.1, function()
             -- FIX: Rebuild map again in case header children became visible
             -- after the initial rebuild (SecureGroupHeaderTemplate may defer child Show)
-            DF:Debug("ROSTER", "PEW +0.1s: rebuilding unitFrameMap, members=%d, GRUs so far=%d", GetNumGroupMembers(), gruEventCount)
+            if DF:DebugActive("ROSTER") then
+                DF:Debug("ROSTER", "PEW +0.1s: rebuilding unitFrameMap, members=%d, GRUs so far=%d", GetNumGroupMembers(), gruEventCount)
+            end
             DF:RebuildUnitFrameMap()
-            DF:Debug("ROSTER", "PEW +0.1s: mapSize=%d", DF.unitFrameMap and DF:CountUnitFrameMap() or -1)
+            if DF:DebugActive("ROSTER") then
+                DF:Debug("ROSTER", "PEW +0.1s: mapSize=%d", DF.unitFrameMap and DF:CountUnitFrameMap() or -1)
+            end
             if DF.RefreshLiveFrames then
                 DF:RefreshLiveFrames()
             end
@@ -7655,11 +7761,15 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             -- Schedule an independent recheck here so the party fills in even
             -- without a subsequent GROUP_ROSTER_UPDATE.
             if not IsInRaid() and IsInGroup() and GetNumGroupMembers() < 5 and not InCombatLockdown() then
-                DF:Debug("ROSTER", "PEW: incomplete party (%d members), scheduling follower recheck", GetNumGroupMembers())
+                if DF:DebugActive("ROSTER") then
+                    DF:Debug("ROSTER", "PEW: incomplete party (%d members), scheduling follower recheck", GetNumGroupMembers())
+                end
                 -- Queue a roster update after a delay to give NPCs time to register
                 C_Timer.After(FOLLOWER_RECHECK_DELAY, function()
                     if not InCombatLockdown() and IsInGroup() and GetNumGroupMembers() < 5 then
-                        DF:Debug("ROSTER", "PEW follower recheck — group has %d members", GetNumGroupMembers())
+                        if DF:DebugActive("ROSTER") then
+                            DF:Debug("ROSTER", "PEW follower recheck — group has %d members", GetNumGroupMembers())
+                        end
                         rosterMembershipCache = {}
                         lastRosterCount = 0
                         QueueRosterUpdate()
@@ -7678,9 +7788,13 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                     DF:Debug("ROSTER", "PEW +1.0s: skipped (combat lockdown)")
                     return
                 end
-                DF:Debug("ROSTER", "PEW +1.0s: rebuilding unitFrameMap, members=%d, GRUs so far=%d", GetNumGroupMembers(), gruEventCount)
+                if DF:DebugActive("ROSTER") then
+                    DF:Debug("ROSTER", "PEW +1.0s: rebuilding unitFrameMap, members=%d, GRUs so far=%d", GetNumGroupMembers(), gruEventCount)
+                end
                 DF:RebuildUnitFrameMap()
-                DF:Debug("ROSTER", "PEW +1.0s: mapSize=%d", DF.unitFrameMap and DF:CountUnitFrameMap() or -1)
+                if DF:DebugActive("ROSTER") then
+                    DF:Debug("ROSTER", "PEW +1.0s: mapSize=%d", DF.unitFrameMap and DF:CountUnitFrameMap() or -1)
+                end
                 if DF.RefreshLiveFrames then
                     DF:RefreshLiveFrames()
                 end
@@ -7766,7 +7880,9 @@ function DF:ProcessRosterUpdate()
     DF:InvalidatePinnedUnitCache()
     local numGroup = GetNumGroupMembers()
     local inRaid = IsInRaid()
-    DF:Debug("ROSTER", "ProcessRosterUpdate: %d members, inRaid=%s", numGroup, tostring(inRaid))
+    if DF:DebugActive("ROSTER") then
+        DF:Debug("ROSTER", "ProcessRosterUpdate: %d members, inRaid=%s", numGroup, tostring(inRaid))
+    end
 
     -- RAIDPOS diagnostic: capture container position state at the start of every
     -- roster processing pass so we can correlate "frames jumped" reports with the
@@ -7775,10 +7891,12 @@ function DF:ProcessRosterUpdate()
         local rdb = DF:GetRaidDB()
         local activeAuto = (DF.AutoProfilesUI and DF.AutoProfilesUI.activeRuntimeProfile
             and DF.AutoProfilesUI.activeRuntimeProfile.name) or "none"
-        DF:Debug("RAIDPOS", "ProcessRosterUpdate ENTRY: members=%d inRaid=%s anchor=(%.1f,%.1f) scale=%.3f autoProfile=%s",
-            numGroup, tostring(inRaid),
-            rdb and rdb.raidAnchorX or 0, rdb and rdb.raidAnchorY or 0,
-            rdb and rdb.frameScale or 1.0, activeAuto)
+        if DF:DebugActive("RAIDPOS") then
+            DF:Debug("RAIDPOS", "ProcessRosterUpdate ENTRY: members=%d inRaid=%s anchor=(%.1f,%.1f) scale=%.3f autoProfile=%s",
+                numGroup, tostring(inRaid),
+                rdb and rdb.raidAnchorX or 0, rdb and rdb.raidAnchorY or 0,
+                rdb and rdb.frameScale or 1.0, activeAuto)
+        end
     end
 
     -- Clear range cache so stale unit→range mappings are flushed
@@ -8063,7 +8181,9 @@ function DF:ProcessRosterUpdate()
                 followerRecheckTimer = C_Timer.NewTimer(FOLLOWER_RECHECK_DELAY, function()
                     followerRecheckTimer = nil
                     if not InCombatLockdown() and IsInGroup() and GetNumGroupMembers() < 5 then
-                        DF:Debug("ROSTER", "Follower dungeon recheck %d/%d — group has %d members", retryCount, FOLLOWER_RECHECK_MAX, GetNumGroupMembers())
+                        if DF:DebugActive("ROSTER") then
+                            DF:Debug("ROSTER", "Follower dungeon recheck %d/%d — group has %d members", retryCount, FOLLOWER_RECHECK_MAX, GetNumGroupMembers())
+                        end
                         -- Force roster cache to see the change
                         rosterMembershipCache = {}
                         lastRosterCount = 0
@@ -8815,6 +8935,11 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- PLAYER_FLAGS_CHANGED: Update AFK icon
     if event == "PLAYER_FLAGS_CHANGED" then
         local unit = arg1
+        -- Text Designer's status text can include AFK; it refreshes with the
+        -- health category. No-op without the TD module.
+        if unit and DF.UpdateTextDesigner then
+            tdRefresh(unitFrameMap[unit], FindPinnedFrameForUnit(unit), "health")
+        end
         if unit and DF.UpdateAFKIcon then
             local frame = unitFrameMap[unit]
             if frame and frame.dfEventsEnabled ~= false then

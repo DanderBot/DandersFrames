@@ -27,6 +27,61 @@ if originalCreateUnitFrame then
 end
 
 -- ============================================================
+-- TURNING CLICK-CASTING ON OR OFF FROM THE UI
+-- The one path both switches take: the Enabled box in the Binds header and
+-- the Click-Casting row on the settings window's Modules page.
+--
+-- Enabling is asynchronous: a Clique/Clicked conflict or the Blizzard warning
+-- opens a popup, and the write happens in that popup's confirm callback, not
+-- on the click. `checkbox` stays ticked while the popup is up; the popup's
+-- CANCEL path unchecks it. `onDone` (optional) runs after a write this
+-- function makes itself (disable, or a confirmed enable).
+-- ============================================================
+function CC:RequestEnabled(wantEnabled, checkbox, onDone)
+    if wantEnabled then
+        -- Check for conflicting addons
+        local conflicts = {}
+        if C_AddOns and C_AddOns.IsAddOnLoaded then
+            if C_AddOns.IsAddOnLoaded("Clique") then
+                table.insert(conflicts, "Clique")
+            end
+            if C_AddOns.IsAddOnLoaded("Clicked") then
+                table.insert(conflicts, "Clicked")
+            end
+        elseif IsAddOnLoaded then
+            if IsAddOnLoaded("Clique") then
+                table.insert(conflicts, "Clique")
+            end
+            if IsAddOnLoaded("Clicked") then
+                table.insert(conflicts, "Clicked")
+            end
+        end
+
+        if #conflicts > 0 then
+            -- The popup owns the decision from here; it unchecks on cancel,
+            -- and runs onDone once a choice turns click-casting on.
+            CC:ShowClickCastConflictPopup(conflicts, checkbox, onDone)
+            return
+        end
+
+        -- No addon conflicts - show Blizzard warning
+        CC:ShowBlizzardClickCastWarning(checkbox, function()
+            -- Proceed with enabling
+            CC.db.enabled = true
+            CC:SetEnabled(true)
+            if onDone then onDone() end
+        end)
+        -- The warning's confirm callback owns the write; it unchecks on cancel.
+        return
+    end
+
+    -- Disabling - proceed normally (no popup, so write it here).
+    CC.db.enabled = false
+    CC:SetEnabled(false)
+    if onDone then onDone() end
+end
+
+-- ============================================================
 -- INITIALIZATION HOOK
 -- ============================================================
 
@@ -161,48 +216,11 @@ function CC:CreateClickCastUI(parent)
         nativeCheck = true,
         labelGap    = 3,
         get         = function() return CC.db and CC.db.enabled end,
-        onClick     = function(wantEnabled)
-        if wantEnabled then
-            -- Check for conflicting addons
-            local conflicts = {}
-            if C_AddOns and C_AddOns.IsAddOnLoaded then
-                if C_AddOns.IsAddOnLoaded("Clique") then
-                    table.insert(conflicts, "Clique")
-                end
-                if C_AddOns.IsAddOnLoaded("Clicked") then
-                    table.insert(conflicts, "Clicked")
-                end
-            elseif IsAddOnLoaded then
-                if IsAddOnLoaded("Clique") then
-                    table.insert(conflicts, "Clique")
-                end
-                if IsAddOnLoaded("Clicked") then
-                    table.insert(conflicts, "Clicked")
-                end
-            end
-            
-            if #conflicts > 0 then
-                -- The popup owns the decision from here; it unchecks on cancel.
-                CC:ShowClickCastConflictPopup(conflicts, enableCb)
-                return
-            end
-
-            -- No addon conflicts - show Blizzard warning
-            CC:ShowBlizzardClickCastWarning(enableCb, function()
-                -- Proceed with enabling
-                CC.db.enabled = true
-                CC:SetEnabled(true)
-            end)
-            -- The warning's confirm callback owns the write; it unchecks on cancel.
-            return
-        end
-
-        -- Disabling - proceed normally (no popup, so write it here).
-        CC.db.enabled = false
-        CC:SetEnabled(false)
-        end,
+        onClick     = function(wantEnabled) CC:RequestEnabled(wantEnabled, enableCb) end,
     })
     enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
+    -- The Modules page switches click-casting too; it repaints this box after.
+    CC.headerEnableCb = enableCb
 
     -- Profile settings cogwheel (far right of row 1)
     local profileCogwheel = CreateFrame("Button", nil, row1, "BackdropTemplate")
@@ -218,7 +236,7 @@ function CC:CreateClickCastUI(parent)
         self.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
         DF.GUI:ShowTooltip(self, {
             title = L["Profile Settings"],
-            lines = { L["Open the Profiles tab to manage profiles"] },
+            lines = { L["Click-cast profiles are managed on the Profiles page."] },
         })
     end)
     profileCogwheel:HookScript("OnLeave", function(self)
@@ -892,11 +910,19 @@ function CC:CreateClickCastUI(parent)
     
     -- Tab switching function (defined after all controls exist)
     local function SetActiveTab(tabName)
+        -- ★ CLICK-CAST PROFILES LIVE UNDER PROFILES NOW (Profiles > Click
+        -- Casting, GUI/Pages/Profiles.lua), which hosts the one profiles panel
+        -- this file builds. The Profiles tab and the header cog are kept as the
+        -- way there; neither switches this panel's own tab any more.
+        if tabName == "profiles" then
+            if DF.GUI and DF.GUI.SelectTab then DF.GUI.SelectTab("profiles_clickcast") end
+            return
+        end
         CC.activeTab = tabName
         spellsTab:SetActive(tabName == "spells")
         macrosTab:SetActive(tabName == "macros")
         itemsTab:SetActive(tabName == "items")
-        profilesTab:SetActive(tabName == "profiles")
+        profilesTab:SetActive(false)
         
         -- Toggle spell controls
         local showSpellControls = (tabName == "spells")
@@ -917,26 +943,20 @@ function CC:CreateClickCastUI(parent)
         local showItemsControls = (tabName == "items")
         itemsHint:SetShown(showItemsControls)
         
-        -- Toggle profiles panel
-        local showProfiles = (tabName == "profiles")
-        if CC.profilesPanel then
-            CC.profilesPanel:SetShown(showProfiles)
-        end
-        if CC.spellGrid then
-            CC.spellGrid:SetShown(not showProfiles)
-        end
-        
-        if not showProfiles then
-            CC:RefreshSpellGrid()
-        else
-            CC:RefreshProfilesPanel()
-        end
+        -- (The profiles panel is not this tab strip's to show or hide: it is
+        -- hosted on Profiles > Click Casting.)
+        if CC.spellGrid then CC.spellGrid:Show() end
+        CC:RefreshSpellGrid()
     end
     
     spellsTab:SetScript("OnClick", function() SetActiveTab("spells") end)
     macrosTab:SetScript("OnClick", function() SetActiveTab("macros") end)
     itemsTab:SetScript("OnClick", function() SetActiveTab("items") end)
     profilesTab:SetScript("OnClick", function() SetActiveTab("profiles") end)
+    profilesTab:HookScript("OnEnter", function(self)
+        DF.GUI:ShowTooltip(self, { title = L["Profiles"], lines = { L["Click-cast profiles are managed on the Profiles page."] } })
+    end)
+    profilesTab:HookScript("OnLeave", function() DF.GUI:HideTooltip() end)
     
     -- Store reference for external access (e.g., from profile settings cogwheel)
     CC.SetActiveTab = SetActiveTab
@@ -1341,8 +1361,8 @@ function CC:RefreshClickCastingUI()
         self:RefreshSpellGrid()
     end
     
-    -- Refresh profiles panel if visible
-    if self.activeTab == "profiles" and self.profilesPanel then
+    -- Refresh profiles panel if visible (hosted on Profiles > Click Casting)
+    if self.profilesPanel and self.profilesPanel:IsVisible() then
         self:RefreshProfilesPanel()
     end
     

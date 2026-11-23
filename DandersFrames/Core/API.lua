@@ -871,6 +871,22 @@ end
 -- (common during a group-wide reshuffle), the callback fires exactly once
 -- for that sortType on the next frame. Safe to re-query
 -- DandersFrames_GetFrameForUnit(unit) from within the callback.
+--
+--   DandersFrames.RegisterCallback(self, "OnProfileChanged", function(event, profileName)
+--       -- profileName is the profile now live (DandersFrames.db is it)
+--   end)
+--
+-- Fires after a profile switch, a profile reset and a profile import, once the
+-- new settings are in place and the frames have been refreshed. A reset fires
+-- with the same name it had; a spec auto-switch is a switch.
+--
+--   DandersFrames.RegisterCallback(self, "OnTestModeChanged", function(event, scope, active)
+--       -- scope is "party" or "raid"; active is whether that preview is on screen now
+--   end)
+--
+-- Fires when a test-mode preview appears or goes away, by any route (the test
+-- panel, /df test, the toolbar, an unlock). Only on a change, and with what is
+-- actually showing: a request refused in combat does not fire.
 -- ============================================================
 
 local CallbackHandler = LibStub and LibStub("CallbackHandler-1.0", true)

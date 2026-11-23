@@ -47,6 +47,8 @@ local env = setmetatable({
         end,
     },
     DF = { IsAuraDesignerEnabledForMode = function() return W.enabled end },
+    -- The enable of what the page edits (Options.lua P.EditTargetEnabled).
+    P = { EditTargetEnabled = function() return W.enabled end },
 }, { __index = _G })
 local chunk = loadstring(body .. "\nreturn ApplyEnabledState", "@Editor.lua:ApplyEnabledState")
 check(chunk ~= nil, "adcover: the lifted function compiles")
@@ -87,7 +89,7 @@ eq(W.made, 2, "adcover: (no second cover on the same frame)")
 
 -- ---- who calls it ----
 -- The full build is everything in the island after the reuse path's return.
-local island = cut("local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)") or ""
+local island = cut("local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef, opts)") or ""
 local full = island:match("\n        DF:AuraDesigner_RefreshPage%(%)\n        return\n    end\n(.*)$") or ""
 check(full ~= "", "adcover: found the island's full-build path")
 check(full:match("ApplyEnabledState%(%)%s*end%s*$") ~= nil,

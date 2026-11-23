@@ -886,7 +886,8 @@ end
 local function CopyAnchor(a)
     if type(a) ~= "table" then return nil end
     return { target = a.target, mode = a.mode, edge = a.edge, align = a.align,
-             point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY }
+             point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY,
+             mirrorX = a.mirrorX, mirrorY = a.mirrorY, mirrorPosX = a.mirrorPosX, mirrorPosY = a.mirrorPosY }
 end
 
 -- What the legacy drag handles, the position panel and the Wago API call "x/y": the
@@ -1260,16 +1261,16 @@ function PinnedFrames:UpdateBossHandlerConfig(setIndex)
             if f then
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
-                -- ☠ `dfPinnedEffDB` IS the Hide Auras / Hide Icons mechanism: BuildPinnedEffDB forces
+                -- ☠ `dfDB` IS the Hide Auras / Hide Icons mechanism: BuildPinnedEffDB forces
                 -- showBuffs/showDebuffs/defensiveIconEnabled/missingBuffIconEnabled false on it and every
                 -- updater reads it through DF:GetFrameDB. There is no separate hide flag to change.
-                f.dfPinnedEffDB = effDB
+                f.dfDB = effDB
                 -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset;
                 -- the resolver falls back to FrameMode when the stamp is nil).
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
                 DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
-                f.isRaidFrame = IsInRaid()
+                DF:SetRaidFrameFlag(f, IsInRaid())
             end
         end
     end
@@ -1667,9 +1668,11 @@ function PinnedFrames:UpdateHeaderNameList(setIndex)
     
     local nameList = BuildNameList(validRosterNames)
     
-    DF:Debug("PINNED", "Set %d updating nameList (%d players in set, %d valid, list=%s)",
-        setIndex, #set.players, #validRosterNames,
-        nameList ~= "" and nameList or "(empty)")
+    if DF:DebugActive("PINNED") then
+        DF:Debug("PINNED", "Set %d updating nameList (%d players in set, %d valid, list=%s)",
+            setIndex, #set.players, #validRosterNames,
+            nameList ~= "" and nameList or "(empty)")
+    end
     
     -- Only update if not in combat
     if InCombatLockdown() then
@@ -1855,13 +1858,13 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
             -- sizes from the shared per-mode db) keeps this set's Match/Custom size.
             child.dfPinnedWidth, child.dfPinnedHeight = frameWidth, frameHeight
             child.dfPinnedBorderDB = borderDB
-            child.dfPinnedEffDB = effDB   -- the Hide Auras/Icons mechanism; see the note at the boss site
+            child.dfDB = effDB   -- the Hide Auras/Icons mechanism; see the note at the boss site
             -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset).
             child.dfAuraPresetOverride = set.auraDesignerPreset
             child.dfTextPresetOverride = set.textDesignerPreset
             DF:SetPixelPerfectSize(child, frameWidth, frameHeight, effDB or db)
             -- Also update the isRaidFrame flag for proper DB selection in other functions
-            child.isRaidFrame = IsInRaid()
+            DF:SetRaidFrameFlag(child, IsInRaid())
             -- Re-render the border now so border edits apply live (the per-frame
             -- ApplyFrameLayout also picks up dfPinnedBorderDB on its next tick).
             if DF.ApplyFrameBorder then DF:ApplyFrameBorder(child, borderDB) end
@@ -1963,9 +1966,11 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
         end
     end
     
-    DF:Debug("PINNED", "ApplyLayoutSettings set=%d horizontal=%s frameAnchor=%s columnAnchor=%s containerAnchor=%s size=%dx%d spacing=%d,%d",
-        setIndex, tostring(horizontal), tostring(frameAnchor), tostring(columnAnchor),
-        tostring(containerAnchorPoint), frameWidth, frameHeight, hSpacing, vSpacing)
+    if DF:DebugActive("PINNED") then
+        DF:Debug("PINNED", "ApplyLayoutSettings set=%d horizontal=%s frameAnchor=%s columnAnchor=%s containerAnchor=%s size=%dx%d spacing=%d,%d",
+            setIndex, tostring(horizontal), tostring(frameAnchor), tostring(columnAnchor),
+            tostring(containerAnchorPoint), frameWidth, frameHeight, hSpacing, vSpacing)
+    end
     
     -- ============================================================
     -- CRITICAL: 4-step refresh to force repositioning
@@ -2533,7 +2538,9 @@ function PinnedFrames:Initialize()
         return
     end
 
-    DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
+    if DF:DebugActive("PINNED") then
+        DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
+    end
 
     -- ☠ ENABLED sets only, NOT every defined set. CreateSetFrames force-creates up to 40 secure
     -- header children per set via the startingIndex trick, and building them for sets that are
@@ -2728,8 +2735,10 @@ function PinnedFrames:Reinitialize()
         -- deleting the LAST enabled set left its fake frames on screen. Prune walks
         -- the real containers by name; it does not know about testContainers.
         self:RefreshTestModeSets()
-        DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s), pruned",
-            tostring(self.currentMode))
+        if DF:DebugActive("PINNED") then
+            DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s), pruned",
+                tostring(self.currentMode))
+        end
         return
     end
 
@@ -3310,8 +3319,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
         -- Check if mode changed (party <-> raid)
         local actualMode = GetActualMode()
         if PinnedFrames.currentMode and actualMode ~= PinnedFrames.currentMode then
-            DF:Debug("PINNED", "Mode changed from %s to %s — reinitializing",
-                tostring(PinnedFrames.currentMode), tostring(actualMode))
+            if DF:DebugActive("PINNED") then
+                DF:Debug("PINNED", "Mode changed from %s to %s — reinitializing",
+                    tostring(PinnedFrames.currentMode), tostring(actualMode))
+            end
             PinnedFrames:Reinitialize()
             return
         end
@@ -3525,7 +3536,7 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
 
     frame.index = index
     frame.dfTestIndex = index
-    frame.isRaidFrame = isRaidMode
+    DF:SetRaidFrameFlag(frame, isRaidMode)
     frame.dfIsTestFrame = true
     frame.dfIsDandersFrame = true
     frame.dfIsPinnedTestFrame = true  -- distinguish from testPartyFrames/testRaidFrames
@@ -3653,11 +3664,11 @@ function PinnedFrames:EnsurePlayerTestFramePool(setIndex, count, isRaidMode, isB
             local fw, fh = GetSetFrameSize(setDB, db)
             pool[i].dfPinnedWidth, pool[i].dfPinnedHeight = fw, fh
             pool[i].dfPinnedBorderDB = GetSetBorderDB(setDB, GetSetBaselineDB(setDB, db))
-            pool[i].dfPinnedEffDB = setDB and BuildPinnedEffDB(db, setDB.hideAuras, setDB.hideIcons) or nil
+            pool[i].dfDB = setDB and BuildPinnedEffDB(db, setDB.hideAuras, setDB.hideIcons) or nil
             pool[i].dfAuraPresetOverride = setDB and setDB.auraDesignerPreset
             pool[i].dfTextPresetOverride = setDB and setDB.textDesignerPreset
             pool[i]:SetSize(fw, fh)
-            pool[i].isRaidFrame = isRaidMode
+            DF:SetRaidFrameFlag(pool[i], isRaidMode)
             pool[i].isPinnedBossFrame = isBossSet or false
         end
     end
@@ -3710,11 +3721,11 @@ function PinnedFrames:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
             if i <= n then
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
-                f.dfPinnedEffDB = effDB
+                f.dfDB = effDB
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
                 DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
-                f.isRaidFrame = isRaidMode
+                DF:SetRaidFrameFlag(f, isRaidMode)
 
                 local slotIndex = i - 1
                 local row = math.floor(slotIndex / unitsPerRow)

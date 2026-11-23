@@ -106,6 +106,14 @@ function Engine:ForceRefreshAllFrames()
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(TryUpdate)
     end
+    -- Standalone frames (DF:InitStandaloneFrame) are in none of those walks. Preview
+    -- frames among them are test frames, which the test refresh below owns.
+    -- ⚠ One with the designer off is cleared only when it has something to clear:
+    -- the teardown stops every sound alert, and a standalone frame that never drew
+    -- the designer must not silence the party's.
+    for f in pairs(DF.StandaloneFrames or {}) do
+        if not f.dfPreview and (f.dfADFactory or DF:IsAuraDesignerEnabled(f)) then TryUpdate(f) end
+    end
 
     -- The native factory buff row derives its Aura-Designer dedup set from the AD
     -- config at build time, so an AD config change must re-drive the buff row for

@@ -642,13 +642,17 @@ end
 
 -- CLICK-CASTING CONFLICT POPUP
 -- =========================================================================
-function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
+-- onDone: run after a choice that turns click-casting on without a reload
+-- (Ignore, or the warning already ignored), so the caller can repaint -- the
+-- Modules page and the settings rail (CC:RequestEnabled's onDone).
+function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox, onDone)
     -- Check if user has chosen to ignore conflict warnings
     if self.db and self.db.ignoreConflictWarning then
         -- Skip conflict popup, proceed to Blizzard warning / enable
         CC:ShowBlizzardClickCastWarning(enableCheckbox, function()
             CC.db.enabled = true
             CC:SetEnabled(true)
+            if onDone then onDone() end
         end)
         return
     end
@@ -839,6 +843,7 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
             CC:ShowBlizzardClickCastWarning(enableCheckbox, function()
                 CC.db.enabled = true
                 CC:SetEnabled(true)
+                if onDone then onDone() end
             end)
         end
     end)

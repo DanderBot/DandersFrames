@@ -278,6 +278,7 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Layer_Shade_Tube_Vert.png",
     "DF_Matte.tga",
     "DF_Minimalist.tga",
+    "DF_OuterGlow.tga",
     "DF_Pattern_Biohazard_V1.png",
     "DF_Pattern_Heart_V1.png",
     "DF_Pattern_Heart_V2.png",
@@ -1304,6 +1305,7 @@ DF.PartyDefaults = {
     absorbBarAnchor = "TOPRIGHT",
     absorbBarAttachedClampMode = 1,   -- no control: Missing Health is the only value (DF:MigrateAbsorbClampMode)
     absorbBarBackgroundColor = {r = 0, g = 0, b = 0, a = 1},
+    absorbBarBreakout = 0,   -- % of the bar's length the shield may draw past its end (Attached only)
     absorbBarBlendMode = "BLEND",
     absorbBarColor = {r = 0, g = 0.83529418706894, b = 1, a = 0.80208319425583},
     absorbBarFrameLevel = 11,
@@ -1992,6 +1994,9 @@ DF.PartyDefaults = {
     -- Frame Dimensions & Layout
     frameHeight = 64,
     framePadding = 0,
+    -- Keep Health Bar Inside Border: the health bar stops at the frame border's inner edge
+    -- instead of running under it (DF:BarsInsideFrameBorder). Off = padding only, as before.
+    healthInsideFrameBorder = false,
     frameSpacing = 1,
     frameScale = 1.0,
     frameWidth = 125,
@@ -2059,6 +2064,7 @@ DF.PartyDefaults = {
     healPredictionEnabled = true,
     -- ☠ UNDER THE ABSORB (+11) BY DESIGN: where the two overlap, the shield is the more
     -- important readout. See DF:ResolveHealPredictionBarLevel for the band around it.
+    healPredictionBreakout = 0,   -- % of the bar's length heals may draw past its end
     healPredictionFrameLevel = 10,
     healPredictionHeight = 6,
     healPredictionMode = "OVERLAY",
@@ -2171,11 +2177,22 @@ DF.PartyDefaults = {
     showMinimapButton = true,
 
     -- Missing Buff
+    missingBuffBlessingDPS = "might",      -- WoW Forever: the paladin blessing each role is checked for
+    missingBuffBlessingHealer = "wisdom",
+    missingBuffBlessingTank = "might",
     missingBuffCheckAttackPower = true,
+    missingBuffCheckBlessing = true,       -- WoW Forever only (as are Salvation, Spirit and Thorns)
     missingBuffCheckBronze = true,
     missingBuffCheckIntellect = true,
+    -- OFF by default: on older Forever builds Salvation counts as a paladin blessing and
+    -- doesn't stack with another blessing from the same paladin, so Salvation + Might on
+    -- one member would leave one of the two checks always showing. Stacking is reported
+    -- from build 70425; our spell data is from 70205, so it is unconfirmed.
+    missingBuffCheckSalvation = false,
     missingBuffCheckSkyfury = true,
+    missingBuffCheckSpirit = true,
     missingBuffCheckStamina = true,
+    missingBuffCheckThorns = true,
     missingBuffCheckVersatility = true,
     missingBuffClassDetection = true,
     missingBuffHideFromBar = true,
@@ -2225,6 +2242,7 @@ DF.PartyDefaults = {
     missingBuffIconSize = 24,
     missingBuffIconX = 0,
     missingBuffIconY = 0,
+    missingBuffThornsTankOnly = true,       -- WoW Forever: Thorns only on tanks (and on you while solo)
 
     -- Name Text
     nameColorClass = false,
@@ -2371,6 +2389,23 @@ DF.PartyDefaults = {
     petBorderSize = 1,
     petBorderStyle = "SOLID",
     petBorderTexture = "SOLID",
+    -- Aura rows (Frames/Pets.lua PET AURA ROWS): one buff row and one debuff row on
+    -- each group pet frame. Only these seven per row are pet-specific; filters, sort,
+    -- duration text, borders and the rest come from the main Buffs / Debuffs rows.
+    -- Inside the frame by default: debuffs from the left edge, buffs left of the
+    -- health percentage (petHealthAnchor RIGHT), both clear of the centred name.
+    petBuffAnchor = "RIGHT",
+    petBuffGrowth = "LEFT_DOWN",
+    petBuffMax = 2,
+    petBuffOffsetX = -30,
+    petBuffOffsetY = 0,
+    petBuffSize = 16,
+    petDebuffAnchor = "LEFT",
+    petDebuffGrowth = "RIGHT_DOWN",
+    petDebuffMax = 2,
+    petDebuffOffsetX = 2,
+    petDebuffOffsetY = 0,
+    petDebuffSize = 16,
     petEnabled = false,
     petFrameHeight = 22,
     petFrameWidth = 130,
@@ -2408,6 +2443,8 @@ DF.PartyDefaults = {
     petPowerColor = {r = 0.2, g = 0.4, b = 0.9},
     petPowerColorMode = "POWER",
     petShowBorder = true,
+    petShowBuffs = false,
+    petShowDebuffs = true,
     petShowHealthText = true,
     petShowPowerBar = false,
     petTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
@@ -2595,6 +2632,16 @@ DF.PartyDefaults = {
     -- behaviour, so true is what every upgrading profile already looks like. False
     -- here would have silently lengthened every matched bar on upgrade.
     resourceBarMatchAdjustFrameBorder = true,
+    -- OVER draws the bar on top of a full-size health bar; BOTTOM / TOP / LEFT / RIGHT give
+    -- it a strip along that side, and the health bar stops at the strip on frames that carry
+    -- one (DF:GetResourceBarRoomEdge, DF:GetHealthBarInsets in Frames/HealthRect.lua).
+    resourceBarPlacement = "OVER",
+    -- A Placement strip's own offsets, from its seat on its side (DF:LayoutResourceBar).
+    resourceBarStripX = 0,
+    resourceBarStripY = 0,
+    -- A Placement strip's own Frame Level: under the frame border (+14), see
+    -- DF:ResolveResourceBarLevelOffset.
+    resourceBarStripFrameLevel = 12,
     resourceBarOrientation = "HORIZONTAL",
     resourceBarReverseFill = false,
     resourceBarShowDPS = false,

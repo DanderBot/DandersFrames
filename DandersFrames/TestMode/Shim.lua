@@ -153,6 +153,21 @@ function DF:ReconcileTestMode(scope, silent)
     -- Show* refuses in combat, so `active` may still disagree afterwards; the
     -- next reconcile picks that up rather than us pretending it succeeded.
     if DF.GUI and DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
+    DF:NotifyTestModeChanged(scope)
+end
+
+-- The OnTestModeChanged API callback (Core/API.lua): fired with what is on screen
+-- NOW, and only when that differs from what was last announced, so every route
+-- that shows or hides a preview can call it without double-firing. The four
+-- Show*/Hide*TestFrames call it at their ends, which covers the paths that hide
+-- test frames directly without going through ReconcileTestMode.
+DF._testAnnounced = DF._testAnnounced or { party = false, raid = false }
+function DF:NotifyTestModeChanged(scope)
+    scope = testScope(scope)
+    local active = DF:IsTestModeActive(scope)
+    if DF._testAnnounced[scope] == active then return end
+    DF._testAnnounced[scope] = active
+    if DF.FireAPICallback then DF:FireAPICallback("OnTestModeChanged", scope, active) end
 end
 
 -- For paths that hide test frames DIRECTLY (mode switches, the Click Casting
