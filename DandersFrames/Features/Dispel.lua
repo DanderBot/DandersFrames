@@ -487,10 +487,10 @@ local function LayoutStateChanged(overlay, db, frame)
     parentW = parentW or 80
     return overlay.dfL_borderSize              ~= db.dispelBorderSize
         or overlay.dfL_framePadding            ~= db.framePadding
-        -- The health rect (Frames/HealthRect.lua) can move without the padding changing:
+        -- The seen health rect (Frames/HealthRect.lua) can move without the padding changing:
         -- a resource bar Placement strip or Keep Health Bar Inside Border.
-        or (frame and (overlay.dfL_rectL ~= frame.dfHealthRectL or overlay.dfL_rectR ~= frame.dfHealthRectR
-            or overlay.dfL_rectT ~= frame.dfHealthRectT or overlay.dfL_rectB ~= frame.dfHealthRectB))
+        or (frame and (overlay.dfL_rectL ~= frame.dfHealthVisL or overlay.dfL_rectR ~= frame.dfHealthVisR
+            or overlay.dfL_rectT ~= frame.dfHealthVisT or overlay.dfL_rectB ~= frame.dfHealthVisB))
         or overlay.dfL_borderInset             ~= db.dispelBorderInset
         or overlay.dfL_pixelPerfect            ~= db.pixelPerfect
         or overlay.dfL_iconSize                ~= db.dispelIconSize
@@ -516,8 +516,8 @@ local function CacheLayoutState(overlay, db, frame)
         or (overlay.gradient and overlay.gradient:GetParent())
     overlay.dfL_framePadding            = db.framePadding
     if frame then
-        overlay.dfL_rectL, overlay.dfL_rectR = frame.dfHealthRectL, frame.dfHealthRectR
-        overlay.dfL_rectT, overlay.dfL_rectB = frame.dfHealthRectT, frame.dfHealthRectB
+        overlay.dfL_rectL, overlay.dfL_rectR = frame.dfHealthVisL, frame.dfHealthVisR
+        overlay.dfL_rectT, overlay.dfL_rectB = frame.dfHealthVisT, frame.dfHealthVisB
     end
     overlay.dfL_borderSize              = db.dispelBorderSize
     overlay.dfL_borderInset             = db.dispelBorderInset
@@ -614,7 +614,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
     end
     
     -- Gradient positioning. Anchor rect = the UN-CLIPPED health rect
-    -- (DF:GetHealthBarInsets, Frames/HealthRect.lua: the frame minus framePadding,
+    -- (DF:GetHealthVisibleInsets, Frames/HealthRect.lua: the frame minus framePadding,
     -- less a resource bar Placement strip, so the wash never lies over the strip).
     -- Never anchor to the healthBar itself: reduced-max-health
     -- "Clip Health Bar" mode re-anchors the healthBar to just the un-reduced
@@ -632,7 +632,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
             gradientParent = CreateFrame("Frame", nil, overlay)
             overlay.dfGradientAnchorProxy = gradientParent
         end
-        local l, r, t, b = DF:GetHealthBarInsets(frame, db)
+        local l, r, t, b = DF:GetHealthVisibleInsets(frame, db)
         gradientParent:ClearAllPoints()
         -- Anchor the proxy to the WIDGET (overlay), never to `frame` directly.
         -- overlay:SetAllPoints(host), and host is the frame (legacy path) or the
@@ -2246,7 +2246,7 @@ end
 
 -- GAME mode, EDGE strip: one gradient strip texture per edge — all four now live on the
 -- SAME slot button (keyed by side), positioned from settings on the un-clipped health
--- rect (DF:GetHealthBarInsets: immune to the reduced-max clip, clear of a resource bar
+-- rect (DF:GetHealthVisibleInsets: immune to the reduced-max clip, clear of a resource bar
 -- Placement strip). Geometry mirrors ApplyOverlayLayout's EDGE branch: strip depth =
 -- health rect dimension × Gradient Size.
 local function StyleGameEdgeSlot(btn, frame, db, edge)
@@ -2255,7 +2255,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     local tex = btn.dfDispelEdgeTex and btn.dfDispelEdgeTex[edge]
     if not tex then return end
     tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
-    local l, r, t, b = DF:GetHealthBarInsets(frame, db)
+    local l, r, t, b = DF:GetHealthVisibleInsets(frame, db)
     local gradientSize = db.dispelGradientSize or 0.3
     local innerW = math.max((frame:GetWidth() or 80) - l - r, 1)
     local innerH = math.max((frame:GetHeight() or 40) - t - b, 1)

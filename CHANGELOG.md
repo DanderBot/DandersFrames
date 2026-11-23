@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Improvements
+
+- (Resource Bar) With **Placement** Below or Above a horizontal health bar (or Left of / Right of a vertical one), the health bar keeps its full size and the resource bar is cut out of it, so a see-through frame border tints the health bar the same on every side. A bar at the end the health bar fills from or towards still shrinks the health bar, so the whole health range stays readable. (by Krathe)
+
 ## [6.0.0]
 
 ### New Features

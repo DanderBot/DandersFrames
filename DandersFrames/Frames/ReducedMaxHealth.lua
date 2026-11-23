@@ -29,6 +29,7 @@ function DF:CreateReducedMaxHealthBar(frame, db)
     bar:Hide()
 
     frame.dfReducedMaxHealthBar = bar
+    if DF.HoleBarToResourceBar then DF:HoleBarToResourceBar(frame, bar) end
 end
 
 function DF:RestoreHealthBarFromReducedMax(frame)
@@ -125,9 +126,10 @@ function DF:UpdateReducedMaxHealth(frame)
     -- the clipped health bar's right edge, which anchors to this bar's texture —
     -- at the old inset, producing asymmetric padding (new on the left, old on
     -- the right).
-    -- ★ NESTED INSIDE THE HEALTH RECT, not the padding rect. With a Placement strip, the
-    -- rect already stops at the power bar, so the reduced band sits at the end of
-    -- the SHRUNK health bar and the clip below only ever moves the full-health edge.
+    -- ★ NESTED INSIDE THE HEALTH RECT, not the padding rect. With a Placement strip across
+    -- the fill, the rect already stops at the power bar, so the reduced band sits at the end
+    -- of the SHRUNK health bar and the clip below only ever moves the full-health edge. A
+    -- strip along the fill is cut out of this bar as it is of the health bar.
     -- Same insets, same function as every other health-bar anchor
     -- (DF:GetHealthBarInsets, Frames/HealthRect.lua) -- never re-derive them here.
     local l, r, t, b = DF:GetHealthBarInsets(frame, db)
