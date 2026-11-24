@@ -2102,27 +2102,19 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
                 end
             end
             
-            -- Show what bindings SHOULD be on this frame
-            local scopesApplicable = {}
-            if frame.dfClickCastRegistered then
-                scopesApplicable.unitframes = true
-                scopesApplicable.blizzard = frame.dfIsBlizzardFrame
-            end
+            -- The frame scope this frame answers to (CC:GetFrameScope)
+            local frameScope = CC:GetFrameScope(frame)
+            print("  Frame scope: " .. tostring(frameScope)
+                .. "  registered=" .. tostring(frame.dfClickCastRegistered == true))
             
-            print("  Applicable scopes:")
-            for scope, active in pairs(scopesApplicable) do
-                print("    " .. scope .. ": " .. tostring(active))
-            end
-            
-            -- List enabled bindings
+            -- List enabled bindings, and whether each is on in this frame's scope
             print("  Enabled bindings:")
             for i, binding in ipairs(CC.db.bindings) do
                 if binding.enabled ~= false then
-                    local scope = binding.scope or "blizzard"
-                    local bindType = binding.bindType or "mouse"
+                    local on = CC:BindingScopeOn(binding, frameScope) and "ON " or "off"
                     local spellName = binding.spellName or binding.macroName or binding.actionType or "?"
                     local keyText = CC:GetBindingKeyText(binding)
-                    print("    [" .. scope .. "] " .. keyText .. " -> " .. spellName)
+                    print("    [" .. on .. "] " .. keyText .. " -> " .. spellName)
                 end
             end
             

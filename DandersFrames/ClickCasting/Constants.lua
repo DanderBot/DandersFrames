@@ -434,10 +434,37 @@ local FRAME_INFO = {
     },
     otherFrames = {
         name = "Other Frames",
-        desc = "Player frame, target frame, focus frame, pet frame, boss frames, arena frames, and nameplates",
+        desc = "Blizzard's frames (player, target, focus, pet, boss, arena), other addons' unit frames, and nameplates",
     },
 }
 CC.FRAME_INFO = FRAME_INFO
+
+-- ============================================================
+-- FRAME SCOPES
+-- Where on DandersFrames' own frames a binding works, one key per frame type.
+-- Stored on the binding as frames.scopes[key] = bool (CC:BindingScopeOn reads
+-- it); "other" is not a member here, it stays frames.otherFrames.
+--
+-- ⚠ The keys are DB keys: never rename one. A unit frame's key IS its
+-- dfUFUnit (DandersFrames_UnitFrames/Units.lua), so a new unit frame gets a
+-- scope by existing, and a binding that has never been saved with that key
+-- falls back to frames.dandersFrames (see CC:BindingScopeOn).
+-- ============================================================
+local FRAME_SCOPE_FAMILIES = {
+    { key = "group", members = { "party", "raid" } },
+    { key = "unit",  members = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" } },
+}
+CC.FRAME_SCOPE_FAMILIES = FRAME_SCOPE_FAMILIES
+
+-- Every DF scope, in display order.
+local FRAME_SCOPES = {}
+for _, fam in ipairs(FRAME_SCOPE_FAMILIES) do
+    for _, key in ipairs(fam.members) do FRAME_SCOPES[#FRAME_SCOPES + 1] = key end
+end
+CC.FRAME_SCOPES = FRAME_SCOPES
+
+-- The scope a frame outside DandersFrames answers to.
+CC.FRAME_SCOPE_OTHER = "other"
 
 -- Targeting Fallback info (checkboxes - for keyboard/hover bindings)
 -- Shared warning: every fallback below forces the binding's key onto the

@@ -2534,7 +2534,34 @@ function GUI:CreateCheckRow(parent, opts)
             on = on and true or false
             baseSetChecked(self, on)
             self.check:SetShown(on)
+            -- A plain set ends any partial state (SetMixed below).
+            self.mixed = nil
+            self.check:SetAlpha(self.blockedReason and 0.4 or 1)
         end
+
+        -- PARTIAL ("some but not all"): a parent row over members, e.g. click-
+        -- casting's Group Frames over Party and Raid. Drawn as the check, dimmed;
+        -- the native checked state is left false so a click means "turn all on".
+        -- Manual rows only -- the native texture has no partial look.
+        function cb:SetMixed(on)
+            if not on then return end
+            baseSetChecked(self, false)
+            self.mixed = true
+            self.check:Show()
+            self.check:SetAlpha(0.4)
+        end
+    end
+
+    -- BLOCKED: shown greyed with the reason in its tooltip, and deaf to clicks.
+    -- The value stays as it is (nothing is cleared), so lifting the block gives
+    -- the row back exactly as it was. Not :Disable() -- a disabled button gets
+    -- no OnEnter, and the reason has to be readable on hover.
+    -- reason = a string to block, nil to unblock.
+    function cb:SetBlocked(reason)
+        self.blockedReason = reason
+        local col = reason and C_TEXT_DIM or (opts.labelColor or C_TEXT)
+        self.label:SetTextColor(col.r or col[1], col.g or col[2], col.b or col[3])
+        self.check:SetAlpha((reason or self.mixed) and 0.4 or 1)
     end
 
     -- Keep the checked state and the texture in step. Equivalent to SetChecked above on
@@ -2562,7 +2589,18 @@ function GUI:CreateCheckRow(parent, opts)
     -- A call site that genuinely defers its write simply passes no `set`.
     cb:SetScript("OnClick", function(self)
         local val = self:GetChecked() and true or false
-        if self.manualCheck then self.check:SetShown(val) end
+        if self.blockedReason then
+            -- Undo the client's own toggle; a blocked row keeps its value.
+            local wasMixed = self.mixed
+            self:SetChecked(not val)
+            if wasMixed and self.SetMixed then self:SetMixed(true) end
+            return
+        end
+        if self.manualCheck then
+            self.check:SetShown(val)
+            self.mixed = nil
+            self.check:SetAlpha(1)
+        end
         -- Before set/onClick so the click still sounds if a handler errors. Opt-in:
         -- the settings pages deliberately do not sound their checkboxes, but the
         -- binding editor's always have and that is a behaviour, not a style.
@@ -2573,7 +2611,17 @@ function GUI:CreateCheckRow(parent, opts)
 
     if opts.tooltip then
         cb:SetScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, opts.tooltip)
+            if self.blockedReason then
+                -- The row's own tooltip, then why it is greyed.
+                local t = opts.tooltip
+                local lines = {}
+                for _, line in ipairs(t.lines or {}) do lines[#lines + 1] = line end
+                lines[#lines + 1] = " "
+                lines[#lines + 1] = { text = self.blockedReason, color = C_TEXT_DIM }
+                GUI:ShowTooltip(self, { title = t.title, lines = lines, anchor = t.anchor })
+            else
+                GUI:ShowTooltip(self, opts.tooltip)
+            end
         end)
         cb:SetScript("OnLeave", function() GUI:HideTooltip() end)
     end

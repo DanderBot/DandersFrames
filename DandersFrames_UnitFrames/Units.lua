@@ -537,6 +537,10 @@ function Units:Build(key, unit, token, name, parent, slot)
     f:HookScript("OnHide", OnHide)
     f:SetScript("OnEvent", Units.OnEvent)
     if ClickCastFrames then ClickCastFrames[f] = true end
+    -- The template's OnLoad registered this button for click-casting before
+    -- dfUFUnit was stamped, so its binds went on as a party frame's. Re-apply
+    -- now its frame scope (Unit Frames > this unit) is known.
+    if DF.ClickCast and DF.ClickCast.RefreshFrameScope then DF.ClickCast:RefreshFrameScope(f) end
     if RANGED[unit] and DF.RegisterRangeFrame then DF:RegisterRangeFrame(f) end
     UF.frames[key] = f
     Elements("Attach", f)
