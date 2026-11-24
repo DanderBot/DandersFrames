@@ -100,6 +100,24 @@ Search.Concepts = {
     { "phase", "phased" },
     { "important", "priority" },
     { "targeted", "incoming" },
+    { "kick", "interrupt", "interruptible", "interrupted" },
+    { "elite", "rare", "classification", "dragon" },
+    { "pvp", "honor", "warmode" },
+    { "boss", "encounter" },
+}
+
+-- ------------------------------------------------------------
+-- PHRASES -- several words that name ONE thing, read as that thing's word
+-- before the query is split. The words are what the unit frame pages are
+-- called inside (their page names: uf_targettarget_health), so the phrase finds
+-- that unit's pages rather than every page that says "target".
+-- ------------------------------------------------------------
+Search.Phrases = {
+    ["target of target"] = "targettarget",
+    ["targets target"]   = "targettarget",
+    ["focus target"]     = "focustarget",
+    ["focus of target"]  = "focustarget",
+    ["out of range"]     = "outofrange",
 }
 
 -- ------------------------------------------------------------
@@ -108,6 +126,7 @@ Search.Concepts = {
 -- find debuff ones (they share every other word, so it would find all of them).
 -- ------------------------------------------------------------
 Search.Narrower = {
+    tot     = { "targettarget" },
     aura    = { "buff", "debuff" },
     role    = { "tank", "healer", "dps" },
     group   = { "party", "raid" },
@@ -190,6 +209,14 @@ Search.Tags = {
 
     -- Pets
     petEnabled                = "pet frames minion companion",
+
+    -- Unit frames
+    restingIconEnabled        = "rested resting zzz inn city sleep",
+    castbarEnabled            = "cast bar casting spell channel",
+    castbarKickTick           = "kick interrupt ready",
+    castbarKickNotReadyColor  = "kick interrupt cooldown",
+    portraitEnabled           = "portrait face avatar 3d model",
+    classDragonEnabled        = "elite rare boss dragon frame",
 }
 
 -- Words that carry no meaning on their own. Dropped from tooltips, keys and the

@@ -196,4 +196,65 @@ do
     check(has(S2:RankedMatches("durchsichtig"), e), "locale: a group under the client's locale is used")
 end
 
+-- ============================================================
+-- 4. WHAT THE UNIT FRAMES MODULE NEEDED (2026-11-24 in-game report)
+-- ============================================================
+print("-- Search match: a page with a table of its own registers its own keys")
+do
+    local DF3, S3 = NewHost()
+    -- A unit frame page: builds against the unit's table, whose keys the party
+    -- defaults do not have.
+    local unitDb = { restingIconEnabled = false, restingIconSize = 16 }
+    DF3.GUI.Pages.uf_player_icons = { tabName = "uf_player_icons" }
+    DF3.GUI.PageBuildDb = function(page) if page.tabName == "uf_player_icons" then return unitDb end end
+    S3:SetCurrentTab("uf_player_icons", "Player Unit Icons")
+    S3:SetCurrentSection("Resting Icon")
+    local e = S3:Register({ label = "Enable", dbKey = "restingIconEnabled" })
+    check(e.id ~= nil, "own db: a unit-only key is registered")
+    local stray = S3:Register({ label = "Nope", dbKey = "notAKeyAnywhere" })
+    check(stray.id == nil, "own db: a key the page's table lacks is still dropped")
+    check(has(S3:RankedMatches("resting"), e), "own db: 'resting' finds the Resting Icon card's setting")
+
+    print("-- Search match: a card registers itself by title")
+    local card = {}
+    S3:SetCurrentSection("Combat Icon", card)
+    local sec
+    for _, r in ipairs(S3.Registry) do if r.isSection and r.label == "Combat Icon" then sec = r end end
+    check(sec ~= nil and sec.sourceWidget == card, "section: the card is an entry, pointing at the card")
+    local set = S3:MatchEntries(S3:CompileQuery("combat icon"))
+    check(set[sec] ~= nil, "section: the filter finds the card by its title")
+    for _, r in ipairs(S3:RankedMatches("combat icon")) do
+        check(not r.isSection, "section: ...and Home's results leave it out")
+    end
+end
+
+print("-- Search match: finished words match whole, the word being typed matches its start")
+do
+    local _, S4 = NewHost()
+    local tex = Reg(S4, "bars_health", "Health Bar", "Settings", "Texture", "healthColor")
+    local txt = Reg(S4, "bars_health", "Health Bar", "Text", "Health Text Size", "healthTextSize")
+    local set = S4:MatchEntries(S4:CompileQuery("text health"))
+    check(set[txt] and not set[tex], "prefix: a finished word ('text health') no longer finds Texture")
+    set = S4:MatchEntries(S4:CompileQuery("health tex"))
+    check(set[tex] and set[txt], "prefix: ...while 'tex' is still being typed it finds both")
+    set = S4:MatchEntries(S4:CompileQuery("health t"))
+    check(set[txt], "prefix: a one-letter word being typed still narrows by its start")
+
+    print("-- Search match: tooltips match whole words, not their normal form")
+    local step = Reg(S4, "auras_debuffs", "Debuff Bar", "Highlight", "Size Step", "frameWidth",
+                     "Each icon after the first is this much smaller than the rest of the icons.")
+    check(not S4:MatchEntries(S4:CompileQuery("resting"))[step], "tooltip: 'resting' does not find 'the rest of'")
+    check(S4:MatchEntries(S4:CompileQuery("smaller"))[step], "tooltip: its own words still find it")
+
+    print("-- Search match: phrases and the words players use")
+    local tot = Reg(S4, "uf_targettarget_health", "Target of Target", "Colors", "Bar Color", "healthColor")
+    local tgt = Reg(S4, "uf_target_health", "Target", "Colors", "Bar Color", "healthColor")
+    set = S4:MatchEntries(S4:CompileQuery("target of target"))
+    check(set[tot] and not set[tgt], "phrase: 'target of target' is that unit, not every target")
+    set = S4:MatchEntries(S4:CompileQuery("tot"))
+    check(set[tot] and not set[tgt], "narrower: 'tot' is target of target")
+    local kickTick = Reg(S4, "uf_player_castbar", "Cast Bar", "Settings", "Interrupt Ready Mark", "frameShowBorder")
+    check(S4:MatchEntries(S4:CompileQuery("kick"))[kickTick], "synonym: 'kick' finds interrupt settings")
+end
+
 DandersFrames, GetLocale = savedDF, savedLocale

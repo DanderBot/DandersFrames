@@ -114,8 +114,33 @@ function Search:SetCurrentTab(tabName, tabLabel)
     self.CurrentSection = nil
 end
 
-function Search:SetCurrentSection(sectionName)
+-- `widget`, when the caller passes one, is the card or header that opens the
+-- section: the section itself is then registered as an entry of its own (an
+-- isSection entry, label = its title), so a card is findable by its title even
+-- when the controls in it are of kinds that register nothing -- a header's
+-- on/off tick, a check row, a segment toggle. The page list's filter counts it;
+-- Home's ranked results leave it out (it has no control to show inline).
+function Search:SetCurrentSection(sectionName, widget)
     self.CurrentSection = sectionName
+    if widget and type(sectionName) == "string" and sectionName ~= "" and self.CurrentTab then
+        local entry = self:Register({
+            label = sectionName, searchKey = "section:" .. sectionName,
+            isSection = true, type = "section",
+        })
+        if entry and entry.id then entry.sourceWidget = widget end
+    end
+end
+
+-- The table a page builds against when it has one of its own (a module's page:
+-- a unit frame's table, not the party/raid one), or nil. Asked fresh every time
+-- rather than cached by page name: a profile switch hands the same page a new table.
+function Search:_OwnPageDb()
+    local tab = self.CurrentTab
+    local GUI = DF.GUI
+    local page = GUI and GUI.Pages and tab and GUI.Pages[tab]
+    if not (page and GUI.PageBuildDb) then return nil end
+    local ok, db = pcall(GUI.PageBuildDb, page)
+    return (ok and type(db) == "table") and db or nil
 end
 
 -- ============================================================
@@ -204,7 +229,16 @@ function Search:Register(entry)
     
     -- If entry has a dbKey, check if it exists in the current mode's defaults
     -- Skip settings that don't exist for the current mode
-    if entry.dbKey and type(entry.dbKey) == "string" and defaults then
+    -- ☠ ...UNLESS THE PAGE HAS A TABLE OF ITS OWN. A unit frame page builds
+    -- against the unit's table, and about 200 unit-frame settings (the whole cast
+    -- bar, the resting / PvP / elite icons, the portrait) have no party or raid
+    -- default at all -- this check dropped every one of them, so a search in the
+    -- Unit Frames module found nothing for "resting", "portrait" or "cast bar".
+    -- Such a page answers for its own keys: the key exists when its table has it.
+    local ownDb = entry.dbKey and type(entry.dbKey) == "string" and self:_OwnPageDb()
+    if ownDb then
+        if ownDb[entry.dbKey] == nil then return entry end
+    elseif entry.dbKey and type(entry.dbKey) == "string" and defaults then
         if defaults[entry.dbKey] == nil then
             -- This setting doesn't exist in the current mode's defaults, skip it
             return entry
@@ -1144,12 +1178,15 @@ end
 --   iconX      its left inset (default 6); the text starts one gap after it
 --   fontSize   the typed text and the placeholder, at the settings font (default:
 --              the small template font)
+--   onFocus    fn() when the box takes focus (the filter starts its index then)
+--   onEnter    fn() on Enter, after the box lets go of focus
 --   onChange   fn(text) called with the box's text on every edit, clear and Escape
 --              INSTEAD of the results view; a bar built with it never becomes
 --              Search.SearchBar (the page list's filter box -- Features/SearchFilter.lua)
 function Search:CreateSearchBar(parent, opts)
     opts = opts or {}
     local onChange = opts.onChange
+    local onFocus = opts.onFocus
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
 
@@ -1217,6 +1254,7 @@ function Search:CreateSearchBar(parent, opts)
     clearBtn:Hide()
     
     editbox:SetScript("OnEditFocusGained", function()
+        if onFocus then onFocus() end
         local c = GetThemeColor()
         if surface then
             surface:SetBorderColor(c.r, c.g, c.b, 1)
@@ -1282,6 +1320,7 @@ function Search:CreateSearchBar(parent, opts)
     
     editbox:SetScript("OnEnterPressed", function(self)
         self:ClearFocus()
+        if opts.onEnter then opts.onEnter() end
     end)
     
     frame.editbox = editbox
