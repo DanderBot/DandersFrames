@@ -628,10 +628,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Same gate as its siblings on this page.
             group.disableChildrenOn = function(d) return not d.showBuffs end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
                 BuffOrderChanged()
                 tools2.refreshStates()   -- Mine First greys while Sort Order = Default
-            end), 55)
+            end), L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."]), 55)
 
             -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
             local bfSortMine = group:AddWidget(GUI:CreateCheckbox(parent, L["My Auras First"], db, "directBuffSortMineFirst", BuffOrderChanged), 30)
@@ -941,6 +941,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- banded into a seconds-sampled formatter — see GetDurationFormatFields).
             local durHideAbove = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
             durHideAbove.disableOn = function(d) return not d.buffShowDuration or DF:IsPercentDurationFormat(d.buffDurationFormat) end
+            durHideAbove.tooltip = L["Keeps the duration text hidden until the time left drops below the seconds set under it, so only auras close to running out show a number. Not available with the Percent format."]
             local durHideAboveSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
             durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.buffDurationFormat) end
             local durHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], db, "buffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
@@ -1134,10 +1135,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Position"], durBarPositionOptions, db, "buffDurationBarPosition", BuffBarChanged), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "buffDurationBarHeight", nil, BuffBarChanged, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "buffDurationBarGap", nil, BuffBarChanged, true), 55)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "buffDurationBarColorMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "buffDurationBarColorMode", function()
                 tools2.refreshStates()
                 BuffBarChanged()
-            end), 55)
+            end), L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."]), 55)
             local buffBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
             local buffBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
             -- A curve mode brings its own ramp texture and forces white, so these two do
@@ -1968,10 +1969,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- live while the row it orders is switched off.
             group.disableChildrenOn = function(d) return not d.showDebuffs end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
                 DebuffFilterChanged()
                 tools2.refreshStates()  -- My Auras First greys on Default / Order Applied
-            end), 55)
+            end), L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."]), 55)
 
             local dfSortMine = group:AddWidget(GUI:CreateCheckbox(parent, L["My Auras First"], db, "directDebuffSortMineFirst", DebuffFilterChanged), 30)
             dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
@@ -2504,6 +2505,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Hide Above can't compose with the Percent format (see the buff page).
             local durHideAbove = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
             durHideAbove.disableOn = function(d) return not d.debuffShowDuration or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
+            durHideAbove.tooltip = L["Keeps the duration text hidden until the time left drops below the seconds set under it, so only auras close to running out show a number. Not available with the Percent format."]
             local durHideAboveSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
             durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
             local durHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
@@ -2759,10 +2761,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Position"], durBarPositionOptions, db, "debuffDurationBarPosition", DebuffBarChanged), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "debuffDurationBarHeight", nil, DebuffBarChanged, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "debuffDurationBarGap", nil, DebuffBarChanged, true), 55)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
                 tools2.refreshStates()
                 DebuffBarChanged()
-            end), 55)
+            end), L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."]), 55)
             local debuffBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
             local debuffBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
             -- A curve mode brings its own ramp texture and forces white, so these two do
@@ -3894,10 +3896,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Position"], defBarPositionOptions, db, "defensiveDurationBarPosition", DefBarChanged), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
                 tools2.refreshStates()
                 DefBarChanged()
-            end), 55)
+            end), L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."]), 55)
             local defBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
             local defBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
             -- A curve mode brings its own ramp texture and forces white, so these two do

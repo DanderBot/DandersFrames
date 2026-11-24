@@ -4100,6 +4100,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- Type dropdown respects only the extra gate (e.g. Show Border). With no
     -- extra gate (Expiring override) it's always visible.
     w.animationType.hideOn = hideExtra or function() return false end
+    w.animationType.tooltip = L["Adds a moving effect to the border to draw the eye, such as a blink, a glow or sparkles running round it. Pick None to keep the border still."]
 
     -- Perf warning: animations run an OnUpdate per active border, which adds up in 20-30 player raids.
     if showPerfBanner then
