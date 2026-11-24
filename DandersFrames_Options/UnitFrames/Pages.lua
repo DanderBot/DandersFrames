@@ -1458,6 +1458,9 @@ function UFO.AddTextPreviewFrame(target, unit)
     -- The ring spots in its Anchor To lists, markers for them on the mock, and a
     -- Show Hover State switch (TextDesigner/UI/Options.lua).
     target.ringAnchors = true
+    -- WoW Forever: the Pet Happiness tokens are offered on the pet's designer only
+    -- (they answer only for your own hunter pet).
+    target.petTokens = (unit == "pet" and DF.IS_FOREVER) and true or nil
     target.getSizeDB = function() return UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit) end
     target.decorateMock = function(mock, chrome)
         local R = UF.Rings

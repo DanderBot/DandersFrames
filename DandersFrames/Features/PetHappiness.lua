@@ -22,6 +22,10 @@ local addonName, DF = ...
 --                           at least one consumer is on, on Forever, for a hunter.
 --   PH.Tint(mood, onlyUnhappy)  the colour a frame is tinted by happiness (or nil)
 --   PH.SetTints(frame, side, health, border, name)  stamp + repaint what changed
+--   PH:Loyalty / :Diet / :TrainingPoints / :Experience (mock)  the other answers
+--                           (tooltip and Text Designer tokens); PH.MoodText(mood)
+--   PH:WatchTokens(frame, on)  a unit frames pet frame shows a pet token: the XP
+--                           and training point events are registered only then
 --
 -- ⚠ UNVERIFIED IN GAME: the atlas names, and that the answers stay readable in
 -- combat. A secret answer reads as nil (hidden), never guessed.
@@ -76,13 +80,19 @@ function PH:IsHunter()
     return PH.isHunter
 end
 
--- mood, damage %, loyalty rate; nil when there is nothing to show.
-function PH:Read()
-    if not PH:IsSupported() then return nil end
+-- Forever, and the player has a hunter pet out (a warlock's demon is not one).
+function PH:HasHunterPet()
+    if not PH:IsSupported() then return false end
     if HasPetUI then
         local hasUI, isHunterPet = HasPetUI()
-        if IsSecret(hasUI) or IsSecret(isHunterPet) or not (hasUI and isHunterPet) then return nil end
+        if IsSecret(hasUI) or IsSecret(isHunterPet) or not (hasUI and isHunterPet) then return false end
     end
+    return true
+end
+
+-- mood, damage %, loyalty rate; nil when there is nothing to show.
+function PH:Read()
+    if not PH:HasHunterPet() then return nil end
     local mood, damage, rate = C_PetInfo.GetPetHappiness()
     if IsSecret(mood) or type(mood) ~= "number" then return nil end
     if mood < 1 or mood > 3 then return nil end
@@ -138,37 +148,82 @@ local function Plain(v)
     return v
 end
 
+-- ------------------------------------------------------------
+-- The pet's other answers, read by the tooltip and the Text Designer's pet
+-- tokens (one place that calls each API). nil = nothing to show: no hunter pet,
+-- an empty or secret answer. `mock`: test mode's sample (PH.MOCK) instead.
+-- ------------------------------------------------------------
+function PH:Loyalty(mock)
+    if mock then return format(DF.L["Loyalty Level %d"], PH.MOCK.loyaltyLevel) end
+    if not (PH:HasHunterPet() and C_PetInfo.GetPetLoyalty) then return nil end
+    local s = Plain(C_PetInfo.GetPetLoyalty())
+    if type(s) == "string" and s ~= "" then return s end
+    return nil
+end
+
+-- The foods the pet eats, as the API's list (localised by the client).
+function PH:Diet(mock)
+    if mock then return { DF.L["Meat"], DF.L["Fish"] } end
+    if not (PH:HasHunterPet() and C_PetInfo.GetPetFoodTypes) then return nil end
+    local foods = Plain(C_PetInfo.GetPetFoodTypes())
+    if type(foods) == "table" and next(foods) then return foods end
+    return nil
+end
+
+-- The diet list joined with Blizzard's delimiter ("Meat, Fish"); nil when empty.
+function PH.DietText(foods)
+    if type(foods) ~= "table" then return nil end
+    local delim = _G.PET_FOOD_DELIMIT
+    if type(delim) ~= "string" or delim == "" then delim = ", " end
+    local out
+    for i = 1, #foods do
+        local f = foods[i]
+        if type(f) == "string" and not IsSecret(f) then out = out and (out .. delim .. f) or f end
+    end
+    return out
+end
+
+-- Training points available to spend (total - used).
+function PH:TrainingPoints(mock)
+    if mock then return PH.MOCK.trainingPoints end
+    if not (PH:HasHunterPet() and C_PetInfo.GetPetTrainingPoints) then return nil end
+    local total, used = C_PetInfo.GetPetTrainingPoints()
+    total, used = tonumber(Plain(total)), tonumber(Plain(used)) or 0
+    if not total then return nil end
+    return total - used
+end
+
+-- Current XP and XP to the next level; nil at the level cap (Blizzard's XP bar
+-- hides there too: nextXP is 0).
+function PH:Experience(mock)
+    if mock then return PH.MOCK.xp, PH.MOCK.nextXP end
+    if not (PH:HasHunterPet() and GetPetExperience) then return nil end
+    local cur, nxt = GetPetExperience()
+    cur, nxt = tonumber(Plain(cur)), tonumber(Plain(nxt))
+    if cur and nxt and nxt > 0 then return cur, nxt end
+    return nil
+end
+
+-- Happy / Content / Unhappy: Blizzard's own words, ours if a build lacks one.
+function PH.MoodText(mood)
+    if not PH.COLOR_KEYS[mood] then return nil end
+    return G("PET_HAPPINESS" .. mood, PH.MOOD_FALLBACK[mood])
+end
+
 -- What the tooltip shows, as a table of named fields (nil = leave the line out).
 function PH:TooltipData(mock)
+    local d = {}
     if mock then
         local m = PH.MOCK
-        return { mood = m.mood, damage = m.damage, rate = m.rate,
-                 loyalty = format(DF.L["Loyalty Level %d"], m.loyaltyLevel),
-                 diet = { DF.L["Meat"], DF.L["Fish"] },
-                 trainingPoints = m.trainingPoints, xp = m.xp, nextXP = m.nextXP }
+        d.mood, d.damage, d.rate = m.mood, m.damage, m.rate
+    else
+        d.mood, d.damage, d.rate = PH:Read()
+        if not d.mood then return nil end
     end
-    local d = {}
-    d.mood, d.damage, d.rate = PH:Read()
-    if not d.mood then return nil end
-    local P = C_PetInfo
-    if P.GetPetLoyalty then
-        local s = Plain(P.GetPetLoyalty())
-        if type(s) == "string" and s ~= "" then d.loyalty = s end
-    end
-    if P.GetPetFoodTypes then
-        local foods = Plain(P.GetPetFoodTypes())
-        if type(foods) == "table" and next(foods) then d.diet = foods end
-    end
-    if P.GetPetTrainingPoints then
-        local total, used = P.GetPetTrainingPoints()
-        total, used = tonumber(Plain(total)), tonumber(Plain(used)) or 0
-        if total then d.trainingPoints = total - used end
-    end
-    if GetPetExperience then
-        local cur, nxt = GetPetExperience()
-        cur, nxt = tonumber(Plain(cur)), tonumber(Plain(nxt))
-        if cur and nxt and nxt > 0 then d.xp, d.nextXP = cur, nxt end
-    end
+    d.loyalty = PH:Loyalty(mock)
+    d.diet = PH:Diet(mock)
+    d.trainingPoints = PH:TrainingPoints(mock)
+    d.xp, d.nextXP = PH:Experience(mock)
     return d
 end
 
@@ -181,7 +236,7 @@ function PH:TooltipLines(mock)
         lines[#lines + 1] = { text = text, r = r or 1, g = g or 1, b = b or 1 }
     end
     local c = PH.TITLE_COLORS[d.mood]
-    add(G("PET_HAPPINESS" .. d.mood, PH.MOOD_FALLBACK[d.mood]), c[1], c[2], c[3])
+    add(PH.MoodText(d.mood), c[1], c[2], c[3])
     if d.damage then
         add(Fmt(G("PET_DAMAGE_PERCENTAGE", "Pet is doing %d%% damage"), d.damage))
     end
@@ -191,17 +246,8 @@ function PH:TooltipLines(mock)
         add(G("GAINING_LOYALTY", "Gaining loyalty"))
     end
     if d.loyalty then add(d.loyalty) end
-    if d.diet then
-        local foods = {}
-        for i = 1, #d.diet do
-            if type(d.diet[i]) == "string" then foods[#foods + 1] = d.diet[i] end
-        end
-        if #foods > 0 then
-            local delim = _G.PET_FOOD_DELIMIT
-            if type(delim) ~= "string" or delim == "" then delim = ", " end
-            add(Fmt(G("PET_DIET_TEMPLATE", "Diet: %s"), tconcat(foods, delim)))
-        end
-    end
+    local diet = PH.DietText(d.diet)
+    if diet then add(Fmt(G("PET_DIET_TEMPLATE", "Diet: %s"), diet)) end
     if d.trainingPoints then
         add(Fmt(G("TRAINING_POINTS", "Training Points: %d"), d.trainingPoints))
     end
@@ -242,7 +288,13 @@ end
 -- the loyalty trend), or once after a new pet / a loading screen.
 -- ============================================================
 PH.consumers = {}
+-- Consumers of the pet's other answers too (the Text Designer's pet tokens):
+-- told on every pet-data event, since loyalty level, XP and training points have
+-- no part in the change key below.
+PH.dataConsumers = {}
 PH.EVENTS = { "UNIT_HAPPINESS", "UNIT_PET", "PLAYER_ENTERING_WORLD" }
+-- Registered on top of PH.EVENTS only while a data consumer is on.
+PH.DATA_EVENTS = { "UNIT_PET_EXPERIENCE", "UNIT_PET_TRAINING_POINTS" }
 
 local function Sign(rate)
     if not rate then return 0 end
@@ -262,8 +314,29 @@ function PH:Notify(force)
     for _, fn in pairs(PH.consumers) do fn() end
 end
 
+function PH:NotifyData()
+    for _, fn in pairs(PH.dataConsumers) do fn() end
+end
+
 function PH:Wanted()
-    return PH:IsSupported() and PH:IsHunter() and next(PH.consumers) ~= nil
+    return PH:IsSupported() and PH:IsHunter() and (next(PH.consumers) ~= nil or next(PH.dataConsumers) ~= nil)
+end
+
+-- The XP / training point events, on or off with the data consumers.
+local function SetDataEvents(f, on)
+    if on then
+        -- UNIT_PET_EXPERIENCE fires for the OWNER (Blizzard's paper doll filters on
+        -- "player"); UNIT_PET_TRAINING_POINTS' unit is unconfirmed, so it is not
+        -- filtered (it fires only when points are spent or earned).
+        if f.RegisterUnitEvent then
+            pcall(f.RegisterUnitEvent, f, "UNIT_PET_EXPERIENCE", "player")
+        else
+            pcall(f.RegisterEvent, f, "UNIT_PET_EXPERIENCE")
+        end
+        pcall(f.RegisterEvent, f, "UNIT_PET_TRAINING_POINTS")
+    elseif f.UnregisterEvent then
+        for _, ev in ipairs(PH.DATA_EVENTS) do pcall(f.UnregisterEvent, f, ev) end
+    end
 end
 
 function PH:UpdateRegistration()
@@ -273,54 +346,95 @@ function PH:UpdateRegistration()
         if f and PH.registered then
             f:UnregisterAllEvents()
             PH.registered = false
+            PH.dataRegistered = false
             PH.lastKey = nil
             DF:Debug("PET", "Pet Happiness: events off")
         end
         return
     end
-    if PH.registered then return end
-    if not f then
-        if not CreateFrame then return end
-        f = CreateFrame("Frame")
-        f:SetScript("OnEvent", function(_, event) PH:OnEvent(event) end)
-        PH.driver = f
+    if not PH.registered then
+        if not f then
+            if not CreateFrame then return end
+            f = CreateFrame("Frame")
+            f:SetScript("OnEvent", function(_, event) PH:OnEvent(event) end)
+            PH.driver = f
+        end
+        -- pcall'd: a client without one of these refuses it; that costs one event.
+        if f.RegisterUnitEvent then
+            pcall(f.RegisterUnitEvent, f, "UNIT_HAPPINESS", "pet")
+            pcall(f.RegisterUnitEvent, f, "UNIT_PET", "player")
+        else
+            pcall(f.RegisterEvent, f, "UNIT_HAPPINESS")
+            pcall(f.RegisterEvent, f, "UNIT_PET")
+        end
+        pcall(f.RegisterEvent, f, "PLAYER_ENTERING_WORLD")
+        PH.registered = true
+        PH.dataRegistered = false
+        DF:Debug("PET", "Pet Happiness: events on")
     end
-    -- pcall'd: a client without one of these refuses it; that costs one event.
-    if f.RegisterUnitEvent then
-        pcall(f.RegisterUnitEvent, f, "UNIT_HAPPINESS", "pet")
-        pcall(f.RegisterUnitEvent, f, "UNIT_PET", "player")
-    else
-        pcall(f.RegisterEvent, f, "UNIT_HAPPINESS")
-        pcall(f.RegisterEvent, f, "UNIT_PET")
+    local wantData = next(PH.dataConsumers) ~= nil
+    if wantData ~= PH.dataRegistered then
+        SetDataEvents(f, wantData)
+        PH.dataRegistered = wantData
+        DF:Debug("PET", "Pet Happiness: XP / training point events %s", wantData and "on" or "off")
     end
-    pcall(f.RegisterEvent, f, "PLAYER_ENTERING_WORLD")
-    PH.registered = true
-    DF:Debug("PET", "Pet Happiness: events on")
 end
 
 function PH:OnEvent(event)
     if event == "PLAYER_ENTERING_WORLD" then
         -- The pet's state may not read yet straight after a loading screen.
         if C_Timer and C_Timer.After then
-            C_Timer.After(0.5, function() PH:Notify(true) end)
+            C_Timer.After(0.5, function() PH:Notify(true); PH:NotifyData() end)
         else
             PH:Notify(true)
+            PH:NotifyData()
         end
     elseif event == "UNIT_PET" then
         PH:Notify(true)
-    else
+        PH:NotifyData()
+    elseif event == "UNIT_HAPPINESS" then
         PH:Notify(false)
+        -- Loyalty level has no event of its own: it is read again here as well.
+        PH:NotifyData()
+    else
+        PH:NotifyData()       -- UNIT_PET_EXPERIENCE / UNIT_PET_TRAINING_POINTS
     end
 end
 
 -- on: whether this consumer shows the icon right now; fn: its repaint.
-function PH:SetConsumer(key, on, fn)
+-- data: it also shows the pet's XP / training points / loyalty level / diet
+-- (fn then runs on every pet-data event, not only on a change of mood).
+function PH:SetConsumer(key, on, fn, data)
+    local list = data and PH.dataConsumers or PH.consumers
     if on and type(fn) == "function" then
-        PH.consumers[key] = fn
+        list[key] = fn
     else
-        PH.consumers[key] = nil
+        list[key] = nil
     end
     PH:UpdateRegistration()
+end
+
+-- ------------------------------------------------------------
+-- TEXT DESIGNER TOKENS (the unit frames pet frame)
+-- Render.lua tells the core, on each full render of a live unit frames pet
+-- frame, whether its template shows a pet token. While any does, one data
+-- consumer refreshes those frames' "pet" elements on every pet-data event.
+-- ------------------------------------------------------------
+PH.tokenFrames = {}
+local TOKEN_KEY = "td_tokens"
+
+local function TokensChanged()
+    for f in pairs(PH.tokenFrames) do
+        if f.IsVisible and f:IsVisible() and DF.UpdateTextDesigner then DF:UpdateTextDesigner(f, "pet") end
+    end
+end
+
+function PH:WatchTokens(frame, on)
+    if not frame then return end
+    on = (on and DF.IS_FOREVER) and true or nil
+    if PH.tokenFrames[frame] == on and not (on and not PH.registered) then return end
+    PH.tokenFrames[frame] = on
+    PH:SetConsumer(TOKEN_KEY, next(PH.tokenFrames) ~= nil, TokensChanged, true)
 end
 
 -- ============================================================
