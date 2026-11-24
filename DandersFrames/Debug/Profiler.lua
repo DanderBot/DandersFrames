@@ -571,6 +571,17 @@ local PROFILED_FUNCTIONS = {
     -- working.
     "Search.BuildFullRegistry",
     "Search.BuildFullRegistryBudgeted",
+    -- The side menu's in-place filter: what ONE keystroke costs. RefreshFilter is
+    -- the whole keystroke; the rows under it split it into the match
+    -- (_FilterCompute / CompileQuery / MatchEntries), the one-off word index
+    -- (_MatchIndex), and the page's marking (_FilterPage). The page's relayout
+    -- shows up under GUI.PageRefreshStates above.
+    "Search.RefreshFilter",
+    "Search._FilterCompute",
+    "Search.CompileQuery",
+    "Search.MatchEntries",
+    "Search._MatchIndex",
+    "Search._FilterPage",
     "ChangedSettings.BuildReport",
 
     "LightweightUpdateFrameSize",
