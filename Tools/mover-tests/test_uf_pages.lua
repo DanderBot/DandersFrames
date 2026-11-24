@@ -479,11 +479,12 @@ do
         Add(row, 25, 2)
         for _, key in ipairs({ "frame_size", "frame_groupvisibility", "frame_border", "frame_bordershadow",
                                "frame_fade", "frame_permanentmover" }) do
+            -- frame_fade is asked to prove the Frame page no longer draws it (it moved to Fading)
             asked[key] = self.sectionFilter(key)
         end
         local band = Frame()
         band.groupChildren = {}
-        for _, dbKey in ipairs({ "frameWidth", "frameSpacing", "frameFadeSplitCombat" }) do
+        for _, dbKey in ipairs({ "frameWidth", "frameSpacing" }) do
             local w = Frame()
             local entry = { dbKey = dbKey }
             if Search.EntryFilter and Search.EntryFilter(entry) == false then entry.dfFilteredOut = true end
@@ -535,13 +536,12 @@ do
     eq(page.modeSeen, "party", "the party builder draws its PARTY variant")
     eq(asked.frame_size, true, "ToT: Frame Size shows")
     eq(asked.frame_border, true, "ToT: Border shows")
-    eq(asked.frame_fade, true, "ToT: Frame Fade shows")
+    eq(asked.frame_fade, false, "ToT: Frame Fade is not on the Frame page any more (it moved to Fading)")
     eq(asked.frame_bordershadow, false, "ToT: no Border Shadow (not in its relevance)")
     eq(asked.frame_groupvisibility, false, "a group-only card is filtered off")
     eq(asked.frame_permanentmover, false, "Permanent Mover is filtered off (the mover owns position)")
     check(built.frameWidth.hideOn == nil, "a relevant control stays")
     check(built.frameSpacing.hideOn and built.frameSpacing.hideOn(), "Frame Spacing is hidden for every unit")
-    check(built.frameFadeSplitCombat.hideOn and built.frameFadeSplitCombat.hideOn(), "a control not relevant to ToT is hidden")
     check(Search.EntryFilter == nil, "the search filter is lifted after the build")
     check(added[1].w.dfLinkBanner, "the page opens with the link banner...")
     eq(added[1].col, "both", "...across both columns")
@@ -1350,7 +1350,20 @@ do
         bars_health = heldSP.bars_health, general_frame = heldSP.general_frame,
         indicators_highlights = { "selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro" },
         auras_debuffs = { "debuff", "showDebuffs", "directDebuff", "debuffBlacklist" },
+        -- "frameFade" out-ranks "frame": the Frame Fade card lives on the Fading page.
+        display_fading = { "frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf" },
     }
+    -- The shipped longest-prefix resolver (Core/Profile.lua), lifted from source so a
+    -- copy here resolves ownership exactly as the addon does.
+    local heldOwns, heldReg = DF.SectionOwnsKey, DF.SectionRegistry
+    do
+        local body = df_file_source("Core/Profile.lua"):gsub("\r\n", "\n")
+            :match("function DF:SectionOwnsKey%(prefixes, key%)\n(.-)\nend\n")
+        check(body ~= nil, "copy: the shipped SectionOwnsKey is liftable")
+        local mk = body and (loadstring or load)("local DF = ...\nreturn function(self, prefixes, key)\n" .. body .. "\nend", "@SectionOwnsKey")
+        DF.SectionOwnsKey = mk and mk(DF)
+        DF.SectionRegistry = DF.SECTION_PREFIXES
+    end
     for k in pairs(UFO.prefixes) do UFO.prefixes[k] = nil end
     UF.Links.ResetCaches()
     local refreshes = 0
@@ -1385,7 +1398,7 @@ do
     eq(skip("frame", "target", "frameBorderSize"), nil, "copied: a border's thickness is look")
     eq(skip("debuffs", "player", "debuffStackScale"), nil, "copied: the text scale inside an icon is look")
     eq(skip("health", "target", "healthColorStops"), nil, "copied: the health gradient")
-    eq(skip("frame", "targettarget", "frameFadeSplitCombat"), "hidden", "skip: a control the unit's page hides")
+    eq(skip("fading", "targettarget", "frameFadeSplitCombat"), "hidden", "skip: a control the unit's page hides")
     eq(skip("frame", "targettarget", "frameBorderShadowEnabled"), "hidden", "skip: a card the unit's page hides")
     eq(skip("frame", "player", "frameBorderShadowEnabled"), nil, "...copied where the card shows")
     eq(skip("highlights", "target", "aggroHighlightMode"), "meaning", "skip: aggro on an enemy frame")
@@ -1421,7 +1434,7 @@ do
     eq(tot.frameHeight, nil, "...either way")
     eq(tot.permanentMoverColor, nil, "...nor the group mover")
     eq(tot.frameBorderShadowEnabled, nil, "...nor a card ToT does not have")
-    eq(tot.frameFadeSplitCombat, nil, "...nor a control ToT does not have")
+    eq(tot.frameFadeSplitCombat, nil, "...nor Frame Fade (its keys belong to the Fading page now)")
     check(tot.frameBorderColor and tot.frameBorderColor.r == 0.2 and tot.frameBorderColor ~= party.frameBorderColor,
           "...but the border colour, copied")
     for k in pairs(tot) do tot[k] = nil end
@@ -1487,6 +1500,7 @@ do
         for k in pairs(t) do t[k] = nil end
     end
     DF.PartyDefaults, DF.SECTION_PREFIXES = heldPD, heldSP
+    DF.SectionOwnsKey, DF.SectionRegistry = heldOwns, heldReg
     DF.GetDB, DF.SettingsUndo, UF.RequestRefresh = heldGetDB, heldSU, heldRefresh
     for k in pairs(UFO.prefixes) do UFO.prefixes[k] = nil end
     UF.Links.ResetCaches()

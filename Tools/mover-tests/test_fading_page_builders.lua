@@ -87,7 +87,7 @@ end
 
 local PAGE
 do
-    local a = SRC:find('Add(CreateCopyButton(self.child, {"rangeFade"', 1, true)
+    local a = SRC:find('Add(CreateCopyButton(self.child, {"frameFade", "rangeFade"', 1, true)
     local b = SRC:find('{pageId = "display_visibility", label = L["Visibility"]}', 1, true)
     check(a ~= nil and b ~= nil and b > a, "the Fading page builder is locatable by its own ends")
     PAGE = SRC:sub(a or 1, b or 1)
@@ -225,6 +225,93 @@ do
 end
 
 -- ============================================================
+-- 2b. FRAME FADE -- its enable is the card's header tick (moved from the Frame page)
+-- The group had no boolean meaning "am I doing anything" for a whole release;
+-- frameFadeSplitCombat is a MODE and it HIDES the global slider, so the boolean
+-- was ADDED -- frameFadeEnabled, shipped true -- rather than borrowed.
+-- ============================================================
+local FRAME_FADE = {
+    { "checkbox", "Enable Frame Fade",                 "frameFadeEnabled",            30 },
+    { "slider",   "Global Frame Fade",                 "frameFadeAlpha",              55 },
+    { "checkbox", "Separate Combat Fade",              "frameFadeSplitCombat",        30 },
+    { "slider",   "Out of Combat Frame Fade",          "frameFadeAlphaOutOfCombat",   55 },
+    { "slider",   "In Combat Frame Fade",              "frameFadeAlphaInCombat",      55 },
+    { "checkbox", "Use In-Combat Fade In Instances",   "frameFadeInstanceUsesCombat", 30 },
+    { "checkbox", "Show In-Combat Fade When Hovering", "frameFadeHoverUsesCombat",    30 },
+    { "dropdown", "Hover Applies To",                  "frameFadeHoverScope",         55 },
+}
+
+print("-- Fading page: Frame Fade")
+do
+    local body = builderBody("BuildFrameFadeGroup")
+    checkCensus(census(body), FRAME_FADE, "frame fade")
+    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil
+      and body:find(".keepEnabled = true", 1, true) ~= nil,
+          "frame fade: the enable is skipped when the header carries it, and stays live in a pinned panel")
+
+    -- ☠ ...AND THE BODY'S FIRST CONTROL IS EXPECTED TO GREY. With the header
+    -- carrying the tick, the Global Frame Fade slider is child ONE of a band with
+    -- no header -- and the only mark that would spare it is a keepEnabled it must
+    -- not have. The kit spares by MARK now, not by position.
+    local hoisted = body:match("if not tools2%.hoistToggle then.-\n            end\n(.*)")
+    check(hoisted ~= nil, "frame fade: the builder's other half reads on its own")
+    if hoisted then
+        local first = census(hoisted)[1]
+        check(first ~= nil and first.key == FRAME_FADE[2][3], "frame fade: ...the global slider first")
+        eq(select(2, hoisted:gsub("%.keepEnabled", "")), 0,
+           "frame fade: ...and nothing in the body is spared from the gate")
+    end
+    local sections = ui_file_source("Sections.lua")
+    check(sections:find("groupOff and i > 1", 1, true) == nil
+      and sections:find('rawget(widget, "isSectionHeader")', 1, true) ~= nil
+      and sections:find('rawget(widget, "keepEnabled")', 1, true) ~= nil,
+          "frame fade: the group gate spares the header and the Enable by their marks, not by position")
+    check(options_file_source("GUI/SettingsWidgets.lua"):find("container.isSectionHeader = true", 1, true) ~= nil,
+          "frame fade: ...which GUI:CreateHeader stamps")
+    check(body:find("group.disableChildrenOn = function(d) return not d.frameFadeEnabled end", 1, true) ~= nil,
+          "frame fade: the group's grey-while-off gate is inside the builder")
+
+    check(df_file_source("Locales/enUS.lua"):find('L["' .. FRAME_FADE[1][2] .. '"] = true', 1, true) ~= nil,
+          "frame fade: the tick's label is a shipped enUS phrase")
+    check(options_file_source("Core/ExportCategories.lua"):find('"' .. FRAME_FADE[1][3] .. '"', 1, true) ~= nil,
+          "frame fade: ...and the key travels in a profile export")
+
+    local block, call = sectionBlock("Frame Fade", "BuildFrameFadeGroup")
+    check(call:find('OpenSection(L["Frame Fade"], "frame_fade", 1, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {', 1, true) ~= nil,
+          "frame fade: a card keyed frame_fade (its old key, so saved state carries) in column 1, pinnable")
+    check(call:find('db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"]', 1, true) ~= nil,
+          "frame fade: the header tick is bound to frameFadeEnabled under the checkbox's own name")
+    check(call:find("RefreshFrameFade() self:RefreshStates() tools.ReflowMounted()", 1, true) ~= nil
+      and call:find("RefreshCurrentPage", 1, true) == nil,
+          "frame fade: ...committing the engine refresh, a state pass and a pinned-panel repaint -- never a rebuild")
+    check(block:find("BuildFrameFadeGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "frame fade: mounts its builder with hoistToggle for its header tick")
+
+    do
+        local at = PAGE:find('GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Separate Combat Fade"]', 1, true)
+        local tip = at and PAGE:find('L["Uses one opacity out of combat', at, true)
+        check(at ~= nil and tip ~= nil and tip - at < 400, "frame fade: tooltip on Separate Combat Fade")
+    end
+    local sum = PAGE:match("local function FrameFadeSummary%(d%)(.-)\n        end")
+    check(sum ~= nil and sum:find('L%["Alpha"%]') ~= nil and sum:find('L%["Combat"%]') ~= nil,
+          "frame fade: the summary labels its opacities in words the locale ships")
+end
+
+print("-- Fading page: Frame Fade's keys belong to this page")
+do
+    local gui = df_file_source("GUI/GUI.lua")
+    check(gui:find('display_fading               = { "frameFade",', 1, true) ~= nil,
+          "ownership: display_fading claims frameFade, out-ranking general_frame's \"frame\"")
+    local ap = df_file_source("Core/AutoProfiles.lua")
+    local ffAt = ap:find('{"frameFade",           "display_fading"', 1, true)
+    local frAt = ap:find('{"frame",               "general_frame"', 1, true)
+    check(ffAt and frAt and ffAt < frAt, "auto profiles: frameFade maps to Fading, above the generic frame row")
+    local links = uf_file_source("Links.lua")
+    check(links:find('frameFadeEnabled = "fading"', 1, true) ~= nil,
+          "UF links: Frame Fade's on/off switch belongs to the fading part")
+end
+
+-- ============================================================
 -- 3. THE TWO FEATURE FADES
 -- ============================================================
 local DEAD_FADE = {
@@ -285,19 +372,19 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading | Spirit of Redemption Fading",
-       "order: the five cards open in reading order")
+       "Frame Fade | Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading | Spirit of Redemption Fading",
+       "order: the six cards open in reading order, Frame Fade first")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
-    eq(hoists, 4, "ticks: four mounts skip their in-body toggle -- one checkbox per setting")
+    eq(hoists, 5, "ticks: five mounts skip their in-body toggle -- one checkbox per setting")
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: Expand All / Collapse All at the top, spanning both columns")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
-    local firstAt = PAGE:find('OpenSection(L["Out of Range"]', 1, true)
+    local firstAt = PAGE:find('OpenSection(L["Frame Fade"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    check(PAGE:find('Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)', 1, true) ~= nil,
-          "page: the copy button's prefix list, unhealable fading included")
+    check(PAGE:find('Add(CreateCopyButton(self.child, {"frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)', 1, true) ~= nil,
+          "page: the copy button's prefix list, Frame Fade and unhealable fading included")
 
     -- Every string the page asks for ships in enUS. ONE is new with this
     -- conversion: the second card's title, "Element-Specific Alpha".

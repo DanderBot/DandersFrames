@@ -475,7 +475,9 @@ DF.SECTION_PREFIXES = {
     bars_healpred                = { "healPrediction" },
     bars_health                  = { "healthColor", "healthOrientation", "healthTexture", "classColor", "smoothBars", "background", "missingHealth", "reducedMaxHealth" },
     bars_resource                = { "resourceBar" },
-    display_fading               = { "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf" },
+    -- "frameFade" out-ranks general_frame's "frame" (longest prefix wins): the
+    -- Frame Fade card lives on the Fading page, so this page owns its keys.
+    display_fading               = { "frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf" },
     display_pets                 = { "pet" },
     display_tooltips             = { "tooltip" },
     display_visibility           = { "soloMode", "hidePlayerFrame", "restedIndicator" },
