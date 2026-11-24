@@ -178,10 +178,36 @@ print("-- Search match: one index per registry")
 local ix1 = S:_MatchIndex()
 check(S:_MatchIndex() == ix1, "index: reused while the registry stands")
 local late = Reg(S, "general_sorting", "Sorting", "Sorting", "Sort by Class", "sortEnabled")
-check(S:_MatchIndex() ~= ix1, "index: rebuilt when the registry grows")
+check(S:_MatchIndex() == ix1 and ix1.n == #S.Registry, "index: grows in place when the registry grows")
 check(has(find("class"), late), "index: ...and the new entry is found")
 S.Registry = { fadeAlpha }
 check(#find("width") == 0, "index: rebuilt when the registry is replaced")
+
+print("-- Search match: the index is built in slices, never in one go")
+do
+    local savedClock, savedTimer2 = debugprofilestop, C_Timer
+    local now = 0
+    debugprofilestop = function() now = now + 1; return now end   -- every read costs 1 ms
+    local queued = {}
+    C_Timer = { After = function(_, fn) queued[#queued + 1] = fn end }
+    local _, S5 = NewHost()
+    for i = 1, 100 do Reg(S5, "p" .. (i % 5), "Page", "Card", "Setting " .. i, "frameWidth") end
+    local progress, done = 0, false
+    function S5:_OnIndexProgress(complete) progress = progress + 1; if complete then done = true end end
+    local ix = S5:_MatchIndex(5)
+    check(ix.n < 100 and not ix.complete, "slice: a budgeted call stops early (" .. ix.n .. " of 100)")
+    check(#queued == 1, "slice: ...and queues the rest for the next frame")
+    local frames = 0
+    while #queued > 0 and frames < 100 do
+        local batch = queued; queued = {}
+        for _, fn in ipairs(batch) do fn() end
+        frames = frames + 1
+    end
+    check(done and S5:_MatchIndex().n == 100, "slice: later frames finish it (" .. frames .. " frames)")
+    check(progress >= 1, "slice: ...and report as it grows")
+    check(#S5:RankedMatches("setting 42") >= 1, "slice: the finished index answers")
+    debugprofilestop, C_Timer = savedClock, savedTimer2
+end
 
 -- ============================================================
 -- 3. A LOCALE'S OWN SYNONYMS

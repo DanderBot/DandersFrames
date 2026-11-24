@@ -152,9 +152,10 @@ function Search:_FilterCompute()
     -- The view's deferred pages (one unit's pages) join the index; nothing else.
     self:IncludeScopedPages(inView)
     self:TryReuseRegistry()
+    F.partial = false
     if self:RegistryIsStale() or self.RegistryBuilding then
         -- A build creates frames: never in combat. Try again once it ends.
-        if InCombatLockdown() then
+        if InCombatLockdown() and not self.RegistryBuilding then
             if not waitingForCombat then
                 waitingForCombat = CreateFrame("Frame")
                 waitingForCombat:SetScript("OnEvent", function(f)
@@ -175,8 +176,16 @@ function Search:_FilterCompute()
             end)
             F.waitToken = self._buildToken
         end
-        Deactivate()
-        return false, viewMoved
+        -- ★ WHILE THE INDEX IS BUILDING, ANSWER FROM WHAT HAS LANDED. The build
+        -- appends page after page; the answer is recomputed as it grows (the
+        -- registry's length is part of the memo key, and the build reports its
+        -- progress -- _OnBuildProgress below), so the list widens as pages land.
+        -- Nothing found YET is not "nothing found": the window stays unfiltered.
+        if not self.RegistryBuilding then
+            Deactivate()
+            return false, viewMoved
+        end
+        F.partial = true
     end
 
     local compiled = self:CompileQuery(F.text)
@@ -186,13 +195,12 @@ function Search:_FilterCompute()
     F.keepCache = {}
     dbByTab = {}
     F.compiled = compiled
+    F.pageWhole = {}
     F.indexed = compiled.index and compiled.index.indexed or nil
     F.hit = self:MatchEntries(compiled, function(e) return e.tab ~= nil and inView[e.tab] == true end)
 
     local pageHit, pageWhole = {}, {}
-    for entry in pairs(F.hit) do
-        if not pageHit[entry.tab] and EntryWouldShow(entry) then pageHit[entry.tab] = true end
-    end
+    -- Pages whose own name matches show whole (asked first: the dry run reads it).
     for name in pairs(inView) do
         local label, spaced = PageTexts(GUI.Pages[name], name)
         if self:TextMatchesAll(compiled, { { label, literal = true }, { spaced, literal = true } }) then
@@ -200,8 +208,33 @@ function Search:_FilterCompute()
             pageHit[name] = true
         end
     end
+    F.pageWhole = pageWhole
+    local candidate = {}
+    for entry in pairs(F.hit) do
+        if not candidate[entry.tab] and EntryWouldShow(entry) then candidate[entry.tab] = true end
+    end
+    -- ★ LISTED ONLY WHEN THE PAGE WOULD SHOW SOMETHING: the same decision the
+    -- page pass makes (_FilterPage, dry), on the page's own widgets. A page with
+    -- no build to ask (its entries came from a build that is not on it) keeps
+    -- the entry-level answer.
+    for tab in pairs(candidate) do
+        local page = GUI.Pages and GUI.Pages[tab]
+        local kids = page and page.children
+        if type(kids) == "table" and #kids > 0 then
+            local ok, shows = pcall(self._FilterPage, self, page, PageDB(page), true)
+            if not ok then geterrorhandler()(shows) end
+            if ok and shows then pageHit[tab] = true end
+        else
+            pageHit[tab] = true
+        end
+    end
     F.pageHit, F.pageWhole = pageHit, pageWhole
     F.any = next(pageHit) ~= nil
+    if F.partial and not F.any then
+        Deactivate()
+        F.partial = true
+        return false, viewMoved
+    end
     F.active = true
     F.memo = MemoKey(sig)
     return true, viewMoved
@@ -258,21 +291,39 @@ local function SameCol(a, b)
 end
 
 -- Marks the page; returns true when any mark moved (so a relayout is due).
-function Search:_FilterPage(page, db)
+-- ★ `dry`: decide, mark nothing, and answer whether ANYTHING on the page would
+-- be left showing. The page list asks this of every page it would list, so a
+-- page is listed exactly when this pass would leave something on it -- the
+-- list and the page cannot disagree (a page listed with nothing on it was the
+-- 2026-11-24 report: a unit frame's Frame page listed for "move").
+function Search:_FilterPage(page, db, dry)
     local name = page.tabName
-    if not (F.active and F.any and name and F.inView[name]) or F.pageWhole[name] or PageHasFill(page) then
+    if dry then
+        if F.pageWhole[name] or PageHasFill(page) then return true end
+    elseif not (F.active and F.any and name and F.inView[name]) or F.pageWhole[name] or PageHasFill(page) then
         if page._dfFiltered then return self:_UnfilterPage(page) end
         return false
     end
-    local moved = not page._dfFiltered
-    page._dfFiltered = true
+    local moved = false
+    local anyShown = false
+    local dryHidden = dry and {} or nil
+    if not dry then
+        moved = not page._dfFiltered
+        page._dfFiltered = true
+    end
     local keepCache = F.keepCache or {}
     F.keepCache = keepCache
     local function Mark(w, hidden)
-        if rawget(w, "dfFilterHidden") ~= hidden then
+        if dry then
+            dryHidden[w] = hidden or false
+        elseif rawget(w, "dfFilterHidden") ~= hidden then
             rawset(w, "dfFilterHidden", hidden)
             moved = true
         end
+    end
+    local function IsHidden(w)
+        if dry then return dryHidden[w] == true end
+        return rawget(w, "dfFilterHidden") and true or false
     end
 
     local compiled = F.compiled
@@ -314,14 +365,16 @@ function Search:_FilterPage(page, db)
         keepCache[w] = c
         return c
     end
-    local function Keep(w, section)
-        if not Matches(w, section) then return false end
+    -- `forced`: the control sits under a header whose title matched, so it is
+    -- kept like any control in a card whose title matched.
+    local function Keep(w, section, forced)
+        if not (forced or Matches(w, section)) then return false end
         return not CondHidden(w, db)
     end
 
     -- A box: decide its rows (headers inside it follow the rows under them), mark
     -- them, and say whether anything is left.
-    local function DecideGroup(g, section)
+    local function DecideGroup(g, section, forced)
         local kids = rawget(g, "groupChildren") or {}
         local keep, any = {}, false
         for j, e in ipairs(kids) do
@@ -329,9 +382,9 @@ function Search:_FilterPage(page, db)
             if type(cw) == "table" and not rawget(cw, "isSectionHeader") then
                 local k
                 if rawget(cw, "groupChildren") then
-                    k = not CondHidden(cw, db) and DecideGroup(cw, section)
+                    k = not CondHidden(cw, db) and DecideGroup(cw, section, forced)
                 else
-                    k = Keep(cw, section)
+                    k = Keep(cw, section, forced)
                 end
                 keep[j] = k and true or false
                 if k then any = true end
@@ -349,7 +402,7 @@ function Search:_FilterPage(page, db)
                 keep[j] = k
             end
         end
-        if g.SetChildFiltered then
+        if g.SetChildFiltered and not dry then
             for j, e in ipairs(kids) do
                 if e.widget then
                     local want = (not keep[j]) or nil
@@ -363,6 +416,30 @@ function Search:_FilterPage(page, db)
 
     local children = page.children or {}
     local cardKept = {}
+
+    -- ★ A BARE HEADER WHOSE TITLE MATCHES shows what it heads, the way a card
+    -- whose title matches shows the whole card: "movement" finds the Movement
+    -- header and so the Permanent Mover card under it. What it heads: the
+    -- widgets after it in its own column, up to the next bare header there.
+    local underMatched = {}
+    do
+        local cur = {}
+        for _, w in ipairs(children) do
+            if type(w) == "table" and not rawget(w, "settingsGroup") then
+                local col = rawget(w, "layoutCol") or 1
+                if rawget(w, "isSectionHeader") then
+                    local gt = rawget(w, "GetText")
+                    local title = (type(gt) == "function" and gt(w)) or rawget(w, "title")
+                    local m = type(title) == "string" and not CondHidden(w, db) and CardMatched({ sectionTitleText = title })
+                    if col == "both" then cur[1], cur[2] = m, m else cur[col] = m end
+                else
+                    local m
+                    if col == "both" then m = cur[1] or cur[2] else m = cur[col] end
+                    if m then underMatched[w] = true end
+                end
+            end
+        end
+    end
     for _, w in ipairs(children) do
         if type(w) == "table" and not rawget(w, "settingsGroup") then
             local hidden = nil
@@ -372,34 +449,50 @@ function Search:_FilterPage(page, db)
                 hidden = nil   -- decided below (cards, headers), or never filtered
             elseif rawget(w, "isPageFooter") then
                 hidden = true
+            elseif type(section) == "table" and CondHidden(section, db) then
+                -- Inside a card that is not drawn at all (a card filtered off a
+                -- unit frame's page hides on Never): nothing in it can show.
+                hidden = true
             elseif rawget(w, "isSettingsGroup") then
-                local any = not CondHidden(w, db) and DecideGroup(w, section)
+                local any = not CondHidden(w, db) and DecideGroup(w, section, underMatched[w])
                 if any then
                     if section then cardKept[section] = true end
                 else
                     hidden = true
                 end
-            elseif Keep(w, section) then
+            elseif Keep(w, section, underMatched[w]) then
                 if section then cardKept[section] = true end
             else
                 hidden = true
             end
             -- Cards and headers are marked once, below: marking them shown here and
             -- hidden there would count as a change on every pass.
-            if not later then Mark(w, hidden) end
+            if not later then
+                Mark(w, hidden)
+                if not hidden and not (rawget(w, "rightAlign") or rawget(w, "isSyncPoint"))
+                    and not CondHidden(w, db) then
+                    anyShown = true
+                end
+            end
         end
     end
 
     -- Cards: kept when anything in them is (or their title matches), and opened
     -- for the search when shut.
+    -- A card's header tick is one of its controls: a match on it keeps the card.
+    -- A card hidden by its own condition keeps nothing, whatever matched in it.
     for _, w in ipairs(children) do
         if type(w) == "table" and rawget(w, "sectionChildren") then
-            if cardKept[w] or CardMatched(w) then
+            local tick = rawget(w, "headerToggle")
+            local keep = not CondHidden(w, db) and (cardKept[w] or CardMatched(w) or underMatched[w]
+                or (type(tick) == "table" and Matches(tick, nil)))
+            if keep then
                 Mark(w, nil)
-                if OpenCard(w) then moved = true end
+                anyShown = true
+                if not dry and OpenCard(w) then moved = true end
             else
                 Mark(w, true)
-                if RestoreCard(w) then moved = true end
+                if not dry and RestoreCard(w) then moved = true end
             end
         end
     end
@@ -417,7 +510,7 @@ function Search:_FilterPage(page, db)
                     if SameCol(col, wcol) then
                         if rawget(w, "isSectionHeader") then break end
                         if not (rawget(w, "rightAlign") or rawget(w, "isSyncPoint"))
-                            and not rawget(w, "dfFilterHidden") then
+                            and not IsHidden(w) then
                             keep = true
                             break
                         end
@@ -427,6 +520,7 @@ function Search:_FilterPage(page, db)
             Mark(h, (not keep) or nil)
         end
     end
+    if dry then return anyShown end
     return moved
 end
 
@@ -562,6 +656,26 @@ function Search:RefreshFilter(moved)
     self:_FilterNote()
 end
 
+-- ★ GROWTH: the index build landed more pages, or the word index took another
+-- slice. Re-answer, at most every PROGRESS_EVERY seconds (a build reports every
+-- frame). Home's results re-run once the word index is complete.
+local PROGRESS_EVERY = 0.15
+local function QueueProgressRefresh()
+    if F.progressQueued then return end
+    F.progressQueued = true
+    C_Timer.After(PROGRESS_EVERY, function()
+        F.progressQueued = nil
+        if F.text ~= "" then Search:RefreshFilter(false) end
+    end)
+end
+function Search:_OnBuildProgress()
+    QueueProgressRefresh()
+end
+function Search:_OnIndexProgress(complete)
+    QueueProgressRefresh()
+    if complete and self.RefreshIfActive then self:RefreshIfActive() end
+end
+
 -- Enter in the box: when the page on screen has nothing matching, go to the
 -- first listed page that does.
 function Search:FilterJump()
@@ -579,13 +693,28 @@ function Search:WarmFilterIndex()
         self:EnsureRegistryAsync(function(ok)
             F.waitToken = nil
             if ok then
-                self:_MatchIndex()
+                self:_MatchIndex(self.INDEX_SLICE_MS)
                 if F.text ~= "" then self:RefreshFilter(true) end
             end
         end)
         F.waitToken = self._buildToken
     elseif self._MatchIndex then
-        self:_MatchIndex()
+        -- Sliced: the word index never builds in the frame of the click.
+        self:_MatchIndex(self.INDEX_SLICE_MS)
+    end
+end
+
+-- On the settings window opening (after a moment, out of combat): only the work
+-- that makes NO frames -- the index assembled from pages already built this
+-- session, and its word index in slices. Building the pages nobody has opened
+-- waits for the box to take focus: those builds make every page's frames, which
+-- a player who never searches should not pay for (see the report on a frameless
+-- recording pass, which is what would lift this).
+function Search:WarmFilterIndexCheap()
+    if InCombatLockdown() then return end
+    self:TryReuseRegistry()
+    if not self:RegistryIsStale() and self._MatchIndex then
+        self:_MatchIndex(self.INDEX_SLICE_MS)
     end
 end
 
@@ -642,6 +771,13 @@ function Search:CreateFilterBar(parent)
         onEnter  = function() Search:FilterJump() end,
     })
     F.bar = bar
+    if parent and type(parent.HookScript) == "function" then
+        parent:HookScript("OnShow", function()
+            C_Timer.After(1, function()
+                if parent:IsVisible() then Search:WarmFilterIndexCheap() end
+            end)
+        end)
+    end
     return bar
 end
 

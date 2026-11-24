@@ -322,17 +322,54 @@ local function IndexEntry(ix, entry)
 end
 
 -- The index for the registry as it stands, built if it is out of date.
-function Search:_MatchIndex()
+-- ★ GROWN, NEVER REBUILT, AND NEVER IN ONE GO. The registry only ever grows
+-- by appending (a build adds page after page) or is replaced whole, so the
+-- index keeps the count it has reached and adds the entries after it; only a
+-- new registry starts it again. With `budgetMs` it stops once that much time is
+-- spent and finishes on later frames (a few thousand entries cost ~100 ms in
+-- one piece -- the freeze on clicking into the box). The partial index answers
+-- for what it holds; Search:_OnIndexProgress is told as it grows. Without a
+-- budget (tests, tools) it completes now.
+local INDEX_SLICE_MS = 4
+function Search:_MatchIndex(budgetMs)
     EnsureConcepts()
     local reg = self.Registry or {}
     local ix = self._matchIndex
-    if ix and ix.reg == reg and ix.n == #reg then return ix end
-    ix = { reg = reg, n = #reg, words = {}, cons = {}, raw = {}, vocab = {}, indexed = {} }
-    for w, n in pairs(conceptVocab) do ix.vocab[w] = n end
-    for _, entry in ipairs(reg) do IndexEntry(ix, entry) end
-    self._matchIndex = ix
+    if not ix or ix.reg ~= reg or ix.n > #reg then
+        ix = { reg = reg, n = 0, words = {}, cons = {}, raw = {}, vocab = {}, indexed = {} }
+        for w, n in pairs(conceptVocab) do ix.vocab[w] = n end
+        self._matchIndex = ix
+    end
+    local total = #reg
+    if ix.n < total then
+        local clock = budgetMs and debugprofilestop
+        local deadline = clock and (clock() + budgetMs)
+        local i = ix.n
+        while i < total do
+            i = i + 1
+            IndexEntry(ix, reg[i])
+            if deadline and i % 16 == 0 and clock() > deadline then break end
+        end
+        ix.n = i
+    end
+    ix.complete = ix.n >= #reg
+    if not ix.complete and budgetMs then self:_QueueIndexSlice() end
     return ix
 end
+
+function Search:_QueueIndexSlice()
+    if self._indexSliceQueued or not C_Timer then return end
+    self._indexSliceQueued = true
+    C_Timer.After(0, function()
+        self._indexSliceQueued = nil
+        local ix = self:_MatchIndex(INDEX_SLICE_MS)
+        if self._OnIndexProgress then
+            local ok, err = pcall(self._OnIndexProgress, self, ix.complete)
+            if not ok and err then geterrorhandler()(err) end
+        end
+    end)
+end
+Search.INDEX_SLICE_MS = INDEX_SLICE_MS
 
 -- ------------------------------------------------------------
 -- COMPILING A QUERY
@@ -412,7 +449,7 @@ function Search:CompileQuery(query)
     if type(query) ~= "string" then return nil end
     local folded = Fold(query):gsub("^%s+", ""):gsub("%s+$", "")
     if #folded < 2 then return nil end
-    local ix = self:_MatchIndex()
+    local ix = self:_MatchIndex(INDEX_SLICE_MS)
 
     -- Phrases that name one thing ("target of target") become that thing's word.
     local text = folded

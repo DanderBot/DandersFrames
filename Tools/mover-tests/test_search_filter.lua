@@ -333,6 +333,144 @@ Type("fade")
 check(not S:FilterActive() and built == 0, "combat: no build, no filter yet")
 inCombat = false
 
+print("-- Filter: every page the list shows has something showing on it")
+do
+    NewWindow()
+    local Never = function() return true end
+    -- The group Frame page's shape: bare headers over cards, a card whose header
+    -- tick is a registered setting that is NOT on the page, rows whose labels do
+    -- not say what the card is called.
+    local function FramePage(name, label, filtered)
+        local fp = Page(name, label)
+        local function capture(fn) S._captureEntries = fp._entries; fn(); S._captureEntries = nil end
+        local h1 = { isSectionHeader = true, layoutCol = 1 }
+        capture(function() S:SetCurrentSection("Layout", h1) end)
+        fp.children[#fp.children + 1] = h1
+        Card(fp, "Frame Size", { { "Width", "frameWidth" } }, { col = 1 })
+        local h2 = { isSectionHeader = true, layoutCol = 1, GetText = function() return "Movement" end }
+        capture(function() S:SetCurrentSection("Movement", h2) end)
+        fp.children[#fp.children + 1] = h2
+        local mover, moverBox
+        capture(function()
+            mover, moverBox = Card(fp, "Permanent Mover", {
+                { "Handle Position", "permanentMoverAnchor" },
+                { "Show on Hover Only", "permanentMoverShowOnHover" },
+            }, { col = 1, shut = true })
+            S:SetCurrentSection("Permanent Mover", mover)
+            mover.headerToggle = Control(fp, "Enable Permanent Mover", "permanentMover")
+        end)
+        if filtered then
+            -- A card filtered off this page (a unit frame's): it never shows, and
+            -- its header still registered -- what the old OpenSection did.
+            mover.hideOn, moverBox.hideOn, h2.hideOn = Never, Never, Never
+        end
+        Card(fp, "Border", { { "Show Border", "frameShowBorder" } }, { col = 2 })
+        return fp, mover, moverBox, h2
+    end
+    local gp, gMover, gBox, gHead = FramePage("general_frame", "Frame")
+    local up = FramePage("uf_player_frame", "Player Frame", true)
+    Card(Page("display_fading", "Fading"), "Frame Fade", { { "Global Frame Fade", "frameFadeAlpha" } })
+    Card(Page("bars_health", "Health Bar"), "Colors", { { "Bar Color", "healthColor" } })
+
+    GUI.CurrentPageName = "general_frame"
+    Type("move")
+    check(GUI.Tabs.general_frame._shown, "move: the group Frame page is listed")
+    check(not GUI.Tabs.uf_player_frame._shown, "move: a page whose only match is a card filtered off it is not")
+    GUI.RelayoutCurrentPage()
+    check(not rawget(gMover, "dfFilterHidden") and gMover.expanded, "move: the Permanent Mover card shows, opened")
+    check(not rawget(gHead, "dfFilterHidden"), "move: ...under its Movement header")
+    for _, e in ipairs(gBox.groupChildren) do
+        check(not e.filterHidden, "move: a card matched by title shows whole: " .. e.widget.label)
+    end
+    Type("")
+    Type("movement")
+    GUI.RelayoutCurrentPage()
+    check(GUI.Tabs.general_frame._shown and not rawget(gMover, "dfFilterHidden") and not rawget(gHead, "dfFilterHidden"),
+          "header: a bare header whose title matches shows the cards under it")
+    Type("")
+    Type("enable permanent")
+    check(GUI.Tabs.general_frame._shown and not rawget(gMover, "dfFilterHidden"),
+          "tick: a match on the card's header tick keeps the card")
+
+    -- What "showing" means for the invariant: a card, a box with a row left in it,
+    -- or a control -- not a header, not the page's tools.
+    local function Showing(page)
+        for _, w in ipairs(page.children) do
+            if not rawget(w, "dfFilterHidden") and not (w.hideOn and w.hideOn()) and not w.isSectionHeader then
+                if w.sectionChildren then return true end
+                if w.groupChildren then
+                    for _, e in ipairs(w.groupChildren) do
+                        if not e.filterHidden and not (e.widget.hideOn and e.widget.hideOn()) then return true end
+                    end
+                elseif w.searchEntry then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    for _, q in ipairs({ "move", "mover", "movement", "resting", "fade", "border", "hide", "range",
+                         "cast bar", "size", "width", "handle", "permanent", "frame", "color", "show" }) do
+        Type("")
+        Type(q)
+        for name, btn in pairs(GUI.Tabs) do
+            if btn._shown then
+                local page = GUI.Pages[name]
+                GUI.FilterPagePass(page, DF.db.party)
+                check(Showing(page), "invariant: '" .. q .. "' lists " .. name .. " and something shows on it")
+            end
+        end
+    end
+    Type("")
+end
+
+print("-- Filter: while the index builds, typing filters on what has landed")
+do
+    NewWindow()
+    local savedClock = debugprofilestop
+    local clk = 0
+    debugprofilestop = function() clk = clk + 10; return clk end   -- every page step overruns a slice
+    local function LazyPage(name, label, title, rowLabel, key)
+        local p = Page(name, label)
+        p.GetIndexEntries = function() return nil end   -- never built this session
+        local done = false
+        p.RefreshForIndex = function(self)
+            if done then return end
+            done = true
+            Card(self, title, { { rowLabel, key } })
+        end
+        return p
+    end
+    LazyPage("general_frame", "Frame", "Frame Fade", "Global Frame Fade", "frameFadeAlpha")
+    LazyPage("display_fading", "Fading", "Out of Range", "Frame Alpha (Out of Range)", "rangeFadeAlpha")
+    LazyPage("general_layout", "Layout", "Size", "Width", "frameWidth")
+    S.RegistryBuilt = false
+    GUI.CurrentPageName = "general_frame"
+    local function Listed()
+        local n = 0
+        for _, btn in pairs(GUI.Tabs) do if btn._shown and S:FilterActive() then n = n + 1 end end
+        return n
+    end
+    local function OneFrame()
+        local batch = timers; timers = {}
+        for _, fn in ipairs(batch) do fn() end
+        return #batch
+    end
+    S:SetFilterText("fade")
+    local sawPartial, frames = false, 0
+    while #timers > 0 and frames < 60 do
+        OneFrame()
+        frames = frames + 1
+        if S.RegistryBuilding and S:FilterActive() and Listed() >= 1 then sawPartial = true end
+    end
+    check(sawPartial, "partial: pages are listed while the build is still running")
+    check(not S.RegistryBuilding, "partial: the build finished (" .. frames .. " frames)")
+    check(GUI.Tabs.general_frame._shown and GUI.Tabs.display_fading._shown and not GUI.Tabs.general_layout._shown,
+          "partial: ...and the finished list has every match and nothing else")
+    debugprofilestop = savedClock
+    Type("")
+end
+
 print("-- Filter: the wiring in the shared files")
 local P = options_file_source("GUI/Panel.lua"):gsub("\r\n", "\n")
 check(P:find("if GUI.FilterPagePass then GUI.FilterPagePass(self, db) end", 1, true) ~= nil,
