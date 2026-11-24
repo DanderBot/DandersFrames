@@ -314,6 +314,7 @@ function Search:RegistryIsStale()
     local currentMode = DF.GUI and DF.GUI.SelectedMode or "party"
     return (not self.RegistryBuilt) or #self.Registry == 0 or self.BuiltForMode ~= currentMode
         or (self.BuiltWithDeferred or false) ~= (self.deferredIndexOn or false)
+        or (self.BuiltScopeEpoch or 0) ~= (self.scopeEpoch or 0)
 end
 
 -- ============================================================
@@ -334,8 +335,33 @@ end
 -- ============================================================
 function Search:IsPageIndexed(page)
     if not page or page.skipSearchIndex then return false end
-    if page.deferIndex and not self.deferredIndexOn then return false end
+    if page.deferIndex and not self.deferredIndexOn
+        and not (self.scopedPages and page.tabName and self.scopedPages[page.tabName]) then
+        return false
+    end
     return true
+end
+
+-- ★ SOME DEFERRED PAGES, NOT ALL OF THEM. The page list's filter only needs the
+-- pages of the view it is narrowing -- one unit's pages, not every unit's -- so it
+-- asks for those by name. Same staleness rule as IncludeDeferredPages: a name
+-- not asked for before moves the epoch, the index reads stale, and the next build
+-- adds just those pages (reusing every page that already holds a valid build).
+-- Returns true when anything new was asked for.
+function Search:IncludeScopedPages(names)
+    local added = false
+    self.scopedPages = self.scopedPages or {}
+    for name in pairs(names) do
+        local page = DF.GUI and DF.GUI.Pages and DF.GUI.Pages[name]
+        if page and page.deferIndex and not self.scopedPages[name] then
+            self.scopedPages[name] = true
+            added = true
+        end
+    end
+    if added and not self.deferredIndexOn then
+        self.scopeEpoch = (self.scopeEpoch or 0) + 1
+    end
+    return added
 end
 
 function Search:IncludeDeferredPages()
@@ -379,6 +405,7 @@ function Search:TryReuseRegistry()
     registrationId = 0
     self.BuiltForMode = GUI.SelectedMode
     self.BuiltWithDeferred = self.deferredIndexOn or false
+    self.BuiltScopeEpoch = self.scopeEpoch or 0
     self._buildToken = (self._buildToken or 0) + 1
     for _, entries in ipairs(lists) do AppendIndexEntries(self, entries) end
     self.RegistryBuilt = true
@@ -446,6 +473,7 @@ function Search:_BeginRegistryBuild()
     self.BuiltForMode = DF.GUI.SelectedMode
     -- ...and whether the deferred pages are in it (DEFERRED PAGES, above).
     self.BuiltWithDeferred = self.deferredIndexOn or false
+    self.BuiltScopeEpoch = self.scopeEpoch or 0
 
     -- Bumped on every build AND by InvalidateRegistry, so a budgeted drain can
     -- tell "still mine" from "superseded" between slices.
@@ -1116,8 +1144,12 @@ end
 --   iconX      its left inset (default 6); the text starts one gap after it
 --   fontSize   the typed text and the placeholder, at the settings font (default:
 --              the small template font)
+--   onChange   fn(text) called with the box's text on every edit, clear and Escape
+--              INSTEAD of the results view; a bar built with it never becomes
+--              Search.SearchBar (the page list's filter box -- Features/SearchFilter.lua)
 function Search:CreateSearchBar(parent, opts)
     opts = opts or {}
+    local onChange = opts.onChange
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
 
@@ -1178,7 +1210,7 @@ function Search:CreateSearchBar(parent, opts)
         onClick    = function()
             editbox:SetText("")
             editbox:ClearFocus()
-            Search:HideResults()
+            if onChange then onChange("") else Search:HideResults() end
         end,
     })
     clearBtn:SetPoint("RIGHT", -4, 0)
@@ -1213,6 +1245,12 @@ function Search:CreateSearchBar(parent, opts)
     
     editbox:SetScript("OnTextChanged", function(self, userInput)
         local text = self:GetText()
+        if onChange then
+            placeholder:SetShown((not text or text == "") and not self:HasFocus())
+            clearBtn:SetShown(text ~= nil and text ~= "")
+            onChange(text or "")
+            return
+        end
         if text and text ~= "" then
             placeholder:Hide()
             clearBtn:Show()
@@ -1239,7 +1277,7 @@ function Search:CreateSearchBar(parent, opts)
     editbox:SetScript("OnEscapePressed", function(self)
         self:SetText("")
         self:ClearFocus()
-        Search:HideResults()
+        if onChange then onChange("") else Search:HideResults() end
     end)
     
     editbox:SetScript("OnEnterPressed", function(self)
@@ -1249,8 +1287,8 @@ function Search:CreateSearchBar(parent, opts)
     frame.editbox = editbox
     frame.placeholder = placeholder
     frame.clearBtn = clearBtn
-    
-    self.SearchBar = frame
+
+    if not onChange then self.SearchBar = frame end
     return frame
 end
 

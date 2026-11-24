@@ -3,7 +3,7 @@
 local DF = DandersFrames
 local Search = DF.Search
 
-local pairs, ipairs, type, next = pairs, ipairs, type, next
+local pairs, ipairs, type, next, setmetatable = pairs, ipairs, type, next, setmetatable
 local sub, gsub, gmatch, byte, find, char =
     string.sub, string.gsub, string.gmatch, string.byte, string.find, string.char
 local sort = table.sort
@@ -287,6 +287,7 @@ local function AddField(ix, entry, words, weight, withConcepts, skipStop)
 end
 
 local function IndexEntry(ix, entry)
+    if ix.indexed then ix.indexed[entry] = true end
     if type(entry.label) == "string" then
         AddField(ix, entry, Words(entry.label), W_LABEL, true)
     end
@@ -319,7 +320,7 @@ function Search:_MatchIndex()
     local reg = self.Registry or {}
     local ix = self._matchIndex
     if ix and ix.reg == reg and ix.n == #reg then return ix end
-    ix = { reg = reg, n = #reg, words = {}, cons = {}, vocab = {} }
+    ix = { reg = reg, n = #reg, words = {}, cons = {}, vocab = {}, indexed = {} }
     for w, n in pairs(conceptVocab) do ix.vocab[w] = n end
     for _, entry in ipairs(reg) do IndexEntry(ix, entry) end
     self._matchIndex = ix
@@ -436,17 +437,22 @@ end
 
 -- Does a piece of text (a card title, a page name) answer every word of a
 -- compiled query? Used for the parts of a page that carry no search entry.
--- `texts` is a list of strings; each query word may be met by any of them.
+-- `texts` is a list; each query word may be met by any item. An item is a
+-- string, or { text, literal = true } for text matched on its words alone, with
+-- no concepts -- the way the index treats a page's name (a page called Fading
+-- is not "about transparency" just because fade and transparency are synonyms).
 function Search:TextMatchesAll(compiled, texts)
     if not compiled then return false end
     for _, acc in ipairs(compiled.words) do
         local ok = false
-        for _, text in ipairs(texts) do
+        for _, item in ipairs(texts) do
+            local text, literal = item, false
+            if type(item) == "table" then text, literal = item[1], item.literal end
             if type(text) == "string" then
                 for _, w in ipairs(Words(text)) do
                     local n = Norm(w)
                     if acc.words[n] then ok = true break end
-                    local ids = conceptsOf[n]
+                    local ids = not literal and conceptsOf[n]
                     if ids then
                         for _, id in ipairs(ids) do
                             if acc.cons[id] then ok = true break end
@@ -456,6 +462,39 @@ function Search:TextMatchesAll(compiled, texts)
                 end
             end
             if ok then break end
+        end
+        if not ok then return false end
+    end
+    return true
+end
+
+-- Does one entry answer every word? For an entry the index does not hold -- a
+-- control whose setting the registry left out (no default in this mode), or a
+-- page rebuilt since the index was -- judged on exactly the fields the index
+-- would have given it, so the answer cannot differ from one the index gives.
+-- `section`, `pageLabel` and `pageName` stand in for what an unregistered entry
+-- was never stamped with (Register stamps them only on entries it keeps).
+function Search:EntryMatchesAll(compiled, entry, section, pageLabel, pageName)
+    if not (compiled and type(entry) == "table") then return false end
+    local probe = entry
+    if (section and not entry.section) or (pageLabel and not entry.tabLabel) or (pageName and not entry.tab) then
+        probe = setmetatable({
+            section  = entry.section or section,
+            tabLabel = entry.tabLabel or pageLabel,
+            tab      = entry.tab or pageName,
+        }, { __index = entry })
+    end
+    local mini = { words = {}, cons = {}, vocab = {} }
+    IndexEntry(mini, probe)
+    for _, acc in ipairs(compiled.words) do
+        local ok = false
+        for n in pairs(acc.words) do
+            if mini.words[n] then ok = true break end
+        end
+        if not ok then
+            for id in pairs(acc.cons) do
+                if mini.cons[id] then ok = true break end
+            end
         end
         if not ok then return false end
     end
