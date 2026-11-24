@@ -1098,13 +1098,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "dead" and "offline" matched nothing: the keys are fadeDead*, which begins
         -- "fade". So the entire Dead/Offline Fading box was silently dropped from all
         -- three. Prefixes must be real key prefixes, not the box's name.
-        Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
+        Add(CreateCopyButton(self.child, {"frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
 
         -- ===== THE PAGE'S CARDS ===========================================
-        -- FOUR cards, because the range check and the per-element alphas are
+        -- SIX cards, because the range check and the per-element alphas are
         -- split (see BuildRangeCheckGroup):
         --
-        --   column 1   Out of Range (no on/off), Element-Specific Alpha (tick:
+        --   column 1   Frame Fade (tick: frameFadeEnabled; moved here from the
+        --              Frame page -- "frameFade" is the first prefix above, so this
+        --              page owns its keys for Copy / Sync / Reset and the UF links),
+        --              Out of Range (no on/off), Element-Specific Alpha (tick:
         --              oorEnabled)
         --   column 2   Dead/Offline Fading (tick: fadeDeadFrames), Health
         --              Threshold Fading (tick: healthFadeEnabled), Spirit of
@@ -1115,8 +1118,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- The fades are how a frame LOOKS, so they are pinnable; the range
         -- check is behaviour and is not.
         --
-        -- ⚠ NO CATEGORY HEADERS. A header names a SECTION -- and the section here
-        -- is the whole page, which the tab already calls "Fading".
+        -- Headers group the cards by what they fade on: Frame, Range, Unit State.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } and, where the toggle moved into the
@@ -1450,6 +1452,137 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- columns, and "both" carries them through the one-column fold intact.
         Add(tools.SectionControls(self.child), 24, "both")
 
+        -- Frame Fade moved here from the Frame page: it is the whole-frame base the
+        -- range and health fades multiply onto, and the health fade can now override it.
+        -- Its section key stays "frame_fade" so a saved collapse / pin state carries over.
+        Add(GUI:CreateHeader(self.child, L["Frame"]), 40, 1)
+        -- ===== FRAME FADE (column 1, first: the base every fade below multiplies onto) =====
+        -- Whole-frame base opacity, multiplied with the range / health fades
+        -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
+        -- split on -- an out-of-combat and an in-combat value, plus a hover option that
+        -- shows the in-combat value while the mouse is on a frame out of combat.
+        --
+        -- ☠ THE TICK IS frameFadeEnabled, AND IT IS NOT frameFadeSplitCombat.
+        -- The split is a MODE rather than an enable (both states fade), and it
+        -- HIDES the global slider, so a tick that switched it off would grey the
+        -- one control the group exists for. frameFadeEnabled (Config.lua,
+        -- defaulting true) is the group's own boolean, and the engine reads it
+        -- before anything else it fades on (DF:GetFrameBaseAlpha). Off means
+        -- alpha 1, not the slider's value.
+        -- Every slider that can reach 0% says what 0% means: the frame is invisible,
+        -- but alpha never stops the mouse, so it still clicks, hovers and click-casts.
+        local function WithZeroNote(tip)
+            local note = L["At 0% the frame is invisible but can still be clicked, hovered and click-cast."]
+            return tip and format("%s\n\n%s", tip, note) or note
+        end
+
+        local function RefreshFrameFade()
+            if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
+            -- Pets re-apply their fade only on a range-cache miss; flush it so the
+            -- next tick picks up the new base instead of waiting for a range change.
+            if DF.ClearRangeCache then DF:ClearRangeCache() end
+            DF:RefreshAllVisibleFrames()
+            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
+        end
+
+        -- The group's seven controls, verbatim, taking the group and parent they
+        -- should build into. Same factories, same L keys, same db keys, same
+        -- callbacks, same slot heights, same hideOn/disableOn -- the only thing
+        -- the move changed is where `group`, `parent` and the state refresh come
+        -- from. Guarded by test_frame_page_builders.lua, which reads this body
+        -- out of the source and checks it against the inventory it had inline.
+        local function BuildFrameFadeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the card's HEADER carries this tick.
+            if not tools2.hoistToggle then
+                local ffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Fade"], db, "frameFadeEnabled", RefreshFrameFade), 30)
+                ffEnable.keepEnabled = true
+            end
+            -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does on every other
+            -- header-tick group on this page, so a pinned copy greys alike.
+            group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
+
+            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
+            ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
+            ffGlobal.tooltip = WithZeroNote(L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."])
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
+                tools2.refreshStates()
+                RefreshFrameFade()
+            end), L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."]), 30)
+            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
+            ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
+            ffOOC.tooltip = WithZeroNote(L["Frame opacity while you are out of combat. The preview shows this value while you configure it."])
+            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
+            ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
+            ffCombat.tooltip = WithZeroNote()
+            local ffInstance = group:AddWidget(GUI:CreateCheckbox(parent, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
+            ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
+            ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
+            local ffHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
+            -- Works without the split too: there it lifts a hovered frame to full.
+            ffHover.tooltip = format("%s\n\n%s",
+                L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."],
+                L["Without Separate Combat Fade, the frame shows at full opacity instead."])
+            local ffHoverScope = group:AddWidget(GUI:CreateDropdown(parent, L["Hover Applies To"], {
+                ALL   = L["All Frames"],
+                FRAME = L["Hovered Frame Only"],
+            }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
+            ffHoverScope.disableOn = function(d) return not d.frameFadeHoverUsesCombat end
+            ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
+            -- WoW Forever only: your pet's frame shows through Frame Fade while it is not
+            -- happy (DF:GetFrameBaseAlpha + PetHappiness.lua's mood cache). Unit frames
+            -- show it on the pet page alone (PageData hide).
+            if DF.IS_FOREVER then
+                local ffPet = group:AddWidget(GUI:CreateCheckbox(parent, L["Show When Pet Is Not Happy"], db, "frameFadeRevealUnhappyPet", function()
+                    local PH = DF.PetHappiness
+                    if PH and PH.WatchFrameFade then PH:WatchFrameFade() end
+                    RefreshFrameFade()
+                end), 30)
+                ffPet.tooltip = L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."]
+            end
+        end
+
+        -- The summary, per the same convention the border cards follow: at
+        -- most four items, a fixed order, "\194\183" between them, WORDS
+        -- localised and numbers raw, and every opacity carries the word that
+        -- says WHICH opacity it is. Two shapes, because the group has two: one
+        -- value when the split is off, the out-of-combat value plus the
+        -- in-combat one when it is on.
+        local function FrameFadeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
+                                                 or d.frameFadeAlpha
+            base = tonumber(base)
+            if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
+            if d.frameFadeSplitCombat then
+                local inc = tonumber(d.frameFadeAlphaInCombat)
+                if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
+            end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        -- ☠ ENABLE FRAME FADE IS THE HEADER'S TICK, so the builder is told not
+        -- to build its own (hoistToggle). The commit is what the in-body
+        -- checkbox ran plus the state pass that greys the seven behind it and
+        -- a repaint of a pinned panel -- never a page rebuild. How much of the
+        -- frame you can see is how it LOOKS, so it is pinnable.
+        local band = OpenSection(L["Frame Fade"], "frame_fade", 1, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {
+            db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"],
+            onChanged = function()
+                RefreshFrameFade()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end,
+        })
+        BuildFrameFadeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
+
         -- ☠ NO TICK, AND NO PIN. Out of range fading has no on/off: it fades
         -- either way, through the one frame-level alpha or the per-element
         -- ones below. The range spell and the check interval are behaviour,
@@ -1606,13 +1739,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 55)
             hfThreshold.tooltip = L["Units at or above this health percent are faded."]
 
+            -- Below the threshold, show through Frame Fade (HealthFade.lua's reveal):
+            -- the "hide healthy frames out of combat, still see the hurt ones" switch.
+            local hfReveal = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Below Threshold Through Frame Fade"], db, "healthFadeRevealsFrame", function()
+                RefreshHealthFade()
+                DF:UpdateAllFrames()
+            end), 30)
+            hfReveal.tooltip = L["Below the threshold the frame ignores Frame Fade and shows at full opacity, or at your In Combat Frame Fade with Separate Combat Fade on. Use it to hide healthy frames out of combat but still see anyone who is hurt."]
+
             group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
                 DF:UpdateAllFrames()
                 DF:RefreshAllVisibleFrames()
             end), L["Brings a faded frame back to full view while that player has a debuff you can dispel, so the fade never hides it. Only works while the Dispel Overlay is turned on."]), 30)
 
-            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
-            hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
+            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
+            hfFrameAlpha.tooltip = WithZeroNote(L["Frame opacity when health is above the threshold."])
         end
 
         -- Threshold first, then the opacity it applies: the two numbers the
@@ -3443,11 +3584,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --              "Movement"    Permanent Mover (tick: permanentMover)
         --   column 2   "Appearance"  Border (tick: frameShowBorder), Border Shadow
         --                            (tick: frameBorderShadowEnabled, greys with
-        --                            Show Border), Frame Fade (tick:
-        --                            frameFadeEnabled)
+        --                            Show Border). Frame Fade lives on the Fading
+        --                            page (display_fading owns frameFade*).
         --
         -- Pins on the cards that decide how the frames LOOK: Frame Size, the
-        -- three Appearance cards, Group Layout Settings and Flat Grid Settings.
+        -- two Appearance cards, Group Layout Settings and Flat Grid Settings.
         -- Layout Direction is not, because its dropdown rebuilds the page.
         --
         -- On a narrow window the page folds to one column in the order the
@@ -3613,7 +3754,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         CloseSection(band)
 
-        -- ===== APPEARANCE: Border, Border Shadow, Frame Fade (column 2) =====
+        -- ===== APPEARANCE: Border, Border Shadow (column 2) =====
         -- Canonical border controls via the unified helper. classColor +
         -- roleColor are first-class helper include flags. (Pixel-Perfect
         -- Scaling lives on General > Settings > Rendering — it's a global,
@@ -3786,112 +3927,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             hoistToggles = true,
         })
         CloseSection(shadowBand)
-
-        -- ===== FRAME FADE (the third Appearance card) =====
-        -- Whole-frame base opacity, multiplied with the range / health fades
-        -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
-        -- split on -- an out-of-combat and an in-combat value, plus a hover option that
-        -- shows the in-combat value while the mouse is on a frame out of combat.
-        --
-        -- ☠ THE TICK IS frameFadeEnabled, AND IT IS NOT frameFadeSplitCombat.
-        -- The split is a MODE rather than an enable (both states fade), and it
-        -- HIDES the global slider, so a tick that switched it off would grey the
-        -- one control the group exists for. frameFadeEnabled (Config.lua,
-        -- defaulting true) is the group's own boolean, and the engine reads it
-        -- before anything else it fades on (DF:GetFrameBaseAlpha). Off means
-        -- alpha 1, not alpha 0.1.
-        local function RefreshFrameFade()
-            if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
-            -- Pets re-apply their fade only on a range-cache miss; flush it so the
-            -- next tick picks up the new base instead of waiting for a range change.
-            if DF.ClearRangeCache then DF:ClearRangeCache() end
-            DF:RefreshAllVisibleFrames()
-            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
-        end
-
-        -- The group's seven controls, verbatim, taking the group and parent they
-        -- should build into. Same factories, same L keys, same db keys, same
-        -- callbacks, same slot heights, same hideOn/disableOn -- the only thing
-        -- the move changed is where `group`, `parent` and the state refresh come
-        -- from. Guarded by test_frame_page_builders.lua, which reads this body
-        -- out of the source and checks it against the inventory it had inline.
-        local function BuildFrameFadeGroup(tools2)
-            local group, parent = tools2.group, tools2.parent
-
-            -- Suppressed when the card's HEADER carries this tick.
-            if not tools2.hoistToggle then
-                local ffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Fade"], db, "frameFadeEnabled", RefreshFrameFade), 30)
-                ffEnable.keepEnabled = true
-            end
-            -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does on every other
-            -- header-tick group on this page, so a pinned copy greys alike.
-            group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
-
-            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
-            ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
-            ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
-            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
-                tools2.refreshStates()
-                RefreshFrameFade()
-            end), L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."]), 30)
-            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
-            ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
-            ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
-            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
-            ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
-            local ffInstance = group:AddWidget(GUI:CreateCheckbox(parent, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
-            ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
-            ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
-            local ffHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
-            ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
-            ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
-            local ffHoverScope = group:AddWidget(GUI:CreateDropdown(parent, L["Hover Applies To"], {
-                ALL   = L["All Frames"],
-                FRAME = L["Hovered Frame Only"],
-            }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
-            ffHoverScope.disableOn = function(d) return not d.frameFadeSplitCombat or not d.frameFadeHoverUsesCombat end
-            ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
-        end
-
-        -- The summary, per the same convention the border cards follow: at
-        -- most four items, a fixed order, "\194\183" between them, WORDS
-        -- localised and numbers raw, and every opacity carries the word that
-        -- says WHICH opacity it is. Two shapes, because the group has two: one
-        -- value when the split is off, the out-of-combat value plus the
-        -- in-combat one when it is on.
-        local function FrameFadeSummary(d)
-            if not d then return "" end
-            local parts = {}
-            local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
-                                                 or d.frameFadeAlpha
-            base = tonumber(base)
-            if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
-            if d.frameFadeSplitCombat then
-                local inc = tonumber(d.frameFadeAlphaInCombat)
-                if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
-            end
-            return table.concat(parts, " \194\183 ")
-        end
-
-        -- ☠ ENABLE FRAME FADE IS THE HEADER'S TICK, so the builder is told not
-        -- to build its own (hoistToggle). The commit is what the in-body
-        -- checkbox ran plus the state pass that greys the seven behind it and
-        -- a repaint of a pinned panel -- never a page rebuild. How much of the
-        -- frame you can see is how it LOOKS, so it is pinnable.
-        local band = OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {
-            db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"],
-            onChanged = function()
-                RefreshFrameFade()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end,
-        })
-        BuildFrameFadeGroup({
-            group = band, parent = self.child,
-            refreshStates = function() self:RefreshStates() end,
-            hoistToggle = true,
-        })
-        CloseSection(band)
 
         -- ===== LAYOUT DIRECTION (a Layout card) =====
         -- Three dropdowns and never more than two of them visible: the two

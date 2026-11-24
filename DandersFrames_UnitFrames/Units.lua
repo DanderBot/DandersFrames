@@ -449,12 +449,19 @@ function Units:VisibilityMacro(unit)
     if unit == "player" and db.visHideVehicle then add("[vehicleui] hide") end
     if db.visHideMounted then add("[mounted] hide") end
     if db.visHideSkyriding then add("[bonusbar:5] hide") end
+    -- [resting] is a real macro condition (inn / city), answered by the driver
+    -- itself, in combat too -- no event and no rebuild.
+    if db.visHideResting then add("[resting] hide") end
     if db.visAlways ~= false then
         add("show")
     else
         if db.visCombat then add("[combat] show") end
         if db.visNoCombat then add("[nocombat] show") end
         if db.visGroup then add("[group] show") end
+        -- ⚠ [group:party] is ALSO true in a raid, so "Party" excludes the raid case.
+        if db.visParty then add("[group:party,nogroup:raid] show") end
+        if db.visRaid then add("[group:raid] show") end
+        if db.visResting then add("[resting] show") end
         if db.visSolo then add("[nogroup] show") end
         if unit == "player" then
             if db.visHasTarget then add("[@target,exists] show") end
@@ -628,7 +635,9 @@ function Units:SweepFrameFade()
     if not DF.UpdateFrameAppearance then return end
     for _, f in pairs(UF.frames) do
         local db = f.dfDB
-        if db and db.frameFadeSplitCombat and f:IsVisible() then DF:UpdateFrameAppearance(f) end
+        if db and db.frameFadeSplitCombat and f:IsVisible() then
+            if DF.RefreshFrameFadeOn then DF.RefreshFrameFadeOn(f) else DF:UpdateFrameAppearance(f) end
+        end
     end
 end
 

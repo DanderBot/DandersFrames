@@ -64,8 +64,9 @@ Links.ON_OFF = {
     showBuffs = "buffs", showDebuffs = "debuffs",
     defensiveIconEnabled = "defensive", dispelOverlayEnabled = "dispel",
     auraDesignerEnabled = "auradesigner",
-    frameShowBorder = "border", frameFadeEnabled = "frame",
-    -- Fading
+    frameShowBorder = "border",
+    -- Fading (Frame Fade's card lives on the Fading page)
+    frameFadeEnabled = "fading",
     oorEnabled = "fading", healthFadeEnabled = "fading", fadeDeadFrames = "fading",
     rangeFadeEnabled = "fading",
     -- Tooltips: whether each kind opens at all

@@ -89,14 +89,6 @@ function DF:ApplyHealthFadeAlpha(frame)
     -- threshold is resolved without a real unit.
     if DF:FrameInTestScope(frame, "any") and not frame.dfIsTestFrame then return false end
 
-    -- Dispel cancel: if dispel overlay is showing, cancel fade
-    -- (IsShown is a non-tainted boolean)
-    if db.hfCancelOnDispel then
-        if frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
-            return false
-        end
-    end
-
     -- Determine below-threshold alpha based on range state
     -- frame.dfInRange may be a secret boolean from UnitInRange fallback
     local belowAlpha = 1.0
@@ -108,6 +100,28 @@ function DF:ApplyHealthFadeAlpha(frame)
         -- Secret values: can't compare, leave belowAlpha at 1 (OOR handled by frame-level SetAlphaFromBoolean)
     end
 
+    -- ★ "SHOW BELOW THRESHOLD THROUGH FRAME FADE" (healthFadeRevealsFrame, off by
+    -- default). Below the threshold the frame takes the REVEAL value -- what it would
+    -- show in combat (DF:GetFrameRevealAlpha) -- instead of the Frame Fade base, so a
+    -- 0% out-of-combat Frame Fade hides healthy frames and still shows a hurt one.
+    -- The range fade stays multiplied in; above the threshold nothing changes.
+    local reveals = db.healthFadeRevealsFrame and true or false
+    local reveal = reveals and (DF.GetFrameRevealAlpha and DF:GetFrameRevealAlpha(db) or 1) or nil
+
+    -- Dispel cancel: if dispel overlay is showing, cancel fade
+    -- (IsShown is a non-tainted boolean)
+    if db.hfCancelOnDispel then
+        if frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
+            -- With the reveal on, cancelling must SHOW the frame: falling back to the
+            -- plain appearance would put it back at the Frame Fade base (0% hides it).
+            if reveals then
+                frame:SetAlpha(belowAlpha * reveal)
+                return true
+            end
+            return false
+        end
+    end
+
     local aboveAlpha = db.healthFadeAlpha or 0.5
     local threshold = db.healthFadeThreshold or 100
 
@@ -115,7 +129,7 @@ function DF:ApplyHealthFadeAlpha(frame)
     -- engine-resolved value already carries it -- there is no Lua-side multiply
     -- possible on the secret result. Curve cache keys are the scaled numbers.
     local base = DF.GetFrameBaseAlpha and DF:GetFrameBaseAlpha(db, frame) or 1
-    belowAlpha = belowAlpha * base
+    belowAlpha = belowAlpha * (reveal or base)
     aboveAlpha = aboveAlpha * base
 
     -- ☠ DATA FORK, NOT A RENDER FORK. Live must resolve the threshold through the
@@ -238,9 +252,14 @@ function DF:UpdatePetHealthFade(frame)
     local threshold = db.healthFadeThreshold or 100
     local aboveAlpha = db.healthFadeAlpha or 0.5
 
-    -- Frame Fade base folded into the curve, same as the unit-frame path.
+    -- Frame Fade base folded into the curve, same as the unit-frame path -- and the
+    -- same "show below threshold" reveal (healthFadeRevealsFrame).
     local base = DF.GetFrameBaseAlpha and DF:GetFrameBaseAlpha(db, frame) or 1
-    local curve = BuildHealthFadeCurve(threshold, base, aboveAlpha * base)
+    local below = base
+    if db.healthFadeRevealsFrame then
+        below = DF.GetFrameRevealAlpha and DF:GetFrameRevealAlpha(db) or 1
+    end
+    local curve = BuildHealthFadeCurve(threshold, below, aboveAlpha * base)
     local color = UnitHealthPercent(frame.unit, true, curve)
     if not color then return end
 

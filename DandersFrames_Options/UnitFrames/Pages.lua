@@ -1561,8 +1561,11 @@ UFO.VIS_SHOW = {
     { key = "visCombat",         label = function() return L["In Combat"] end },
     { key = "visNoCombat",       label = function() return L["Out of Combat"] end },
     { key = "visGroup",          label = function() return L["In a Group"] end },
+    { key = "visParty",          label = function() return L["Party"] end },
+    { key = "visRaid",           label = function() return L["Raid"] end },
     { key = "visSolo",           label = function() return L["Solo"] end },
     { key = "visInstance",       label = function() return L["In an Instance"] end },
+    { key = "visResting",        label = function() return L["Resting"] end },
     { key = "visHasTarget",      label = function() return L["Have a Target"] end },
     { key = "visHasEnemyTarget", label = function() return L["Have a Hostile Target"] end },
 }
@@ -1571,6 +1574,7 @@ UFO.VIS_HIDE = {
     { key = "visHideVehicle",   label = function() return L["In a Vehicle"] end },
     { key = "visHideMounted",   label = function() return L["Mounted"] end },
     { key = "visHideSkyriding", label = function() return L["Skyriding"] end },
+    { key = "visHideResting",   label = function() return L["Resting"] end },
 }
 
 function UFO.VisControlShown(rec, unit, key)

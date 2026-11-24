@@ -98,6 +98,7 @@ local COMMON = {
     visInstance = false, visHasTarget = false, visHasEnemyTarget = false,
     visHidePetBattle = true,
     visHideVehicle = false, visHideMounted = false, visHideSkyriding = false,
+    visParty = false, visRaid = false, visResting = false, visHideResting = false,
 }
 
 -- ============================================================

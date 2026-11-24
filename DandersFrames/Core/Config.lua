@@ -1738,6 +1738,7 @@ DF.PartyDefaults = {
     healthFadeEnabled = false,
     healthFadeAlpha = 0.5,
     healthFadeThreshold = 100,
+    healthFadeRevealsFrame = false,   -- below the threshold, show through Frame Fade (DF:GetFrameRevealAlpha)
     hfCancelOnDispel = true,
 
     -- Unhealable fading (Spirit of Redemption): a cover over the frame while the aura is up
@@ -2566,6 +2567,7 @@ DF.PartyDefaults = {
     frameFadeHoverUsesCombat = false,
     frameFadeHoverScope = "ALL",   -- "ALL" = every frame lifts while any is hovered; "FRAME" = just the hovered one
     frameFadeInstanceUsesCombat = false,   -- inside a dungeon/raid/arena/BG, hold the in-combat value between pulls
+    frameFadeRevealUnhappyPet = false,     -- WoW Forever: your pet's frame shows through Frame Fade while it is not happy
 
     -- Ping Icon (mirror of Blizzard's 12.1 frame pings; see Features/PingMirror.lua)
     pingIconAlpha = 1,

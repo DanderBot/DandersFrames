@@ -26,7 +26,7 @@ local SUBJECT = {
     Frames = true, Interface = true,                    -- Settings
     Sorting = true, Priority = true,                    -- Sorting
     ["Unit Colors"] = true, ["Aura Colors"] = true,     -- Colors
-    Range = true, ["Unit State"] = true,                -- Fading
+    Frame = true, Range = true, ["Unit State"] = true,  -- Fading (Frame: Frame Fade's card)
     ["Unit Frame"] = true, Auras = true,                -- Tooltips
     ["Group Roles"] = true, Markers = true,             -- Icons
     Status = true, Combat = true,
