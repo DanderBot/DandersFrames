@@ -239,6 +239,7 @@ local FRAME_FADE = {
     { "checkbox", "Use In-Combat Fade In Instances",   "frameFadeInstanceUsesCombat", 30 },
     { "checkbox", "Show In-Combat Fade When Hovering", "frameFadeHoverUsesCombat",    30 },
     { "dropdown", "Hover Applies To",                  "frameFadeHoverScope",         55 },
+    { "checkbox", "Show When Pet Is Not Happy",        "frameFadeRevealUnhappyPet",   30 },   -- built on WoW Forever only
 }
 
 print("-- Fading page: Frame Fade")

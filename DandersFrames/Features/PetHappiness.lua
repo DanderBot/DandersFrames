@@ -851,7 +851,10 @@ function PH:UpdateGroupFrame(frame)
     local db = DF:GetFrameDB(frame)
     local test = frame.dfIsTestFrame
     local icon = frame.dfHappinessIcon
-    if not test then PH:WatchGroup() end
+    if not test then
+        PH:WatchGroup()
+        PH:WatchFrameFade()
+    end
     local own = db and PH.IsOwnPetFrame(frame)
     local showIcon = own and db.petHappinessIconEnabled
     local tints = own and PH.WantsTints(db.petHappinessColorBorder, db.petHappinessColorName, db.petHealthColorMode)
@@ -917,4 +920,78 @@ function PH:WatchGroup()
     if on == PH.groupOn and not (on and not PH.registered) then return end
     PH.groupOn = on
     PH:SetConsumer(GROUP_KEY, on, GroupFramesChanged)
+end
+
+-- ============================================================
+-- FRAME FADE: "SHOW WHEN PET IS NOT HAPPY" (frameFadeRevealUnhappyPet)
+-- DF:GetFrameBaseAlpha reveals your own pet's frame through Frame Fade while
+-- PH.fadeMood is below 3 (Content or Unhappy). It is on the health hot path,
+-- so it reads this cached mood and never calls C_PetInfo itself; the consumer
+-- below keeps the cache and repaints your pet's frames when the mood moves.
+-- Alpha only, so it applies in combat too.
+-- ============================================================
+local FADE_KEY = "frame_fade"
+PH.fadeMood = nil
+
+function PH:WantsFrameFade()
+    if not PH:IsSupported() then return false end
+    for _, get in ipairs(GROUP_DB_GETTERS) do
+        local db = DF[get] and DF[get](DF)
+        if db and db.frameFadeRevealUnhappyPet then return true end
+    end
+    local UF = DF.UnitFrames
+    local udb = UF and UF.GetUnitDB and UF:GetUnitDB("pet")
+    return (udb and udb.frameFadeRevealUnhappyPet) and true or false
+end
+
+-- Your pet's frames: the group player-pet frame, your raid pet frame, the unit
+-- frames pet frame. Group pet frames re-apply their fade only on a range-cache
+-- miss, so their cache entry is dropped first.
+local function RefreshOwnPetFrameFade()
+    local function group(f)
+        if not (f and f.unit and PH.IsOwnPetFrame(f)) then return end
+        if DF.ClearRangeCacheForUnit then DF:ClearRangeCacheForUnit(f.unit) end
+        if DF.UpdatePetRange then DF:UpdatePetRange(f) end
+        if DF.UpdatePetHealthFade then DF:UpdatePetHealthFade(f) end
+    end
+    if DF.petFrames then group(DF.petFrames.player) end
+    for _, set in ipairs({ DF.raidPetFrames or false, DF.arenaPetFrames or false }) do
+        if set then
+            for i = 1, 40 do group(set[i]) end
+        end
+    end
+    local UF = DF.UnitFrames
+    local uf = UF and UF.frames and UF.frames.pet
+    if uf and uf.IsVisible and uf:IsVisible() then
+        if DF.RefreshFrameFadeOn then DF.RefreshFrameFadeOn(uf) end
+        if DF.UpdateHealthFade then DF:UpdateHealthFade(uf) end
+    end
+end
+
+local function FadeMoodChanged()
+    local mood = PH:Read()
+    if mood == PH.fadeMood then return end
+    PH.fadeMood = mood
+    RefreshOwnPetFrameFade()
+end
+
+-- Called from the Fading page's checkbox, from every group pet frame update (next
+-- to WatchGroup) and on entering the world.
+function PH:WatchFrameFade()
+    local on = PH:WantsFrameFade()
+    if on == PH.fadeOn and not (on and not PH.registered) then return end
+    PH.fadeOn = on
+    PH:SetConsumer(FADE_KEY, on, FadeMoodChanged)
+    if on then
+        FadeMoodChanged()
+    elseif PH.fadeMood ~= nil then
+        PH.fadeMood = nil
+        RefreshOwnPetFrameFade()
+    end
+end
+
+if CreateFrame and DF.IS_FOREVER then
+    local pew = CreateFrame("Frame")
+    pew:RegisterEvent("PLAYER_ENTERING_WORLD")
+    pew:SetScript("OnEvent", function() PH:WatchFrameFade() end)
 end

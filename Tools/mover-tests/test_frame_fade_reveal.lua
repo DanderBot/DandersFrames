@@ -278,3 +278,27 @@ do
     check(page:find("ffHoverScope.disableOn = function(d) return not d.frameFadeHoverUsesCombat end", 1, true) ~= nil,
           "the scope dropdown greys only with the hover option off")
 end
+
+-- ============================================================
+-- 6. WOW FOREVER: SHOW WHEN PET IS NOT HAPPY
+-- ============================================================
+print("-- Unhappy pet: your pet's frame takes the reveal value while not Happy")
+do
+    DF.PetHappiness = { fadeMood = nil, IsOwnPetFrame = function(f) return f.unit == "pet" end }
+    local d = db({ frameFadeSplitCombat = true, frameFadeAlphaOutOfCombat = 0, frameFadeAlphaInCombat = 0.9,
+                   frameFadeRevealUnhappyPet = true })
+    local pet, other = { unit = "pet" }, { unit = "party1" }
+    eq(DF:GetFrameBaseAlpha(d, pet), 0, "no cached mood (option off elsewhere / no pet): the base")
+    DF.PetHappiness.fadeMood = 3
+    eq(DF:GetFrameBaseAlpha(d, pet), 0, "Happy: the base")
+    DF.PetHappiness.fadeMood = 2
+    eq(DF:GetFrameBaseAlpha(d, pet), 0.9, "Content: the reveal (in-combat) value")
+    DF.PetHappiness.fadeMood = 1
+    eq(DF:GetFrameBaseAlpha(d, pet), 0.9, "Unhappy: the reveal value")
+    eq(DF:GetFrameBaseAlpha(d, other), 0, "...never another unit's frame")
+    d.frameFadeRevealUnhappyPet = false
+    eq(DF:GetFrameBaseAlpha(d, pet), 0, "option off on this frame's settings: the base")
+    d.frameFadeRevealUnhappyPet, d.frameFadeEnabled = true, false
+    eq(DF:GetFrameBaseAlpha(d, pet), 1, "Frame Fade off: full, as ever")
+    DF.PetHappiness = nil
+end

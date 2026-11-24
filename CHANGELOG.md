@@ -5,6 +5,7 @@
 ### New Features
 
 - (Fading) New **Show Below Threshold Through Frame Fade** option in **Health Threshold Fading**. Below the threshold a frame ignores Frame Fade, so you can hide healthy frames out of combat and still see anyone who is hurt. Try Frame Fade at 0% out of combat and 100% in combat with this on.
+- (Fading) WoW Forever: new **Show When Pet Is Not Happy** option in **Frame Fade**. Your pet's frame shows through Frame Fade while your pet is Content or Unhappy, in or out of combat.
 
 - (Pet Frames) WoW Forever: your hunter pet's happiness now shows as a face beside the unit frames pet frame and your own party/raid pet frame. Hover it for damage, loyalty, diet, training points and experience; a small arrow warns when loyalty is dropping. The pet frame's border, name and health bar can also be colored by happiness (colors under **Display > Colors**), and the pet's **Text Designer** has a **Pet Happiness** category. Settings are on the pet's **Unit Icons** page and **Display > Pet Frames**.
 

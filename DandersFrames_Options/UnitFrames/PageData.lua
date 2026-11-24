@@ -119,6 +119,7 @@ DF.UnitFramePageData = {
                 frameFadeHoverScope = { player = true, targettarget = true, focustarget = true, pet = true },
                 frameFadeHoverUsesCombat = { targettarget = true, focustarget = true },
                 frameFadeInstanceUsesCombat = { targettarget = true, focustarget = true, boss = true },
+                frameFadeRevealUnhappyPet = { player = true, target = true, targettarget = true, focus = true, focustarget = true, boss = true },
                 frameFadeSplitCombat = { targettarget = true, focustarget = true, boss = true },
                 oorAuraDesignerAlpha = { target = true, focus = true, pet = true, boss = true },
                 oorDefensiveIconAlpha = { target = true, focus = true, pet = true, boss = true },

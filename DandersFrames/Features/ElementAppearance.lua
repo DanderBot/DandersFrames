@@ -133,6 +133,17 @@ function DF:GetFrameBaseAlpha(db, frame)
     -- shipped default (true) does. `not db.frameFadeEnabled` would fade nobody's
     -- frames on the first login after an upgrade.
     if db.frameFadeEnabled == false then return 1 end
+    -- ★ WoW Forever: "Show When Pet Is Not Happy". Your own pet's frame takes the
+    -- reveal value while it is Content or Unhappy. PH.fadeMood is a plain number the
+    -- PetHappiness consumer caches (nil unless the option is on somewhere), so this
+    -- is one table read on every other frame.
+    if db.frameFadeRevealUnhappyPet and frame then
+        local PH = DF.PetHappiness
+        local mood = PH and PH.fadeMood
+        if mood and mood < 3 and PH.IsOwnPetFrame and PH.IsOwnPetFrame(frame) then
+            return DF:GetFrameRevealAlpha(db)
+        end
+    end
     if db.frameFadeSplitCombat then
         -- "In Instances" holds the in-combat value for the whole dungeon / raid /
         -- arena / BG visit -- the M+ complaint: combat drops between every pack, so

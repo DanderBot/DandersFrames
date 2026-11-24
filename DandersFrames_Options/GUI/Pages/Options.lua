@@ -1530,6 +1530,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
             ffHoverScope.disableOn = function(d) return not d.frameFadeHoverUsesCombat end
             ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
+            -- WoW Forever only: your pet's frame shows through Frame Fade while it is not
+            -- happy (DF:GetFrameBaseAlpha + PetHappiness.lua's mood cache). Unit frames
+            -- show it on the pet page alone (PageData hide).
+            if DF.IS_FOREVER then
+                local ffPet = group:AddWidget(GUI:CreateCheckbox(parent, L["Show When Pet Is Not Happy"], db, "frameFadeRevealUnhappyPet", function()
+                    local PH = DF.PetHappiness
+                    if PH and PH.WatchFrameFade then PH:WatchFrameFade() end
+                    RefreshFrameFade()
+                end), 30)
+                ffPet.tooltip = L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."]
+            end
         end
 
         -- The summary, per the same convention the border cards follow: at

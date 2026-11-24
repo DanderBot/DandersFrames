@@ -1230,4 +1230,58 @@ local headers6 = norm5(df_file_source("Frames/Headers.lua"))
 check(headers6:find("frame.border:SetBorderColor(DF:GetFrameBorderColor(frame, DF:GetFrameDB(frame)))", 1, true),
       "FullFrameRefresh's colour pass goes through DF:GetFrameBorderColor")
 
+-- ============================================================
+print("-- Frame Fade: Show When Pet Is Not Happy")
+do
+    local F = NewDF(true)
+    local P = F.PetHappiness
+    local party, raid, petDB = {}, {}, {}
+    function F:GetDB() return party end
+    function F:GetRaidDB() return raid end
+    F.UnitFrames = { GetUnitDB = function(_, unit) return unit == "pet" and petDB or {} end, frames = {} }
+    local log = {}
+    function F:ClearRangeCacheForUnit(u) log[#log + 1] = "clear:" .. u end
+    function F:UpdatePetRange(f) log[#log + 1] = "range:" .. f.unit end
+    function F:UpdatePetHealthFade(f) log[#log + 1] = "hf:" .. f.unit end
+    F.petFrames = { player = { unit = "pet" } }
+
+    mood = 3
+    P:WatchFrameFade()
+    eq(P.consumers.frame_fade, nil, "option off everywhere: no consumer, no events")
+    eq(P.fadeMood, nil, "...and no cached mood (the resolver's one read stays nil)")
+
+    party.frameFadeRevealUnhappyPet = true
+    P:WatchFrameFade()
+    check(P.consumers.frame_fade ~= nil, "on for party: the consumer is registered")
+    eq(P.fadeMood, 3, "...and the mood cached at once")
+
+    log = {}
+    mood = 2
+    P.consumers.frame_fade()
+    eq(P.fadeMood, 2, "Content: cached")
+    eq(table.concat(log, ","), "clear:pet,range:pet,hf:pet",
+       "...and your pet's group frame re-applies its fade (range cache dropped first)")
+    log = {}
+    P.consumers.frame_fade()
+    eq(#log, 0, "same mood again: nothing repainted")
+
+    party.frameFadeRevealUnhappyPet = nil
+    log = {}
+    P:WatchFrameFade()
+    eq(P.consumers.frame_fade, nil, "option off again: the consumer goes")
+    eq(P.fadeMood, nil, "...the cache is cleared")
+    eq(table.concat(log, ","), "clear:pet,range:pet,hf:pet", "...and the frame repainted back to its fade")
+
+    petDB.frameFadeRevealUnhappyPet = true
+    P:WatchFrameFade()
+    check(P.consumers.frame_fade ~= nil, "the unit frames pet page's switch counts too")
+    petDB.frameFadeRevealUnhappyPet = nil
+    P:WatchFrameFade()
+
+    local R = NewDF(false)
+    function R:GetDB() return { frameFadeRevealUnhappyPet = true } end
+    R.PetHappiness:WatchFrameFade()
+    eq(R.PetHappiness.consumers.frame_fade, nil, "retail: never asks")
+end
+
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end
