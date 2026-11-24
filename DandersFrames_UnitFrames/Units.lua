@@ -628,7 +628,9 @@ function Units:SweepFrameFade()
     if not DF.UpdateFrameAppearance then return end
     for _, f in pairs(UF.frames) do
         local db = f.dfDB
-        if db and db.frameFadeSplitCombat and f:IsVisible() then DF:UpdateFrameAppearance(f) end
+        if db and db.frameFadeSplitCombat and f:IsVisible() then
+            if DF.RefreshFrameFadeOn then DF.RefreshFrameFadeOn(f) else DF:UpdateFrameAppearance(f) end
+        end
     end
 end
 

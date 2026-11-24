@@ -16,6 +16,9 @@
 - (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
 - (Settings) Added tooltips to many settings that weren't clear from their name alone, across raid layout, sorting, pinned frames, aura bars, targeted spells, fading, tooltips, highlights, icons, absorbs, heal prediction and health bars.
 - (Resource Bar) With **Placement** Below or Above a horizontal health bar (or Left of / Right of a vertical one), the health bar keeps its full size and the resource bar is cut out of it, so a see-through frame border tints the health bar the same on every side. A bar at the end the health bar fills from or towards still shrinks the health bar, so the whole health range stays readable. (by Krathe)
+- (Fading) **Frame Fade** has moved from the **Frame** page to the **Fading** page, for party, raid and every unit frame. Your settings are unchanged. Linked unit frames now share Frame Fade through the **Fading** link instead of **Frame**.
+- (Fading) **Frame Fade** and Health Threshold Fading's above-threshold opacity can now go down to 0% to hide a frame completely. A hidden frame can still be clicked and click-cast.
+- (Fading) Status icons (summon, AFK, phased, raid role, ping and the rest) now fade along with **Frame Fade** instead of staying bright on a faded frame.
 
 ### Bug Fixes
 

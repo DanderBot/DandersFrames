@@ -3914,4 +3914,14 @@ L["%s uses Blizzard's frame, so Other Frames covers it."] = true
 L["Blizzard's frames (player, target, focus, pet, boss, arena), other addons' unit frames, and nameplates."] = true
 L["The DandersFrames unit frames: player, target, focus, pet, boss and the rest."] = true
 L["Your party and raid frames, including pinned, arena and group pet frames."] = true
+
+-- Frame Fade at 0%, Health Fade's reveal, the unhappy-pet reveal (Fading page) and the
+-- unit frames' Resting visibility condition. L["Party"] and L["Raid"] are reused.
+L["At 0% the frame is invisible but can still be clicked, hovered and click-cast."] = true
+L["Below the threshold the frame ignores Frame Fade and shows at full opacity, or at your In Combat Frame Fade with Separate Combat Fade on. Use it to hide healthy frames out of combat but still see anyone who is hurt."] = true
+L["Resting"] = true
+L["Show Below Threshold Through Frame Fade"] = true
+L["Show When Pet Is Not Happy"] = true
+L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."] = true
+L["Without Separate Combat Fade, the frame shows at full opacity instead."] = true
 --@end-do-not-package@

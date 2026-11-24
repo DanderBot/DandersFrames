@@ -1468,7 +1468,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- one control the group exists for. frameFadeEnabled (Config.lua,
         -- defaulting true) is the group's own boolean, and the engine reads it
         -- before anything else it fades on (DF:GetFrameBaseAlpha). Off means
-        -- alpha 1, not alpha 0.1.
+        -- alpha 1, not the slider's value.
+        -- Every slider that can reach 0% says what 0% means: the frame is invisible,
+        -- but alpha never stops the mouse, so it still clicks, hovers and click-casts.
+        local function WithZeroNote(tip)
+            local note = L["At 0% the frame is invisible but can still be clicked, hovered and click-cast."]
+            return tip and format("%s\n\n%s", tip, note) or note
+        end
+
         local function RefreshFrameFade()
             if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
             -- Pets re-apply their fade only on a range-cache miss; flush it so the
@@ -1496,18 +1503,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- header-tick group on this page, so a pinned copy greys alike.
             group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
 
-            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
+            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
             ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
-            ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
+            ffGlobal.tooltip = WithZeroNote(L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."])
             group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
                 tools2.refreshStates()
                 RefreshFrameFade()
             end), L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."]), 30)
-            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
+            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
             ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
-            ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
-            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
+            ffOOC.tooltip = WithZeroNote(L["Frame opacity while you are out of combat. The preview shows this value while you configure it."])
+            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
             ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
+            ffCombat.tooltip = WithZeroNote()
             local ffInstance = group:AddWidget(GUI:CreateCheckbox(parent, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
             ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
             ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
@@ -1723,8 +1731,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF:RefreshAllVisibleFrames()
             end), L["Brings a faded frame back to full view while that player has a debuff you can dispel, so the fade never hides it. Only works while the Dispel Overlay is turned on."]), 30)
 
-            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
-            hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
+            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
+            hfFrameAlpha.tooltip = WithZeroNote(L["Frame opacity when health is above the threshold."])
         end
 
         -- Threshold first, then the opacity it applies: the two numbers the
