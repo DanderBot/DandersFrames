@@ -3398,6 +3398,17 @@ function GUI:SetFrameLevelTooltip(container)
     return container   -- chainable, so it wraps a CreateSlider call in place
 end
 
+-- Attach a hover tooltip to a widget built inline, and hand the widget back.
+-- The same `.tooltip` every factory reads (DandersUI/Widgets.lua ResolveTooltipSpec):
+-- a string is the BODY, and the title stays the widget's own label.
+-- Chainable like SetFrameLevelTooltip, so an inline Add(...) / AddWidget(...) call
+-- gains a tooltip without a new local (the big builders sit near Lua's 200-local limit).
+-- Where a local already holds the widget, set `w.tooltip = ...` directly instead.
+function GUI:WithTooltip(w, text)
+    if w then w.tooltip = text end
+    return w
+end
+
 -- Dual-handle range slider: two draggable handles select a [lo, hi] sub-range of
 -- [minRange, maxRange]. Self-contained — the caller anchors the returned track
 -- frame and reads values via the onChange callback. (:GetValues() also exists and

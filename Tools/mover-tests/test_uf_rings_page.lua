@@ -280,6 +280,10 @@ do
     end
     local bars, ring = find("Bars Text Template"), find("Ring Text Template")
     check(bars and ring, "one dropdown per style on the Style card")
+    check(bars and type(bars.tooltip) == "string" and bars.tooltip:find("while its style is Bars", 1, true),
+          "Bars Text Template says it belongs to the Bars style")
+    check(ring and type(ring.tooltip) == "string" and ring.tooltip:find("while its style is Ring", 1, true),
+          "...and Ring Text Template to the Ring style")
     eq(ring.dropOpts.optionsFunc, UFO.TextTemplateOptions, "the list is re-read when the menu opens")
     eq(table.concat(UFO.TextTemplateOptions()._order, ","), "Default,A", "...from the Text Designer library")
     ring.set("A")
