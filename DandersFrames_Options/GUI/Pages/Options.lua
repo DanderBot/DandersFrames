@@ -823,6 +823,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if not tools2.hoistToggle then
                 local bindTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Binding Tooltips"], db, "tooltipBindingEnabled", nil), 30)
                 bindTooltipEnable.keepEnabled = true
+                bindTooltipEnable.tooltip = L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."]
             end
             group.disableChildrenOn = function(d) return not d.tooltipBindingEnabled end
 
@@ -854,6 +855,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
             nil, nil, nil, {
                 db = db, key = "tooltipBindingEnabled", label = L["Enable Binding Tooltips"],
+                tooltip = L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."],
                 onChanged = function() self:RefreshStates() end,
             })
         BuildBindTooltipGroup({
@@ -1366,9 +1368,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- refresh alone never reaches a group living in a popout holder. On
             -- the page the tools2 hook IS self:RefreshStates.
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
                     tools2.refreshStates()
-                end), 30)
+                end), L["Fades each part of an out-of-range frame by its own amount instead of the whole frame at once. Useful for keeping names readable while the health bar dims."]), 30)
             end
 
             -- Element-specific sliders (shown when enabled)
@@ -1471,6 +1473,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, RangeFadeOff, nil,
             BuildElementAlphaGroup, {
                 db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
+                tooltip = L["Fades each part of an out-of-range frame by its own amount instead of the whole frame at once. Useful for keeping names readable while the health bar dims."],
                 onChanged = function()
                     self:RefreshStates()
                     tools.ReflowMounted()
@@ -1603,10 +1606,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 55)
             hfThreshold.tooltip = L["Units at or above this health percent are faded."]
 
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
                 DF:UpdateAllFrames()
                 DF:RefreshAllVisibleFrames()
-            end), 30)
+            end), L["Brings a faded frame back to full view while that player has a debuff you can dispel, so the fade never hides it. Only works while the Dispel Overlay is turned on."]), 30)
 
             local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
             hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
