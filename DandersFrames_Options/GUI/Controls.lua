@@ -463,6 +463,7 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     w.flashSpeed = group:AddWidget(GUI:CreateSlider(parent, L["Flash Speed"], 0.2, 3, 0.1,
         dbTable, K("FlashSpeed"), nil, onStructural, true), 54)
     w.flashSpeed.disableOn = function() return not dbTable[K("Flash")] end
+    w.flashSpeed.tooltip = L["How long one pulse out and back takes, in seconds. Higher values pulse more slowly."]
 
     -- ── TINT: a solid wash. Colour, opacity and inset — three controls, because that is
     -- genuinely all a wash has.

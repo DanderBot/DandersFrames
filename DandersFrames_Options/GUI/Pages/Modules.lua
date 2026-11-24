@@ -1528,6 +1528,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 ApplyDispelSettings()
             end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
             gradSize.disableOn = DisableIfNoGradient
+            gradSize.tooltip = L["How far the wash reaches in from the frame edge, as a share of the frame. Has no effect on Full Frame, which always covers the whole bar."]
             local gradAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
                 InvalidateCurves()
             end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
@@ -1546,6 +1547,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 ApplyDispelSettings()
             end), 55)
             blendDropdown.disableOn = DisableIfNoGradient
+            blendDropdown.tooltip = L["Glow brightens what is underneath so the colour shines, and shows best over dark bars. Solid lays the colour on top exactly as picked, which reads better over bright class colours."]
             -- Darken effect lives at the bottom of the Gradient group (it only
             -- renders behind the gradient).
             local darkenCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()

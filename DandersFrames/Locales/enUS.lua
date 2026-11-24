@@ -3047,6 +3047,18 @@ L["Which side the first column starts at. New columns are added towards the othe
 L["Which Text Designer template sets the text on these frames. Inherit uses the one your party or raid frames use, named in brackets."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: aura bars (Buff Bar, Debuff Bar, Defensive Icon, Dispel
+-- Overlay and the shared border animation / pandemic controls). Alphabetical within the block.
+-- ============================================================
+L["Adds a moving effect to the border to draw the eye, such as a blink, a glow or sparkles running round it. Pick None to keep the border still."] = true
+L["Glow brightens what is underneath so the colour shines, and shows best over dark bars. Solid lays the colour on top exactly as picked, which reads better over bright class colours."] = true
+L["How far the wash reaches in from the frame edge, as a share of the frame. Has no effect on Full Frame, which always covers the whole bar."] = true
+L["How long one pulse out and back takes, in seconds. Higher values pulse more slowly."] = true
+L["Keeps the duration text hidden until the time left drops below the seconds set under it, so only auras close to running out show a number. Not available with the Percent format."] = true
+L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."] = true
+L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,
