@@ -2251,6 +2251,87 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         CloseSection(band)
 
+        -- ===== PET HAPPINESS (WoW Forever only, column 2, under Health Bar) =====
+        -- Your hunter pet's happy / content / unhappy face beside the pet frame
+        -- that shows YOUR pet (Features/PetHappiness.lua, GROUP PET FRAMES). The
+        -- same card the unit frames pet page has: Show is the header's tick, and
+        -- the positions are that page's (Outside Right ... plus the nine points).
+        --
+        -- ⚠ A do-block under the Forever gate: this page's builder is close to
+        -- Lua's 200-local ceiling, so nothing here leaves a local at page scope.
+        if DF.IS_FOREVER then
+            local function ApplyPetHappiness()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end
+            local function LivePetHappiness()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end
+            local UFO = GUI.UnitFrameOptions
+            local happinessPositions = UFO and UFO.HappinessPositionOptions and UFO.HappinessPositionOptions()
+                or textAnchorValues
+            local function HappinessOff(d) return not d.petHappinessIconEnabled end
+
+            local function BuildPetHappinessGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                group.disableChildrenOn = function(d) return not d.petEnabled end
+
+                if not tools2.hoistToggle then
+                    group:AddWidget(GUI:CreateCheckbox(parent, L["Show"], db, "petHappinessIconEnabled", function()
+                        ApplyPetHappiness()
+                        GateRefresh(tools2)
+                    end), 30)
+                end
+
+                local size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 8, 32, 1, db, "petHappinessIconSize",
+                    ApplyPetHappiness, LivePetHappiness, true), 55)
+                size.disableOn = HappinessOff
+
+                local position = group:AddWidget(GUI:CreateDropdown(parent, L["Position"], happinessPositions, db,
+                    "petHappinessIconAnchor", ApplyPetHappiness), 55)
+                position.disableOn = HappinessOff
+
+                local offX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "petHappinessIconX",
+                    ApplyPetHappiness, LivePetHappiness, true), 55)
+                offX.disableOn = HappinessOff
+
+                local offY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "petHappinessIconY",
+                    ApplyPetHappiness, LivePetHappiness, true), 55)
+                offY.disableOn = HappinessOff
+
+                local tooltip = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Tooltip"], db, "petHappinessIconTooltip",
+                    ApplyPetHappiness), 30)
+                tooltip.disableOn = HappinessOff
+                tooltip.tooltip = L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."]
+            end
+
+            -- Where the face sits, in the dropdown's own words.
+            local function PetHappinessSummary(d)
+                if not d then return "" end
+                local where = happinessPositions[d.petHappinessIconAnchor]
+                return where or ""
+            end
+
+            -- How the pets LOOK, so pinnable; greys with the page gate.
+            local happinessBand = OpenSection(L["Pet Happiness"], "pets_happiness", 2, PetHappinessSummary, PetsOffRow, nil,
+                BuildPetHappinessGroup, {
+                    db = db, key = "petHappinessIconEnabled", label = L["Show"],
+                    disableOn = PetsOffRow,
+                    onChanged = function()
+                        ApplyPetHappiness()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
+                })
+            happinessBand.disableChildrenOn = function(d) return not d.petEnabled end
+            BuildPetHappinessGroup({
+                group = happinessBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(happinessBand)
+        end
+
         -- ===== AURAS (Buffs, Debuffs -- column 2, under Appearance) =====
         -- One row of each on every pet frame (Frames/Pets.lua PET AURA ROWS). Only
         -- WHERE the row sits and how many it shows are pet settings; what it shows

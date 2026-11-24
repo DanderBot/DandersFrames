@@ -458,37 +458,13 @@ end
 -- Position: one of the nine points inside the frame, or OUTSIDE_<side>: the
 -- icon's facing edge on the frame's <side> edge, centred along it.
 -- ============================================================
-IN.HAPPINESS_OUTSIDE = {
-    OUTSIDE_RIGHT = { "LEFT", "RIGHT" },
-    OUTSIDE_LEFT = { "RIGHT", "LEFT" },
-    OUTSIDE_TOP = { "BOTTOM", "TOP" },
-    OUTSIDE_BOTTOM = { "TOP", "BOTTOM" },
-}
-
 function IN.PlaceHappiness(icon, f, db)
-    local anchor = db and db.happinessIconAnchor
-    local x, y = tonumber(db and db.happinessIconX) or 0, tonumber(db and db.happinessIconY) or 0
-    local out = IN.HAPPINESS_OUTSIDE[anchor]
-    if out then
-        icon:SetPoint(out[1], f, out[2], x, y)
-    else
-        local point = K.Point(anchor, "RIGHT")
-        icon:SetPoint(point, f, point, x, y)
-    end
+    local PH = DF.PetHappiness
+    if not PH then return end
+    -- The shared placement (Features/PetHappiness.lua): inside, or OUTSIDE_<side>.
+    PH:Place(icon, f, db and db.happinessIconAnchor, db and db.happinessIconX, db and db.happinessIconY)
     -- Hover shows the tooltip; clicks never stop at the icon.
-    IN.SetHappinessMouse(icon, not (db and db.happinessIconTooltip == false))
-end
-
-function IN.SetHappinessMouse(icon, on)
-    if icon.dfMouseOn == on then return end
-    if InCombatLockdown and InCombatLockdown() then return end
-    icon.dfMouseOn = on
-    if icon.EnableMouseMotion then
-        icon:EnableMouseMotion(on)
-    elseif icon.SetMouseMotionEnabled then
-        icon:SetMouseMotionEnabled(on)
-    end
-    if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(false) end
+    PH.SetMouse(icon, not (db and db.happinessIconTooltip == false))
 end
 
 function IN.NewHappinessIcon(host, f)

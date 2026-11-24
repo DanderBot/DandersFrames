@@ -392,4 +392,157 @@ for _, k in ipairs({ "Pet Happiness", "Show Tooltip", "Outside Right", "Outside 
 end
 check(df_file_source("DandersFrames.toc"):find("Features\\PetHappiness.lua", 1, true), "listed in the resident TOC")
 
+-- ============================================================
+-- GROUP PET FRAMES (phase 2): Features/PetHappiness.lua GROUP PET FRAMES, driven
+-- from Frames/Pets.lua.
+-- ============================================================
+print("-- Group pet frames: defaults and export")
+local cfg = df_file_source("Core/Config.lua")
+local exportSrc = options_file_source("Core/ExportCategories.lua")
+for _, kv in ipairs({ { "petHappinessIconEnabled", "true" }, { "petHappinessIconSize", "14" },
+                      { "petHappinessIconAnchor", '"OUTSIDE_RIGHT"' }, { "petHappinessIconX", "2" },
+                      { "petHappinessIconY", "0" }, { "petHappinessIconTooltip", "true" } }) do
+    check(cfg:find("    " .. kv[1] .. " = " .. kv[2] .. ",", 1, true), "PartyDefaults: " .. kv[1] .. " = " .. kv[2])
+    check(exportSrc:find('"' .. kv[1] .. '",', 1, true), "export: " .. kv[1])
+end
+
+print("-- Group pet frames: own pet only")
+local gdb = { petEnabled = true, petHappinessIconEnabled = true, petHappinessIconSize = 14,
+              petHappinessIconAnchor = "OUTSIDE_RIGHT", petHappinessIconX = 2, petHappinessIconY = 0,
+              petHappinessIconTooltip = true }
+local rdb = { petEnabled = false, petHappinessIconEnabled = true }
+function DF:GetDB() return gdb end
+function DF:GetRaidDB() return rdb end
+function DF:GetFrameDB(f) return f.isRaidFrame and rdb or gdb end
+local yours = {}                     -- unit token -> is it your pet
+function DF.UnitIsUnit(a, b)
+    if b ~= "pet" then return nil end
+    return yours[a] == true
+end
+local function PetFrame(unit, raid, test)
+    local f = Make("Button", UIParent)
+    f.unit, f.isRaidFrame, f.dfIsTestFrame, f.isPetFrame = unit, raid, test, true
+    return f
+end
+DF.petFrames, DF.raidPetFrames, DF.arenaPetFrames, DF.partyPetFrames = {}, {}, {}, {}
+
+local GP = DF.PetHappiness
+local own = PetFrame("pet")
+DF.petFrames.player = own
+GP:UpdateGroupFrame(own)
+local gi = own.dfHappinessIcon
+check(gi and gi:IsShown(), "party: your pet's frame shows the face")
+eq(gi.tex._atlas, "UI-PetHappiness", "...happy")
+eq(gi._w, 14, "...14px")
+local gpt = gi._points[#gi._points]
+eq(gpt[1] .. ">" .. gpt[3], "LEFT>RIGHT", "...outside the right edge")
+eq(gpt[2], own, "...of the pet frame")
+eq(gpt[4], 2, "...2px out")
+eq(gi._motion, true, "...hover reaches it")
+eq(gi._clicks, false, "...clicks never stop at it")
+check(GP.consumers.group_pet ~= nil, "the group side asks for the events under its own key")
+
+local partyPet = PetFrame("partypet1")
+GP:UpdateGroupFrame(partyPet)
+eq(partyPet.dfHappinessIcon, nil, "a party member's pet: no face, nothing built")
+
+local raidOther, raidMine = PetFrame("raidpet3", true), PetFrame("raidpet7", true)
+DF.raidPetFrames[3], DF.raidPetFrames[7] = raidOther, raidMine
+rdb.petEnabled = true
+yours.raidpet7 = true
+GP:UpdateGroupFrame(raidOther)
+GP:UpdateGroupFrame(raidMine)
+eq(raidOther.dfHappinessIcon, nil, "raid: someone else's pet gets no face")
+check(raidMine.dfHappinessIcon and raidMine.dfHappinessIcon:IsShown(), "raid: the raidpet<N> that is yours gets it")
+yours.raidpet7 = nil
+GP:UpdateGroupFrame(raidMine)
+check(not raidMine.dfHappinessIcon:IsShown(), "raid: the roster moved, that frame is not yours now: hidden")
+yours.raidpet7 = true
+local heldUIU = DF.UnitIsUnit
+DF.UnitIsUnit = function() return nil end    -- withheld (secret / not comparable)
+GP:UpdateGroupFrame(raidMine)
+check(not raidMine.dfHappinessIcon:IsShown(), "raid: an unanswerable comparison reads as not yours")
+DF.UnitIsUnit = heldUIU
+GP:UpdateGroupFrame(raidMine)
+
+print("-- Group pet frames: events and repaints")
+mood = 1
+GP:OnEvent("UNIT_HAPPINESS")
+eq(gi.tex._atlas, "UI-PetMad", "UNIT_HAPPINESS: the party pet frame repainted")
+eq(raidMine.dfHappinessIcon.tex._atlas, "UI-PetMad", "...and your raid pet frame")
+mood = 3
+GP:OnEvent("UNIT_HAPPINESS")
+hunterPet = false
+GP:UpdateGroupFrame(own)
+check(not gi:IsShown(), "not a hunter pet (vehicle / demon): hidden")
+hunterPet = true
+GP:UpdateGroupFrame(own)
+
+gdb.petHappinessIconTooltip = false
+GP:UpdateGroupFrame(own)
+eq(gi._motion, false, "tooltip off: the mouse passes through")
+tip:Hide()
+gi:GetScript("OnEnter")(gi)
+check(not tip.shown, "...no tooltip")
+gdb.petHappinessIconTooltip = true
+GP:UpdateGroupFrame(own)
+gi:GetScript("OnEnter")(gi)
+check(tip.shown and tip.lines[1] == "Happy" and tip.owner == gi, "hover: the tooltip on the face")
+gi:GetScript("OnLeave")(gi)
+check(not tip.shown, "leave: hidden")
+
+gdb.petHappinessIconAnchor, gdb.petHappinessIconX, gdb.petHappinessIconY = "TOPLEFT", 1, -1
+GP:UpdateGroupFrame(own)
+gpt = gi._points[#gi._points]
+eq(gpt[1] .. gpt[3] .. gpt[4] .. gpt[5], "TOPLEFTTOPLEFT1-1", "an inside point with its offsets")
+gdb.petHappinessIconAnchor, gdb.petHappinessIconX, gdb.petHappinessIconY = "OUTSIDE_RIGHT", 2, 0
+
+gdb.petHappinessIconEnabled = false
+GP:UpdateGroupFrame(own)
+check(not gi:IsShown(), "party switched off: hidden")
+check(GP.consumers.group_pet ~= nil, "...raid still shows it, so the events stay")
+rdb.petHappinessIconEnabled = false
+GP:UpdateGroupFrame(own)
+eq(GP.consumers.group_pet, nil, "both off: the group side lets the events go")
+gdb.petHappinessIconEnabled, rdb.petHappinessIconEnabled = true, true
+
+print("-- Group pet frames: test mode")
+mood = nil                                   -- no pet at all
+local tParty, tRaid1, tRaid2 = PetFrame("pet", false, true), PetFrame("raidpet1", true, true), PetFrame("raidpet2", true, true)
+GP:UpdateGroupFrame(tParty); GP:UpdateGroupFrame(tRaid1); GP:UpdateGroupFrame(tRaid2)
+check(tParty.dfHappinessIcon and tParty.dfHappinessIcon:IsShown(), "party preview: the player's slot shows the sample without a pet")
+eq(tParty.dfHappinessIcon.tex._atlas, "UI-PetHappiness", "...a happy pet")
+check(tRaid1.dfHappinessIcon and tRaid1.dfHappinessIcon:IsShown(), "raid preview: slot 1 (the player) shows it")
+eq(tRaid2.dfHappinessIcon, nil, "raid preview: other slots do not")
+tParty.dfHappinessIcon:GetScript("OnEnter")(tParty.dfHappinessIcon)
+eq(#tip.lines, 7, "the preview's tooltip shows the sample lines")
+mood = 3
+
+print("-- Group pet frames: retail")
+do
+    local R = NewDF(false)
+    function R:GetFrameDB() return gdb end
+    local rf = PetFrame("pet")
+    R.PetHappiness:UpdateGroupFrame(rf)
+    eq(rf.dfHappinessIcon, nil, "retail: nothing built")
+    eq(R.PetHappiness.consumers.group_pet, nil, "...no consumer")
+end
+
+print("-- Group pet frames: wiring (source)")
+local pets = df_file_source("Frames/Pets.lua"):gsub("\r\n", "\n")
+local hookCalls = 0
+for _ in pets:gmatch("DF%.PetHappiness:UpdateGroupFrame%(frame%)") do hookCalls = hookCalls + 1 end
+eq(hookCalls, 3, "Pets.lua: styled, live update and preview update all paint the face")
+local opts = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
+check(opts:find('OpenSection(L["Pet Happiness"], "pets_happiness", 2', 1, true), "a Pet Happiness card on the pet page")
+check(opts:find("if DF.IS_FOREVER then\n            local function ApplyPetHappiness()", 1, true), "...built on Forever only")
+for _, k in ipairs({ "petHappinessIconSize", "petHappinessIconAnchor", "petHappinessIconX", "petHappinessIconY",
+                     "petHappinessIconTooltip" }) do
+    check(opts:find('"' .. k .. '"', 1, true), "a control for " .. k)
+end
+local disables = 0
+for _ in opts:gmatch("%.disableOn = HappinessOff") do disables = disables + 1 end
+eq(disables, 5, "every control greys while the face is off")
+eq(#DF.errs, 0, "no element errored")
+
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

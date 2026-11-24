@@ -314,3 +314,182 @@ function PH:SetConsumer(key, on, fn)
     end
     PH:UpdateRegistration()
 end
+
+-- ============================================================
+-- PLACEMENT (shared by the unit frames pet icon and the group pet frames)
+-- One of the nine points inside the frame, or OUTSIDE_<side>: the icon's facing
+-- edge on the frame's <side> edge, centred along it.
+-- ============================================================
+PH.OUTSIDE = {
+    OUTSIDE_RIGHT = { "LEFT", "RIGHT" },
+    OUTSIDE_LEFT = { "RIGHT", "LEFT" },
+    OUTSIDE_TOP = { "BOTTOM", "TOP" },
+    OUTSIDE_BOTTOM = { "TOP", "BOTTOM" },
+}
+PH.INSIDE = { TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true, RIGHT = true,
+              BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true }
+
+function PH:Place(icon, rel, anchor, x, y)
+    x, y = tonumber(x) or 0, tonumber(y) or 0
+    local out = PH.OUTSIDE[anchor]
+    if out then
+        icon:SetPoint(out[1], rel, out[2], x, y)
+    else
+        local point = PH.INSIDE[anchor] and anchor or "RIGHT"
+        icon:SetPoint(point, rel, point, x, y)
+    end
+end
+
+-- Hover reaches the icon (for the tooltip) while `on`; clicks never stop at it,
+-- so a click on the icon is a click on whatever is under it.
+function PH.SetMouse(icon, on)
+    on = on and true or false
+    if icon.dfMouseOn == on then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    icon.dfMouseOn = on
+    if icon.EnableMouseMotion then
+        icon:EnableMouseMotion(on)
+    elseif icon.SetMouseMotionEnabled then
+        icon:SetMouseMotionEnabled(on)
+    end
+    if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(false) end
+end
+
+-- ============================================================
+-- GROUP PET FRAMES (Frames/Pets.lua)
+-- The face goes on the ONE group pet frame that shows your own pet: "pet" in a
+-- party, the raidpet<N> that is your pet in a raid or an arena. The API only
+-- describes your own pet, so other people's pets never get one. Settings are
+-- the petHappinessIcon* keys of the frame's mode table (party, generated raid).
+-- In test mode the player's slot (party "pet", raid "raidpet1") shows the
+-- sample, whatever your class, so it can be set up without a pet.
+-- ⚠ The icon is a plain child frame: it never takes clicks and is never
+-- protected, so it is laid out and painted in combat too.
+-- ============================================================
+local GROUP_KEY = "group_pet"
+
+-- Is this group pet frame showing the player's own pet?
+function PH.IsOwnPetFrame(frame)
+    local unit = frame and frame.unit
+    if type(unit) ~= "string" then return false end
+    if frame.dfIsTestFrame then
+        return unit == "pet" or (frame.isRaidFrame and unit == "raidpet1") or false
+    end
+    if unit == "pet" then return true end
+    if not unit:find("^raidpet%d+$") then return false end   -- partypet<N>: never yours
+    local same = DF.UnitIsUnit and DF.UnitIsUnit(unit, "pet")
+    if same == nil and not DF.UnitIsUnit and UnitIsUnit then
+        same = UnitIsUnit(unit, "pet")
+        if IsSecret(same) then same = nil end
+    end
+    return same == true
+end
+
+local function GroupIconOnEnter(self)
+    local frame = self.dfPetFrame
+    local db = frame and DF:GetFrameDB(frame)
+    if not db or db.petHappinessIconTooltip == false then return end
+    PH:ShowTooltip(self, frame.dfIsTestFrame and true or false)
+end
+
+local function GroupIconOnLeave()
+    PH:HideTooltip()
+end
+
+function PH.NewGroupIcon(frame)
+    local icon = CreateFrame("Frame", nil, frame)
+    icon.dfPetFrame = frame
+    icon.tex = icon:CreateTexture(nil, "OVERLAY")
+    icon.tex:SetAllPoints()
+    icon:SetScript("OnEnter", GroupIconOnEnter)
+    icon:SetScript("OnLeave", GroupIconOnLeave)
+    icon:Hide()
+    frame.dfHappinessIcon = icon
+    return icon
+end
+
+-- Paints only on a change of mood; nil hides.
+function PH.PaintGroupIcon(icon, mood)
+    if not mood then
+        icon.dfMood = nil
+        icon:Hide()
+        return
+    end
+    if icon.dfMood ~= mood then
+        if not PH:SetArt(icon.tex, mood) then icon.dfMood = nil; icon:Hide(); return end
+        icon.dfMood = mood
+    end
+    icon:Show()
+end
+
+function PH.LayoutGroupIcon(icon, frame, db)
+    local size = tonumber(db.petHappinessIconSize) or 14
+    icon:SetSize(size, size)
+    -- Above the pet frame's own layers (its border sits at +14).
+    if frame.GetFrameLevel and icon.SetFrameLevel then
+        icon:SetFrameLevel((frame:GetFrameLevel() or 0) + 16)
+    end
+    icon:ClearAllPoints()
+    PH:Place(icon, frame, db.petHappinessIconAnchor or "OUTSIDE_RIGHT", db.petHappinessIconX, db.petHappinessIconY)
+    PH.SetMouse(icon, db.petHappinessIconTooltip ~= false)
+end
+
+-- Lay out and paint one group pet frame's face (Pets.lua calls this when the
+-- frame is styled or updated). Forever only.
+function PH:UpdateGroupFrame(frame)
+    if not (DF.IS_FOREVER and frame) then return end
+    local db = DF:GetFrameDB(frame)
+    local test = frame.dfIsTestFrame
+    local icon = frame.dfHappinessIcon
+    if not test then PH:WatchGroup() end
+    if not (db and db.petHappinessIconEnabled and PH.IsOwnPetFrame(frame)) then
+        if icon then PH.PaintGroupIcon(icon, nil) end
+        return
+    end
+    icon = icon or PH.NewGroupIcon(frame)
+    PH.LayoutGroupIcon(icon, frame, db)
+    local mood
+    if test then
+        local data = frame.ownerFrame and DF.GetTestDataForFrame and DF:GetTestDataForFrame(frame.ownerFrame)
+        mood = (data and data.petHappiness) or PH.MOCK.mood
+    else
+        mood = (PH:Read())
+    end
+    PH.PaintGroupIcon(icon, mood)
+end
+
+-- The live group pet frames that could be yours, repainted when the answer
+-- changes (the shared event driver calls this).
+local function GroupFramesChanged()
+    if DF.petFrames and DF.petFrames.player then PH:UpdateGroupFrame(DF.petFrames.player) end
+    local sets = { DF.raidPetFrames, DF.arenaPetFrames }
+    for n = 1, 2 do
+        local set = sets[n]
+        if set then
+            for i = 1, 40 do
+                local f = set[i]
+                -- A frame that had the face (to repaint or drop it), or the one that is yours now.
+                if f and (f.dfHappinessIcon or PH.IsOwnPetFrame(f)) then PH:UpdateGroupFrame(f) end
+            end
+        end
+    end
+end
+PH.GroupFramesChanged = GroupFramesChanged
+
+-- Asks for the events while either group mode (party, raid) shows the face.
+function PH:WantsGroup()
+    if not DF.IS_FOREVER then return false end
+    for _, get in ipairs({ "GetDB", "GetRaidDB" }) do
+        local db = DF[get] and DF[get](DF)
+        if db and db.petEnabled and db.petHappinessIconEnabled then return true end
+    end
+    return false
+end
+
+function PH:WatchGroup()
+    local on = PH:WantsGroup()
+    -- Asked again while on but unregistered: the class may not have been known yet.
+    if on == PH.groupOn and not (on and not PH.registered) then return end
+    PH.groupOn = on
+    PH:SetConsumer(GROUP_KEY, on, GroupFramesChanged)
+end
