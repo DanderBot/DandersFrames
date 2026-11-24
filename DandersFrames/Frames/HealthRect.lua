@@ -10,11 +10,15 @@ local addonName, DF = ...
 -- (Features/Dispel.lua) and the resource bar layout (Frames/Bars.lua).
 --
 -- The rect is the frame minus framePadding on every side (or minus the frame
--- border band with Keep Health Bar Inside Border), except that a resource bar
--- with a Placement strip (Below / Above / Left of / Right of Health Bar) takes
--- its side: the health bar stops at the strip's inner edge instead of running
--- under it. On Top of Health Bar (the default) draws the bar over a full-size
--- health bar, as before.
+-- border band with Keep Health Bar Inside Border). A resource bar Placement strip
+-- (Below / Above / Left of / Right of Health Bar) running ALONG the fill leaves the
+-- rect whole and is cut out of the health bar instead (DF:SyncResourceBarHole,
+-- Frames/Bars.lua); one ACROSS the fill takes its side, the health bar stopping at
+-- the strip's inner edge (DF:GetResourceBarCutEdge says why). On Top of Health Bar
+-- (the default) draws the bar over a full-size health bar.
+-- Two rects come out of here: where the health bar SITS (DF:GetHealthBarInsets) and
+-- where health is SEEN (DF:GetHealthVisibleInsets, the strip's side always taken),
+-- which is what the dispel wash keeps to.
 --
 -- Only plain (non-secure) regions are anchored here -- the health bar, the
 -- missing-health bar and the reduced-max strip -- so none of it is blocked in
@@ -43,6 +47,28 @@ function DF:GetResourceBarRoomEdge(db, frame)
         return nil
     end
     return p
+end
+
+-- Whether a strip on `side` runs along the health fill rather than across it.
+local function RunsAlongFill(db, side)
+    local o = db.healthOrientation
+    if o == "VERTICAL" or o == "VERTICAL_INV" then return side == "LEFT" or side == "RIGHT" end
+    return side == "TOP" or side == "BOTTOM"
+end
+
+-- The Placement side whose strip is CUT out of the health bar, or nil.
+-- ★ ALONG THE FILL (Below / Above a horizontal bar, Left / Right of a vertical one) THE
+-- STRIP IS CUT, NOT MADE ROOM FOR. The health bar keeps its full rect, so a see-through
+-- frame border lies over health on every side and tints it evenly; made room for, the
+-- border beside the strip lies over the frame background and reads as a different colour.
+-- The fill still reads end to end beside the strip.
+-- ☠ ACROSS THE FILL THE STRIP SITS AT ONE OF ITS ENDS, so a cut would hide that end of the
+-- health range: a unit at 90% would read full, or low health would vanish under the strip.
+-- That side takes the strip's room instead (DF:GetHealthBarInsets).
+function DF:GetResourceBarCutEdge(db, frame)
+    local side = DF:GetResourceBarRoomEdge(db, frame)
+    if side and RunsAlongFill(db, side) then return side end
+    return nil
 end
 
 -- "Keep Health Bar Inside Border": the health bar stops at the frame border's inner edge
@@ -107,29 +133,32 @@ local function StripInnerEdge(db, side)
     return DF:GetResourceBarStripInset(db) + thickness + inward
 end
 
--- The health bar's insets from the frame's LEFT, RIGHT, TOP and BOTTOM edges, in that
--- order (every caller unpacks l, r, t, b).
+-- Insets from the frame's LEFT, RIGHT, TOP and BOTTOM edges, in that order (every caller
+-- unpacks l, r, t, b).
 -- Base: framePadding on every side, or the border band with Keep Health Bar Inside Border.
--- ★ THE STRIP RULE: on a Placement strip's side the inset is
+-- ★ THE STRIP RULE: on the side of a strip ACROSS the fill (and of any strip, for
+-- `visible`) the inset is
 --     max(base, strip inset + thickness + inward offset)
 -- i.e. the health bar ends exactly where the strip ends, with no gap and no overlap,
 -- wherever the strip is pushed. max() keeps the base when the strip is pushed OUT past
 -- the frame far enough that it no longer reaches it. A shorter strip (Match off) still
 -- takes the WHOLE side: the gap beside it shows the frame background, never health that
 -- the strip would half-cover. The health bar always keeps at least 1 unit across.
+-- A strip ALONG the fill leaves the side at base: it is cut out of the bar instead.
 --
 -- PER FRAME: only while THIS frame wants a bar (DF:NoteResourceBarWanted) -- role and
 -- class filters and solo mode decide that; a frame that never shows one keeps the whole
 -- health bar.
 --
 -- ☠ HOT PATH: ReducedMaxHealth calls this on every health tick. No allocation.
-function DF:GetHealthBarInsets(frame, db)
+local function Insets(frame, db, visible)
     local base = (db and db.framePadding) or 0
     if DF:BarsInsideFrameBorder(db) then base = DF:GetFrameBorderBandInset(db) end
     local l, r, t, b = base, base, base, base
     if not (frame and frame.dfResourceBarWanted) then return l, r, t, b end
     local side = DF:GetResourceBarRoomEdge(db, frame)
     if not side then return l, r, t, b end
+    if not visible and RunsAlongFill(db, side) then return l, r, t, b end
 
     local edge = math_max(base, StripInnerEdge(db, side))
     -- Never collapse the health bar: leave it at least 1 unit across.
@@ -145,6 +174,16 @@ function DF:GetHealthBarInsets(frame, db)
         if side == "LEFT" then l = edge else r = edge end
     end
     return l, r, t, b
+end
+
+-- Where the health bar sits.
+function DF:GetHealthBarInsets(frame, db)
+    return Insets(frame, db, false)
+end
+
+-- Where health is seen: the strip's side taken even where the strip is cut out of the bar.
+function DF:GetHealthVisibleInsets(frame, db)
+    return Insets(frame, db, true)
 end
 
 -- How far past the health bar's `side` edge a Placement strip reaches: from the health
@@ -197,6 +236,9 @@ function DF:AnchorHealthBarsToPadding(frame, db)
     if frame.missingHealthBar then
         DF:AnchorToHealthRect(frame.missingHealthBar, frame, l, r, t, b)
     end
+    frame.dfHealthVisL, frame.dfHealthVisR, frame.dfHealthVisT, frame.dfHealthVisB =
+        DF:GetHealthVisibleInsets(frame, db)
+    if DF.SyncResourceBarHole then DF:SyncResourceBarHole(frame, db) end
 end
 
 -- Re-run the bars that measure the health bar's size, one frame later. A moved
@@ -223,14 +265,16 @@ local function RefreshMeasuredBars()
 end
 
 -- ★ CALLED WHEN THE RESOURCE BAR IS RE-LAID OUT OR ITS "WANTED" ANSWER FLIPS
--- (Frames/Bars.lua, UpdatePower, the border drag). Cheap when nothing changed: four
--- number compares and out. Only when this
+-- (Frames/Bars.lua, UpdatePower, the border drag). Cheap when nothing changed: a compare
+-- per cut bar and four number compares, and out. Only when this
 -- frame's rect actually moves does it re-anchor, re-clip reduced max health
 -- inside the new rect, and queue the measured bars (absorbs, heal prediction).
 function DF:SyncHealthBarRect(frame, db)
     if not (frame and frame.healthBar) then return end
     db = db or DF:GetFrameDB(frame)
     if not db then return end
+    -- A cut strip leaves the rect where it is, so the cut is synced before the early out.
+    if DF.SyncResourceBarHole then DF:SyncResourceBarHole(frame, db) end
     local l, r, t, b = DF:GetHealthBarInsets(frame, db)
     if l == frame.dfHealthRectL and r == frame.dfHealthRectR
         and t == frame.dfHealthRectT and b == frame.dfHealthRectB then

@@ -1,15 +1,16 @@
 -- ============================================================
 -- THE HEALTH RECT WITH A RESOURCE BAR PLACEMENT STRIP
 -- Frames/HealthRect.lua is the ONE place that decides the health bar's rect. With a
--- Placement strip (Below / Above / Left of / Right of Health Bar), the strip's side
--- stops at the strip's inner edge -- but only on a frame MEANT to carry a bar
+-- Placement strip ACROSS the fill, the strip's side stops at the strip's inner edge
+-- (a strip along the fill is cut out instead, test_health_bar_insets.lua) -- so this
+-- file runs a VERTICAL bar, where Below / Above are across -- but only on a frame MEANT to carry a bar
 -- (DF:NoteResourceBarWanted), never following the bar's momentary hides. A change
 -- re-anchors once, re-clips reduced max health inside the new rect, and re-measures
 -- the absorb / heal bars one frame later (a moved anchor does not resize until the
 -- next draw). Reduced Max Health nests its strip inside the same rect.
 --
 -- Loaded REAL: HealthRect.lua and ReducedMaxHealth.lua. The source guards at the end
--- pin the shape: one rect, no hole mask, no Show/Hide watch.
+-- pin the shape: one rect, no Show/Hide watch.
 -- ============================================================
 
 local saved = {}
@@ -68,7 +69,7 @@ local function baseDB(over)
         resourceBarStripX = 0, resourceBarStripY = 1,
         reducedMaxHealthEnabled = false, reducedMaxHealthClipHealthBar = true,
         reducedMaxHealthColor = { r = 0.5, g = 0.5, b = 0.5, a = 0.8 },
-        healthOrientation = "HORIZONTAL",
+        healthOrientation = "VERTICAL",
     }
     for k, v in pairs(over or {}) do db[k] = v end
     return db
@@ -157,11 +158,23 @@ do
     eq(healer.healthBar.points.BOTTOMRIGHT.y, 0, "Placement back to On Top: full size")
     currentDB.resourceBarPlacement = "RIGHT"
     currentDB.resourceBarStripX = -2
+    currentDB.healthOrientation = "HORIZONTAL"     -- right of a horizontal bar is across it
     DF:SyncHealthBarRect(healer, currentDB)
     eq(healer.healthBar.points.BOTTOMRIGHT.x, -6, "Right of Health Bar pushed in 2: the right side stops at 6")
     eq(healer.healthBar.points.BOTTOMRIGHT.y, 0, "...and the bottom is full again")
     currentDB.resourceBarPlacement, currentDB.resourceBarStripX = "BOTTOM", 0
+    currentDB.healthOrientation = "VERTICAL"
     DF:SyncHealthBarRect(healer, currentDB)
+    flushTimers()
+
+    -- Along the fill the rect stays whole; only where health is seen takes the strip.
+    currentDB.healthOrientation = "HORIZONTAL"
+    DF:SyncHealthBarRect(healer, currentDB)
+    eq(healer.healthBar.points.BOTTOMRIGHT.y, 0, "horizontal bar, below: full size (the strip is cut out)")
+    eq(healer.dfHealthVisB, 5, "...and the seen rect stops at the strip")
+    currentDB.healthOrientation = "VERTICAL"
+    DF:SyncHealthBarRect(healer, currentDB)
+    eq(healer.healthBar.points.BOTTOMRIGHT.y, 5, "Fill Direction back to vertical: below is across, shrinks")
     flushTimers()
 
     -- Unit frames: the same rect, per frame.
@@ -204,7 +217,7 @@ do
     local hp = f.healthBar.points
     eq(rmh.points.BOTTOMRIGHT.y, 5, "the reduced strip spans the SHRUNK health rect, above the resource strip")
     eq(hp.BOTTOMLEFT.y, 5, "clipped health bar: frame-side bottom edge stops at the strip")
-    check(hp.TOPRIGHT.rel == rmh.fill and hp.BOTTOMRIGHT.rel == rmh.fill,
+    check(hp.TOPLEFT.rel == rmh.fill and hp.TOPRIGHT.rel == rmh.fill,
         "clipped health bar: full-health edge still on the reduced band")
 
     -- no longer wanted while clipped: re-clip inside the FULL rect, not left stale
@@ -225,6 +238,7 @@ do
     -- a strip on the reduced end (horizontal fill, reduced on the right, Right of Health Bar)
     currentDB.resourceBarPlacement = "RIGHT"
     currentDB.resourceBarStripX = 0
+    currentDB.healthOrientation = "HORIZONTAL"
     DF:SyncHealthBarRect(f, currentDB)
     eq(rmh.points.BOTTOMRIGHT.x, -4, "Right of Health Bar: the reduced band ends at the strip, not under it")
     eq(f.healthBar.points.BOTTOMLEFT.y, 0, "...and the bottom is full")
@@ -232,7 +246,7 @@ do
 end
 
 -- ============================================================
-print("-- One health rect: no anchor site restates it, no hole mask, no Show/Hide watch")
+print("-- One health rect: no anchor site restates it, no Show/Hide watch")
 -- ============================================================
 do
     local create = df_file_source("Frames/Create.lua")
@@ -258,8 +272,7 @@ do
     for _, file in ipairs({ "Frames/Bars.lua", "Frames/TextureLayers.lua", "Frames/ReducedMaxHealth.lua",
                             "Frames/Update.lua", "Frames/HealthRect.lua", "Frames/Create.lua" }) do
         local src = df_file_source(file)
-        for _, w in ipairs({ "HoleBarToResourceBar", "SyncResourceBarHole", "SetTextureHole", "DF_HoleMask",
-                             "dfHoleMask", "WatchPowerBarForHealthRect", "resourceBarShrinkHealth" }) do
+        for _, w in ipairs({ "WatchPowerBarForHealthRect", "resourceBarShrinkHealth" }) do
             check(not src:find(w, 1, true), file .. ": no " .. w)
         end
     end
@@ -271,8 +284,8 @@ do
     local anchor = note and tm:find("DF:AnchorHealthBarsToPadding(frame, db)", note, true)
     check(note and anchor, "TestMode.lua: the preview records the answer before placing the health bar")
     local dispel = df_file_source("Features/Dispel.lua")
-    local _, nDis = dispel:gsub("DF:GetHealthBarInsets%(frame, db%)", "")
-    eq(nDis, 2, "Dispel.lua: the wash and the edge strips sit on the health rect, not over the strip")
+    local _, nDis = dispel:gsub("DF:GetHealthVisibleInsets%(frame, db%)", "")
+    eq(nDis, 2, "Dispel.lua: the wash and the edge strips sit on the seen health rect, not over the strip")
 end
 
 restore()

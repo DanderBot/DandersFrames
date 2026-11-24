@@ -2256,8 +2256,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ★ PLACEMENT: on top of the health bar (the bar goes wherever Anchor and the offsets
-        -- put it), or along one side of the frame with the health bar stopping at it
-        -- (DF:GetResourceBarRoomEdge, DF:GetHealthBarInsets). The side fixes one axis, so Anchor, Match and the length
+        -- put it), or along one side of the frame, cut out of the health bar or with the health
+        -- bar stopping at it (DF:GetResourceBarRoomEdge, DF:GetResourceBarCutEdge). The side fixes one axis, so Anchor, Match and the length
         -- still place the bar along it. The offsets and Frame Level swap to the strip's own
         -- keys (DF:LayoutResourceBar, DF:ResolveResourceBarLevelOffset), so each placement keeps
         -- its own and neither default moves the other.
