@@ -1188,4 +1188,46 @@ for _, k in ipairs({ "Diet", "Happiness", "Happiness (Color)", "Loyalty Level", 
     eq(n, 1, "enUS: " .. k)
 end
 
+-- ============================================================
+-- In game: the UF pet's tinted border showed only while the Border Thickness
+-- slider was dragged. The drag repaints through DF:ApplyFrameBorder, which lays
+-- the tint back. The release's UF:RefreshAll also runs DF:FullFrameRefresh,
+-- whose border-colour pass (Frames/Headers.lua) repainted the NORMAL colour
+-- over the tint; IN:Update then saw the same stamp and repainted nothing. Every
+-- border-colour pass resolves through DF:GetFrameBorderColor, so a standing tint
+-- has to come out of it. The real function, out of Core.lua, on the release's
+-- order of calls.
+-- ============================================================
+print("-- Bug: the tinted border survives a full refresh")
+local core6 = norm5(df_file_source("Core.lua"))
+local gfbc = core6:match("\nfunction DF:GetFrameBorderColor%(frame, db%)\n.-\nend\n")
+check(gfbc ~= nil, "DF:GetFrameBorderColor found in Core.lua")
+local env6 = setmetatable({ DF = DF, DEFAULT_CLASS_COLOR = { r = 1, g = 1, b = 1 } }, { __index = _G })
+local chunk6 = gfbc and loadstring(gfbc, "GetFrameBorderColor")
+if chunk6 then setfenv(chunk6, env6) end
+check(chunk6 ~= nil, "...and it loads")
+local savedGFBC = DF.GetFrameBorderColor
+if chunk6 then chunk6() end
+local db6 = { frameBorderColor = { r = 0, g = 0, b = 0, a = 0.5 }, frameBorderColorSource = "STATIC" }
+local f6 = { unit = "pet", border = Border() }
+f6.border.SetBorderColor = f6.border.SetColor
+f6.dfHappinessBorder = COL.unhappy
+PH.PaintBorder(f6.border, f6.dfHappinessBorder, db6.frameBorderColor)   -- ApplyFrameBorder's re-tint
+f6.border:SetBorderColor(DF:GetFrameBorderColor(f6, db6))              -- FullFrameRefresh's colour pass
+eq(table.concat(f6.border.c, ","), "1,0,0,0.5", "a full refresh keeps the tint, with the border's own alpha")
+db6.frameBorderColorSource = "CLASS"
+f6.border:SetBorderColor(DF:GetFrameBorderColor(f6, db6))              -- the unit-colour pass
+eq(table.concat(f6.border.c, ","), "1,0,0,0.5", "...so does the class-colour pass")
+f6.dfHappinessBorder = false                                          -- marked stale by a colour edit
+db6.frameBorderColorSource = "STATIC"
+f6.border:SetBorderColor(DF:GetFrameBorderColor(f6, db6))
+eq(table.concat(f6.border.c, ","), "0,0,0,0.5", "no standing tint: the normal colour")
+f6.dfHappinessBorder = nil
+f6.border:SetBorderColor(DF:GetFrameBorderColor(f6, db6))
+eq(table.concat(f6.border.c, ","), "0,0,0,0.5", "...nor on any other frame")
+DF.GetFrameBorderColor = savedGFBC
+local headers6 = norm5(df_file_source("Frames/Headers.lua"))
+check(headers6:find("frame.border:SetBorderColor(DF:GetFrameBorderColor(frame, DF:GetFrameDB(frame)))", 1, true),
+      "FullFrameRefresh's colour pass goes through DF:GetFrameBorderColor")
+
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

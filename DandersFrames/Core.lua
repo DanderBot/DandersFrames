@@ -2173,6 +2173,15 @@ function DF:GetFrameBorderColor(frame, db)
     local base = db.frameBorderColor or DEFAULT_CLASS_COLOR
     local br, bg, bb, ba = base.r or 0, base.g or 0, base.b or 0, base.a or 1
 
+    -- WoW Forever, the unit frames pet: a standing Pet Happiness tint
+    -- (Features/PetHappiness.lua) IS the border colour, with the picker's alpha,
+    -- exactly as PH.PaintBorder lays it. ☠ Every colour-only pass (FullFrameRefresh,
+    -- the unit-colour pass) reads this; without it they painted the normal colour
+    -- over the tint, and the tint's stamp-diff never repainted it (the tint showed
+    -- only while a border slider was dragged). nil (or false: stale) elsewhere.
+    local tint = frame and frame.dfHappinessBorder
+    if tint then return tint.r, tint.g, tint.b, ba end
+
     -- Resolve source the same way Border:BuildSpec does, so the lightweight
     -- live-update path (LightweightUpdateBorderColor) renders identically to
     -- the full Apply path. ColorSource is the canonical Stage 2 key; the
