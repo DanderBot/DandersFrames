@@ -36,7 +36,9 @@ local gsub = string.gsub
 -- front of the user are added to it.
 -- ============================================================
 
-local FILTER_DEBOUNCE = 0.15
+-- Short: a keystroke now costs a cached match and, only when the answer
+-- changed, one relayout of the page on screen (see RefreshFilter).
+local FILTER_DEBOUNCE = 0.1
 
 local F = {
     text     = "",      -- what the box says (trimmed)
@@ -123,6 +125,17 @@ end
 local function Deactivate()
     F.active, F.compiled, F.any = false, nil, false
     F.hit, F.pageHit, F.pageWhole, F.indexed = {}, {}, {}, nil
+    F.memo = nil
+end
+
+-- ★ ONE COMPUTE PER QUERY. The page list is laid out by many callers (every page
+-- select, every category fold, the filter itself), and each asks for the answer;
+-- the answer only moves with the query, the pages in view, the mode or the
+-- registry, so it is computed once for those and handed back after.
+local function MemoKey(sig)
+    local reg = Search.Registry
+    return F.text .. "\1" .. sig .. "\1" .. tostring(GUI.SelectedMode) .. "\1"
+        .. tostring(reg) .. "\1" .. tostring(reg and #reg or 0)
 end
 
 function Search:_FilterCompute()
@@ -132,6 +145,9 @@ function Search:_FilterCompute()
     F.inView = inView
     local viewMoved = (sig ~= F.viewSig)
     F.viewSig = sig
+    if F.memo and F.memo == MemoKey(sig) and not self.RegistryBuilding then
+        return true, viewMoved
+    end
 
     -- The view's deferred pages (one unit's pages) join the index; nothing else.
     self:IncludeScopedPages(inView)
@@ -167,6 +183,7 @@ function Search:_FilterCompute()
     if not compiled then Deactivate() return true, viewMoved end
 
     F.gen = F.gen + 1
+    F.keepCache = {}
     dbByTab = {}
     F.compiled = compiled
     F.indexed = compiled.index and compiled.index.indexed or nil
@@ -186,6 +203,7 @@ function Search:_FilterCompute()
     F.pageHit, F.pageWhole = pageHit, pageWhole
     F.any = next(pageHit) ~= nil
     F.active = true
+    F.memo = MemoKey(sig)
     return true, viewMoved
 end
 
@@ -201,20 +219,26 @@ local function ClearGroup(g)
     end
 end
 
+-- Both answer whether they MOVED anything: the filter only lays a page out
+-- again when its marks changed (RefreshFilter).
 local function RestoreCard(section)
+    local moved = false
     if rawget(section, "dfFilterOpened") then
         section.dfFilterOpened = nil
         section.expanded = false
         if section.ShowFold then section:ShowFold() end
+        moved = true
     end
     section.dfFilterUser = nil
+    return moved
 end
 
 local function OpenCard(section)
-    if section.expanded or rawget(section, "dfFilterUser") then return end
+    if section.expanded or rawget(section, "dfFilterUser") then return false end
     section.dfFilterOpened = true
     section.expanded = true
     if section.ShowFold then section:ShowFold() end
+    return true
 end
 
 function Search:_UnfilterPage(page)
@@ -226,19 +250,30 @@ function Search:_UnfilterPage(page)
         end
     end
     page._dfFiltered = nil
+    return true
 end
 
 local function SameCol(a, b)
     return a == b or a == "both" or b == "both"
 end
 
+-- Marks the page; returns true when any mark moved (so a relayout is due).
 function Search:_FilterPage(page, db)
     local name = page.tabName
     if not (F.active and F.any and name and F.inView[name]) or F.pageWhole[name] or PageHasFill(page) then
-        if page._dfFiltered then self:_UnfilterPage(page) end
-        return
+        if page._dfFiltered then return self:_UnfilterPage(page) end
+        return false
     end
+    local moved = not page._dfFiltered
     page._dfFiltered = true
+    local keepCache = F.keepCache or {}
+    F.keepCache = keepCache
+    local function Mark(w, hidden)
+        if rawget(w, "dfFilterHidden") ~= hidden then
+            rawset(w, "dfFilterHidden", hidden)
+            moved = true
+        end
+    end
 
     local compiled = F.compiled
     local label, spaced = PageTexts(page, name)
@@ -256,14 +291,32 @@ function Search:_FilterPage(page, db)
 
     -- A control is kept when its card's title matches, or its own setting does,
     -- and its "only shown when" would show it.
+    -- The match half is cached per widget per query (a page is swept again on
+    -- every setting change); the condition half is read live.
+    local function Matches(w, section)
+        local c = keepCache[w]
+        if c ~= nil then return c end
+        if CardMatched(section) then
+            c = true
+        else
+            local e = rawget(w, "searchEntry")
+            if type(e) ~= "table" then
+                c = false
+            elseif F.hit[e] then
+                c = true
+            elseif F.indexed and F.indexed[e] then
+                c = false
+            else
+                c = self:EntryMatchesAll(compiled, e, section and rawget(section, "sectionTitleText"), label, name)
+                    and true or false
+            end
+        end
+        keepCache[w] = c
+        return c
+    end
     local function Keep(w, section)
-        if CondHidden(w, db) then return false end
-        if CardMatched(section) then return true end
-        local e = rawget(w, "searchEntry")
-        if type(e) ~= "table" then return false end
-        if F.hit[e] then return true end
-        if F.indexed and F.indexed[e] then return false end
-        return self:EntryMatchesAll(compiled, e, section and rawget(section, "sectionTitleText"), label, name)
+        if not Matches(w, section) then return false end
+        return not CondHidden(w, db)
     end
 
     -- A box: decide its rows (headers inside it follow the rows under them), mark
@@ -298,7 +351,11 @@ function Search:_FilterPage(page, db)
         end
         if g.SetChildFiltered then
             for j, e in ipairs(kids) do
-                if e.widget then g:SetChildFiltered(e.widget, not keep[j]) end
+                if e.widget then
+                    local want = (not keep[j]) or nil
+                    if e.filterHidden ~= want then moved = true end
+                    g:SetChildFiltered(e.widget, not keep[j])
+                end
             end
         end
         return any
@@ -310,9 +367,9 @@ function Search:_FilterPage(page, db)
         if type(w) == "table" and not rawget(w, "settingsGroup") then
             local hidden = nil
             local section = rawget(w, "collapsibleSection")
-            if rawget(w, "rightAlign") or rawget(w, "isSyncPoint") or rawget(w, "sectionChildren")
-                or rawget(w, "isSectionHeader") then
-                hidden = nil   -- decided below, or never filtered
+            local later = rawget(w, "sectionChildren") or rawget(w, "isSectionHeader")
+            if later or rawget(w, "rightAlign") or rawget(w, "isSyncPoint") then
+                hidden = nil   -- decided below (cards, headers), or never filtered
             elseif rawget(w, "isPageFooter") then
                 hidden = true
             elseif rawget(w, "isSettingsGroup") then
@@ -327,7 +384,9 @@ function Search:_FilterPage(page, db)
             else
                 hidden = true
             end
-            if rawget(w, "dfFilterHidden") ~= hidden then rawset(w, "dfFilterHidden", hidden) end
+            -- Cards and headers are marked once, below: marking them shown here and
+            -- hidden there would count as a change on every pass.
+            if not later then Mark(w, hidden) end
         end
     end
 
@@ -336,11 +395,11 @@ function Search:_FilterPage(page, db)
     for _, w in ipairs(children) do
         if type(w) == "table" and rawget(w, "sectionChildren") then
             if cardKept[w] or CardMatched(w) then
-                rawset(w, "dfFilterHidden", nil)
-                OpenCard(w)
+                Mark(w, nil)
+                if OpenCard(w) then moved = true end
             else
-                rawset(w, "dfFilterHidden", true)
-                RestoreCard(w)
+                Mark(w, true)
+                if RestoreCard(w) then moved = true end
             end
         end
     end
@@ -365,14 +424,18 @@ function Search:_FilterPage(page, db)
                     end
                 end
             end
-            rawset(h, "dfFilterHidden", (not keep) or nil)
+            Mark(h, (not keep) or nil)
         end
     end
+    return moved
 end
 
 GUI.FilterPagePass = function(page, db)
     local ok, err = pcall(Search._FilterPage, Search, page, db)
     if not ok and err then geterrorhandler()(err) end
+    if page and page.tabName and page.tabName == GUI.CurrentPageName and Search._FilterNote then
+        Search:_FilterNote()
+    end
 end
 
 -- ------------------------------------------------------------
@@ -409,7 +472,7 @@ GUI.FilterNavPrepare = function()
         C_Timer.After(0, function()
             afterView = nil
             MoveOffEmptyPage()
-            if GUI.RelayoutCurrentPage then GUI.RelayoutCurrentPage() end
+            Search:RefreshFilter(false)
         end)
     end
     return F.active
@@ -438,18 +501,92 @@ end
 -- ------------------------------------------------------------
 -- DRIVING IT
 -- ------------------------------------------------------------
--- Recompute and redraw the list and the page on screen. `moved` = the query (or
--- the registry under it) changed, so the page on screen may need to change too.
+-- The note over a page the query found nothing on: the page itself is emptied
+-- by the filter, and Enter in the box goes to the first page that matches.
+-- ONE font string for the window, made the first time it is needed.
+local noteText
+function Search:_FilterNote()
+    local cur = GUI.CurrentPageName
+    local show = F.active and F.any and cur and F.inView[cur] and not F.pageHit[cur] and true or false
+    if show and not noteText and GUI.contentFrame then
+        noteText = GUI.contentFrame:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+        noteText:SetPoint("TOPLEFT", GUI.contentFrame, "TOPLEFT", 16, -16)
+        noteText:SetPoint("TOPRIGHT", GUI.contentFrame, "TOPRIGHT", -16, -16)
+        noteText:SetJustifyH("LEFT")
+        noteText:SetWordWrap(true)
+        noteText:SetText(L["Nothing on this page matches. Press Enter to go to a page that does."])
+    end
+    if noteText then noteText:SetShown(show) end
+end
+
+-- What the page list shows: changes only when the set of listed pages does.
+local function NavSig()
+    if not F.active then return "off" end
+    if not F.any then return "none" end
+    local names = {}
+    for name in pairs(F.pageHit) do names[#names + 1] = name end
+    table.sort(names)
+    return table.concat(names, ",")
+end
+
+-- ★ A KEYSTROKE'S WHOLE COST, and it is kept small on purpose (the first version
+-- re-laid the list, swept and re-laid the page twice, and could switch pages,
+-- on every key):
+--   * the answer is computed once per query (MemoKey);
+--   * the page list is laid out again only when the set of listed pages moved;
+--   * the page on screen is marked, and laid out ONCE, only when a mark moved;
+--   * the page on screen is never switched while typing (Enter does that).
+-- `moved` is kept for callers that know the registry under the answer changed.
 function Search:RefreshFilter(moved)
-    if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
-    if moved and F.active then
-        local cur = GUI.CurrentPageName
-        if cur and F.inView[cur] and not F.pageHit[cur] and F.any then
-            MoveOffEmptyPage()
-            return
+    local before = F.navDrawn
+    if F.text ~= "" then self:_FilterCompute() else Deactivate() end
+    local after = NavSig()
+    if after ~= before or moved then
+        F.navDrawn = after
+        if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
+    end
+    local cur = GUI.CurrentPageName
+    local page = cur and GUI.Pages and GUI.Pages[cur]
+    if page then
+        local ok, changed = pcall(self._FilterPage, self, page, PageDB(page))
+        if not ok then
+            geterrorhandler()(changed)
+        elseif changed and page.RefreshStates then
+            page:RefreshStates()
+            -- A narrowed page is shorter: start it at the top.
+            if rawget(page, "SetVerticalScroll") or (type(page.SetVerticalScroll) == "function") then
+                pcall(page.SetVerticalScroll, page, 0)
+            end
         end
     end
-    if GUI.RelayoutCurrentPage then GUI.RelayoutCurrentPage() end
+    self:_FilterNote()
+end
+
+-- Enter in the box: when the page on screen has nothing matching, go to the
+-- first listed page that does.
+function Search:FilterJump()
+    if F.active and F.any then MoveOffEmptyPage() end
+end
+
+-- Focus on the box: get the view's index built before the first letter, as a
+-- query would (budgeted, never in combat), so typing finds it ready.
+function Search:WarmFilterIndex()
+    if InCombatLockdown() or not GUI.Tabs then return end
+    local inView = ViewPages()
+    self:IncludeScopedPages(inView)
+    self:TryReuseRegistry()
+    if (self:RegistryIsStale() or self.RegistryBuilding) and not (self.RegistryBuilding and F.waitToken == self._buildToken) then
+        self:EnsureRegistryAsync(function(ok)
+            F.waitToken = nil
+            if ok then
+                self:_MatchIndex()
+                if F.text ~= "" then self:RefreshFilter(true) end
+            end
+        end)
+        F.waitToken = self._buildToken
+    elseif self._MatchIndex then
+        self:_MatchIndex()
+    end
 end
 
 -- Every page a filter touched goes back as it was. Pages not on screen are put
@@ -460,6 +597,7 @@ function Search:ClearFilter()
     local had = F.text ~= "" or F.active
     F.text = ""
     Deactivate()
+    F.navDrawn = nil
     for _, page in pairs(GUI.Pages or {}) do
         if page._dfFiltered then self:_UnfilterPage(page) end
     end
@@ -468,7 +606,13 @@ function Search:ClearFilter()
         bar.editbox:SetText("")
         bar.editbox:ClearFocus()
     end
-    if had then self:RefreshFilter(false) end
+    if had then
+        if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
+        local cur = GUI.CurrentPageName
+        local page = cur and GUI.Pages and GUI.Pages[cur]
+        if page and page.RefreshStates then page:RefreshStates() end
+    end
+    self:_FilterNote()
 end
 
 function Search:FilterActive()
@@ -494,6 +638,8 @@ end
 function Search:CreateFilterBar(parent)
     local bar = self:CreateSearchBar(parent, {
         onChange = function(text) Search:SetFilterText(text) end,
+        onFocus  = function() Search:WarmFilterIndex() end,
+        onEnter  = function() Search:FilterJump() end,
     })
     F.bar = bar
     return bar

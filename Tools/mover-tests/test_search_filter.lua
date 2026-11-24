@@ -71,6 +71,17 @@ local function NewWindow()
         local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
         if page then GUI.FilterPagePass(page, DF.db.party) end
     end
+    -- The note's font string, recorded.
+    GUI.contentFrame = { CreateFontString = function()
+        local fs = { shown = false }
+        function fs:SetPoint() end
+        function fs:SetJustifyH() end
+        function fs:SetWordWrap() end
+        function fs:SetText(t) self.text = t end
+        function fs:SetShown(v) self.shown = v and true or false end
+        GUI._note = fs
+        return fs
+    end }
     DF.GUI = GUI
     DandersFrames = DF
     load_options_file_into("Features/Search.lua", NS)
@@ -91,6 +102,8 @@ local function Page(name, label, opts)
     function page:IsShown() return GUI.CurrentPageName == name end
     function page:Hide() end
     function page:GetIndexEntries() return self._entries end
+    page.layouts = 0
+    function page:RefreshStates() self.layouts = self.layouts + 1; GUI.FilterPagePass(self, DF.db.party) end
     GUI.Pages[name] = page
     local btn = { tabName = name, inView = not (opts and opts.outOfView), order = order }
     function btn:IsShown() return self._shown end
@@ -270,12 +283,35 @@ check(not any, "empty: every row leaves the list")
 GUI.RelayoutCurrentPage()
 check(not rawget(framePage, "_dfFiltered"), "empty: the page on screen is left whole rather than blank")
 
-print("-- Filter: the page on screen with nothing matching moves to one that has")
+print("-- Filter: typing never switches the page; Enter goes to one that matches")
 Type("")
 GUI.CurrentPageName = "auras_buffs"
 selected = {}
 Type("transparency")
-check(#selected == 1 and selected[1] == "general_frame", "move: the first listed page with a match is selected (" .. tostring(selected[1]) .. ")")
+eq(#selected, 0, "move: typing leaves the page on screen alone")
+check(GUI._note and GUI._note.shown, "move: ...and says nothing on it matches")
+S:FilterJump()
+check(#selected == 1 and selected[1] == "general_frame", "move: Enter selects the first listed page with a match (" .. tostring(selected[1]) .. ")")
+GUI.RelayoutCurrentPage()
+S:RefreshFilter(false)
+check(not GUI._note.shown, "move: the note goes once the page has a match")
+
+print("-- Filter: a keystroke costs one compute and at most one layout")
+Type("")
+GUI.CurrentPageName = "general_frame"
+local matchCalls = 0
+local realMatch = S.MatchEntries
+S.MatchEntries = function(...) matchCalls = matchCalls + 1; return realMatch(...) end
+framePage.layouts = 0
+Type("transparenc")
+eq(matchCalls, 1, "cost: one match for the keystroke")
+eq(framePage.layouts, 1, "cost: one layout of the page on screen")
+GUI:UpdateTabLayout(); GUI:UpdateTabLayout()
+eq(matchCalls, 1, "cost: laying the list out again reuses the answer")
+framePage.layouts = 0
+Type("transparency")
+eq(framePage.layouts, 0, "cost: a keystroke that changes nothing on the page lays nothing out")
+S.MatchEntries = realMatch
 
 print("-- Filter: a 'show me' link clears the filter first")
 check(S:FilterActive(), "link: setup -- filtering")

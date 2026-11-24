@@ -262,7 +262,8 @@ function GUI:CreateHeader(parent, text, opts)
     
     -- SEARCH: Track current section
     if DF.Search and not (opts and opts.keepSearchSection) then
-        DF.Search:SetCurrentSection(text)
+        -- The header is handed over too: the section is findable by its title.
+        DF.Search:SetCurrentSection(text, container)
     end
 
     return container
@@ -1063,9 +1064,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- it was.
     if pinRightInset then section:SetHeaderRightInset(pinRightInset) end
 
-    -- SEARCH: Track current section
+    -- SEARCH: Track current section (and register the card itself, by title)
     if DF.Search then
-        DF.Search:SetCurrentSection(text)
+        DF.Search:SetCurrentSection(text, section)
     end
 
     -- ============================================================

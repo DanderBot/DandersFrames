@@ -269,13 +269,20 @@ local function Post(map, k, entry, weight)
     if not cur or weight > cur then p[entry] = weight end
 end
 
-local function AddField(ix, entry, words, weight, withConcepts, skipStop)
+-- `rawOnly`: post the word as written, not its normal form (tooltips). A
+-- tooltip is prose, and normalising prose finds settings by accident: "resting"
+-- and "the rest of the icons" share the normal form "rest".
+local function AddField(ix, entry, words, weight, withConcepts, skipStop, rawOnly)
     local stop = Search.StopWords
     for _, w in ipairs(words) do
         if not (skipStop and (stop[w] or #w < 3)) then
             local n = Norm(w)
             ix.vocab[w] = n
-            Post(ix.words, n, entry, weight)
+            if rawOnly then
+                Post(ix.raw, w, entry, weight)
+            else
+                Post(ix.words, n, entry, weight)
+            end
             if withConcepts then
                 local ids = conceptsOf[n]
                 if ids then
@@ -310,7 +317,7 @@ local function IndexEntry(ix, entry)
     end
     local tip = TooltipText(entry.sourceWidget)
     if tip then
-        AddField(ix, entry, Words(tip), W_TIP, false, true)
+        AddField(ix, entry, Words(tip), W_TIP, false, true, true)
     end
 end
 
@@ -320,7 +327,7 @@ function Search:_MatchIndex()
     local reg = self.Registry or {}
     local ix = self._matchIndex
     if ix and ix.reg == reg and ix.n == #reg then return ix end
-    ix = { reg = reg, n = #reg, words = {}, cons = {}, vocab = {}, indexed = {} }
+    ix = { reg = reg, n = #reg, words = {}, cons = {}, raw = {}, vocab = {}, indexed = {} }
     for w, n in pairs(conceptVocab) do ix.vocab[w] = n end
     for _, entry in ipairs(reg) do IndexEntry(ix, entry) end
     self._matchIndex = ix
@@ -342,6 +349,7 @@ end
 local function HitsAnything(ix, acc)
     for n in pairs(acc.words) do if ix.words[n] then return true end end
     for id in pairs(acc.cons) do if ix.cons[id] then return true end end
+    for w in pairs(acc.raw) do if ix.raw[w] then return true end end
     return false
 end
 
@@ -350,27 +358,35 @@ local function AcceptConcepts(acc, n, m)
     if ids then for _, id in ipairs(ids) do Accept(acc.cons, id, m) end end
 end
 
-local function CompileWord(ix, qw)
-    local acc = { word = qw, words = {}, cons = {} }
+-- `isLast`: the word still being typed. Only it matches the words it STARTS;
+-- the words before it are finished, so "health text" no longer finds Texture.
+local function CompileWord(ix, qw, isLast)
+    local acc = { word = qw, words = {}, cons = {}, raw = {} }
     local n = Norm(qw)
     Accept(acc.words, n, M_EXACT)
-    if #qw < 2 then return acc end   -- "x", "y": the word itself only
+    Accept(acc.raw, qw, M_EXACT)
+    if #qw < 2 and not isLast then return acc end   -- "offset x": the x itself only
 
-    AcceptConcepts(acc, n, M_CONCEPT)
-    local narrow = narrowerOf[n]
-    if narrow then
-        for _, nn in ipairs(narrow) do Accept(acc.words, nn, M_NARROW) end
+    if #qw >= 2 then
+        AcceptConcepts(acc, n, M_CONCEPT)
+        local narrow = narrowerOf[n]
+        if narrow then
+            for _, nn in ipairs(narrow) do Accept(acc.words, nn, M_NARROW) end
+        end
     end
 
     -- Words this one starts (or, for a non-ASCII word, sits inside -- Chinese
     -- and Korean labels are one long word with no spaces to start at).
     local ascii = IsAscii(qw)
-    for raw, rn in pairs(ix.vocab) do
-        if raw ~= qw then
-            local at = find(raw, qw, 1, true)
-            if at == 1 or (at and not ascii) then
-                Accept(acc.words, rn, M_PREFIX)
-                if #qw >= 4 then AcceptConcepts(acc, rn, M_CONCEPT * M_PREFIX) end
+    if isLast then
+        for raw, rn in pairs(ix.vocab) do
+            if raw ~= qw then
+                local at = find(raw, qw, 1, true)
+                if at == 1 or (at and not ascii) then
+                    Accept(acc.words, rn, M_PREFIX)
+                    Accept(acc.raw, raw, M_PREFIX)
+                    if #qw >= 4 then AcceptConcepts(acc, rn, M_CONCEPT * M_PREFIX) end
+                end
             end
         end
     end
@@ -382,6 +398,7 @@ local function CompileWord(ix, qw)
             for raw, rn in pairs(ix.vocab) do
                 if IsAscii(raw) and Dist(qw, raw, bound) <= bound then
                     Accept(acc.words, rn, M_TYPO)
+                    Accept(acc.raw, raw, M_TYPO)
                     AcceptConcepts(acc, rn, M_CONCEPT * M_TYPO)
                 end
             end
@@ -397,8 +414,16 @@ function Search:CompileQuery(query)
     if #folded < 2 then return nil end
     local ix = self:_MatchIndex()
 
+    -- Phrases that name one thing ("target of target") become that thing's word.
+    local text = folded
+    for phrase, word in pairs(Search.Phrases or {}) do
+        if find(text, phrase, 1, true) then
+            text = gsub(text, "%f[%w]" .. gsub(phrase, "%p", "%%%0") .. "%f[%W]", word)
+        end
+    end
+
     local all, kept = {}, {}
-    for w in gmatch(folded, WORD) do all[#all + 1] = w end
+    for w in gmatch(text, WORD) do all[#all + 1] = w end
     local stop = Search.StopWords
     for _, w in ipairs(all) do
         if not stop[w] then kept[#kept + 1] = w end
@@ -407,7 +432,9 @@ function Search:CompileQuery(query)
     if #kept == 0 then return nil end
 
     local compiled = { text = folded, words = {}, index = ix }
-    for i, w in ipairs(kept) do compiled.words[i] = CompileWord(ix, w) end
+    -- The last word is the one being typed, unless the query ends in a space.
+    local typing = not find(query, "%s$")
+    for i, w in ipairs(kept) do compiled.words[i] = CompileWord(ix, w, typing and i == #kept) end
     return compiled
 end
 
@@ -425,6 +452,15 @@ local function WordHits(ix, acc)
     end
     for id, m in pairs(acc.cons) do
         local p = ix.cons[id]
+        if p then
+            for entry, w in pairs(p) do
+                local s = w * m
+                if not hits[entry] or s > hits[entry] then hits[entry] = s end
+            end
+        end
+    end
+    for raw, m in pairs(acc.raw) do
+        local p = ix.raw[raw]
         if p then
             for entry, w in pairs(p) do
                 local s = w * m
@@ -484,7 +520,7 @@ function Search:EntryMatchesAll(compiled, entry, section, pageLabel, pageName)
             tab      = entry.tab or pageName,
         }, { __index = entry })
     end
-    local mini = { words = {}, cons = {}, vocab = {} }
+    local mini = { words = {}, cons = {}, raw = {}, vocab = {} }
     IndexEntry(mini, probe)
     for _, acc in ipairs(compiled.words) do
         local ok = false
@@ -494,6 +530,11 @@ function Search:EntryMatchesAll(compiled, entry, section, pageLabel, pageName)
         if not ok then
             for id in pairs(acc.cons) do
                 if mini.cons[id] then ok = true break end
+            end
+        end
+        if not ok then
+            for w in pairs(acc.raw) do
+                if mini.raw[w] then ok = true break end
             end
         end
         if not ok then return false end
@@ -548,13 +589,14 @@ function Search:RankedMatches(query)
     end
 
     local anyAll = false
-    for _, m in pairs(matched) do
-        if m >= nWords then anyAll = true break end
+    for entry, m in pairs(matched) do
+        if m >= nWords and not entry.isSection then anyAll = true break end
     end
 
     local list = {}
     for entry, s in pairs(score) do
-        if not anyAll or matched[entry] >= nWords then
+        -- A card's own entry (isSection) has no control to show inline.
+        if not entry.isSection and (not anyAll or matched[entry] >= nWords) then
             local label = type(entry.label) == "string" and Fold(entry.label) or ""
             if find(label, compiled.text, 1, true) then s = s + PHRASE_BONUS end
             list[#list + 1] = { entry = entry, score = s, words = matched[entry] }

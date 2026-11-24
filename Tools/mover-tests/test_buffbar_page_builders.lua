@@ -606,7 +606,7 @@ do
     -- so every control built after it takes that breadcrumb through the ordinary
     -- widget path -- and its GetText is what
     -- ScrollToSection and every GUI:LinkToSetting{ section = ... } find it by.
-    check(WIDGETS:find("DF.Search:SetCurrentSection(text)", 1, true) ~= nil,
+    check(WIDGETS:find("DF.Search:SetCurrentSection(text, section)", 1, true) ~= nil,
           "search: CreateCollapsibleSection stamps the breadcrumb every control after it registers under")
     check(WIDGETS:find("section.GetText = function(self) return self.sectionTitleText end", 1, true) ~= nil,
           "search: ...and answers to its own name, which is what a jump finds it by")
@@ -1353,7 +1353,7 @@ do
           "tick: ...above the header's click area, so a press toggles and never folds")
     check(fn:find('tick:SetPoint("LEFT", section, "LEFT", TICK_X, 0)', 1, true) ~= nil,
           "tick: ...between the chevron and the title")
-    local crumb = fn:find("DF.Search:SetCurrentSection(text)", 1, true)
+    local crumb = fn:find("DF.Search:SetCurrentSection(text, section)", 1, true)
     check(crumb ~= nil and tickAt ~= nil and crumb < tickAt,
           "tick: ...after the section's search breadcrumb, so its entry lands under this section")
     check(WIDGETS:find("container.searchEntry = DF.Search:RegisterCheckbox(label, dbKey, nil, false, callback)", 1, true) ~= nil,
