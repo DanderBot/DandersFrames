@@ -1271,6 +1271,7 @@ function UFO.BuildResourceDetachedCard(page, ctx, changed)
     end, ctx.offRow, nil, nil, {
         db = db, key = "resourceBarDetached", label = L["Detach"],
         disableOn = ctx.offRow, onChanged = changed,
+        tooltip = L["Moves the power bar out of the frame with its own size, onto the point of the frame's edge you pick below."],
     })
     local w = band:AddWidget(GUI:CreateCheckbox(page.child, L["Match Frame Width"], db,
         "resourceBarDetachedMatchWidth", changed), 30)
@@ -1683,6 +1684,7 @@ local function DetachedControls(self, band, unit, kind, changed, off, attached)
         function() return UFO.ChildFollowing(unit, kind) end,
         function(v) UFO.SetChildFollowing(unit, kind, v); changed() end), 30)
     w.disableOn, w.hideOn = off, attached
+    w.tooltip = L["Keeps the detached bar pinned to its frame's edge, so it moves when the frame moves. Off leaves it where you put it on screen."]
     w = band:AddWidget(GUI:CreateButtonRow(self.child, {
         { label = L["Edit in Mover"], width = 120, icon = "open_with",
           onClick = function() UFO.EditChildInMover(unit, kind) end },
@@ -1704,14 +1706,18 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
         "settings", { db = db, key = "castbarEnabled", label = L["Enable Cast Bar"], onChanged = changed })
     for _, c in ipairs({
         { "castbarHideIdle", L["Hide When Not Casting"] },
-        { "castbarLatency", L["Show Latency"] },
+        { "castbarLatency", L["Show Latency"],
+          L["Shades the end of the bar by your current network delay. You can queue your next spell once the fill reaches the shaded part."] },
         { "castbarEmpower", L["Show Empower Stages"] },
-        { "castbarKickTick", L["Show Kick-Ready Mark"] },
-        { "castbarPriorityHighlight", L["Glow Important Spells"] },
+        { "castbarKickTick", L["Show Kick-Ready Mark"],
+          L["While your interrupt is on cooldown, a mark shows where in the enemy's cast it comes back. If the mark is before the end, you can still interrupt in time."] },
+        { "castbarPriorityHighlight", L["Glow Important Spells"],
+          L["Puts a glow round the bar when the game marks the spell as important, usually one worth interrupting or avoiding."] },
     }) do
         if shown(c[1]) then
             w = band:AddWidget(GUI:CreateCheckbox(self.child, c[2], db, c[1], changed), 30)
             w.disableOn = off
+            if c[3] then w.tooltip = c[3] end
         end
     end
     Close(band)
@@ -1735,6 +1741,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
     if shown("castbarDetached") then
         w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "castbarDetached", changed), 30)
         w.disableOn = off
+        w.tooltip = L["Frees the cast bar from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."]
     end
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
         { BOTTOM = L["Bottom"], TOP = L["Top"], _order = { "BOTTOM", "TOP" } }, db, "castbarSide", changed), 55)
@@ -1767,12 +1774,14 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
         { "castbarNonInterruptibleColor", L["Not Interruptible"] },
         { "castbarChannelColor", L["Channel"] },
         { "castbarFailedColor", L["Interrupted / Failed"] },
-        { "castbarKickNotReadyColor", L["Kick Not Ready"] },
+        { "castbarKickNotReadyColor", L["Kick Not Ready"],
+          L["Fill colour used while your interrupt is still on cooldown. Needs Show Kick-Ready Mark on."] },
         { "castbarPriorityHighlightColor", L["Important Glow"] },
     }) do
         if shown(c[1]) then
             w = band:AddWidget(GUI:CreateColorPicker(self.child, c[2], db, c[1], false, changed), 30)
             w.disableOn = off
+            if c[3] then w.tooltip = c[3] end
         end
     end
     if shown("castbarClassColor") then
@@ -1860,6 +1869,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Display Mode"],
         { PIPS = L["Pips"], BAR = L["Single Bar"], _order = { "PIPS", "BAR" } }, db, "classPowerMode", changed), 55)
     w.disableOn = off
+    w.tooltip = L["Pips shows one block per point. Single Bar shows one bar that fills up."]
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide When Empty"], db, "classPowerHideEmpty", changed), 30)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Out of Combat"], db, "classPowerHideOOC", changed), 30)
@@ -1869,8 +1879,10 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     band = Open(L["Class Options"], "uf_cp_class", 1, nil, "settings")
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Death Knight Runes"], db, "classPowerRunes", changed), 30)
     w.disableOn = off
+    w.tooltip = L["Shows a Death Knight's six runes, each refilling on its own. Off shows nothing on a Death Knight."]
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Brewmaster Stagger"], db, "classPowerStagger", changed), 30)
     w.disableOn = off
+    w.tooltip = L["Shows a Brewmaster's staggered damage as a bar that turns from green to yellow to red as it grows. Off shows nothing on a Brewmaster."]
     Close(band)
 
     band = Open(L["Size"], "uf_cp_size", 1, nil, "size")
@@ -1889,6 +1901,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
         function(d) return detached(d) and L["Detached"] or L["Attached"] end, "position")
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "classPowerDetached", changed), 30)
     w.disableOn = off
+    w.tooltip = L["Frees the class power from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."]
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
         { TOP = L["Top"], BOTTOM = L["Bottom"], _order = { "TOP", "BOTTOM" } }, db, "classPowerPosition", changed), 55)
     w.disableOn, w.hideOn = off, detached
@@ -1909,6 +1922,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
         { CLASS = L["Class"], POWER = L["Power Type"], CUSTOM = L["Custom"], _order = { "CLASS", "POWER", "CUSTOM" } },
         db, "classPowerColorMode", changed), 55)
     w.disableOn = off
+    w.tooltip = L["Class uses your class colour, Power Type uses the game's own colour for that resource, and Custom uses one colour you pick."]
     w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Custom Color"], db, "classPowerColor", false, changed), 30)
     w.disableOn = off
     w.hideOn = function(d) return not (d and d.classPowerColorMode == "CUSTOM") end
@@ -1916,6 +1930,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Charged Pip"], db, "classPowerChargedColor", false, changed), 30)
     w.disableOn = off
+    w.tooltip = L["Colour for charged combo points, which some Rogue talents create."]
     Close(band)
 
     band = Open(L["Border"], "uf_cp_border", 2, nil, "border", BorderToggle(db, "classPower", changed))
@@ -1953,6 +1968,7 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
             { ["3D"] = L["3D Model"], ["2D"] = L["2D Portrait"], _order = { "3D", "2D" } }, db, "portraitNpcMode", changed), 55)
         w.disableOn = off
         w.hideOn = function(d) return not (d and (d.portraitMode == "CLASS" or d.portraitMode == "SPEC")) end
+        w.tooltip = L["Class and Spec Icons have nothing to show for an NPC, so choose what NPCs show instead."]
     end
     if shown("portraitDesatDead") then
         w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Desaturate When Dead"], db, "portraitDesatDead", changed), 30)
@@ -1967,6 +1983,7 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Size (0 = frame height)"], -60, 100, 1, db, "portraitSize", changed), 55)
     w.disableOn = off
+    w.tooltip = L["Added to the frame's height. 0 makes the portrait as tall as the frame, negative values shrink it and positive values grow it."]
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "portraitX", changed), 55)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "portraitY", changed), 55)
@@ -2350,8 +2367,10 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
             changed()
         end, nil, set, { optionsFunc = UFO.TextTemplateOptions }), 55)
     end
-    textTemplate(L["Bars Text Template"], "textDesignerPreset")
-    textTemplate(L["Ring Text Template"], "ringTextDesignerPreset")
+    textTemplate(L["Bars Text Template"], "textDesignerPreset").tooltip =
+        L["The Text Designer template this frame uses while its style is Bars. Each style keeps its own, so switching style also switches the text layout."]
+    textTemplate(L["Ring Text Template"], "ringTextDesignerPreset").tooltip =
+        L["The Text Designer template this frame uses while its style is Ring. Each style keeps its own, so switching style also switches the text layout."]
     band:AddWidget(GUI:CreateLabel(self.child,
         L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar."], 250), 70)
     Close(band)
@@ -2854,7 +2873,8 @@ function UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
     end, "layout")
     band:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growth, db, "bossGrowth", changed), 55)
     band:AddWidget(GUI:CreateSlider(self.child, L["Frame Spacing"], 0, 150, 1, db, "bossSpacing", changed), 55)
-    band:AddWidget(GUI:CreateSlider(self.child, L["Units Per Row"], 1, count, 1, db, "bossUnitsPerRow", changed), 55)
+    band:AddWidget(GUI:WithTooltip(GUI:CreateSlider(self.child, L["Units Per Row"], 1, count, 1, db, "bossUnitsPerRow", changed),
+        L["How many boss frames sit in a line before the next one starts a new line. With Up or Down growth, each new line is a column beside the first."]), 55)
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Row Spacing"], -5, 50, 1, db, "bossRowSpacing", changed), 55)
     -- Only matters once a row wraps.
     w.disableOn = UFO.Explain(function(d) return not (d and tonumber(d.bossUnitsPerRow) and d.bossUnitsPerRow < count) end,
@@ -3366,11 +3386,12 @@ function UFO.BuildSettingsPage(self, db, Add)
     end, "framemodes")
     for _, unit in ipairs(UF and UF.SPAWNED_UNITS or {}) do
         local u = unit
-        band:AddWidget(GUI:CreateDropdown(self.child, UFO.UnitLabel(u), UFO.SourceOptions(u), nil, nil,
+        band:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(self.child, UFO.UnitLabel(u), UFO.SourceOptions(u), nil, nil,
             function() self:RefreshStates() end,
             function() return UFO.GetSource(u) end,
             function(v) UFO.SetSource(u, v) end,
-            { optionsFunc = function() return UFO.SourceOptions(u) end }), 55)
+            { optionsFunc = function() return UFO.SourceOptions(u) end }),
+            L["Who draws this frame. DandersFrames draws its own, Blizzard keeps the game's frame, and Hidden shows neither. Takes a reload."]), 55)
     end
     band:AddWidget(GUI:CreateLabel(self.child, L["Target of Target can only be Blizzard when Target is."], 250), 30)
     band:AddWidget(GUI:CreateLabel(self.child, L["Focus Target can only be Blizzard when Focus is."], 250), 30)
@@ -3381,12 +3402,13 @@ function UFO.BuildSettingsPage(self, db, Add)
     band = Open(L["Blizzard Frames"], "uf_blizzard", 2,
         function() return UFO.HidesBlizzardCastBar() and format(L["%s hidden"], L["Cast Bar"]) or L["Shown"] end,
         "visibility")
-    band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Blizzard Player Cast Bar"], db, "hideBlizzardCastbar",
+    band:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(self.child, L["Hide Blizzard Player Cast Bar"], db, "hideBlizzardCastbar",
         function()
             UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
         end,
         function() return UFO.HidesBlizzardCastBar() end,
-        function(v) if db then db.hideBlizzardCastbar = v and true or false end end), 30)
+        function(v) if db then db.hideBlizzardCastbar = v and true or false end end),
+        L["Hides the game's own cast bar for your character. Until you change it, this follows your DandersFrames player cast bar and hides while that is on."]), 30)
     Close(band)
 end
 

@@ -118,6 +118,16 @@ local function NewGUI()
     function G:EnterView(g) G.GlobalView = g and true or false end
     G.SelectTab = function(n) calls[#calls + 1] = "tab:" .. tostring(n); G.CurrentPageName = n end
     function G:CreatePopoutPageTools() return nil end
+    -- The REAL GUI:WithTooltip, cut out of SettingsWidgets.lua: the pages wrap inline
+    -- widgets in it, so a stand-in here would test the stand-in.
+    do
+        local src = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n")
+        local a = src:find("function GUI:WithTooltip(w, text)", 1, true)
+        local b = a and src:find("\nend\n", a, true)
+        local fn = a and b and loadstring("local GUI = ...\n" .. src:sub(a, b + 4), "@SettingsWidgets.lua:WithTooltip")
+        check(fn ~= nil, "GUI:WithTooltip can be cut out of SettingsWidgets.lua")
+        if fn then fn(G) end
+    end
     DF.GUI = G
     DF.GUIPageProviders = {}
     load_options_file_into("GUI/ModuleRegistry.lua", NS)
@@ -590,6 +600,13 @@ do
     local castbar
     for _, c in ipairs(checks) do if c.key == "hideBlizzardCastbar" then castbar = c end end
     check(castbar and castbar.db == DF.db.unitframes.global, "Settings: Hide Blizzard Player Cast Bar is module-wide")
+    check(castbar and type(castbar.tooltip) == "string" and castbar.tooltip:find("follows your DandersFrames player cast bar", 1, true),
+          "Settings: Hide Blizzard Player Cast Bar explains that it follows ours until set")
+    local tipped = 0
+    for _, s in ipairs(sources) do
+        if type(s.tooltip) == "string" and s.tooltip:find("Who draws this frame.", 1, true) then tipped = tipped + 1 end
+    end
+    eq(tipped, #sources, "Settings: every Frame Source dropdown carries the one shared tooltip")
     -- Edit in Mover without the mover: DF's "DandersMover is disabled" line.
     says = {}
     rows[1].buttons[1].onClick()
@@ -825,6 +842,44 @@ do
     check(w and w.hideOn and w.hideOn({ classPowerColorMode = "CLASS" }) and not w.hideOn({ classPowerColorMode = "CUSTOM" }),
           "Class Power: Custom Color shows only in Custom mode")
 
+    print("-- Tooltips on the settings a label cannot explain")
+    local function tipOf(w) return w and type(w.tooltip) == "string" and w.tooltip ~= "" end
+    local function followTip()
+        for _, x in ipairs(built) do if x.label == "Follow the Frame" then return tipOf(x) end end
+    end
+    for _, k in ipairs({ "classPowerMode", "classPowerRunes", "classPowerStagger", "classPowerDetached",
+                         "classPowerColorMode", "classPowerChargedColor" }) do
+        check(tipOf(byKey[k]), "Class Power: " .. k .. " has a tooltip")
+    end
+    check(followTip(), "Class Power: Follow the Frame has a tooltip")
+    check(not tipOf(byKey.classPowerHideEmpty), "...and a self-explaining tick has none")
+    cards, keys, byKey = BuildPage("player", "castbar")
+    check(tipOf(byKey.castbarLatency) and tipOf(byKey.castbarDetached), "Cast Bar: Show Latency, Detach")
+    check(followTip(), "Cast Bar: Follow the Frame (the shared detached controls)")
+    check(not tipOf(byKey.castbarHideIdle), "...Hide When Not Casting needs none")
+    cards, keys, byKey = BuildPage("target", "castbar")
+    check(tipOf(byKey.castbarKickTick) and tipOf(byKey.castbarPriorityHighlight), "target: Kick-Ready Mark, Glow Important Spells")
+    check(tipOf(byKey.castbarKickNotReadyColor), "target: the Kick Not Ready colour")
+    check(not tipOf(byKey.castbarColor), "...the plain colours need none")
+    cards, keys, byKey = BuildPage("player", "portrait")
+    check(tipOf(byKey.portraitNpcMode) and tipOf(byKey.portraitSize), "Portrait: For NPCs Use, Size")
+    cards, keys, byKey = BuildPage("boss", "bosslayout")
+    check(tipOf(byKey.bossUnitsPerRow), "Boss Layout: Units Per Row")
+    -- Every string the module's pages ask for ships in enUS.
+    do
+        local loc = df_file_source("Locales/enUS.lua")
+        local have, missing, seen = {}, 0, {}
+        for k in loc:gmatch('L%["([^"]+)"%]%s*=%s*true') do have[k] = true end
+        for k in options_file_source("UnitFrames/Pages.lua"):gmatch('L%["([^"]+)"%]') do
+            if not seen[k] and not have[k] then
+                missing = missing + 1
+                check(false, 'locale: UnitFrames/Pages.lua asks for L["' .. k .. '"], which enUS does not ship')
+            end
+            seen[k] = true
+        end
+        eq(missing, 0, "locale: every string the Unit Frames pages ask for exists in enUS")
+    end
+
     print("-- Stage F pages: Portrait")
     cards, keys, byKey = BuildPage("player", "portrait")
     eq(cards, "uf_po_settings,uf_po_position,uf_po_look,uf_po_border", "Portrait: Settings, Size & Position, Look, Border")
@@ -867,6 +922,8 @@ do
         for _, w in ipairs(built) do keys[#keys + 1] = w.key; byKey[w.key] = w end
         eq(added[1] and added[1].w.cardKey, "resource_detached", "Detach: one card, keyed as the page data lists it")
         eq(toggles.resource_detached and toggles.resource_detached.key, "resourceBarDetached", "...its switch is the header tick")
+        check(toggles.resource_detached and type(toggles.resource_detached.tooltip) == "string",
+              "...with its own tooltip (this Detach is not the mover one)")
         eq(table.concat(keys, ","), "resourceBarDetachedMatchWidth,resourceBarDetachedWidth,resourceBarDetachedHeight,"
             .. "resourceBarDetachedAnchor,resourceBarDetachedX,resourceBarDetachedY",
             "...Match Frame Width, Width, Height, Anchor, Offset X, Offset Y")

@@ -7,6 +7,7 @@
 - (Modules) Modules now use on/off switches instead of checkboxes, so it's clearer what's on.
 - (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
 - (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
+- (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
 
 ### Bug Fixes
 

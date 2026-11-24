@@ -3002,6 +3002,31 @@ L["How far inside the frame edge the highlight sits. Negative values push it out
 L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: Unit Frames pages (same rules as the curated sets above).
+-- Alphabetical within the block.
+-- ============================================================
+L["Added to the frame's height. 0 makes the portrait as tall as the frame, negative values shrink it and positive values grow it."] = true
+L["Class and Spec Icons have nothing to show for an NPC, so choose what NPCs show instead."] = true
+L["Class uses your class colour, Power Type uses the game's own colour for that resource, and Custom uses one colour you pick."] = true
+L["Colour for charged combo points, which some Rogue talents create."] = true
+L["Fill colour used while your interrupt is still on cooldown. Needs Show Kick-Ready Mark on."] = true
+L["Frees the cast bar from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."] = true
+L["Frees the class power from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."] = true
+L["Hides the game's own cast bar for your character. Until you change it, this follows your DandersFrames player cast bar and hides while that is on."] = true
+L["How many boss frames sit in a line before the next one starts a new line. With Up or Down growth, each new line is a column beside the first."] = true
+L["Keeps the detached bar pinned to its frame's edge, so it moves when the frame moves. Off leaves it where you put it on screen."] = true
+L["Moves the power bar out of the frame with its own size, onto the point of the frame's edge you pick below."] = true
+L["Pips shows one block per point. Single Bar shows one bar that fills up."] = true
+L["Puts a glow round the bar when the game marks the spell as important, usually one worth interrupting or avoiding."] = true
+L["Shades the end of the bar by your current network delay. You can queue your next spell once the fill reaches the shaded part."] = true
+L["Shows a Brewmaster's staggered damage as a bar that turns from green to yellow to red as it grows. Off shows nothing on a Brewmaster."] = true
+L["Shows a Death Knight's six runes, each refilling on its own. Off shows nothing on a Death Knight."] = true
+L["The Text Designer template this frame uses while its style is Bars. Each style keeps its own, so switching style also switches the text layout."] = true
+L["The Text Designer template this frame uses while its style is Ring. Each style keeps its own, so switching style also switches the text layout."] = true
+L["While your interrupt is on cooldown, a mark shows where in the enemy's cast it comes back. If the mark is before the end, you can still interrupt in time."] = true
+L["Who draws this frame. DandersFrames draws its own, Blizzard keeps the game's frame, and Hidden shows neither. Takes a reload."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,
