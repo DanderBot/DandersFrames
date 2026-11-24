@@ -1520,13 +1520,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
             ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
             local ffHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
-            ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
-            ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
+            -- Works without the split too: there it lifts a hovered frame to full.
+            ffHover.tooltip = format("%s\n\n%s",
+                L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."],
+                L["Without Separate Combat Fade, the frame shows at full opacity instead."])
             local ffHoverScope = group:AddWidget(GUI:CreateDropdown(parent, L["Hover Applies To"], {
                 ALL   = L["All Frames"],
                 FRAME = L["Hovered Frame Only"],
             }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
-            ffHoverScope.disableOn = function(d) return not d.frameFadeSplitCombat or not d.frameFadeHoverUsesCombat end
+            ffHoverScope.disableOn = function(d) return not d.frameFadeHoverUsesCombat end
             ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
         end
 

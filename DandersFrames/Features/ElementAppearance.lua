@@ -152,6 +152,15 @@ function DF:GetFrameBaseAlpha(db, frame)
         end
         return db.frameFadeAlphaOutOfCombat or 1
     end
+    -- ★ HOVER WITHOUT THE SPLIT: there is no in-combat value to borrow, so a hovered
+    -- frame shows at full. Same scope rule as above; the global value holds in
+    -- combat too, so so does the lift (alpha only, legal in combat).
+    if db.frameFadeHoverUsesCombat then
+        local hovered = (db.frameFadeHoverScope == "FRAME")
+            and (frame and frame.dfIsHovered)
+            or (db.frameFadeHoverScope ~= "FRAME" and AnyFrameHovered())
+        if hovered then return 1 end
+    end
     return db.frameFadeAlpha or 1
 end
 
@@ -207,36 +216,43 @@ local function SweepFrameFade()
 end
 
 -- Hover edge for the "Show In-Combat Fade When Hovering" option. Cheap gate first --
--- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the split
--- and the hover option are both on and the player is out of combat (in combat the
--- frame already shows the in-combat value). Called AFTER the hook has written
+-- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the hover
+-- option is on (with the split on, also only out of combat: in combat the frame
+-- already shows the in-combat value). Called AFTER the hook has written
 -- frame.dfIsHovered, so the flag is the truth here.
 -- Scope "ALL": track the hovered frame globally and sweep every frame on the
 -- none->some edge immediately; the some->none edge is settled one frame later, so
 -- crossing straight from one frame onto its neighbour (leave + enter in the same
 -- frame) costs one sweep and never flashes -- the deferred leave finds a new
 -- hovered frame and does nothing.
+-- ★ WITHOUT THE SPLIT the hover option lifts to full (GetFrameBaseAlpha), and the
+-- global value holds in combat too, so the combat skip only applies with the split
+-- on -- there, in combat, the frame already shows the in-combat value.
 local function SweepIfNothingHovered()
     if DF._frameFadeHoveredFrame == nil and not UnitAffectingCombat("player") then
         SweepFrameFade()
     end
 end
+local function SweepIfNothingHoveredAnyTime()
+    if DF._frameFadeHoveredFrame == nil then SweepFrameFade() end
+end
 function DF:RefreshFrameFadeForHover(frame)
     if not (frame and frame.dfIsDandersFrame) then return end
     local db = DF:GetFrameDB(frame)
-    if not (db and db.frameFadeSplitCombat and db.frameFadeHoverUsesCombat) then return end
+    if not (db and db.frameFadeHoverUsesCombat and db.frameFadeEnabled ~= false) then return end
+    local skipInCombat = db.frameFadeSplitCombat
     if db.frameFadeHoverScope == "FRAME" then
-        if UnitAffectingCombat("player") then return end
+        if skipInCombat and UnitAffectingCombat("player") then return end
         RefreshFrameFadeOn(frame)
         return
     end
     if frame.dfIsHovered then
         local wasNone = DF._frameFadeHoveredFrame == nil
         DF._frameFadeHoveredFrame = frame
-        if wasNone and not UnitAffectingCombat("player") then SweepFrameFade() end
+        if wasNone and not (skipInCombat and UnitAffectingCombat("player")) then SweepFrameFade() end
     elseif DF._frameFadeHoveredFrame == frame then
         DF._frameFadeHoveredFrame = nil
-        C_Timer.After(0, SweepIfNothingHovered)
+        C_Timer.After(0, skipInCombat and SweepIfNothingHovered or SweepIfNothingHoveredAnyTime)
     end
 end
 

@@ -242,3 +242,39 @@ do
 end
 
 for k, v in pairs(HELD) do _G[k] = v end
+
+-- ============================================================
+-- 5. HOVER REVEAL WITHOUT THE COMBAT SPLIT
+-- ============================================================
+print("-- Hover: with the split off, a hovered frame shows at full")
+do
+    local d = db({ frameFadeAlpha = 0, frameFadeHoverUsesCombat = true, frameFadeHoverScope = "FRAME" })
+    eq(DF:GetFrameBaseAlpha(d, { dfIsHovered = true }), 1, "scope FRAME: the hovered frame lifts to full")
+    eq(DF:GetFrameBaseAlpha(d, { dfIsHovered = false }), 0, "...the others keep the global value")
+    S.combat = true
+    eq(DF:GetFrameBaseAlpha(d, { dfIsHovered = true }), 1, "...in combat too (the global value holds in combat)")
+    S.combat = false
+    local all = db({ frameFadeAlpha = 0.2, frameFadeHoverUsesCombat = true, frameFadeHoverScope = "ALL" })
+    DF._frameFadeHoveredFrame = { dfIsHovered = true }
+    eq(DF:GetFrameBaseAlpha(all, {}), 1, "scope ALL: every frame lifts while one is hovered")
+    DF._frameFadeHoveredFrame = nil
+    eq(DF:GetFrameBaseAlpha(all, {}), 0.2, "...and drops back when none is")
+    eq(DF:GetFrameBaseAlpha(db({ frameFadeAlpha = 0.2 }), { dfIsHovered = true }), 0.2,
+       "hover option off: no lift")
+    eq(DF:GetFrameBaseAlpha(db({ frameFadeSplitCombat = true, frameFadeAlphaOutOfCombat = 0, frameFadeAlphaInCombat = 0.7,
+                                 frameFadeHoverUsesCombat = true, frameFadeHoverScope = "FRAME" }), { dfIsHovered = true }), 0.7,
+       "split on: still the in-combat value (unchanged)")
+end
+
+print("-- Hover: the edge handler and the settings no longer require the split")
+do
+    local fn = SRC:match("function DF:RefreshFrameFadeForHover%(frame%)\n(.-)\nend\n") or ""
+    check(fn:find("db.frameFadeHoverUsesCombat", 1, true) and not fn:find("db.frameFadeSplitCombat and db.frameFadeHoverUsesCombat", 1, true),
+          "the hover edge is gated on the hover option alone")
+    check(fn:find("skipInCombat and UnitAffectingCombat", 1, true) ~= nil,
+          "...and skips combat only when the split is on")
+    local page = options_file_source("GUI/Pages/Options.lua")
+    check(page:find("ffHover.disableOn", 1, true) == nil, "the hover checkbox no longer greys without the split")
+    check(page:find("ffHoverScope.disableOn = function(d) return not d.frameFadeHoverUsesCombat end", 1, true) ~= nil,
+          "the scope dropdown greys only with the hover option off")
+end
