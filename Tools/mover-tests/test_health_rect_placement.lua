@@ -177,6 +177,33 @@ do
     eq(healer.healthBar.points.BOTTOMRIGHT.y, 5, "Fill Direction back to vertical: below is across, shrinks")
     flushTimers()
 
+    -- ★ A cut strip never moves the rect, so the seen rect must still follow every sync
+    -- (the dispel wash keys its layout cache on it).
+    currentDB.healthOrientation = "HORIZONTAL"
+    DF:SyncHealthBarRect(healer, currentDB)
+    flushTimers()
+    eq(healer.dfHealthVisB, 5, "cut strip: the seen rect starts at the strip")
+    local clearsCut = healer.healthBar.clears
+    currentDB.resourceBarStripY = 3                -- slider drag: LayoutResourceBar -> sync only
+    DF:SyncHealthBarRect(healer, currentDB)
+    eq(healer.healthBar.clears, clearsCut, "cut strip, strip pushed in: the rect does not move")
+    eq(healer.dfHealthVisB, 7, "...but the seen rect follows the strip")
+    currentDB.resourceBarHeight = 6
+    DF:SyncHealthBarRect(healer, currentDB)
+    eq(healer.dfHealthVisB, 9, "cut strip, thicker strip: the seen rect follows")
+    decide(healer, false)                          -- role / solo flip, UpdatePower
+    eq(healer.healthBar.clears, clearsCut, "cut strip, no longer wanted: the rect still does not move")
+    eq(healer.dfHealthVisB, 0, "...but the seen rect gives the strip's side back")
+    decide(healer, true)
+    eq(healer.dfHealthVisB, 9, "wanted again: the seen rect takes the side again")
+    currentDB.resourceBarPlacement = "OVER"
+    DF:SyncHealthBarRect(healer, currentDB)
+    eq(healer.dfHealthVisB, 0, "Placement back to On Top: the seen rect is whole")
+    currentDB.resourceBarPlacement, currentDB.resourceBarStripY, currentDB.resourceBarHeight = "BOTTOM", 1, 4
+    currentDB.healthOrientation = "VERTICAL"
+    DF:SyncHealthBarRect(healer, currentDB)
+    flushTimers()
+
     -- Unit frames: the same rect, per frame.
     local sa = Frame("sa", currentDB, { dfStandalone = true, unit = "player" })
     DF:AnchorHealthBarsToPadding(sa, currentDB)

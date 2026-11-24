@@ -275,6 +275,11 @@ function DF:SyncHealthBarRect(frame, db)
     if not db then return end
     -- A cut strip leaves the rect where it is, so the cut is synced before the early out.
     if DF.SyncResourceBarHole then DF:SyncResourceBarHole(frame, db) end
+    -- ☠ THE SEEN RECT TOO, before the early out. A cut strip never moves the rect, so a
+    -- strip slider drag or a "wanted" flip would return below with the seen rect stale,
+    -- and the dispel wash (which keys its layout cache on it) would keep the old shape.
+    frame.dfHealthVisL, frame.dfHealthVisR, frame.dfHealthVisT, frame.dfHealthVisB =
+        DF:GetHealthVisibleInsets(frame, db)
     local l, r, t, b = DF:GetHealthBarInsets(frame, db)
     if l == frame.dfHealthRectL and r == frame.dfHealthRectR
         and t == frame.dfHealthRectT and b == frame.dfHealthRectB then
