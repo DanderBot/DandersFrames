@@ -8,7 +8,7 @@
 - (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
 - (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
 - (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
-- (Settings) Added tooltips to the raid layout, sorting, pinned frames and aura bar settings, like Sort Order, duration bar Color Mode and Border Animation.
+- (Settings) Added tooltips to the raid layout, sorting, pinned frames, aura bar and targeted spells settings, like Sort Order, duration bar Color Mode, Border Animation and Show Untargeted Casts.
 
 ### Bug Fixes
 
