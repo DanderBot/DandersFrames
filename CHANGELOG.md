@@ -4,7 +4,7 @@
 
 ### New Features
 
-- (Unit Frames) WoW Forever: the pet frame shows your hunter pet's happiness face. Hover it to see damage, loyalty, diet, training points and experience. Find it on the pet's **Unit Icons** page.
+- (Unit Frames, Pet Frames) WoW Forever: the pet frame shows your hunter pet's happiness face, on the unit frames pet frame and on your own pet's party/raid pet frame. Hover it to see damage, loyalty, diet, training points and experience. Find it on the pet's **Unit Icons** page and on **Display > Pet Frames**.
 
 ### Improvements
 

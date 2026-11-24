@@ -1001,6 +1001,9 @@ function DF:ApplyPetFrameStyle(frame)
         local healthColor = db.petHealthTextColor or {r = 1, g = 1, b = 1}
         frame.healthText:SetTextColor(healthColor.r, healthColor.g, healthColor.b)
     end
+
+    -- WoW Forever: your hunter pet's happiness face (Features/PetHappiness.lua).
+    if DF.IS_FOREVER and DF.PetHappiness then DF.PetHappiness:UpdateGroupFrame(frame) end
 end
 
 -- `testName` is the only preview fork and it is pure DATA: the name a fabricated pet
@@ -1060,6 +1063,8 @@ function DF:UpdatePetFrame(frame)
         DF:UpdatePetFrameTestMode(frame)
         DF:SetPetFrameVisible(frame, true)
         DF:UpdatePetAuras(frame)
+        -- WoW Forever: the happiness face's sample on the player's slot.
+        if DF.IS_FOREVER and DF.PetHappiness then DF.PetHappiness:UpdateGroupFrame(frame) end
         return
     end
 
@@ -1076,6 +1081,9 @@ function DF:UpdatePetFrame(frame)
         DF:UpdatePetPower(frame)
         DF:SetPetFrameVisible(frame, true)
         DF:UpdatePetAuras(frame)
+        -- WoW Forever: the happiness face. ApplyPetFrameStyle stops in combat, and
+        -- the face is not protected, so it is painted here too.
+        if DF.IS_FOREVER and DF.PetHappiness then DF.PetHappiness:UpdateGroupFrame(frame) end
     else
         DF:SetPetFrameVisible(frame, false)
     end

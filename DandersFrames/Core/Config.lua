@@ -2427,6 +2427,14 @@ DF.PartyDefaults = {
     petHealthTextColor = {r = 1, g = 1, b = 1},
     petHealthX = -2,
     petHealthY = 0,
+    -- WoW Forever only: your hunter pet's happiness face on the group pet frame
+    -- (Features/PetHappiness.lua, GROUP PET FRAMES), outside its right edge.
+    petHappinessIconAnchor = "OUTSIDE_RIGHT",
+    petHappinessIconEnabled = true,
+    petHappinessIconSize = 14,
+    petHappinessIconTooltip = true,
+    petHappinessIconX = 2,
+    petHappinessIconY = 0,
     petMatchOwnerHeight = false,
     petMatchOwnerWidth = true,
     petNameAnchor = "CENTER",
