@@ -3059,6 +3059,18 @@ L["Static uses your Texture and Bar Color. The other modes replace those and col
 L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: targeted spells (Targeted List and Personal Targeted
+-- Spells). Alphabetical within the block.
+-- ============================================================
+L["Also lists casts with no target, such as ground effects and area spells. With this off, only casts aimed at someone in your group appear."] = true
+L["Applies a ready-made look in one go, setting bar size, spacing, icon, which text shows, border, background opacity and font size. You can still change any of them afterwards."] = true
+L["Only shows casts the game itself marks as important, usually ones worth interrupting or avoiding, and hides the rest."] = true
+L["Puts a < after the target's name, like an arrow pointing back at them."] = true
+L["Puts a > before the target's name, like an arrow pointing at them."] = true
+L["The order the bars appear in. Newest First puts the latest cast first, Oldest First keeps the earliest first, and Static gives each cast a fixed spot so bars never move, which can leave gaps as casts end."] = true
+L["The widest this text can be before it is cut short. 0 uses the full width of the bar."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,

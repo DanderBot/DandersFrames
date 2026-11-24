@@ -4231,10 +4231,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     end), 30)
                 end
                 local tlImportantOnly = group:AddWidget(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "targetedListImportantOnly", TargetedListUpdate), 30)
+                tlImportantOnly.tooltip = L["Only shows casts the game itself marks as important, usually ones worth interrupting or avoiding, and hides the rest."]
                 tlImportantOnly.disableOn = HideTLOptions
                 local tlHideOwn = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Casts Targeting You"], db, "targetedListHideOwnCasts", TargetedListUpdate), 30)
                 tlHideOwn.disableOn = HideTLOptions
                 local tlShowUntargeted = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Untargeted Casts"], db, "targetedListShowUntargeted", TargetedListUpdate), 30)
+                tlShowUntargeted.tooltip = L["Also lists casts with no target, such as ground effects and area spells. With this off, only casts aimed at someone in your group appear."]
                 tlShowUntargeted.disableOn = HideTLOptions
                 local tlHideOOC = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Out-of-Combat Casts"], db, "targetedListHideOutOfCombat", TargetedListUpdate), 30)
                 tlHideOOC.disableOn = HideTLOptions
@@ -4302,6 +4304,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlGrowth = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growthOptions, db, "targetedListGrowth", TargetedListUpdate), 55)
                 tlGrowth.disableOn = HideTLOptions
                 local tlSort = group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], sortOptions, db, "targetedListSortOrder", TargetedListUpdate), 55)
+                tlSort.tooltip = L["The order the bars appear in. Newest First puts the latest cast first, Oldest First keeps the earliest first, and Static gives each cast a fixed spot so bars never move, which can leave gaps as casts end."]
                 tlSort.disableOn = HideTLOptions
             end
 
@@ -4375,6 +4378,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlPreset = group:AddWidget(GUI:CreateDropdown(parent, L["Bar Style"], stylePresetOptions, db, "targetedListStylePreset", function()
                     TargetedListPresetChanged(tools2)
                 end), 55)
+                tlPreset.tooltip = L["Applies a ready-made look in one go, setting bar size, spacing, icon, which text shows, border, background opacity and font size. You can still change any of them afterwards."]
                 tlPreset.disableOn = HideTLOptions
                 local tlTexture = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "targetedListTexture", TargetedListUpdate), 55)
                 tlTexture.disableOn = HideTLOptions
@@ -4650,8 +4654,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlClassColor = group:AddWidget(GUI:CreateCheckbox(parent, L["Target Name Class Color"], db, "targetedListTargetNameClassColor", TargetedListUpdate), 30)
                 tlClassColor.disableOn = HideTargetNameOptions
                 local tlArrow = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Arrow Prefix"], db, "targetedListShowArrowPrefix", TargetedListUpdate), 30)
+                tlArrow.tooltip = L["Puts a > before the target's name, like an arrow pointing at them."]
                 tlArrow.disableOn = HideTargetNameOptions
                 local tlArrowSuffix = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Arrow Suffix"], db, "targetedListShowArrowSuffix", TargetedListUpdate), 30)
+                tlArrowSuffix.tooltip = L["Puts a < after the target's name, like an arrow pointing back at them."]
                 tlArrowSuffix.disableOn = HideTargetNameOptions
             end
 
@@ -4744,6 +4750,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlSNFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListSpellNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
                 tlSNFontSize.disableOn = HideTLOptions
                 local tlSNWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListSpellNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSNWidth.tooltip = L["The widest this text can be before it is cut short. 0 uses the full width of the bar."]
                 tlSNWidth.disableOn = HideTLOptions
                 local tlSNAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListSpellNameAnchor", TargetedListUpdate), 55)
                 tlSNAnchor.disableOn = HideTLOptions
@@ -4769,6 +4776,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlTNFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListTargetNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
                 tlTNFontSize.disableOn = HideTargetNameOptions
                 local tlTNWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListTargetNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlTNWidth.tooltip = L["The widest this text can be before it is cut short. 0 uses the full width of the bar."]
                 tlTNWidth.disableOn = HideTargetNameOptions
                 local tlTNAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListTargetNameAnchor", TargetedListUpdate), 55)
                 tlTNAnchor.disableOn = HideTargetNameOptions
@@ -4820,6 +4828,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlIntFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListInterruptTextFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
                 tlIntFontSize.disableOn = HideTLOptions
                 local tlIntWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListInterruptTextWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlIntWidth.tooltip = L["The widest this text can be before it is cut short. 0 uses the full width of the bar."]
                 tlIntWidth.disableOn = HideTLOptions
                 local tlIntAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListInterruptTextAnchor", TargetedListUpdate), 55)
                 tlIntAnchor.disableOn = HideTLOptions
@@ -4968,7 +4977,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             -- ⚠ NO disableOn HERE: the card's gate greys it with the rest -- the
             -- kit's own syncGate, the same one the Dispel Overlay page accepted.
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), L["Only shows casts the game itself marks as important, usually ones worth interrupting or avoiding, and hides the rest."]), 30)
             -- Same game CVar as the Targeted List page — Personal detects casts through
             -- nameplate tokens too (IsValidCasterUnit), so it has the identical
             -- offscreen blind spot. Both checkboxes drive the one CVar.
