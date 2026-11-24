@@ -3390,7 +3390,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateSlider(parent, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true),
+                L["Space between the edge of the frame and its health bar on every side, so the frame background shows as a margin around the bar."]), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Scale"], 0.5, 2.0, 0.05, db, "frameScale", function() DF:UpdateContainerPosition() DF:UpdateRaidContainerPosition() UpdateFrames() end, function() DF:LightweightUpdateFrameScale() end, true), 55)
             local frameSpacingSlider = group:AddWidget(GUI:CreateSlider(parent, L["Frame Spacing"], -5, 50, 1, db, "frameSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSpacing() end, true), 55)
             frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
@@ -3701,10 +3702,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
             ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
             ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
                 tools2.refreshStates()
                 RefreshFrameFade()
-            end), 30)
+            end), L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."]), 30)
             local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
             ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
             ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
@@ -4012,10 +4013,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function BuildRaidModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Use Group-Based Layout"], db, "raidUseGroups", function()
                     ApplyRaidUseGroups()
                     if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end), 30)
+                end), L["Lays the raid out as separate groups 1 to 8. Turn it off to put everyone in one grid that wraps after a set number of players and sorts the whole raid together."]), 30)
             end
             group:AddWidget(GUI:CreateLabel(parent, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
         end
@@ -4371,13 +4372,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- this one ALIGNS the block in the reserved space, that one picks which end rows
             -- stack FROM.
             local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= CROSS_START, CENTER= L["Center"], END= CROSS_END }
-            group:AddWidget(GUI:CreateDropdown(parent, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames),
+                L["Where the grid sits inside the space kept for a full 40-player raid when fewer players are shown. Center keeps it in the middle, and the other options push it to that edge."]), 55)
 
             -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).
             -- VERTICAL (Columns) wraps left/right; HORIZONTAL (Rows) wraps top/bottom.
             local flatColumnLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
+            local flatColumnTip = db.growDirection == "VERTICAL"
+                and L["Which side the first column starts at. New columns are added towards the other side as the raid fills."]
+                or L["Which edge the first row starts at. New rows are added towards the other edge as the raid fills."]
             local flatColumnOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
-            group:AddWidget(GUI:CreateDropdown(parent, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), flatColumnTip), 55)
 
             -- Players Grow From = the direction players fill the grid's main axis.
             -- HORIZONTAL (Rows) fills Left/Right; VERTICAL (Columns) fills Top/Bottom.
@@ -4457,9 +4462,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local group, parent = tools2.group, tools2.parent
 
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
                     DF:UpdatePermanentMoverVisibility()
-                end), 30)
+                end), L["Adds a handle beside your frames that stays on screen while they are locked. Drag it to move the frames, or click it to run the actions set below."]), 30)
             end
 
             local permMoverAnchor = group:AddWidget(
@@ -4517,18 +4522,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             for id, data in pairs(DF.PERM_MOVER_ACTIONS) do
                 actionValues[id] = data.label
             end
+            -- One tooltip for all four click dropdowns.
+            local actionTip = L["What clicking the handle this way does: Quick Switch opens a list of profiles to pick from, and Cycle Next moves straight to the next one. In combat only Open Settings, Reload UI, Ready Check and Pull Timer work."]
 
             local permActionLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Left Click"], actionValues, db, "permanentMoverActionLeft"), 55)
             permActionLeft.disableOn = function(d) return not d.permanentMover end
+            permActionLeft.tooltip = actionTip
 
             local permActionRight = group:AddWidget(GUI:CreateDropdown(parent, L["Right Click"], actionValues, db, "permanentMoverActionRight"), 55)
             permActionRight.disableOn = function(d) return not d.permanentMover end
+            permActionRight.tooltip = actionTip
 
             local permActionShiftLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Left Click"], actionValues, db, "permanentMoverActionShiftLeft"), 55)
             permActionShiftLeft.disableOn = function(d) return not d.permanentMover end
+            permActionShiftLeft.tooltip = actionTip
 
             local permActionShiftRight = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Right Click"], actionValues, db, "permanentMoverActionShiftRight"), 55)
             permActionShiftRight.disableOn = function(d) return not d.permanentMover end
+            permActionShiftRight.tooltip = actionTip
 
             local permPullTimer = group:AddWidget(GUI:CreateSlider(parent, L["Pull Timer Duration"], 3, 30, 1, db, "permanentMoverPullTimerDuration"), 55)
             permPullTimer.disableOn = function(d) return not d.permanentMover end
@@ -4565,6 +4576,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- A drag handle and its click actions are behaviour, so no pin.
         local band = OpenSection(L["Permanent Mover"], "frame_permanentmover", 1, PermMoverSummary, nil, nil, nil, {
             db = db, key = "permanentMover", label = L["Enable Permanent Mover"],
+            tooltip = L["Adds a handle beside your frames that stays on screen while they are locked. Drag it to move the frames, or click it to run the actions set below."],
             onChanged = function()
                 DF:UpdatePermanentMoverVisibility()
                 self:RefreshStates()

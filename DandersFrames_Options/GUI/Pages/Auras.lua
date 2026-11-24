@@ -216,6 +216,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 if tools2.refreshStates then tools2.refreshStates() end
             end), 30)
             sortMeleeRanged.hideOn = HideSortOptions
+            sortMeleeRanged.tooltip = L["Splits damage dealers into melee and ranged, so each gets its own place in Role Priority. Your own spec is read directly, but other players are judged by class, so melee specs of hybrid classes such as Feral or Enhancement count as ranged."]
 
             local sortByClass = group:AddWidget(GUI:CreateCheckbox(parent, L["Sort by Class (within role)"], db, "sortByClass", function()
                 TriggerSortForCurrentMode()
@@ -282,6 +283,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- builder's group gate while custom sorting is off.
         local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
         selfPos.hideOn = HideSortOptions
+        selfPos.tooltip = L["Where your own frame goes. Always First or Always Last keeps you at that end, and Sorted with Group places you by the same rules as everyone else."]
         CloseSection(band)
 
         -- ===== FRAMESORT INTEGRATION GROUP (a card in column 1) =====
@@ -310,7 +312,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateLabel(parent, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
             -- Suppressed when the CARD's header carries this tick.
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged), 30)
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged), L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."]), 30)
             end
         end
 
@@ -324,6 +326,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- and off the corner already reads "Off".
             local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
                 db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
+                tooltip = L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."],
                 onChanged = UseFrameSortChanged,
             })
             BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })

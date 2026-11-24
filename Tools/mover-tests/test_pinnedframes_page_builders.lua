@@ -99,3 +99,28 @@ do
         check(PAGE:find(line, 1, true) ~= nil, "sets: `" .. line .. "` is still there")
     end
 end
+
+-- Tooltips (settings tooltip plan, batch 2): each wrapped widget carries its
+-- tooltip, and every string ships in enUS.
+print("-- Pinned Frames page: tooltips")
+do
+    local ENUS = df_file_source("Locales/enUS.lua")
+    for _, pair in ipairs({
+        { 'CreateRefreshableDropdown(self.child, L["Frame Type"]',            'Player Frames shows the group members you choose.' },
+        { 'CreateRefreshableDropdown(self.child, L["Size & Spacing From"]',   'Which of your frame setups, party or raid,' },
+        { 'CreatePinnedPresetDropdown(self.child, L["Aura Designer Template"]', 'Which Aura Designer template sets the auras' },
+        { 'CreatePinnedPresetDropdown(self.child, L["Text Designer Template"]', 'Which Text Designer template sets the text' },
+    }) do
+        local at = PAGE:find("GUI:WithTooltip(" .. pair[1], 1, true)
+        local tip = at and PAGE:find('L["' .. pair[2], at, true)
+        check(at ~= nil and tip ~= nil and tip - at < 400, "tooltips: " .. pair[1]:match('L%["([^"]+)"%]') .. " is wrapped with its tooltip")
+    end
+    local missing = 0
+    for key in PAGE:gmatch('L%["([^"]+)"%]') do
+        if not ENUS:find('L["' .. key .. '"] = true', 1, true) then
+            missing = missing + 1
+            check(false, "locale: enUS ships L[\"" .. key .. "\"]")
+        end
+    end
+    eq(missing, 0, "locale: every string the page asks for ships in enUS")
+end
