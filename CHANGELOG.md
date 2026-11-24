@@ -21,6 +21,7 @@
 - (Fading) **Frame Fade** has moved from the **Frame** page to the **Fading** page, for party, raid and every unit frame. Your settings are unchanged. Linked unit frames now share Frame Fade through the **Fading** link instead of **Frame**.
 - (Fading) **Frame Fade** and Health Threshold Fading's above-threshold opacity can now go down to 0% to hide a frame completely. A hidden frame can still be clicked and click-cast.
 - (Fading) Status icons (summon, AFK, phased, raid role, ping and the rest) now fade along with **Frame Fade** instead of staying bright on a faded frame.
+- (Unit Frames) The **Visibility** page can now show a frame only in a **Party** or only in a **Raid**, and show or hide it while **Resting** in an inn or city.
 - (Fading) **Show In-Combat Fade When Hovering** now works without **Separate Combat Fade**: hovering a faded frame shows it at full opacity.
 
 ### Bug Fixes

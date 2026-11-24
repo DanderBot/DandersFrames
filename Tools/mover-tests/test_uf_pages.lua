@@ -642,8 +642,8 @@ do
         eq(table.concat(cardKeys, ","), "uf_vis_show,uf_vis_hide", unit .. " Visibility: Show When, Hide When")
         check(added[2].w.dfUnitRow ~= nil and added[1].w.dfLinkBanner, unit .. " Visibility: the link banner, then the unit row (Reset / Copy)")
         local want = (unit == "player")
-            and "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHasTarget,visHasEnemyTarget,visHidePetBattle,visHideVehicle,visHideMounted,visHideSkyriding"
-            or "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHidePetBattle,visHideMounted,visHideSkyriding"
+            and "visAlways,visCombat,visNoCombat,visGroup,visParty,visRaid,visSolo,visInstance,visResting,visHasTarget,visHasEnemyTarget,visHidePetBattle,visHideVehicle,visHideMounted,visHideSkyriding,visHideResting"
+            or "visAlways,visCombat,visNoCombat,visGroup,visParty,visRaid,visSolo,visInstance,visResting,visHidePetBattle,visHideMounted,visHideSkyriding,visHideResting"
         eq(table.concat(keys, ","), want, unit .. " Visibility: its controls")
         local combat = checks[2]
         check(combat and combat.disableOn, unit .. ": conditions grey while Always is on")

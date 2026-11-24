@@ -117,6 +117,27 @@ stored("player").visHideVehicle = true
 eq(Units:VisibilityMacro("player"), "[petbattle] hide; [vehicleui] hide; show", "player: In a Vehicle")
 reset("pet"); reset("player")
 
+print("-- The macro: Party / Raid split of In a Group, and Resting")
+stored("target").visAlways = false
+stored("target").visParty = true
+eq(Units:VisibilityMacro("target"), "[petbattle] hide; [group:party,nogroup:raid] show; hide",
+   "Party: a party but not a raid ([group:party] is also true in a raid)")
+stored("target").visParty, stored("target").visRaid = nil, true
+eq(Units:VisibilityMacro("target"), "[petbattle] hide; [group:raid] show; hide", "Raid")
+stored("target").visRaid, stored("target").visResting = nil, true
+eq(Units:VisibilityMacro("target"), "[petbattle] hide; [resting] show; hide",
+   "Resting (show): the driver answers it, no rebuild")
+reset("target")
+stored("pet").visHideResting = true
+eq(Units:VisibilityMacro("pet"), "[petbattle] hide; [resting] hide; show", "Resting (hide): a Hide When rule")
+stored("pet").visHideMounted = true
+eq(Units:VisibilityMacro("pet"), "[petbattle] hide; [mounted] hide; [resting] hide; show",
+   "...after the other hide rules, before Always")
+reset("pet")
+stored("target").visGroup = true
+eq(Units:VisibilityMacro("target"), "[petbattle] hide; show", "Always on: the new conditions change nothing")
+reset("target")
+
 print("-- ApplyVisibility: registered on the unit's holder, once per change")
 drivers = {}
 Units:Spawn("focus")
@@ -168,7 +189,8 @@ print("-- Defaults: every key the page draws has one")
 local UD = UF.UnitDefaults.player
 for _, key in ipairs({ "visAlways", "visCombat", "visNoCombat", "visGroup", "visSolo", "visInstance",
                        "visHasTarget", "visHasEnemyTarget", "visHidePetBattle", "visHideVehicle",
-                       "visHideMounted", "visHideSkyriding" }) do
+                       "visHideMounted", "visHideSkyriding", "visParty", "visRaid", "visResting",
+                       "visHideResting" }) do
     check(UD[key] ~= nil, "default for " .. key)
 end
 eq(UD.visAlways, true, "Always on by default")
