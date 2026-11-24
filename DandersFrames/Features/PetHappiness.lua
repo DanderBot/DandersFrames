@@ -252,7 +252,9 @@ function PH:TooltipLines(mock)
         add(Fmt(G("TRAINING_POINTS", "Training Points: %d"), d.trainingPoints))
     end
     if d.xp then
-        add(Fmt(G("XP_STATUS_BAR_TEXT", "XP: %s / %s"), PH.Number(d.xp), PH.Number(d.nextXP)))
+        -- Our own string, not Blizzard's XP_STATUS_BAR_TEXT: on WoW Forever that
+        -- template does not take (current, max) and printed "20/0" for 20 / 3225.
+        add(format(DF.L["XP: %s / %s"], PH.Number(d.xp), PH.Number(d.nextXP)))
     end
     return lines
 end

@@ -170,7 +170,7 @@ eq(texts[3], "Gaining loyalty", "loyalty trend")
 eq(texts[4], "Loyalty Level 6 (Best Friend)", "loyalty level, as the API words it")
 eq(texts[5], "Diet: Meat, Fish", "diet")
 eq(texts[6], "Training Points: 120", "training points available (total - used)")
-eq(texts[7], "XP: 1200/4800", "experience")
+eq(texts[7], "XP: 1200 / 4800", "experience: our own string, not XP_STATUS_BAR_TEXT (Forever printed 20/0)")
 eq(#texts, 7, "seven lines")
 eq(lines[1].r, PH.TITLE_COLORS[3][1], "title coloured by mood")
 rate = -1
