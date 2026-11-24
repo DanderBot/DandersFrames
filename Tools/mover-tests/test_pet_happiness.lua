@@ -936,7 +936,9 @@ check(colorsSrc:find('elseif mode == "CLASS" or mode == "HAPPINESS" then', 1, tr
 local create = df_file_source("Frames/Create.lua")
 check(create:find("if frame.dfHappinessBorder and DF.PetHappiness then", 1, true), "ApplyFrameBorder: a standing tint is laid back")
 local render = df_file_source("TextDesigner/Render.lua")
-check(render:find('elseif cat == "name" and frame.dfHappinessName then', 1, true), "Text Designer: the name tint, under an AD override")
+check(render:find('elseif elem.contentType == "name" and frame.dfHappinessName then', 1, true), "Text Designer: the name tint, under an AD override")
+check(not render:find('elseif cat == "name" and frame.dfHappinessName then', 1, true),
+    "Text Designer: the name tint is the name element only, never level / class / race (same hint category)")
 local pets4 = df_file_source("Frames/Pets.lua")
 check(pets4:find("frame.dfHappinessName or db.petNameColor", 1, true), "Pets.lua: the styled name keeps a standing tint")
 check(pets4:find("DF.PetHappiness.PaintBorder(frame.border, frame.dfHappinessBorder, db.petBorderColor)", 1, true),

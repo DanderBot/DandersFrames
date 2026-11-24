@@ -857,10 +857,11 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
     local ov = cat and frame._tdAuraColor and frame._tdAuraColor[cat]
     if ov then
         fs:SetTextColor(ov.r, ov.g, ov.b, ov.a or 1)
-    elseif cat == "name" and frame.dfHappinessName then
+    elseif elem.contentType == "name" and frame.dfHappinessName then
         -- WoW Forever, the unit frames pet: the Pet Happiness name tint
         -- (DandersFrames_UnitFrames/Indicators.lua), under an Aura Designer
-        -- override. nil on every other frame.
+        -- override. nil on every other frame. The name element only: the
+        -- "name" hint category also holds level, class, race and the rest.
         local hn = frame.dfHappinessName
         fs:SetTextColor(hn.r, hn.g, hn.b, (app.color and app.color.a) or 1)
     end
