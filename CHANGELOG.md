@@ -12,7 +12,7 @@
 - (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
 - (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
 - (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
-- (Settings) Added tooltips to many settings that weren't clear from their name alone, across raid layout, sorting, pinned frames, aura bars, targeted spells, fading, tooltips, highlights and icons.
+- (Settings) Added tooltips to many settings that weren't clear from their name alone, across raid layout, sorting, pinned frames, aura bars, targeted spells, fading, tooltips, highlights, icons, absorbs, heal prediction and health bars.
 - (Resource Bar) With **Placement** Below or Above a horizontal health bar (or Left of / Right of a vertical one), the health bar keeps its full size and the resource bar is cut out of it, so a see-through frame border tints the health bar the same on every side. A bar at the end the health bar fills from or towards still shrinks the health bar, so the whole health range stays readable. (by Krathe)
 
 ### Bug Fixes

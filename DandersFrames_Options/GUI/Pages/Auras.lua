@@ -2077,12 +2077,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end
 
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), L["Shortens the health bar so it stops where the reduced section begins, instead of drawing the reduced section over the end of it."]), 30)
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
             GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
                 { baseSize = true, refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), L["How the reduced section's colour mixes with what is under it. Blend draws the colour as picked, Add brightens it into a glow, and Modulate darkens what is underneath."]), 55)
 
             GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
                 { baseSize = true, refreshStates = tools2.refreshStates })
@@ -2985,7 +2985,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "absorbBarColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 1)
 
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-            add(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "absorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
+            add(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "absorbBarBlendMode", function() DF:UpdateAllFrames() end), L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."]), 55, 1)
 
             local overlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "absorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
             overlayRev.hideOn = function(d) return d.absorbBarMode ~= "OVERLAY" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
@@ -3119,7 +3119,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "healAbsorbBarColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 1)
 
             local healBlendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-            add(GUI:CreateDropdown(parent, L["Blend Mode"], healBlendOptions, db, "healAbsorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
+            add(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Blend Mode"], healBlendOptions, db, "healAbsorbBarBlendMode", function() DF:UpdateAllFrames() end), L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."]), 55, 1)
 
             local healOverlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "healAbsorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
             healOverlayRev.hideOn = function(d) return d.healAbsorbBarMode ~= "OVERLAY" end
@@ -3323,6 +3323,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
             local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
+            blendDropdown.tooltip = L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."]
             blendDropdown.disableOn = function(d) return not d.healPredictionEnabled end
 
             GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",
