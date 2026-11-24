@@ -329,6 +329,7 @@ local DEAD_FADE = {
 local HEALTH_FADE = {
     { "checkbox", "Enable Health Threshold Fade",     "healthFadeEnabled",   30 },
     { "slider",   "Health Threshold (%)",             "healthFadeThreshold", 55 },
+    { "checkbox", "Show Below Threshold Through Frame Fade", "healthFadeRevealsFrame", 30 },
     { "checkbox", "Cancel Fade on Dispellable Debuff","hfCancelOnDispel",    30 },
     { "slider",   "Frame Alpha (Above Threshold)",    "healthFadeAlpha",     55 },
 }

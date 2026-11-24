@@ -4,6 +4,8 @@
 
 ### New Features
 
+- (Fading) New **Show Below Threshold Through Frame Fade** option in **Health Threshold Fading**. Below the threshold a frame ignores Frame Fade, so you can hide healthy frames out of combat and still see anyone who is hurt. Try Frame Fade at 0% out of combat and 100% in combat with this on.
+
 - (Pet Frames) WoW Forever: your hunter pet's happiness now shows as a face beside the unit frames pet frame and your own party/raid pet frame. Hover it for damage, loyalty, diet, training points and experience; a small arrow warns when loyalty is dropping. The pet frame's border, name and health bar can also be colored by happiness (colors under **Display > Colors**), and the pet's **Text Designer** has a **Pet Happiness** category. Settings are on the pet's **Unit Icons** page and **Display > Pet Frames**.
 
 - (Click-Casting) Choose exactly which frames each binding works on: party and raid separately, each unit frame (player, target, target of target, focus, focus target, pet, boss) on its own, and Other Frames. One button can now do different things on different frames, like targeting on the target frame and healing on your party. Set it under **Apply to Frames** when you edit a binding; your existing bindings keep working everywhere they did.

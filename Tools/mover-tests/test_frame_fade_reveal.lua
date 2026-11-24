@@ -132,3 +132,113 @@ do
     check(uf_file_source("Units.lua"):find("DF.RefreshFrameFadeOn(f)", 1, true) ~= nil,
           "the unit frames' own combat sweep uses it too")
 end
+
+-- ============================================================
+-- 4. HEALTH FADE: "SHOW BELOW THRESHOLD THROUGH FRAME FADE"
+-- HealthFade.lua loaded for real, on stubs of the engine curve, with the lifted
+-- resolvers above as its Frame Fade source.
+-- ============================================================
+local HELD = {}
+for _, k in ipairs({ "C_CurveUtil", "CreateColor", "UnitHealthPercent", "UnitExists", "issecretvalue", "Enum" }) do
+    HELD[k] = _G[k]
+end
+local enginePct = 1
+C_CurveUtil = { CreateColorCurve = function()
+    local c = { points = {} }
+    function c:SetType() end
+    function c:AddPoint(x, col) self.points[#self.points + 1] = { x, col } end
+    return c
+end }
+Enum = Enum or {}
+Enum.LuaCurveType = Enum.LuaCurveType or { Linear = 0 }
+CreateColor = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
+-- The engine answers the step the curve encodes: above at full health, below otherwise.
+UnitHealthPercent = function(_, _, curve)
+    local below, above = curve.points[1][2].a, curve.points[#curve.points][2].a
+    local a = (enginePct > 0.999) and above or below
+    return { GetRGBA = function() return 1, 1, 1, a end }
+end
+UnitExists = function() return true end
+issecretvalue = function() return false end
+
+function DF:GetFrameDB(f) return f.db end
+function DF:FrameInTestScope() return false end
+function DF:MemTestDisabled() return false end
+load_df_file_into("Features/HealthFade.lua", DF)
+check(type(DF.ApplyHealthFadeAlpha) == "function", "HealthFade.lua loaded")
+
+local function hfdb(extra)
+    local d = db({ healthFadeEnabled = true, healthFadeAlpha = 1, healthFadeThreshold = 100,
+                   frameFadeSplitCombat = true, frameFadeAlphaOutOfCombat = 0, frameFadeAlphaInCombat = 1 })
+    for k, v in pairs(extra or {}) do d[k] = v end
+    return d
+end
+local function liveFrame(d, extra)
+    local f = { db = d, unit = "party1" }
+    function f:SetAlpha(a) self.alpha = a end
+    for k, v in pairs(extra or {}) do f[k] = v end
+    return f
+end
+local function alphaAt(pct, d, extra)
+    enginePct = pct
+    local f = liveFrame(d, extra)
+    DF:InvalidateHealthFadeCurve()
+    local applied = DF:ApplyHealthFadeAlpha(f)
+    return f.alpha, applied
+end
+
+print("-- Health reveal off: today's maths (below = base, above = alpha x base)")
+eq(alphaAt(1, hfdb()), 0, "out of combat, full health: hidden (above x base 0)")
+eq(alphaAt(0.5, hfdb()), 0, "out of combat, hurt: STILL hidden -- the base 0 is multiplied in")
+
+print("-- Health reveal on: the recipe -- hidden when healthy out of combat, shown when hurt")
+local R = { healthFadeRevealsFrame = true }
+eq(alphaAt(1, hfdb(R)), 0, "out of combat, full health: hidden")
+eq(alphaAt(0.5, hfdb(R)), 1, "out of combat, hurt: shown at the in-combat value")
+S.combat = true
+eq(alphaAt(1, hfdb(R)), 1, "in combat, full health: shown")
+eq(alphaAt(0.5, hfdb(R)), 1, "in combat, hurt: shown")
+S.combat = false
+eq(alphaAt(0.5, hfdb({ healthFadeRevealsFrame = true, frameFadeAlphaInCombat = 0.8 })), 0.8,
+   "the reveal is the in-combat value, not always full")
+eq(alphaAt(0.5, hfdb({ healthFadeRevealsFrame = true, frameFadeSplitCombat = false, frameFadeAlpha = 0 })), 1,
+   "split off: revealed at full")
+eq(alphaAt(0.5, hfdb(R), { dfInRange = false }), 0.4, "out of range, hurt: the range fade still applies (0.4 x 1)")
+eq(alphaAt(0.5, hfdb({ healthFadeRevealsFrame = true, oorEnabled = true }), { dfInRange = false }), 1,
+   "element range mode: range left to the elements, frame revealed")
+
+print("-- Dispel cancel with the reveal on shows the frame instead of dropping to the base")
+local function overlay(shown) return { dfDispelOverlay = { IsShown = function() return shown end } } end
+local a, applied = alphaAt(1, hfdb({ healthFadeRevealsFrame = true, hfCancelOnDispel = true }), overlay(true))
+eq(a, 1, "dispellable debuff, full health, reveal on: shown")
+eq(applied, true, "...and the health fade stays the frame's alpha owner")
+local _, appliedOff = alphaAt(1, hfdb({ hfCancelOnDispel = true }), overlay(true))
+eq(appliedOff, false, "reveal off: the cancel still hands back to the plain appearance (unchanged)")
+
+print("-- Test frames: the stamped-health fork takes the same values")
+eq(alphaAt(1, hfdb(R), { dfIsTestFrame = true, dfHealthPct = 0.5 }), 1, "test frame, hurt: shown")
+eq(alphaAt(1, hfdb(R), { dfIsTestFrame = true, dfHealthPct = 1 }), 0, "test frame, full: hidden")
+
+print("-- Pet frames: the same reveal")
+do
+    local pet = liveFrame(hfdb(R))
+    enginePct = 0.5
+    DF:InvalidateHealthFadeCurve()
+    DF:UpdatePetHealthFade(pet)
+    eq(pet.alpha, 1, "hurt pet, reveal on: shown")
+    local pet2 = liveFrame(hfdb())
+    DF:InvalidateHealthFadeCurve()
+    DF:UpdatePetHealthFade(pet2)
+    eq(pet2.alpha, 0, "hurt pet, reveal off: the base (unchanged)")
+end
+
+print("-- Element range mode keeps an active health fade instead of pinning the base")
+do
+    local body = SRC:match("function DF:UpdateFrameAppearance%(frame%)\n(.-)\nend\n") or ""
+    local oorAt = body:find("if db.oorEnabled then", 1, true)
+    local hfAt = oorAt and body:find("frame.dfHealthFadeActive", oorAt, true)
+    local pinAt = oorAt and body:find("ApplyOORAlpha(frame, true, base, base)", oorAt, true)
+    check(oorAt and hfAt and pinAt and hfAt < pinAt, "element mode asks the health fade before pinning the base")
+end
+
+for k, v in pairs(HELD) do _G[k] = v end

@@ -1726,6 +1726,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 55)
             hfThreshold.tooltip = L["Units at or above this health percent are faded."]
 
+            -- Below the threshold, show through Frame Fade (HealthFade.lua's reveal):
+            -- the "hide healthy frames out of combat, still see the hurt ones" switch.
+            local hfReveal = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Below Threshold Through Frame Fade"], db, "healthFadeRevealsFrame", function()
+                RefreshHealthFade()
+                DF:UpdateAllFrames()
+            end), 30)
+            hfReveal.tooltip = L["Below the threshold the frame ignores Frame Fade and shows at full opacity, or at your In Combat Frame Fade with Separate Combat Fade on. Use it to hide healthy frames out of combat but still see anyone who is hurt."]
+
             group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
                 DF:UpdateAllFrames()
                 DF:RefreshAllVisibleFrames()

@@ -1975,6 +1975,14 @@ function DF:UpdateFrameAppearance(frame)
     if db.oorEnabled then
         -- Element mode pins the frame so per-element fades own the look; the pin IS
         -- the base now, not a hardcoded 1.0.
+        -- ☠ BUT AN ACTIVE HEALTH FADE OWNS THE FRAME'S ALPHA. Pinning to the base here
+        -- undid the health curve on every appearance pass until the next UNIT_HEALTH --
+        -- and with Frame Fade at 0% and the health reveal on, a hurt frame blinked out.
+        -- The curve's below value already leaves range out in element mode.
+        if IsHealthFadeEnabled(db) and frame.dfHealthFadeActive and DF.ApplyHealthFadeAlpha
+            and DF:ApplyHealthFadeAlpha(frame) then
+            return
+        end
         ApplyOORAlpha(frame, true, base, base)
     else
         local inRange = GetInRange(frame)
