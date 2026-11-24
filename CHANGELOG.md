@@ -4,7 +4,7 @@
 
 ### New Features
 
-- (Unit Frames, Pet Frames) WoW Forever: the pet frame shows your hunter pet's happiness face, on the unit frames pet frame and on your own pet's party/raid pet frame. Hover it to see damage, loyalty, diet, training points and experience. A small arrow on its corner warns when your pet is losing loyalty, and **Hide While Happy** shows the face only when your pet needs attention. **Color by Pet Happiness** can also color the pet frame's border, name and health bar, by default only while your pet is not happy; set the colors under **Display > Colors**. Find it on the pet's **Unit Icons** page and on **Display > Pet Frames**. The unit frames pet's **Text Designer** also has a **Pet Happiness** category to show happiness, damage, loyalty, training points, experience and diet as text.
+- (Pet Frames) WoW Forever: your hunter pet's happiness now shows as a face beside the unit frames pet frame and your own party/raid pet frame. Hover it for damage, loyalty, diet, training points and experience; a small arrow warns when loyalty is dropping. The pet frame's border, name and health bar can also be colored by happiness (colors under **Display > Colors**), and the pet's **Text Designer** has a **Pet Happiness** category. Settings are on the pet's **Unit Icons** page and **Display > Pet Frames**.
 
 ### Improvements
 
