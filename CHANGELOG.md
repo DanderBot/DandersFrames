@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### New Features
+
+- (Unit Frames) WoW Forever: the pet frame shows your hunter pet's happiness face. Hover it to see damage, loyalty, diet, training points and experience. Find it on the pet's **Unit Icons** page.
+
 ### Improvements
 
 - (Modules) Modules now use on/off switches instead of checkboxes, so it's clearer what's on.

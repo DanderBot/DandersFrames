@@ -1145,8 +1145,8 @@ do
     eq(cards, "uf_icon_pvp,uf_icon_classification,uf_icon_dragon,uf_icon_classborder,uf_icon_classcolors",
        "target Unit Icons: PvP, Elite / Rare, Elite Dragon, Classification Border, Classification Colors")
     check(has(keys, "classificationStyle"), "...Elite / Rare: icon or text")
-    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification,classDragon,classBorder",
-       "Unit Icons: Reset / Copy act on the three icons' keys and the dragon / border")
+    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification,classDragon,classBorder,happinessIcon",
+       "Unit Icons: Reset / Copy act on the icons' keys (Pet Happiness included) and the dragon / border")
     eq(toggles.uf_icon_dragon and toggles.uf_icon_dragon.key, "classDragonEnabled", "Elite Dragon: its tick in the header")
     eq(toggles.uf_icon_classborder and toggles.uf_icon_classborder.key, "classBorderEnabled", "Classification Border: likewise")
     for _, k in ipairs({ "classDragonAnchor", "classDragonSize", "classDragonSide", "classDragonX", "classDragonY",
