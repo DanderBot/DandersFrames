@@ -1135,8 +1135,27 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     --
     -- Returns whether the section actually MOVED, so a caller can skip the page
     -- pass entirely when nothing did.
+    -- The chevron and the card's fold, drawn from `expanded` as it stands. Shared
+    -- with the settings filter (Features/SearchFilter.lua), which opens a card for
+    -- as long as a search is narrowing the page WITHOUT going through SetExpanded,
+    -- so nothing it opens is ever saved.
+    section.ShowFold = function(self)
+        if self.expanded then
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
+        else
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
+        end
+        if self._ApplyCardFold then self:_ApplyCardFold() end
+    end
+
     section.SetExpanded = function(self, want)
         want = want and true or false
+        -- A card the filter opened, now moved by the user: theirs from here on.
+        -- The filter stops restoring it, and this press is saved like any other.
+        if self.dfFilterOpened then
+            self.dfFilterOpened = nil
+            self.dfFilterUser = true
+        end
         if self.expanded == want then return false end
         self.expanded = want
         if self.expanded then

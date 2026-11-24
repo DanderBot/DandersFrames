@@ -314,6 +314,7 @@ function Search:RegistryIsStale()
     local currentMode = DF.GUI and DF.GUI.SelectedMode or "party"
     return (not self.RegistryBuilt) or #self.Registry == 0 or self.BuiltForMode ~= currentMode
         or (self.BuiltWithDeferred or false) ~= (self.deferredIndexOn or false)
+        or (self.BuiltScopeEpoch or 0) ~= (self.scopeEpoch or 0)
 end
 
 -- ============================================================
@@ -334,8 +335,33 @@ end
 -- ============================================================
 function Search:IsPageIndexed(page)
     if not page or page.skipSearchIndex then return false end
-    if page.deferIndex and not self.deferredIndexOn then return false end
+    if page.deferIndex and not self.deferredIndexOn
+        and not (self.scopedPages and page.tabName and self.scopedPages[page.tabName]) then
+        return false
+    end
     return true
+end
+
+-- ★ SOME DEFERRED PAGES, NOT ALL OF THEM. The page list's filter only needs the
+-- pages of the view it is narrowing -- one unit's pages, not every unit's -- so it
+-- asks for those by name. Same staleness rule as IncludeDeferredPages: a name
+-- not asked for before moves the epoch, the index reads stale, and the next build
+-- adds just those pages (reusing every page that already holds a valid build).
+-- Returns true when anything new was asked for.
+function Search:IncludeScopedPages(names)
+    local added = false
+    self.scopedPages = self.scopedPages or {}
+    for name in pairs(names) do
+        local page = DF.GUI and DF.GUI.Pages and DF.GUI.Pages[name]
+        if page and page.deferIndex and not self.scopedPages[name] then
+            self.scopedPages[name] = true
+            added = true
+        end
+    end
+    if added and not self.deferredIndexOn then
+        self.scopeEpoch = (self.scopeEpoch or 0) + 1
+    end
+    return added
 end
 
 function Search:IncludeDeferredPages()
@@ -379,6 +405,7 @@ function Search:TryReuseRegistry()
     registrationId = 0
     self.BuiltForMode = GUI.SelectedMode
     self.BuiltWithDeferred = self.deferredIndexOn or false
+    self.BuiltScopeEpoch = self.scopeEpoch or 0
     self._buildToken = (self._buildToken or 0) + 1
     for _, entries in ipairs(lists) do AppendIndexEntries(self, entries) end
     self.RegistryBuilt = true
@@ -446,6 +473,7 @@ function Search:_BeginRegistryBuild()
     self.BuiltForMode = DF.GUI.SelectedMode
     -- ...and whether the deferred pages are in it (DEFERRED PAGES, above).
     self.BuiltWithDeferred = self.deferredIndexOn or false
+    self.BuiltScopeEpoch = self.scopeEpoch or 0
 
     -- Bumped on every build AND by InvalidateRegistry, so a budgeted drain can
     -- tell "still mine" from "superseded" between slices.
@@ -665,306 +693,20 @@ function Search:EnsureRegistryAsync(onReady)
 end
 
 -- ============================================================
--- KEYWORD ALIASES
--- ============================================================
-Search.KeywordAliases = {
-    -- Transparency related
-    ["transparency"] = {"alpha", "opacity", "fade"},
-    ["alpha"] = {"transparency", "opacity", "fade"},
-    ["opacity"] = {"alpha", "transparency", "fade"},
-    ["fade"] = {"alpha", "transparency", "opacity"},
-    
-    -- Size related
-    ["size"] = {"width", "height", "scale", "thickness"},
-    ["big"] = {"scale", "size", "large"},
-    ["small"] = {"scale", "size"},
-    
-    -- Position related
-    ["position"] = {"anchor", "offset", "location"},
-    ["move"] = {"position", "anchor", "offset"},
-    ["location"] = {"position", "anchor"},
-    
-    -- Color related
-    ["color"] = {"colour", "rgb", "tint"},
-    ["colour"] = {"color", "rgb", "tint"},
-    
-    -- Text related
-    ["text"] = {"font", "label"},
-    ["font"] = {"text", "typeface"},
-    
-    -- Visibility related
-    ["hide"] = {"show", "visible", "hidden", "display"},
-    ["show"] = {"hide", "visible", "display"},
-    ["visible"] = {"hide", "show", "hidden"},
-    
-    -- Bar related
-    ["bar"] = {"health", "resource", "power", "absorb"},
-    ["health"] = {"hp", "life"},
-    
-    -- Icon related (NOTE: buff and debuff are NOT aliases of each other)
-    ["icon"] = {"aura", "role", "leader"},
-    ["aura"] = {"icon"},
-    
-    -- Frame related
-    ["frame"] = {"unit", "party", "raid", "layout"},
-    ["unit"] = {"frame", "player", "target"},
-    
-    -- Group label related
-    ["label"] = {"group", "text", "number"},
-    ["group"] = {"raid", "label"},
-}
-
--- ============================================================
--- WORD STEMMING
--- Strips common suffixes so "buff" matches "buffs" equally
--- ============================================================
-function Search:StemWord(word)
-    if not word or #word < 3 then return word end
-    
-    word = word:lower()
-    
-    -- Remove common plural/verb suffixes
-    -- Order matters - check longer suffixes first
-    if word:sub(-3) == "ies" and #word > 4 then
-        return word:sub(1, -4) .. "y"  -- "entries" -> "entry"
-    elseif word:sub(-2) == "es" and #word > 3 then
-        local stem = word:sub(1, -3)
-        -- Handle cases like "boxes" -> "box", "classes" -> "class"
-        if word:sub(-3, -3):match("[sxz]") or word:sub(-4, -3) == "ch" or word:sub(-4, -3) == "sh" then
-            return stem
-        end
-        return word:sub(1, -2)  -- Just remove 's' for other cases
-    elseif word:sub(-1) == "s" and #word > 3 and not word:sub(-2, -2):match("[su]") then
-        return word:sub(1, -2)  -- "buffs" -> "buff", but not "class" -> "clas"
-    elseif word:sub(-3) == "ing" and #word > 5 then
-        return word:sub(1, -4)  -- "scaling" -> "scal"
-    elseif word:sub(-2) == "ed" and #word > 4 then
-        return word:sub(1, -3)  -- "enabled" -> "enabl"
-    end
-    
-    return word
-end
-
--- Check if two words match (considering stemming)
-function Search:WordsMatch(word1, word2)
-    if not word1 or not word2 then return false end
-    
-    word1 = word1:lower()
-    word2 = word2:lower()
-    
-    -- Direct match
-    if word1 == word2 then return true end
-    
-    -- Stemmed match
-    local stem1 = self:StemWord(word1)
-    local stem2 = self:StemWord(word2)
-    
-    if stem1 == stem2 then return true end
-    
-    -- One contains the other's stem (for partial matching)
-    if stem1:find(stem2, 1, true) or stem2:find(stem1, 1, true) then
-        return true
-    end
-    
-    return false
-end
-
--- Check if a word appears in text (with stemming support)
--- Returns: found (bool), isWholeWord (bool), isPartOfAnotherWord (bool)
-function Search:WordInText(word, text)
-    if not word or not text then return false, false, false end
-    
-    word = word:lower()
-    text = text:lower()
-    local stemmedWord = self:StemWord(word)
-    
-    -- First, check each word in the text individually
-    for textWord in text:gmatch("%w+") do
-        local stemmedTextWord = self:StemWord(textWord)
-        
-        -- Exact match or stemmed match of a whole word
-        if textWord == word or stemmedTextWord == stemmedWord then
-            return true, true, false
-        end
-        
-        -- Check if search word is contained WITHIN this text word (e.g., "buff" in "debuff")
-        -- This is a partial match and should be penalized
-        if #textWord > #word and textWord:find(word, 1, true) then
-            -- It's a substring of a larger word - this is NOT a good match
-            -- "buff" found in "debuff" should return found=true, isWholeWord=false, isPartOfAnotherWord=true
-            return true, false, true
-        end
-    end
-    
-    return false, false, false
-end
-
--- ============================================================
 -- SEARCH FUNCTION
--- Improved scoring: exact matches >> partial matches >> aliases
--- Now with stemming support
+-- The matching itself lives in Features/SearchMatch.lua (the word index, the
+-- synonyms and tags, prefixes and typos). Find is Home's ranked list: settings
+-- that answer every word first, then -- only when none do -- the closest.
 -- ============================================================
 function Search:Find(query)
     if not query or query == "" then return {} end
-    
+
     -- A search covers every page, deferred ones included (DEFERRED PAGES).
     self:IncludeDeferredPages()
     self:EnsureRegistry()
-    
-    query = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
-    if #query < 2 then return {} end
-    
-    local results = {}
-    local queryWords = {}
-    local queryWordsStemmed = {}
-    local numQueryWords = 0
-    
-    -- Split query into individual words and their stems
-    for word in string.gmatch(query, "%w+") do
-        table.insert(queryWords, word)
-        table.insert(queryWordsStemmed, self:StemWord(word))
-        numQueryWords = numQueryWords + 1
-    end
-    
-    -- Build expanded query with aliases (but track which are exact vs aliases)
-    local exactWords = {}      -- Words the user actually typed (and stems)
-    local aliasWords = {}      -- Words added via aliases (lower priority)
-    
-    for i, word in ipairs(queryWords) do
-        exactWords[word] = true
-        exactWords[queryWordsStemmed[i]] = true  -- Also add stemmed version
-        
-        if self.KeywordAliases[word] then
-            for _, alias in ipairs(self.KeywordAliases[word]) do
-                if not exactWords[alias] then
-                    aliasWords[alias] = true
-                end
-            end
-        end
-        -- Check aliases for stemmed word too
-        if self.KeywordAliases[queryWordsStemmed[i]] then
-            for _, alias in ipairs(self.KeywordAliases[queryWordsStemmed[i]]) do
-                if not exactWords[alias] then
-                    aliasWords[alias] = true
-                end
-            end
-        end
-    end
-    
-    for _, entry in ipairs(self.Registry) do
-        -- All entries in registry are for the current mode (registry is rebuilt when mode changes)
-        local score = 0
-        local exactWordsMatched = 0
-        
-        local labelLower = entry.label and entry.label:lower() or ""
-        local sectionLower = entry.section and entry.section:lower() or ""
-        local dbKeyLower = (entry.dbKey and type(entry.dbKey) == "string") and entry.dbKey:lower() or ""
-        
-        -- ===========================================
-        -- HIGHEST PRIORITY: Full query match in label
-        -- "buff scale" found exactly in "Buff Scale" = huge bonus
-        -- ===========================================
-        if labelLower:find(query, 1, true) then
-            score = score + 1000
-            exactWordsMatched = numQueryWords
-        else
-            -- ===========================================
-            -- Check each query word against the label
-            -- ===========================================
-            for i, word in ipairs(queryWords) do
-                local found, isWholeWord, isPartOfAnotherWord = self:WordInText(word, labelLower)
-                
-                if found then
-                    if isPartOfAnotherWord then
-                        -- "buff" found inside "debuff" - very low score, almost a non-match
-                        score = score + 5
-                    elseif isWholeWord or #word >= 4 then
-                        score = score + 200
-                        exactWordsMatched = exactWordsMatched + 1
-                    else
-                        score = score + 100
-                        exactWordsMatched = exactWordsMatched + 1
-                    end
-                end
-            end
-            
-            -- ===========================================
-            -- Lower priority: Alias word matches in label
-            -- ===========================================
-            for word in pairs(aliasWords) do
-                local found, isWholeWord, isPartOfAnotherWord = self:WordInText(word, labelLower)
-                if found and not isPartOfAnotherWord then
-                    score = score + 30
-                end
-            end
-        end
-        
-        -- ===========================================
-        -- BONUS: Multiple query words matched = more relevant
-        -- ===========================================
-        if numQueryWords > 1 and exactWordsMatched >= numQueryWords then
-            score = score + 500
-        elseif numQueryWords > 1 and exactWordsMatched > 1 then
-            score = score + (exactWordsMatched * 100)
-        end
-        
-        -- ===========================================
-        -- MEDIUM PRIORITY: Section name matches
-        -- ===========================================
-        for _, word in ipairs(queryWords) do
-            local found, isWholeWord, isPartOfAnotherWord = self:WordInText(word, sectionLower)
-            if found and not isPartOfAnotherWord then
-                score = score + 50
-            elseif found and isPartOfAnotherWord then
-                score = score + 5  -- Minimal score for partial match
-            end
-        end
-        
-        -- ===========================================
-        -- LOWER PRIORITY: Keyword matches
-        -- ===========================================
-        if entry.keywords then
-            for _, keyword in ipairs(entry.keywords) do
-                for _, word in ipairs(queryWords) do
-                    if self:WordsMatch(keyword, word) then
-                        score = score + 40
-                    elseif keyword:find(word, 1, true) and #keyword > #word then
-                        -- Word is substring of keyword - low score
-                        score = score + 5
-                    end
-                end
-                for alias in pairs(aliasWords) do
-                    if self:WordsMatch(keyword, alias) then
-                        score = score + 10
-                    end
-                end
-            end
-        end
-        
-        -- ===========================================
-        -- LOWEST PRIORITY: dbKey matches
-        -- ===========================================
-        if dbKeyLower ~= "" then
-            for _, word in ipairs(queryWords) do
-                if dbKeyLower:find(word, 1, true) then
-                    score = score + 25
-                end
-            end
-        end
-        
-        if score > 0 then
-            table.insert(results, {entry = entry, score = score})
-        end
-    end
-    
-    table.sort(results, function(a, b) return a.score > b.score end)
-    
-    local finalResults = {}
-    for _, result in ipairs(results) do
-        table.insert(finalResults, result.entry)
-    end
-    
-    return finalResults
+
+    if not self.RankedMatches then return {} end
+    return self:RankedMatches(query)
 end
 
 -- ============================================================
@@ -1402,8 +1144,12 @@ end
 --   iconX      its left inset (default 6); the text starts one gap after it
 --   fontSize   the typed text and the placeholder, at the settings font (default:
 --              the small template font)
+--   onChange   fn(text) called with the box's text on every edit, clear and Escape
+--              INSTEAD of the results view; a bar built with it never becomes
+--              Search.SearchBar (the page list's filter box -- Features/SearchFilter.lua)
 function Search:CreateSearchBar(parent, opts)
     opts = opts or {}
+    local onChange = opts.onChange
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
 
@@ -1464,7 +1210,7 @@ function Search:CreateSearchBar(parent, opts)
         onClick    = function()
             editbox:SetText("")
             editbox:ClearFocus()
-            Search:HideResults()
+            if onChange then onChange("") else Search:HideResults() end
         end,
     })
     clearBtn:SetPoint("RIGHT", -4, 0)
@@ -1499,6 +1245,12 @@ function Search:CreateSearchBar(parent, opts)
     
     editbox:SetScript("OnTextChanged", function(self, userInput)
         local text = self:GetText()
+        if onChange then
+            placeholder:SetShown((not text or text == "") and not self:HasFocus())
+            clearBtn:SetShown(text ~= nil and text ~= "")
+            onChange(text or "")
+            return
+        end
         if text and text ~= "" then
             placeholder:Hide()
             clearBtn:Show()
@@ -1525,7 +1277,7 @@ function Search:CreateSearchBar(parent, opts)
     editbox:SetScript("OnEscapePressed", function(self)
         self:SetText("")
         self:ClearFocus()
-        Search:HideResults()
+        if onChange then onChange("") else Search:HideResults() end
     end)
     
     editbox:SetScript("OnEnterPressed", function(self)
@@ -1535,8 +1287,8 @@ function Search:CreateSearchBar(parent, opts)
     frame.editbox = editbox
     frame.placeholder = placeholder
     frame.clearBtn = clearBtn
-    
-    self.SearchBar = frame
+
+    if not onChange then self.SearchBar = frame end
     return frame
 end
 

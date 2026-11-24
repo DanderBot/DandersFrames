@@ -24,6 +24,8 @@
 - (Fading) Status icons (summon, AFK, phased, raid role, ping and the rest) now fade along with **Frame Fade** instead of staying bright on a faded frame.
 - (Unit Frames) The **Visibility** page can now show a frame only in a **Party** or only in a **Raid**, and show or hide it while **Resting** in an inn or city.
 - (Fading) **Show In-Combat Fade When Hovering** now works without **Separate Combat Fade**: hovering a faded frame shows it at full opacity.
+- (Settings) The search box at the top of the side menu now filters in place: the menu shows only pages with a matching setting, and each page shows only the matching settings. Clear the box to see everything again. The search on **Home** still lists results from every module.
+- (Settings) Search understands related words and small typos. Try "transparency" or "opacity" to find fade and alpha settings, or "hide" to find visibility options. Partial words work as you type.
 
 ### Bug Fixes
 
