@@ -842,6 +842,61 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         })
         CloseSection(band)
 
+        -- ===== PET HAPPINESS (WoW Forever only, column 1 under Role Colors) =====
+        -- The three colours the hunter pet's frame takes by happiness, wherever Color
+        -- by Pet Happiness is on (Features/PetHappiness.lua, COLOUR BY HAPPINESS):
+        -- DF.db.petHappinessColors, a registered profile-root table, so its defaults,
+        -- new profiles and export / import come from the registry. One set for the
+        -- unit frames pet and the group pet frames; their pages link here.
+        -- ⚠ ITS TITLE IS THE CROSS-LINK ANCHOR those pages jump to
+        -- (UFO.PetHappinessColorsLink): keep the two in step.
+        -- ⚠ A do-block: no page-scope locals.
+        do
+            local PH = DF.IS_FOREVER and DF.PetHappiness
+            if PH and PH.COLOR_ORDER and type(DF.db.petHappinessColors) == "table" then
+                local function PetHappinessChanged()
+                    PH:ColorsChanged()
+                end
+                local function BuildPetHappinessColorsGroup(tools2)
+                    local group, parent = tools2.group, tools2.parent
+                    local store = DF.db.petHappinessColors
+                    group:AddWidget(GUI:CreateLabel(parent, L["The colors your hunter pet's frame takes when it is happy, content or unhappy, wherever Color by Pet Happiness is on."], 260), 50)
+                    local resetBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+                    GUI:StyleButton(resetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
+                    resetBtn:SetScript("OnClick", function()
+                        for _, key in ipairs(PH.COLOR_ORDER) do
+                            local d = PH.COLOR_DEFAULTS[key]
+                            store[key] = { r = d.r, g = d.g, b = d.b }
+                        end
+                        PetHappinessChanged()
+                        RepaintSwatches(tools2)
+                    end)
+                    group:AddWidget(resetBtn, 30)
+                    local labels = { happy = L["Happy"], content = L["Content"], unhappy = L["Unhappy"] }
+                    for _, key in ipairs(PH.COLOR_ORDER) do
+                        if type(store[key]) ~= "table" then
+                            local d = PH.COLOR_DEFAULTS[key]
+                            store[key] = { r = d.r, g = d.g, b = d.b }
+                        end
+                        group:AddWidget(GUI:CreateColorPicker(parent, labels[key], store, key, false,
+                            PetHappinessChanged, PetHappinessChanged, true), 30)
+                    end
+                end
+                local function PetHappinessColorsSummary()
+                    local list = {}
+                    for i, key in ipairs(PH.COLOR_ORDER) do list[i] = { key = key } end
+                    return PaletteSummary(DF.db.petHappinessColors, list, "key", function(k) return PH.COLOR_DEFAULTS[k] end)
+                end
+                local petBand = OpenSection(L["Pet Happiness"], "colors_pet_happiness", 1, PetHappinessColorsSummary, nil, nil,
+                    BuildPetHappinessColorsGroup)
+                BuildPetHappinessColorsGroup({
+                    group = petBand, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(petBand)
+            end
+        end
+
         -- ===== DISPEL TYPE COLORS (the second card in column 1) =====
         -- The one palette whose commit is not a plain repaint: both callbacks
         -- live at page scope above, so the card and a pinned copy drive the same
@@ -1464,7 +1519,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 55)
 
             local classAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Health Bar Alpha"], 0, 1, 0.05, db, "classColorAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-            classAlpha.hideOn = function(d) return d.healthColorMode ~= "CLASS" and d.healthColorMode ~= "PERCENT" end
+            -- (HAPPINESS: the unit frames pet on WoW Forever, painted with this alpha too.)
+            classAlpha.hideOn = function(d)
+                return d.healthColorMode ~= "CLASS" and d.healthColorMode ~= "PERCENT" and d.healthColorMode ~= "HAPPINESS"
+            end
 
             local customColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Health Color"], db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
             customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end

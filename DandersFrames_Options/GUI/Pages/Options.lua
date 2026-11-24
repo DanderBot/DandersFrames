@@ -1819,6 +1819,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             HEALTH = L["Health Gradient"],
             CUSTOM = L["Custom Color"],
         }
+        -- WoW Forever: your hunter pet's frame by Pet Happiness (Features/PetHappiness.lua).
+        if DF.IS_FOREVER then healthColorValues.HAPPINESS = L["Pet Happiness"] end
         local powerColorValues = {
             POWER = L["By Power Type"],
             CUSTOM = L["Custom Color"],
@@ -2343,6 +2345,35 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 hoistToggle = true,
             })
             CloseSection(happinessBand)
+
+            -- ===== COLOR BY PET HAPPINESS (under Pet Happiness) =====
+            -- The pet frame's border, name and health bar in the happiness colour
+            -- (Features/PetHappiness.lua, COLOUR BY HAPPINESS). The controls are the
+            -- unit frames card's (UFO.AddHappinessColorControls) on this page's keys;
+            -- no colour pickers, the card links to the Colors page instead.
+            local colorKeys = { border = "petHappinessColorBorder", name = "petHappinessColorName",
+                                only = "petHappinessColorOnlyUnhappy", mode = "petHealthColorMode" }
+            local function BuildPetHappinessColorsGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+                group.disableChildrenOn = function(d) return not d.petEnabled end
+                if UFO and UFO.AddHappinessColorControls then
+                    UFO.AddHappinessColorControls(group, parent, db, colorKeys, function()
+                        ApplyPetHappiness()
+                        GateRefresh(tools2)
+                    end, tools2.popout and PetsOffRow or nil)
+                end
+            end
+            local function PetHappinessColorsSummary(d)
+                if not (d and UFO and UFO.HappinessColorsText) then return "" end
+                return UFO.HappinessColorsText(d.petHappinessColorBorder, d.petHappinessColorName, d.petHealthColorMode)
+            end
+            local colorsBand = OpenSection(L["Color by Pet Happiness"], "pets_happiness_colors", 2,
+                PetHappinessColorsSummary, PetsOffRow, nil, BuildPetHappinessColorsGroup)
+            BuildPetHappinessColorsGroup({
+                group = colorsBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(colorsBand)
         end
 
         -- ===== AURAS (Buffs, Debuffs -- column 2, under Appearance) =====

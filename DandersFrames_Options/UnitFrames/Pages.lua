@@ -277,7 +277,9 @@ function UFO.Prefixes(kind)
     if kind == "rings" then
         return { "frameStyle", "ringSize", "rings", "ringShow", "ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }
     end
-    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder", "happinessIcon" } end
+    if kind == "unitIcons" then
+        return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder", "happinessIcon", "happinessColor" }
+    end
     if kind == "bosslayout" then return { "boss" } end
     return {}
 end
@@ -2730,6 +2732,71 @@ function UFO.HappinessPositionOptions()
     return opts
 end
 
+-- ---- Color by Pet Happiness (WoW Forever only) -------------------------------
+-- The pet frame's border, name and health bar in the happiness colour. Shared by
+-- this page and the group Pet Frames page (GUI/Pages/Options.lua), which pass
+-- their own keys. No colour pickers: the colours live once on the Colors page,
+-- and the card links there.
+
+-- "Border · Name · Health Bar", the targets that are on, or Off.
+function UFO.HappinessColorsText(border, name, healthMode)
+    local parts = {}
+    if border then parts[#parts + 1] = L["Border"] end
+    if name then parts[#parts + 1] = L["Name"] end
+    if healthMode == "HAPPINESS" then parts[#parts + 1] = L["Health Bar"] end
+    if #parts == 0 then return L["Off"] end
+    return concat(parts, " \194\183 ")
+end
+
+-- The "Set the Pet Happiness colors on the Colors page." note: jumps to the
+-- Colors page's Pet Happiness card (GUI/Pages/Auras.lua) and flashes it.
+-- nil when the GUI cannot make the jump.
+function UFO.PetHappinessColorsLink(parent, width)
+    if not (GUI.CreateLink and GUI.LinkToSetting) then return nil end
+    local link = format("|cffffffff|HdfColors|h%s|h|r", L["Colors page"])
+    return GUI:CreateLink(parent, format(L["Set the Pet Happiness colors on the %s."], link), {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "display_classcolors",
+                section = L["Pet Happiness"],
+                flash   = { border = true, fill = false },
+            })
+        end,
+    })
+end
+
+-- The card's controls into `group`. keys: { border, name, only, mode } -- the db
+-- keys of the two switches, Only When Not Happy, and the health colour mode.
+function UFO.AddHappinessColorControls(group, parent, db, keys, changed, gate)
+    local function none(d)
+        return not (d and (d[keys.border] or d[keys.name] or d[keys.mode] == "HAPPINESS"))
+    end
+    local off = UFO.Gate(L["Color by Pet Happiness"], none, gate)
+    local w = group:AddWidget(GUI:CreateCheckbox(parent, L["Border"], db, keys.border, changed), 30)
+    w.disableOn = gate
+    w = group:AddWidget(GUI:CreateCheckbox(parent, L["Name"], db, keys.name, changed), 30)
+    w.disableOn = gate
+    w = group:AddWidget(GUI:CreateCheckbox(parent, L["Only When Not Happy"], db, keys.only, changed), 30)
+    w.disableOn = off
+    w.tooltip = L["A happy pet keeps its normal colors."]
+    group:AddWidget(GUI:CreateLabel(parent, L["To color the health bar too, pick Pet Happiness as its color."], 260), 35)
+    local note = UFO.PetHappinessColorsLink(parent, GUI:GroupInnerWidth(group))
+    if note then group:AddWidget(note, (note.layoutHeight or 16) + 2) end
+end
+
+UFO.UF_HAPPINESS_COLOR_KEYS = { border = "happinessColorBorder", name = "happinessColorName",
+                                only = "happinessColorOnlyUnhappy", mode = "healthColorMode" }
+
+function UFO.BuildHappinessColorsCard(self, db, Open, Close, changed, col)
+    local k = UFO.UF_HAPPINESS_COLOR_KEYS
+    local band = Open(L["Color by Pet Happiness"], "uf_icon_happiness_colors", col, function(d)
+        return d and UFO.HappinessColorsText(d[k.border], d[k.name], d[k.mode]) or ""
+    end, "icons")
+    UFO.AddHappinessColorControls(band, self.child, db, k, changed)
+    Close(band)
+end
+
 function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
     local Open, Close = Tools(self, Add)
@@ -2794,6 +2861,11 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
             end
             Close(band)
         end
+    end
+    -- WoW Forever: the pet frame coloured by happiness, beside the face's card.
+    if DF.IS_FOREVER and UFO.CardShown(rec, unit, "pet_happiness") then
+        col = (col % 2) + 1
+        UFO.BuildHappinessColorsCard(self, db, Open, Close, changed, col)
     end
     -- The dragon and the class border: every unit with a classification, Boss
     -- included (Boss has no Elite / Rare icon card, only these).
@@ -3639,6 +3711,11 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                         end
                         if rec.kind == "health" then
                             pg.extraHealthColorModes = { REACTION = L["Reaction"], CLASS_REACTION = L["Class / Reaction"] }
+                            -- WoW Forever: the pet's health bar by Pet Happiness
+                            -- (Indicators.lua, PET HAPPINESS COLOURS).
+                            if u == "pet" and DF.IS_FOREVER then
+                                pg.extraHealthColorModes.HAPPINESS = L["Pet Happiness"]
+                            end
                         end
                         GUI:SetPageModule(name, UFO.MODULE)
                         UFO.pageMeta[name] = { unit = u, tab = UFO.TabOf(u), kind = rec.kind }

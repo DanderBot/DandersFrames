@@ -821,6 +821,12 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
     local ov = cat and frame._tdAuraColor and frame._tdAuraColor[cat]
     if ov then
         fs:SetTextColor(ov.r, ov.g, ov.b, ov.a or 1)
+    elseif cat == "name" and frame.dfHappinessName then
+        -- WoW Forever, the unit frames pet: the Pet Happiness name tint
+        -- (DandersFrames_UnitFrames/Indicators.lua), under an Aura Designer
+        -- override. nil on every other frame.
+        local hn = frame.dfHappinessName
+        fs:SetTextColor(hn.r, hn.g, hn.b, (app.color and app.color.a) or 1)
     end
     local text = getResolver():Resolve(elem, source)
     local safeText = getMS().SafeText(text)

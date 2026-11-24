@@ -20,6 +20,8 @@ local addonName, DF = ...
 --   PH:SetConsumer(key, on, fn)  a frame that shows it; fn() runs when the
 --                           answer changes. Events are registered only while
 --                           at least one consumer is on, on Forever, for a hunter.
+--   PH.Tint(mood, onlyUnhappy)  the colour a frame is tinted by happiness (or nil)
+--   PH.SetTints(frame, side, health, border, name)  stamp + repaint what changed
 --
 -- ⚠ UNVERIFIED IN GAME: the atlas names, and that the answers stay readable in
 -- combat. A secret answer reads as nil (hidden), never guessed.
@@ -468,6 +470,120 @@ function PH.PaintBadge(icon, dir, size)
 end
 
 -- ============================================================
+-- COLOUR BY HAPPINESS (shared by both sides)
+-- The pet frame's border, name and health bar in the mood's colour. One set of
+-- three colours per profile (DF.db.petHappinessColors, edited on the Colors
+-- page), so it rides export / import with the other colours. Each target has
+-- its own switch on each side; Only When Not Happy (on by default) leaves a
+-- happy pet in its normal colours, so a colour change means something.
+--
+-- STAMPS, NOT READS. A side works out the three tints when the answer changes
+-- (the consumer path) and stamps them on the frame: dfHappinessHealth,
+-- dfHappinessBorder, dfHappinessName, each a colour or nil. The painters that
+-- already exist read the stamp -- nil on every other frame, and on every frame
+-- off Forever -- so no health tick reads the API and nothing is allocated.
+-- ============================================================
+PH.COLOR_KEYS = { [1] = "unhappy", [2] = "content", [3] = "happy" }
+PH.COLOR_DEFAULTS = {
+    happy   = { r = 0.35, g = 0.85, b = 0.35 },
+    content = { r = 1,    g = 0.75, b = 0.2 },
+    unhappy = { r = 0.95, g = 0.3,  b = 0.3 },
+}
+-- The Colors page's pickers, in order.
+PH.COLOR_ORDER = { "happy", "content", "unhappy" }
+
+if DF.IS_FOREVER and DF.RegisterProfileRootTable then
+    DF:RegisterProfileRootTable("petHappinessColors", {
+        defaults = PH.COLOR_DEFAULTS,
+        exportCategory = "colors",
+    })
+end
+
+-- The profile's colour for a mood (1..3); the default when the profile's is unusable.
+function PH.Color(mood)
+    local key = PH.COLOR_KEYS[mood]
+    if not key then return nil end
+    local t = DF.db and DF.db.petHappinessColors
+    local c = type(t) == "table" and t[key]
+    if type(c) ~= "table" or type(c.r) ~= "number" or type(c.g) ~= "number" or type(c.b) ~= "number" then
+        c = PH.COLOR_DEFAULTS[key]
+    end
+    return c
+end
+
+-- The tint for a mood, or nil (paint normally): no pet, or happy while Only
+-- When Not Happy is on (nil counts as on, the default).
+function PH.Tint(mood, onlyUnhappy)
+    if not PH.COLOR_KEYS[mood] then return nil end
+    if mood == 3 and onlyUnhappy ~= false then return nil end
+    return PH.Color(mood)
+end
+
+-- Every frame that has ever been tinted (weak), for a colour edit to reach.
+PH.tinted = setmetatable({}, { __mode = "k" })
+
+-- Has this frame a stamp to keep or to take back? (false: marked for a repaint)
+function PH.HasTints(frame)
+    return frame.dfHappinessHealth ~= nil or frame.dfHappinessBorder ~= nil or frame.dfHappinessName ~= nil
+end
+
+-- Stamp one frame's three tints and repaint only the targets whose tint moved.
+-- `side` holds how that side paints each target, reading the stamp:
+--   side.health(frame)      repaint the health bar
+--   side.border(frame, c)   the tint, or nil: put the normal border back
+--   side.name(frame, c)     the same for the name
+--   side.refresh(frame)     work the tints out again (a colour edit)
+-- ⚠ A frame with nothing stamped and nothing to stamp is left alone: its normal
+-- painters already drew it, and nothing here may touch an untinted frame.
+function PH.SetTints(frame, side, health, border, name)
+    if not (health or border or name or PH.HasTints(frame)) then return end
+    PH.tinted[frame] = true
+    frame.dfHappinessSide = side
+    if frame.dfHappinessHealth ~= health then
+        frame.dfHappinessHealth = health
+        side.health(frame)
+    end
+    if frame.dfHappinessBorder ~= border then
+        frame.dfHappinessBorder = border
+        side.border(frame, border)
+    end
+    if frame.dfHappinessName ~= name then
+        frame.dfHappinessName = name
+        side.name(frame, name)
+    end
+end
+
+-- The border in a tint: colour only (the border's own SetColor), with the alpha
+-- of the frame's own border colour. Called by both sides, and again by each
+-- side's border painter after it repaints the normal border.
+function PH.PaintBorder(border, c, base)
+    if not (border and border.SetColor and c) then return end
+    local a = type(base) == "table" and tonumber(base.a or base[4]) or 1
+    border:SetColor(c.r, c.g, c.b, a)
+end
+
+-- Does any tint target ask for the answer? (health: the mode's own key value)
+function PH.WantsTints(border, name, healthMode)
+    return (border or name or healthMode == "HAPPINESS") and true or false
+end
+
+-- A colour edited (or reset) on the Colors page. A picker edits the colour table
+-- in place, so a stamp still holds the same table and SetTints would see no
+-- change: each tinted frame's stamps are marked stale (false) and its side works
+-- them out again, which repaints every target.
+function PH:ColorsChanged()
+    for frame in pairs(PH.tinted) do
+        local side = frame.dfHappinessSide
+        if side and PH.HasTints(frame) then
+            if frame.dfHappinessHealth ~= nil then frame.dfHappinessHealth = false end
+            if frame.dfHappinessBorder ~= nil then frame.dfHappinessBorder = false end
+            if frame.dfHappinessName ~= nil then frame.dfHappinessName = false end
+            side.refresh(frame)
+        end
+    end
+end
+
+-- ============================================================
 -- GROUP PET FRAMES (Frames/Pets.lua)
 -- The face goes on the ONE group pet frame that shows your own pet: "pet" in a
 -- party, the raidpet<N> that is your pet in a raid or an arena. The API only
@@ -546,59 +662,135 @@ function PH.LayoutGroupIcon(icon, frame, db)
     PH.SetMouse(icon, db.petHappinessIconTooltip ~= false)
 end
 
--- Lay out and paint one group pet frame's face (Pets.lua calls this when the
--- frame is styled or updated). Forever only.
+-- ------------------------------------------------------------
+-- The group pet frame's tints (COLOUR BY HAPPINESS above). The settings are
+-- petHappinessColorBorder / petHappinessColorName / petHappinessColorOnlyUnhappy
+-- and the health mode petHealthColorMode = "HAPPINESS", whose painter is
+-- DF:ApplyPetHealthColor (Pets.lua): the stamp, else the normal health colour.
+-- ------------------------------------------------------------
+local WHITE = { r = 1, g = 1, b = 1 }
+
+local function GroupOwnerUnit(unit)
+    local owner = unit:gsub("pet", "")
+    if owner == "" then owner = "player" end
+    return owner
+end
+
+local GROUP_SIDE = {}
+
+function GROUP_SIDE.health(frame)
+    if not (DF.ApplyPetHealthColor and frame.healthBar and type(frame.unit) == "string") then return end
+    local db = DF:GetFrameDB(frame)
+    if not db then return end
+    if frame.dfIsTestFrame then
+        -- The preview's own sample: the fraction already on the bar, the owner's class.
+        local pct = frame.healthBar.GetValue and frame.healthBar:GetValue()
+        local data = frame.ownerFrame and DF.GetTestDataForFrame and DF:GetTestDataForFrame(frame.ownerFrame)
+        DF:ApplyPetHealthColor(frame, db, nil, frame.unit,
+            { pct = type(pct) == "number" and pct or 1, class = data and data.class })
+    else
+        DF:ApplyPetHealthColor(frame, db, GroupOwnerUnit(frame.unit), frame.unit)
+    end
+end
+
+function GROUP_SIDE.border(frame, c)
+    if not frame.border then return end
+    local db = DF:GetFrameDB(frame)
+    if c then
+        PH.PaintBorder(frame.border, c, db and db.petBorderColor)
+    elseif db and DF.Border then
+        DF.Border:Apply(frame.border, DF.Border:BuildSpec(db, "pet"))
+    end
+end
+
+function GROUP_SIDE.name(frame, c)
+    local fs = frame.nameText
+    if not fs then return end
+    if not c then
+        local db = DF:GetFrameDB(frame)
+        c = (db and type(db.petNameColor) == "table" and db.petNameColor) or WHITE
+    end
+    fs:SetTextColor(c.r, c.g, c.b)
+end
+
+function GROUP_SIDE.refresh(frame)
+    PH:UpdateGroupFrame(frame)
+end
+
+PH.GROUP_SIDE = GROUP_SIDE
+
+-- mood: the pet's (nil: not your pet, or nothing asks for it).
+function PH.GroupTints(frame, db, mood)
+    local tint = db and PH.Tint(mood, db.petHappinessColorOnlyUnhappy)
+    local health = (tint and db.petHealthColorMode == "HAPPINESS") and tint or nil
+    local border = (tint and db.petHappinessColorBorder) and tint or nil
+    local name = (tint and db.petHappinessColorName) and tint or nil
+    PH.SetTints(frame, GROUP_SIDE, health, border, name)
+end
+
+-- Lay out and paint one group pet frame's face and tints (Pets.lua calls this
+-- when the frame is styled or updated). Forever only.
 function PH:UpdateGroupFrame(frame)
     if not (DF.IS_FOREVER and frame) then return end
     local db = DF:GetFrameDB(frame)
     local test = frame.dfIsTestFrame
     local icon = frame.dfHappinessIcon
     if not test then PH:WatchGroup() end
-    if not (db and db.petHappinessIconEnabled and PH.IsOwnPetFrame(frame)) then
-        if icon then PH.PaintGroupIcon(icon, nil) end
-        return
-    end
-    icon = icon or PH.NewGroupIcon(frame)
-    PH.LayoutGroupIcon(icon, frame, db)
+    local own = db and PH.IsOwnPetFrame(frame)
+    local showIcon = own and db.petHappinessIconEnabled
+    local tints = own and PH.WantsTints(db.petHappinessColorBorder, db.petHappinessColorName, db.petHealthColorMode)
     local mood, rate
-    if test then
-        local data = frame.ownerFrame and DF.GetTestDataForFrame and DF:GetTestDataForFrame(frame.ownerFrame)
-        mood = (data and data.petHappiness) or PH.MOCK.mood
-        rate = (data and data.petLoyaltyRate) or PH.MOCK.rate
-    else
-        local _
-        mood, _, rate = PH:Read()
+    if showIcon or tints then
+        if test then
+            local data = frame.ownerFrame and DF.GetTestDataForFrame and DF:GetTestDataForFrame(frame.ownerFrame)
+            mood = (data and data.petHappiness) or PH.MOCK.mood
+            rate = (data and data.petLoyaltyRate) or PH.MOCK.rate
+        else
+            local _
+            mood, _, rate = PH:Read()
+        end
     end
-    local dir
-    mood, dir = PH.Resolve(mood, rate, db.petHappinessIconHideHappy, db.petHappinessIconTrend, test)
-    PH.PaintGroupIcon(icon, mood)
-    PH.PaintBadge(icon, mood and dir or nil, db.petHappinessIconSize or 14)
+    if showIcon then
+        icon = icon or PH.NewGroupIcon(frame)
+        PH.LayoutGroupIcon(icon, frame, db)
+        local face, dir = PH.Resolve(mood, rate, db.petHappinessIconHideHappy, db.petHappinessIconTrend, test)
+        PH.PaintGroupIcon(icon, face)
+        PH.PaintBadge(icon, face and dir or nil, db.petHappinessIconSize or 14)
+    elseif icon then
+        PH.PaintGroupIcon(icon, nil)
+    end
+    PH.GroupTints(frame, db, tints and mood or nil)
 end
 
 -- The live group pet frames that could be yours, repainted when the answer
 -- changes (the shared event driver calls this).
 local function GroupFramesChanged()
     if DF.petFrames and DF.petFrames.player then PH:UpdateGroupFrame(DF.petFrames.player) end
-    local sets = { DF.raidPetFrames, DF.arenaPetFrames }
     for n = 1, 2 do
-        local set = sets[n]
+        local set = (n == 1) and DF.raidPetFrames or DF.arenaPetFrames
         if set then
             for i = 1, 40 do
                 local f = set[i]
-                -- A frame that had the face (to repaint or drop it), or the one that is yours now.
-                if f and (f.dfHappinessIcon or PH.IsOwnPetFrame(f)) then PH:UpdateGroupFrame(f) end
+                -- A frame that had the face or a tint (to repaint or drop it), or the one that is yours now.
+                if f and (f.dfHappinessIcon or PH.HasTints(f) or PH.IsOwnPetFrame(f)) then PH:UpdateGroupFrame(f) end
             end
         end
     end
 end
 PH.GroupFramesChanged = GroupFramesChanged
 
--- Asks for the events while either group mode (party, raid) shows the face.
+local GROUP_DB_GETTERS = { "GetDB", "GetRaidDB" }
+
+-- Asks for the events while either group mode (party, raid) shows the face or
+-- colours by happiness.
 function PH:WantsGroup()
     if not DF.IS_FOREVER then return false end
-    for _, get in ipairs({ "GetDB", "GetRaidDB" }) do
+    for _, get in ipairs(GROUP_DB_GETTERS) do
         local db = DF[get] and DF[get](DF)
-        if db and db.petEnabled and db.petHappinessIconEnabled then return true end
+        if db and db.petEnabled and (db.petHappinessIconEnabled
+            or PH.WantsTints(db.petHappinessColorBorder, db.petHappinessColorName, db.petHealthColorMode)) then
+            return true
+        end
     end
     return false
 end
