@@ -2780,6 +2780,17 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
                 w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tooltip"], db, "happinessIconTooltip", changed), 30)
                 w.disableOn = off
                 w.tooltip = L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."]
+                local PH = DF.PetHappiness
+                if PH and PH.TrendOptions then
+                    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Loyalty Arrow"], PH.TrendOptions(), db,
+                        "happinessIconTrend", changed), 55)
+                    w.disableOn = off
+                    w.tooltip = L["A small arrow on the face's corner while your pet is losing (or gaining) loyalty."]
+                end
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide While Happy"], db, "happinessIconHideHappy",
+                    changed), 30)
+                w.disableOn = off
+                w.tooltip = L["Show the face only when your pet is content or unhappy. Test mode always shows it."]
             end
             Close(band)
         end

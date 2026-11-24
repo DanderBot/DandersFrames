@@ -3858,13 +3858,17 @@ L["Blessing of Wisdom"] = true
 L["Blessing of Kings"] = true
 L["A paladin is reminded about their own blessing, so several paladins each cover everyone. If you don't know the chosen blessing, Kings is used."] = true
 -- WoW Forever Pet Happiness (DandersFrames/Features/PetHappiness.lua, the unit frames pet page).
--- The tooltip lines are fallbacks for Blizzard's own global strings; L["Content"] is reused.
+-- The tooltip lines are fallbacks for Blizzard's own global strings; L["Content"], L["Both"] and L["Off"] are reused.
+L["A small arrow on the face's corner while your pet is losing (or gaining) loyalty."] = true
 L["Diet: %s"] = true
 L["Fish"] = true
 L["Gaining loyalty"] = true
 L["Happy"] = true
+L["Hide While Happy"] = true
 L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."] = true
 L["Losing loyalty"] = true
+L["Losing Only"] = true
+L["Loyalty Arrow"] = true
 L["Loyalty Level %d"] = true
 L["Meat"] = true
 L["Outside Bottom"] = true
@@ -3873,6 +3877,7 @@ L["Outside Right"] = true
 L["Outside Top"] = true
 L["Pet Happiness"] = true
 L["Pet is doing %d%% damage"] = true
+L["Show the face only when your pet is content or unhappy. Test mode always shows it."] = true
 L["Show Tooltip"] = true
 L["Show whether your hunter pet is happy, content or unhappy, beside the pet frame."] = true
 L["Training Points: %d"] = true

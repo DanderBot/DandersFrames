@@ -14,6 +14,9 @@ local addonName, DF = ...
 --                           else the old paper-doll texture cropped to the face
 --   PH:TooltipLines(mock)   the hover tooltip's lines (mock: test mode's sample)
 --   PH:ShowTooltip(owner, mock) / PH:HideTooltip()
+--   PH.Resolve(...)         what one icon shows: the face (or nil: hidden while
+--                           happy) and the trend badge's arrow
+--   PH.PaintBadge(icon, dir, size)  the loyalty arrow on the icon's corner
 --   PH:SetConsumer(key, on, fn)  a frame that shows it; fn() runs when the
 --                           answer changes. Events are registered only while
 --                           at least one consumer is on, on Forever, for a hunter.
@@ -24,6 +27,7 @@ local addonName, DF = ...
 
 local pairs, ipairs, type, select, tonumber, tostring, next = pairs, ipairs, type, select, tonumber, tostring, next
 local format = string.format
+local floor, max = math.floor, math.max
 local tconcat = table.concat
 
 local PH = {}
@@ -44,8 +48,10 @@ PH.TITLE_COLORS = {
     [2] = { 1, 0.75, 0.2 },
     [1] = { 0.95, 0.3, 0.3 },
 }
--- The test-mode sample: a happy pet gaining loyalty.
-PH.MOCK = { mood = 3, damage = 125, rate = 1, loyaltyLevel = 6, diet = { "Meat", "Fish" },
+-- The test-mode sample: an unhappy pet losing loyalty, the state the face and
+-- the trend badge exist to warn about, so test mode shows both whatever the
+-- badge's mode (Losing Only / Both) and whether Hide While Happy is on.
+PH.MOCK = { mood = 1, damage = 75, rate = -1, loyaltyLevel = 6, diet = { "Meat", "Fish" },
             trainingPoints = 120, xp = 1200, nextXP = 4800 }
 
 local function IsSecret(v)
@@ -356,6 +362,112 @@ function PH.SetMouse(icon, on)
 end
 
 -- ============================================================
+-- TREND BADGE AND HIDE WHILE HAPPY (shared by both sides)
+-- A small arrow on the face's bottom-right corner: down while the pet is losing
+-- loyalty, up while gaining (mode BOTH only; a happy pet gains nearly all the
+-- time, so an up arrow would show nearly always). The badge is a texture on the
+-- icon, so it hides with it: Hide While Happy hides both.
+-- Art: DandersFrames' own chevrons (shipped with the addon, so present on every
+-- client), Blizzard's old arrow buttons if a build refuses the file, tinted red
+-- (losing) / green (gaining) with a dark copy behind for contrast.
+-- ⚠ UNVERIFIED IN GAME on Forever: the look at 16px / 14px.
+-- ============================================================
+PH.TREND_MODES = { "LOSING", "BOTH", "OFF" }
+PH.TREND_DEFAULT = "LOSING"
+PH.BADGE_SCALE = 0.45            -- of the face's size
+PH.BADGE_ART = {
+    [-1] = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
+    [1] = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_less.png",
+}
+PH.BADGE_FALLBACK = { [-1] = "Interface\\Buttons\\Arrow-Down-Up", [1] = "Interface\\Buttons\\Arrow-Up-Up" }
+
+-- The Loyalty Arrow dropdown: raw keys stored, labels localised here.
+function PH.TrendOptions()
+    local L = DF.L
+    return { LOSING = L["Losing Only"], BOTH = L["Both"], OFF = L["Off"], _order = { "LOSING", "BOTH", "OFF" } }
+end
+
+-- The arrow for a loyalty rate under a mode: -1 down, 1 up, nil none.
+-- An unknown / missing mode reads as the default (Losing Only).
+function PH.TrendArrow(rate, mode)
+    if mode == "OFF" or type(rate) ~= "number" then return nil end
+    if rate < 0 then return -1 end
+    if rate > 0 and mode == "BOTH" then return 1 end
+    return nil
+end
+
+-- What one icon shows: the face's mood (nil = hidden) and the badge's arrow.
+-- Hide While Happy hides a happy face, badge and all; never in test mode
+-- (`preview`), so the icon can still be set up.
+function PH.Resolve(mood, rate, hideHappy, mode, preview)
+    if not mood then return nil, nil end
+    if hideHappy and mood == 3 and not preview then return nil, nil end
+    return mood, PH.TrendArrow(rate, mode)
+end
+
+local function SetBadgeFile(tex, dir)
+    local ok = tex:SetTexture(PH.BADGE_ART[dir])
+    if ok == false then ok = tex:SetTexture(PH.BADGE_FALLBACK[dir]) end
+    return ok ~= false
+end
+
+function PH.NewBadge(icon)
+    if icon.dfTrend then return icon.dfTrend end
+    local shadow = icon:CreateTexture(nil, "OVERLAY", nil, 6)
+    local b = icon:CreateTexture(nil, "OVERLAY", nil, 7)
+    b.shadow = shadow
+    shadow:Hide()
+    b:Hide()
+    icon.dfTrend = b
+    return b
+end
+
+-- Sized from the face; its centre a quarter in from the bottom-right corner,
+-- so it overhangs the face a little.
+function PH.LayoutBadge(b, icon, size)
+    size = tonumber(size) or 16
+    if b.dfSize == size then return end
+    b.dfSize = size
+    local s = max(6, floor(size * PH.BADGE_SCALE + 0.5))
+    local inset = floor(s / 4 + 0.5)
+    b:SetSize(s, s)
+    b:ClearAllPoints()
+    b:SetPoint("CENTER", icon, "BOTTOMRIGHT", -inset, inset)
+    b.shadow:SetSize(s, s)
+    b.shadow:ClearAllPoints()
+    b.shadow:SetPoint("CENTER", b, "CENTER", 1, -1)
+end
+
+-- dir: -1 / 1 / nil (hidden). Repaints the art only when the arrow changes.
+function PH.PaintBadge(icon, dir, size)
+    local b = icon.dfTrend
+    if not dir then
+        if b then
+            b.dfDir = nil
+            b:Hide()
+            b.shadow:Hide()
+        end
+        return
+    end
+    b = b or PH.NewBadge(icon)
+    PH.LayoutBadge(b, icon, size)
+    if b.dfDir ~= dir then
+        if not (SetBadgeFile(b, dir) and SetBadgeFile(b.shadow, dir)) then
+            b.dfDir = nil
+            b:Hide()
+            b.shadow:Hide()
+            return
+        end
+        local c = PH.TITLE_COLORS[dir < 0 and 1 or 3]
+        b:SetVertexColor(c[1], c[2], c[3], 1)
+        b.shadow:SetVertexColor(0, 0, 0, 0.9)
+        b.dfDir = dir
+    end
+    b.shadow:Show()
+    b:Show()
+end
+
+-- ============================================================
 -- GROUP PET FRAMES (Frames/Pets.lua)
 -- The face goes on the ONE group pet frame that shows your own pet: "pet" in a
 -- party, the raidpet<N> that is your pet in a raid or an arena. The API only
@@ -448,14 +560,19 @@ function PH:UpdateGroupFrame(frame)
     end
     icon = icon or PH.NewGroupIcon(frame)
     PH.LayoutGroupIcon(icon, frame, db)
-    local mood
+    local mood, rate
     if test then
         local data = frame.ownerFrame and DF.GetTestDataForFrame and DF:GetTestDataForFrame(frame.ownerFrame)
         mood = (data and data.petHappiness) or PH.MOCK.mood
+        rate = (data and data.petLoyaltyRate) or PH.MOCK.rate
     else
-        mood = (PH:Read())
+        local _
+        mood, _, rate = PH:Read()
     end
+    local dir
+    mood, dir = PH.Resolve(mood, rate, db.petHappinessIconHideHappy, db.petHappinessIconTrend, test)
     PH.PaintGroupIcon(icon, mood)
+    PH.PaintBadge(icon, mood and dir or nil, db.petHappinessIconSize or 14)
 end
 
 -- The live group pet frames that could be yours, repainted when the answer

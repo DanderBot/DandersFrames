@@ -565,6 +565,10 @@ local PER_UNIT = {
         happinessIconX = 2,
         happinessIconY = 0,
         happinessIconTooltip = true,
+        -- The loyalty arrow on the face's corner: "LOSING" / "BOTH" / "OFF".
+        happinessIconTrend = "LOSING",
+        -- Hide the face (and its arrow) while the pet is happy.
+        happinessIconHideHappy = false,
     },
     boss = {
         frameWidth = 180, frameHeight = 40,
