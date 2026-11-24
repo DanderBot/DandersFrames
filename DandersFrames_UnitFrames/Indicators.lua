@@ -384,8 +384,10 @@ function IN:Update(f)
     if icons.happiness then
         -- Only while the frame shows the pet itself (in a vehicle it shows you).
         local mood, rate
-        if IN:Enabled(db, "happiness") and unit == "pet" and exists then mood, rate = IN.HappinessMood() end
-        IN.PaintHappiness(icons.happiness, mood, rate, db, false)
+        local face, tints = IN:Enabled(db, "happiness"), IN.WantsTints(db)
+        if (face or tints) and unit == "pet" and exists then mood, rate = IN.HappinessMood() end
+        IN.PaintHappiness(icons.happiness, face and mood or nil, rate, db, false)
+        IN.HappinessTints(f, db, tints and mood or nil)
     end
 end
 
@@ -449,6 +451,7 @@ function IN:Preview(f)
         local mood = (data and data.petHappiness) or (PH and PH.MOCK.mood) or 1
         local rate = (data and data.petLoyaltyRate) or (PH and PH.MOCK.rate) or -1
         IN.PaintHappiness(icons.happiness, IN:Enabled(db, "happiness") and mood or nil, rate, db, true)
+        IN.HappinessTints(f, db, IN.WantsTints(db) and mood or nil)
     end
 end
 
@@ -517,13 +520,65 @@ function IN.PaintHappiness(icon, mood, rate, db, preview)
     icon:Show()
 end
 
--- The live pet frame asks the core for its events while the icon is on.
+-- The live pet frame asks the core for its events while the icon is on or a
+-- target is coloured by happiness.
 function IN.WatchHappiness(f, db)
     local PH = DF.PetHappiness
     if not PH or f.dfUFPreview then return end
-    PH:SetConsumer("uf_pet", IN:Enabled(db, "happiness"), function()
+    PH:SetConsumer("uf_pet", IN:Enabled(db, "happiness") or IN.WantsTints(db), function()
         if f:IsVisible() then IN:Update(f) end
     end)
+end
+
+-- ============================================================
+-- PET HAPPINESS COLOURS (WoW Forever only)
+-- The pet frame's border, name and health bar in the mood's colour (the shared
+-- core's COLOUR BY HAPPINESS: one set of colours per profile, on the Colors
+-- page). Settings: happinessColorBorder / happinessColorName /
+-- happinessColorOnlyUnhappy, and the Health page's healthColorMode = "HAPPINESS".
+-- The tints are worked out here when the answer changes and stamped on the
+-- frame; the painters read the stamp:
+--   health  DF:UpdateHealthBarAppearance's HAPPINESS branch (else class colour)
+--   border  the frame border's own SetColor; DF:ApplyFrameBorder repaints the
+--           normal border and lays a standing tint back over it
+--   name    the Text Designer's name elements (Render.lua updateOne)
+-- ============================================================
+function IN.WantsTints(db)
+    local PH = DF.PetHappiness
+    return PH and PH.WantsTints and db
+        and PH.WantsTints(db.happinessColorBorder, db.happinessColorName, db.healthColorMode) or false
+end
+
+IN.HAPPINESS_SIDE = {
+    health = function(f)
+        if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(f) end
+    end,
+    border = function(f, c)
+        if not f.border then return end
+        if c then
+            local db = K.DB(f)
+            DF.PetHappiness.PaintBorder(f.border, c, db and db.frameBorderColor)
+        elseif DF.ApplyFrameBorder then
+            DF:ApplyFrameBorder(f, K.DB(f))
+        end
+    end,
+    name = function(f)
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(f, "name") end
+    end,
+    refresh = function(f)
+        if f.dfUFPreview then IN:Preview(f) else IN:Update(f) end
+    end,
+}
+
+-- mood: the pet's (nil: no pet, a vehicle, or nothing asks for it).
+function IN.HappinessTints(f, db, mood)
+    local PH = DF.PetHappiness
+    if not (PH and PH.SetTints) then return end
+    local tint = db and PH.Tint(mood, db.happinessColorOnlyUnhappy)
+    local health = (tint and db.healthColorMode == "HAPPINESS") and tint or nil
+    local border = (tint and db.happinessColorBorder) and tint or nil
+    local name = (tint and db.happinessColorName) and tint or nil
+    PH.SetTints(f, IN.HAPPINESS_SIDE, health, border, name)
 end
 
 -- ============================================================

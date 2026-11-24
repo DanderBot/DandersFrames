@@ -2429,6 +2429,11 @@ DF.PartyDefaults = {
     petHealthY = 0,
     -- WoW Forever only: your hunter pet's happiness face on the group pet frame
     -- (Features/PetHappiness.lua, GROUP PET FRAMES), outside its right edge.
+    -- Colour by happiness (the colours: DF.db.petHappinessColors, the Colors page).
+    -- The health bar's is petHealthColorMode = "HAPPINESS".
+    petHappinessColorBorder = false,
+    petHappinessColorName = false,
+    petHappinessColorOnlyUnhappy = true,    -- a happy pet keeps its normal colours
     petHappinessIconAnchor = "OUTSIDE_RIGHT",
     petHappinessIconEnabled = true,
     petHappinessIconHideHappy = false,      -- hide the face (and its arrow) while happy

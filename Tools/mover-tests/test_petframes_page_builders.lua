@@ -154,7 +154,7 @@ do
           "gate: a pinned pane reflows itself, a page widget (box or card) re-lays the page, nothing rebuilds")
     local uses = 0
     for _ in PAGE:gmatch("GateRefresh%(tools2%)") do uses = uses + 1 end
-    eq(uses, 8, "gate: seven callbacks go through it (the pet aura rows' and Pet Happiness's pinned Show ticks among them), plus its own declaration")
+    eq(uses, 9, "gate: eight callbacks go through it (the pet aura rows' and Pet Happiness's pinned Show ticks and its colour switches among them), plus its own declaration")
     local rebuilds = 0
     for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
     eq(rebuilds, 1, "gate: one rebuild on the page -- the layout dropdown, which changes which cards exist")
@@ -335,7 +335,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Settings | Layout Mode | Group Settings | Size | Frame Style | Border | Health Bar | Pet Happiness | Position | Name Text | Health Text",
+       "Settings | Layout Mode | Group Settings | Size | Frame Style | Border | Health Bar | Pet Happiness | Color by Pet Happiness | Position | Name Text | Health Text",
        "order: the cards open in the order they stack -- Name Text after Position, so the Text cards follow Layout in column 1")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end

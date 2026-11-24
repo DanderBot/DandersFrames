@@ -569,6 +569,12 @@ local PER_UNIT = {
         happinessIconTrend = "LOSING",
         -- Hide the face (and its arrow) while the pet is happy.
         happinessIconHideHappy = false,
+        -- Colour the border and the name by happiness (the colours: DF.db.petHappinessColors,
+        -- the Colors page); the health bar's is healthColorMode = "HAPPINESS". Only When
+        -- Not Happy: a happy pet keeps its normal colours.
+        happinessColorBorder = false,
+        happinessColorName = false,
+        happinessColorOnlyUnhappy = true,
     },
     boss = {
         frameWidth = 180, frameHeight = 40,

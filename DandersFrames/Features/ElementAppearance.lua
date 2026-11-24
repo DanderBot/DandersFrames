@@ -511,6 +511,14 @@ function DF:UpdateHealthBarAppearance(frame)
             -- Standalone frames' reaction / tapped colours (Frames/Colors.lua), the
             -- same answer ApplyHealthColors paints, so the two appliers agree.
             tex:SetVertexColor(DF:GetReactionHealthColor(unit, colorMode, frame))
+        elseif colorMode == "HAPPINESS" then
+            -- WoW Forever, the unit frames pet: Pet Happiness. The tint the happiness
+            -- side stamped (DandersFrames_UnitFrames/Indicators.lua, PET HAPPINESS
+            -- COLOURS); none stamped -- a happy pet under Only When Not Happy, a
+            -- vehicle, not Forever -- is the fixed fallback, the class colour.
+            local c = frame.dfHappinessHealth
+            if not c then c = GetClassColor(frame) end
+            tex:SetVertexColor(c.r, c.g, c.b)
         else
             -- Default fallback
             tex:SetVertexColor(0, 0.8, 0)

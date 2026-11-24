@@ -360,7 +360,7 @@ local pages = options_file_source("UnitFrames/Pages.lua")
 check(pages:find('card = "pet_happiness", prefix = "happinessIcon"', 1, true), "a Pet Happiness card")
 check(pages:find("forever = true", 1, true), "...Forever only")
 check(pages:find('(DF.IS_FOREVER or not c.forever)', 1, true), "...skipped off Forever")
-check(pages:find('"classBorder", "happinessIcon" }', 1, true), "the page's keys include happinessIcon (links, reset)")
+check(pages:find('"classBorder", "happinessIcon", "happinessColor" }', 1, true), "the page's keys include happinessIcon and happinessColor (links, reset)")
 check(pages:find('"happinessIconTooltip"', 1, true), "a Show Tooltip control")
 check(pages:find("UFO.AddForeverPetIcons(DF.UnitFramePageData)", 1, true), "the pet gets the page on Forever")
 -- The page-data patch itself.
@@ -701,6 +701,273 @@ for _, k in ipairs({ "Loyalty Arrow", "Losing Only", "Hide While Happy", "Both",
                      "Show the face only when your pet is content or unhappy. Test mode always shows it." }) do
     check(enUS3:find('L["' .. k .. '"] = true', 1, true), "enUS: " .. k)
 end
+eq(#DF.errs, 0, "no element errored")
+
+-- ============================================================
+-- PHASE 4: colour by happiness (border, name, health bar) on both sides.
+-- ============================================================
+print("-- Phase 4: the colours (core)")
+do
+    local spec = DF.registered.petHappinessColors
+    check(spec ~= nil, "Forever: petHappinessColors is a registered profile-root table")
+    eq(spec and spec.exportCategory, "colors", "...it travels with the Colors export category")
+    eq(spec and spec.defaults.unhappy.r, 0.95, "...defaults: unhappy red")
+    eq(spec and spec.defaults.content.g, 0.75, "...content amber")
+    eq(spec and spec.defaults.happy.g, 0.85, "...happy green")
+    local R = NewDF(false)
+    eq(R.registered.petHappinessColors, nil, "retail: not registered")
+end
+local savedDB = DF.db
+DF.db.petHappinessColors = { happy = { r = 0, g = 1, b = 0 }, content = { r = 1, g = 1, b = 0 },
+                             unhappy = { r = 1, g = 0, b = 0 } }
+local COL = DF.db.petHappinessColors
+eq(PH.Color(1), COL.unhappy, "the profile's unhappy colour")
+eq(PH.Tint(1, true), COL.unhappy, "unhappy: tinted")
+eq(PH.Tint(2, true), COL.content, "content: tinted")
+eq(PH.Tint(3, true), nil, "happy, Only When Not Happy: not tinted")
+eq(PH.Tint(3, nil), nil, "...nil counts as on (the default)")
+eq(PH.Tint(3, false), COL.happy, "happy, Only When Not Happy off: the happy colour")
+eq(PH.Tint(nil, false), nil, "no pet: never tinted")
+COL.content = "junk"
+eq(PH.Color(2).r, PH.COLOR_DEFAULTS.content.r, "an unusable stored colour: the default")
+COL.content = { r = 1, g = 1, b = 0 }
+eq(PH.WantsTints(false, false, "HEALTH"), false, "nothing coloured: no tints wanted")
+eq(PH.WantsTints(false, false, "HAPPINESS"), true, "the health mode alone wants them")
+eq(PH.WantsTints(true, false, "CLASS"), true, "the border alone wants them")
+
+print("-- Phase 4: unit frames")
+eq(pdb.happinessColorBorder, false, "UF default: border off")
+eq(pdb.happinessColorName, false, "UF default: name off")
+eq(pdb.happinessColorOnlyUnhappy, true, "UF default: Only When Not Happy on")
+local healthPaints, tdHints, borderApplies = 0, {}, 0
+function DF:UpdateHealthBarAppearance() healthPaints = healthPaints + 1 end
+function DF:UpdateTextDesigner(f, hint) tdHints[#tdHints + 1] = hint end
+function DF:ApplyFrameBorder() borderApplies = borderApplies + 1 end
+local function Border()
+    local b = {}
+    function b:SetColor(r, g, b2, a) self.c = { r, g, b2, a } end
+    return b
+end
+PET.border = Border()
+pdb.frameBorderColor = { r = 0, g = 0, b = 0, a = 0.5 }
+mood, rate = 1, -1
+IN:Update(PET)
+eq(PET.dfHappinessBorder, nil, "every target off: nothing stamped")
+eq(PET.border.c, nil, "...nothing painted")
+eq(healthPaints + #tdHints + borderApplies, 0, "...no painter run")
+pdb.happinessIconEnabled = false
+pdb.happinessColorBorder = true
+IN:Layout(PET)
+check(DF.PetHappiness.consumers.uf_pet ~= nil, "the face off, the border coloured: the events are still asked for")
+eq(PET.dfHappinessBorder, COL.unhappy, "unhappy: the border stamped red")
+eq(PET.border.c and (PET.border.c[1] .. "," .. PET.border.c[2] .. "," .. PET.border.c[4]), "1,0,0.5",
+   "...painted through the border's SetColor, with the frame border's own alpha")
+PET.border.c = nil
+IN:Update(PET)
+eq(PET.border.c, nil, "the same answer: not repainted")
+mood, rate = 3, 1
+IN:Update(PET)
+eq(PET.dfHappinessBorder, nil, "happy, Only When Not Happy: the stamp goes")
+eq(borderApplies, 1, "...and the normal border is put back")
+pdb.happinessColorOnlyUnhappy = false
+IN:Update(PET)
+eq(PET.dfHappinessBorder, COL.happy, "Only When Not Happy off: the happy colour")
+pdb.happinessColorOnlyUnhappy = true
+mood = 2
+PET.unit = "player"            -- a vehicle
+IN:Update(PET)
+eq(PET.dfHappinessBorder, nil, "in a vehicle: no tint")
+PET.unit = "pet"
+IN:Update(PET)
+eq(PET.dfHappinessBorder, COL.content, "back from the vehicle: content amber")
+pdb.happinessColorName = true
+IN:Update(PET)
+eq(PET.dfHappinessName, COL.content, "name: stamped")
+eq(tdHints[#tdHints], "name", "...the Text Designer's name elements re-render")
+local hp = healthPaints
+pdb.healthColorMode = "HAPPINESS"
+IN:Update(PET)
+eq(PET.dfHappinessHealth, COL.content, "health mode Pet Happiness: stamped")
+eq(healthPaints, hp + 1, "...the health bar repainted")
+-- A colour edited in place on the Colors page: the stamp is the same table,
+-- so the edit marks it stale and everything is repainted.
+COL.content.r = 0.5
+local before = healthPaints
+PET.border.c = nil
+PH:ColorsChanged()
+eq(PET.border.c and PET.border.c[1], 0.5, "a colour edit: the border repainted in the new colour")
+eq(healthPaints, before + 1, "...the health bar too")
+eq(PET.dfHappinessHealth, COL.content, "...the stamps hold the colour again")
+-- The answer changes: the event path repaints the tints.
+mood = 1
+PH:OnEvent("UNIT_HAPPINESS")
+eq(PET.dfHappinessBorder, COL.unhappy, "UNIT_HAPPINESS: the tints follow the new mood")
+-- Off again: everything back to normal.
+pdb.happinessColorBorder, pdb.happinessColorName, pdb.healthColorMode = false, false, "CLASS"
+IN:Update(PET)
+check(PET.dfHappinessBorder == nil and PET.dfHappinessName == nil and PET.dfHappinessHealth == nil,
+      "every target off: the stamps go")
+pdb.happinessIconEnabled = nil
+IN:Layout(PET)
+-- Test mode: the sample (unhappy) shows the tint without a pet.
+mood = nil
+local PV4 = Owner("pet")
+PV4.dfUFPreview = true
+PV4.border = Border()
+IN:Attach(PV4)
+pdb.happinessColorBorder = true
+IN:Preview(PV4)
+eq(PV4.dfHappinessBorder, COL.unhappy, "test mode: the unhappy sample tints the border")
+pdb.happinessColorBorder = false
+IN:Preview(PV4)
+eq(PV4.dfHappinessBorder, nil, "...off: untinted")
+mood, rate = 3, 1
+IN:Update(PET)
+
+print("-- Phase 4: group pet frames")
+for _, kv in ipairs({ { "petHappinessColorBorder", "false" }, { "petHappinessColorName", "false" },
+                      { "petHappinessColorOnlyUnhappy", "true" } }) do
+    check(cfg:find("    " .. kv[1] .. " = " .. kv[2] .. ",", 1, true), "PartyDefaults: " .. kv[1] .. " = " .. kv[2])
+    check(exportSrc:find('"' .. kv[1] .. '",', 1, true), "export: " .. kv[1])
+end
+local petHealthCalls = {}
+function DF:ApplyPetHealthColor(f, db, owner, unit, test)
+    petHealthCalls[#petHealthCalls + 1] = { f = f, owner = owner, unit = unit, test = test }
+end
+local applies = 0
+DF.Border = { Apply = function() applies = applies + 1 end, BuildSpec = function() return {} end }
+local function NameText(f)
+    local fs = Make("FontString", f)
+    function fs:SetTextColor(r, g, b) self.c = { r, g, b } end
+    return fs
+end
+own.border = Border()
+own.healthBar = Make("StatusBar", own)
+own.nameText = NameText(own)
+gdb.petBorderColor = { r = 0, g = 0, b = 0, a = 1 }
+gdb.petNameColor = { r = 0.9, g = 0.9, b = 0.9 }
+mood, rate = 1, -1
+GP:UpdateGroupFrame(own)
+eq(own.dfHappinessBorder, nil, "group, every target off: nothing stamped")
+eq(own.nameText.c, nil, "...the name untouched")
+gdb.petHappinessIconEnabled, rdb.petHappinessIconEnabled = false, false
+gdb.petHappinessColorBorder, gdb.petHappinessColorName = true, true
+GP:UpdateGroupFrame(own)
+check(GP.consumers.group_pet ~= nil, "group: the face off, a colour on: the events are still asked for")
+eq(own.dfHappinessBorder, COL.unhappy, "group: the border stamped")
+eq(own.border.c and own.border.c[1], 1, "...painted red")
+eq(own.nameText.c and own.nameText.c[2], 0, "...the name red")
+check(not own.dfHappinessIcon:IsShown(), "...the face stays hidden")
+gdb.petHealthColorMode = "HAPPINESS"
+GP:UpdateGroupFrame(own)
+eq(own.dfHappinessHealth, COL.unhappy, "group health mode Pet Happiness: stamped")
+local lastHealth = petHealthCalls[#petHealthCalls]
+eq(lastHealth and lastHealth.owner, "player", "...repainted through ApplyPetHealthColor, owner = you")
+mood, rate = 3, 1
+PH:OnEvent("UNIT_HAPPINESS")
+eq(own.dfHappinessBorder, nil, "the event, happy: no tint")
+eq(own.nameText.c and own.nameText.c[1], 0.9, "...the name back to its own colour")
+check(applies > 0, "...the normal border put back")
+eq(own.dfHappinessHealth, nil, "...the health stamp gone (the painter falls back to the health colour)")
+-- Not yours: never tinted.
+local p1 = PetFrame("partypet1")
+p1.border = Border()
+mood = 1
+GP:UpdateGroupFrame(p1)
+eq(p1.dfHappinessBorder, nil, "a party member's pet: never tinted")
+eq(p1.border.c, nil, "...its border untouched")
+-- A raid pet frame that stops being yours loses its tint on the next event.
+raidMine.border = Border()
+raidMine.nameText = NameText(raidMine)
+rdb.petHappinessColorBorder = true            -- a raid pet frame reads the raid settings
+PH:OnEvent("UNIT_HAPPINESS")
+eq(raidMine.dfHappinessBorder, COL.unhappy, "your raid pet frame: tinted")
+yours.raidpet7 = nil
+PH:Notify(true)
+eq(raidMine.dfHappinessBorder, nil, "the roster moved, not yours now: the tint goes")
+yours.raidpet7 = true
+rdb.petHappinessColorBorder = nil
+-- Test mode: the player's slot shows the sample's tint.
+mood = nil
+local t4 = PetFrame("pet", false, true)
+t4.border = Border()
+t4.healthBar = Make("StatusBar", t4)
+GP:UpdateGroupFrame(t4)
+eq(t4.dfHappinessBorder, COL.unhappy, "group test mode: the unhappy sample tints the player's slot")
+local t4h = petHealthCalls[#petHealthCalls]
+check(t4h and t4h.f == t4 and type(t4h.test) == "table", "...health repainted with the preview's sample data")
+gdb.petHappinessColorBorder, gdb.petHappinessColorName, gdb.petHealthColorMode = false, false, "HEALTH"
+gdb.petHappinessIconEnabled, rdb.petHappinessIconEnabled = true, true
+mood, rate = 3, 1
+GP:UpdateGroupFrame(own)
+
+print("-- Phase 4: the group health painter (Pets.lua)")
+do
+    local src = df_file_source("Frames/Pets.lua"):gsub("\r\n", "\n")
+    local a = src:find("local PET_HEALTH_STOPS", 1, true)
+    local b = src:find("-- Get or create a health gradient curve", 1, true)
+    check(a and b, "found ApplyPetHealthColor")
+    local H = {}
+    function H:GetClassColor() return { r = 0.1, g = 0.2, b = 0.3 } end
+    function H:GetPetHealthGradientCurve() return nil end
+    local fn = assert(loadstring("local DF, UnitClass, pcall, UnitHealthPercent = ... " .. src:sub(a, b - 1)))
+    fn(H, function() return "Hunter", "HUNTER" end, pcall, nil)
+    local bar = Make("StatusBar")
+    function bar:SetStatusBarColor(r, g, b2) self.c = { r, g, b2 } end
+    bar.tex = Make("Texture", bar)
+    function bar:GetStatusBarTexture() return self.tex end
+    local pf = { healthBar = bar }
+    H:ApplyPetHealthColor(pf, { petHealthColorMode = "HAPPINESS" }, "player", "pet", { pct = 1 })
+    eq(bar.tex._vertex and bar.tex._vertex.g, 0.8, "HAPPINESS, no stamp: the health gradient (the fixed fallback)")
+    pf.dfHappinessHealth = { r = 1, g = 0, b = 0 }
+    H:ApplyPetHealthColor(pf, { petHealthColorMode = "HAPPINESS" }, "player", "pet", { pct = 1 })
+    eq(bar.c and (bar.c[1] .. "," .. bar.c[2]), "1,0", "HAPPINESS, stamped: the tint")
+    H:ApplyPetHealthColor(pf, { petHealthColorMode = "CLASS" }, "player", "pet")
+    eq(bar.c and bar.c[3], 0.3, "another mode ignores a stamp")
+end
+
+print("-- Phase 4: painters (source)")
+local ea = df_file_source("Features/ElementAppearance.lua")
+check(ea:find('elseif colorMode == "HAPPINESS" then', 1, true), "UF health: a HAPPINESS branch")
+check(ea:find("if not c then c = GetClassColor(frame) end", 1, true), "...falling back to class")
+local colorsSrc = df_file_source("Frames/Colors.lua")
+check(colorsSrc:find('elseif mode == "CLASS" or mode == "HAPPINESS" then', 1, true), "ApplyHealthColors: HAPPINESS rides the class branch")
+local create = df_file_source("Frames/Create.lua")
+check(create:find("if frame.dfHappinessBorder and DF.PetHappiness then", 1, true), "ApplyFrameBorder: a standing tint is laid back")
+local render = df_file_source("TextDesigner/Render.lua")
+check(render:find('elseif cat == "name" and frame.dfHappinessName then', 1, true), "Text Designer: the name tint, under an AD override")
+local pets4 = df_file_source("Frames/Pets.lua")
+check(pets4:find("frame.dfHappinessName or db.petNameColor", 1, true), "Pets.lua: the styled name keeps a standing tint")
+check(pets4:find("DF.PetHappiness.PaintBorder(frame.border, frame.dfHappinessBorder, db.petBorderColor)", 1, true),
+      "Pets.lua: the styled border keeps a standing tint")
+
+print("-- Phase 4: settings (source)")
+local auras4 = options_file_source("GUI/Pages/Auras.lua")
+check(auras4:find('OpenSection(L["Pet Happiness"], "colors_pet_happiness", 1', 1, true), "Colors page: a Pet Happiness card")
+check(auras4:find("local PH = DF.IS_FOREVER and DF.PetHappiness", 1, true), "...Forever only")
+check(auras4:find("PH:ColorsChanged()", 1, true), "...an edit repaints the tinted frames")
+local pages4 = options_file_source("UnitFrames/Pages.lua")
+check(pages4:find('section = L["Pet Happiness"]', 1, true), "the link lands on that card")
+check(pages4:find('page    = "display_classcolors"', 1, true), "...on the Colors page")
+check(pages4:find('pg.extraHealthColorModes.HAPPINESS = L["Pet Happiness"]', 1, true), "UF Health page: the Pet Happiness mode")
+check(pages4:find('if u == "pet" and DF.IS_FOREVER then', 1, true), "...pet on Forever only")
+check(pages4:find("UFO.BuildHappinessColorsCard(self, db, Open, Close, changed, col)", 1, true), "UF: a Color by Pet Happiness card")
+check(not pages4:find("CreateColorPicker", pages4:find("function UFO.HappinessColorsText", 1, true), true)
+      or pages4:find("CreateColorPicker", pages4:find("function UFO.HappinessColorsText", 1, true), true)
+         > pages4:find("function UFO.BuildUnitIconsPage", 1, true),
+      "UF: the card has no colour pickers of its own")
+local opts4 = options_file_source("GUI/Pages/Options.lua")
+check(opts4:find('if DF.IS_FOREVER then healthColorValues.HAPPINESS = L["Pet Happiness"] end', 1, true), "group: the Pet Happiness health mode, Forever only")
+check(opts4:find('OpenSection(L["Color by Pet Happiness"], "pets_happiness_colors", 2', 1, true), "group: a Color by Pet Happiness card")
+check(opts4:find("UFO.AddHappinessColorControls(group, parent, db, colorKeys", 1, true), "...the shared controls (and link)")
+local enUS4 = df_file_source("Locales/enUS.lua")
+for _, k in ipairs({ "A happy pet keeps its normal colors.", "Color by Pet Happiness", "Only When Not Happy",
+                     "Set the Pet Happiness colors on the %s.",
+                     "The colors your hunter pet's frame takes when it is happy, content or unhappy, wherever Color by Pet Happiness is on.",
+                     "To color the health bar too, pick Pet Happiness as its color." }) do
+    check(enUS4:find('L["' .. k .. '"] = true', 1, true), "enUS: " .. k)
+end
+DF.db = savedDB
 eq(#DF.errs, 0, "no element errored")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

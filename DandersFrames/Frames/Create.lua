@@ -86,6 +86,12 @@ function DF:ApplyFrameBorder(frame, db)
         unit  = frame.unit,
         frame = frame,
     }))
+    -- WoW Forever, the unit frames pet: a standing Pet Happiness tint goes back
+    -- over the border just repainted (DandersFrames_UnitFrames/Indicators.lua).
+    -- nil on every other frame.
+    if frame.dfHappinessBorder and DF.PetHappiness then
+        DF.PetHappiness.PaintBorder(frame.border, frame.dfHappinessBorder, db.frameBorderColor)
+    end
 end
 
 local BINDING_SHORT_NAMES = {
