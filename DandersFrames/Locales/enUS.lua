@@ -3083,6 +3083,14 @@ L["When a player is in a separate group from you, such as a dungeon finder group
 L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: bars (Absorbs, Heal Prediction, Health Bar). Alphabetical
+-- within the block.
+-- ============================================================
+L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."] = true
+L["How the reduced section's colour mixes with what is under it. Blend draws the colour as picked, Add brightens it into a glow, and Modulate darkens what is underneath."] = true
+L["Shortens the health bar so it stops where the reduced section begins, instead of drawing the reduced section over the end of it."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,
