@@ -3071,6 +3071,18 @@ L["The order the bars appear in. Newest First puts the latest cast first, Oldest
 L["The widest this text can be before it is cut short. 0 uses the full width of the bar."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: display and indicators (Fading, Tooltips, Highlights,
+-- Icons). Alphabetical within the block.
+-- ============================================================
+L["Brings a faded frame back to full view while that player has a debuff you can dispel, so the fade never hides it. Only works while the Dispel Overlay is turned on."] = true
+L["Fades each part of an out-of-range frame by its own amount instead of the whole frame at once. Useful for keeping names readable while the health bar dims."] = true
+L["How a player with threat is shown. Health Bar Color tints their health bar by threat level instead of drawing a border or glow, and Hidden turns it off."] = true
+L["How long the ready check result stays on the frames after the check ends. 0 clears it as soon as the check finishes."] = true
+L["Used when an enemy is attacking the player but someone else has more threat on it, so it may soon switch targets."] = true
+L["When a player is in a separate group from you, such as a dungeon finder group, shows the dungeon finder eye instead of the usual phased icon."] = true
+L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,

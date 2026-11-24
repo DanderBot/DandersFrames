@@ -194,7 +194,7 @@ do
     -- tick's callback still reflows whatever it is built into.
     check(element:find("if not tools2.hoistToggle then", 1, true) ~= nil,
           "element alpha: the in-body switch is skipped when the header carries it")
-    local tick = element:match('CreateCheckbox%(parent, L%["Enable Element%-Specific Alpha"%].-end%), 30%)')
+    local tick = element:match('CreateCheckbox%(parent, L%["Enable Element%-Specific Alpha"%].-end%), L%[".-"%]%), 30%)')
     check(tick ~= nil and tick:find("tools2.refreshStates()", 1, true) ~= nil,
           "element alpha: ...and it reflows through tools2")
     check(range:find("hoistToggle", 1, true) == nil and range:find("disableChildrenOn", 1, true) == nil,
