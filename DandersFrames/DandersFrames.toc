@@ -194,6 +194,8 @@ Features\Nicknames.lua
 Features\NicknamesComm.lua
 Features\PinnedFrames.lua
 Features\FlatRaidFrames.lua
+# WoW Forever: the hunter pet's happiness (unit frames pet icon)
+Features\PetHappiness.lua
 
 # Debug (Profiler.lua is loaded earlier so its SetScript hook is in place)
 # TEMPORARY: wrong-unit / stuck-hidden scanner. Remove with the file.

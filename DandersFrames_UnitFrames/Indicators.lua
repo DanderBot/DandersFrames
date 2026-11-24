@@ -48,9 +48,12 @@ IN.ICONS = {
     resting = { player = true },
     pvp = { player = true, target = true, focus = true },
     classification = { target = true, focus = true, boss = true },
+    -- WoW Forever only: the hunter pet's happiness face (DF.PetHappiness).
+    happiness = DF.IS_FOREVER and { pet = true } or nil,
 }
 -- db key prefix per icon.
-IN.PREFIX = { resting = "restingIcon", pvp = "pvpIcon", classification = "classification" }
+IN.PREFIX = { resting = "restingIcon", pvp = "pvpIcon", classification = "classification",
+              happiness = "happinessIcon" }
 -- restingIconSize that draws the ZZZ at the party player frame's scale.
 IN.RESTING_BASE_SIZE = 16
 
@@ -98,6 +101,8 @@ function IN:Attach(f)
                         if db then ind:SetGlowRects(IN.GlowRects(f, db)) end
                     end)
                 end
+            elseif key == "happiness" then
+                icons[key] = IN.NewHappinessIcon(host, f)
             else
                 icons[key] = NewIcon(host)
             end
@@ -242,13 +247,18 @@ function IN:Layout(f)
                 icon:SetSize(size, size)
             end
             icon:ClearAllPoints()
-            local point = K.Point(db[pre .. "Anchor"], "TOPRIGHT")
-            icon:SetPoint(point, f, point, tonumber(db[pre .. "X"]) or 0, tonumber(db[pre .. "Y"]) or 0)
+            if key == "happiness" then
+                IN.PlaceHappiness(icon, f, db)
+            else
+                local point = K.Point(db[pre .. "Anchor"], "TOPRIGHT")
+                icon:SetPoint(point, f, point, tonumber(db[pre .. "X"]) or 0, tonumber(db[pre .. "Y"]) or 0)
+            end
             if key == "classification" then
                 K.Font(icon.text, db.statusIconFont, size, "OUTLINE", { r = 1, g = 0.82, b = 0 })
             end
         end
     end
+    if icons.happiness then IN.WatchHappiness(f, db) end
     if not f.dfUFPreview then IN:Update(f) end
 end
 
@@ -371,6 +381,11 @@ function IN:Update(f)
         local c = exists and IN:Classification(unit) or nil
         IN.PaintDecorations(icons, db, c)
     end
+    if icons.happiness then
+        -- Only while the frame shows the pet itself (in a vehicle it shows you).
+        local mood = (IN:Enabled(db, "happiness") and unit == "pet" and exists) and IN.HappinessMood() or nil
+        IN.PaintHappiness(icons.happiness, mood)
+    end
 end
 
 function IN:Refresh(f)
@@ -425,6 +440,103 @@ function IN:Preview(f)
         if data then c = data.classification end
         IN.PaintDecorations(icons, db, c)
     end
+    if icons.happiness then
+        -- The sample: a happy pet, whatever your class, so it can be set up
+        -- before you have one.
+        local data = f.dfTestData
+        local mood = (data and data.petHappiness) or (DF.PetHappiness and DF.PetHappiness.MOCK.mood) or 3
+        IN.PaintHappiness(icons.happiness, IN:Enabled(db, "happiness") and mood or nil)
+    end
+end
+
+-- ============================================================
+-- PET HAPPINESS (WoW Forever only)
+-- Blizzard's happy / content / unhappy face for your hunter pet, beside the pet
+-- frame (outside its right edge by default). DandersFrames' shared core
+-- (Features/PetHappiness.lua) reads the answer, owns the events and builds the
+-- hover tooltip; this side places and paints the icon.
+-- Position: one of the nine points inside the frame, or OUTSIDE_<side>: the
+-- icon's facing edge on the frame's <side> edge, centred along it.
+-- ============================================================
+IN.HAPPINESS_OUTSIDE = {
+    OUTSIDE_RIGHT = { "LEFT", "RIGHT" },
+    OUTSIDE_LEFT = { "RIGHT", "LEFT" },
+    OUTSIDE_TOP = { "BOTTOM", "TOP" },
+    OUTSIDE_BOTTOM = { "TOP", "BOTTOM" },
+}
+
+function IN.PlaceHappiness(icon, f, db)
+    local anchor = db and db.happinessIconAnchor
+    local x, y = tonumber(db and db.happinessIconX) or 0, tonumber(db and db.happinessIconY) or 0
+    local out = IN.HAPPINESS_OUTSIDE[anchor]
+    if out then
+        icon:SetPoint(out[1], f, out[2], x, y)
+    else
+        local point = K.Point(anchor, "RIGHT")
+        icon:SetPoint(point, f, point, x, y)
+    end
+    -- Hover shows the tooltip; clicks never stop at the icon.
+    IN.SetHappinessMouse(icon, not (db and db.happinessIconTooltip == false))
+end
+
+function IN.SetHappinessMouse(icon, on)
+    if icon.dfMouseOn == on then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    icon.dfMouseOn = on
+    if icon.EnableMouseMotion then
+        icon:EnableMouseMotion(on)
+    elseif icon.SetMouseMotionEnabled then
+        icon:SetMouseMotionEnabled(on)
+    end
+    if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(false) end
+end
+
+function IN.NewHappinessIcon(host, f)
+    local icon = NewIcon(host)
+    icon:SetScript("OnEnter", function(self)
+        local PH = DF.PetHappiness
+        local db = K.DB(f)
+        if not PH or (db and db.happinessIconTooltip == false) then return end
+        PH:ShowTooltip(self, f.dfUFPreview and true or false)
+    end)
+    icon:SetScript("OnLeave", function()
+        local PH = DF.PetHappiness
+        if PH then PH:HideTooltip() end
+    end)
+    return icon
+end
+
+-- The pet's mood (1..3), or nil: no pet, not a hunter pet, or unreadable.
+function IN.HappinessMood()
+    local PH = DF.PetHappiness
+    if not PH then return nil end
+    return (PH:Read())
+end
+
+-- Paints only on a change of mood.
+function IN.PaintHappiness(icon, mood)
+    if not mood then
+        icon.dfMood = nil
+        icon:Hide()
+        return
+    end
+    if icon.dfMood ~= mood then
+        local PH = DF.PetHappiness
+        if not (PH and PH:SetArt(icon.tex, mood)) then icon:Hide(); return end
+        icon.dfMood = mood
+    end
+    icon.text:Hide()
+    icon.tex:Show()
+    icon:Show()
+end
+
+-- The live pet frame asks the core for its events while the icon is on.
+function IN.WatchHappiness(f, db)
+    local PH = DF.PetHappiness
+    if not PH or f.dfUFPreview then return end
+    PH:SetConsumer("uf_pet", IN:Enabled(db, "happiness"), function()
+        if f:IsVisible() then IN:Update(f) end
+    end)
 end
 
 -- ============================================================

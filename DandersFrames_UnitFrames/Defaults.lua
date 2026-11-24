@@ -557,6 +557,14 @@ local PER_UNIT = {
         -- player's bottom, its right edge 11px left of where Player's debuff row
         -- (five 22px icons from the player's right edge) ends.
         position = { point = "CENTER", x = -365, y = -242 },
+        -- WoW Forever only: the hunter pet's happiness face (Indicators.lua,
+        -- PET HAPPINESS), 2px outside the frame's right edge, with its tooltip.
+        happinessIconEnabled = true,
+        happinessIconSize = 16,
+        happinessIconAnchor = "OUTSIDE_RIGHT",
+        happinessIconX = 2,
+        happinessIconY = 0,
+        happinessIconTooltip = true,
     },
     boss = {
         frameWidth = 180, frameHeight = 40,

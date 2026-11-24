@@ -277,7 +277,7 @@ function UFO.Prefixes(kind)
     if kind == "rings" then
         return { "frameStyle", "ringSize", "rings", "ringShow", "ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }
     end
-    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
+    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder", "happinessIcon" } end
     if kind == "bosslayout" then return { "boss" } end
     return {}
 end
@@ -2697,7 +2697,38 @@ UFO.UNIT_ICON_CARDS = {
     { card = "resting_icon", prefix = "restingIcon", key = "uf_icon_resting", label = function() return L["Resting Icon"] end },
     { card = "pvp_icon", prefix = "pvpIcon", key = "uf_icon_pvp", label = function() return L["PvP Icon"] end },
     { card = "elite_rare", prefix = "classification", key = "uf_icon_classification", label = function() return L["Elite / Rare"] end },
+    -- WoW Forever only (Indicators.lua, PET HAPPINESS).
+    { card = "pet_happiness", prefix = "happinessIcon", key = "uf_icon_happiness", forever = true,
+      label = function() return L["Pet Happiness"] end,
+      tooltip = function() return L["Show whether your hunter pet is happy, content or unhappy, beside the pet frame."] end },
 }
+
+-- The page data is generated and knows nothing of WoW Forever: on Forever the
+-- pet gets the Unit Icons page, with the Pet Happiness card on it.
+function UFO.AddForeverPetIcons(data)
+    if not (DF.IS_FOREVER and data and data.pages) then return end
+    for _, rec in ipairs(data.pages) do
+        if rec.kind == "unitIcons" then
+            rec.units = rec.units or {}
+            rec.cards = rec.cards or {}
+            rec.units.pet = true
+            rec.cards.pet_happiness = { pet = true }
+        end
+    end
+end
+UFO.AddForeverPetIcons(DF.UnitFramePageData)
+
+-- Pet Happiness: beside the frame (the default, outside its right edge) or at
+-- one of the nine points inside it.
+function UFO.HappinessPositionOptions()
+    local opts = PointOptions()
+    opts.OUTSIDE_RIGHT, opts.OUTSIDE_LEFT = L["Outside Right"], L["Outside Left"]
+    opts.OUTSIDE_TOP, opts.OUTSIDE_BOTTOM = L["Outside Top"], L["Outside Bottom"]
+    local order = { "OUTSIDE_RIGHT", "OUTSIDE_LEFT", "OUTSIDE_TOP", "OUTSIDE_BOTTOM" }
+    for _, k in ipairs(opts._order) do order[#order + 1] = k end
+    opts._order = order
+    return opts
+end
 
 function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
@@ -2705,12 +2736,13 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     local function changed() self:RefreshStates(); RefreshFrames() end
     local col = 0
     for _, c in ipairs(UFO.UNIT_ICON_CARDS) do
-        if UFO.CardShown(rec, unit, c.card) then
+        if UFO.CardShown(rec, unit, c.card) and (DF.IS_FOREVER or not c.forever) then
             local pre = c.prefix
             local off = UFO.Gate(c.label(), function(d) return not (d and d[pre .. "Enabled"]) end)
             col = (col % 2) + 1
             local band = Open(c.label(), c.key, col, function(d) return OnOff(d, pre .. "Enabled") end, "icons",
-                { db = db, key = pre .. "Enabled", label = L["Show"], onChanged = changed })
+                { db = db, key = pre .. "Enabled", label = L["Show"], onChanged = changed,
+                  tooltip = c.tooltip and c.tooltip() or nil })
             local w
             if pre == "classification" then
                 w = band:AddWidget(GUI:CreateDropdown(self.child, L["Style"],
@@ -2719,7 +2751,12 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
             end
             w = band:AddWidget(GUI:CreateSlider(self.child, L["Size"], 8, 48, 1, db, pre .. "Size", changed), 55)
             w.disableOn = off
-            w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, pre .. "Anchor", changed), 55)
+            if pre == "happinessIcon" then
+                w = band:AddWidget(GUI:CreateDropdown(self.child, L["Position"], UFO.HappinessPositionOptions(), db,
+                    pre .. "Anchor", changed), 55)
+            else
+                w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, pre .. "Anchor", changed), 55)
+            end
             w.disableOn = off
             w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, pre .. "X", changed), 55)
             w.disableOn = off
@@ -2738,6 +2775,11 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
                     "restingIconGlowPortrait", changed), 30)
                 w.disableOn = glowOff
                 w.tooltip = L["Draw the glow around the portrait too when it sits beside the frame."]
+            end
+            if pre == "happinessIcon" then
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tooltip"], db, "happinessIconTooltip", changed), 30)
+                w.disableOn = off
+                w.tooltip = L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."]
             end
             Close(band)
         end
