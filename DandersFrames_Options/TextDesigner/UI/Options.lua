@@ -89,6 +89,9 @@ local pairs, ipairs = pairs, ipairs
 local CONTENT_CATEGORIES = {
     "group", "identity", "health", "power", "shields", "status", "threat", "shapes",
 }
+-- WoW Forever: the hunter pet's tokens (Features/PetHappiness.lua), before Shapes.
+-- Offered only on the unit frames pet's designer (CategoryOffered below).
+if DF.IS_FOREVER then table.insert(CONTENT_CATEGORIES, #CONTENT_CATEGORIES, "pet") end
 
 -- These label tables read L["..."], which at file-scope returns the enUS
 -- baseline (the languageOverride overlay is applied later, at ADDON_LOADED).
@@ -107,6 +110,7 @@ local function RefreshLocaleStrings()
         threat   = L["Threat & Range"],
         group    = L["Group"],
         shapes   = L["Shapes"],
+        pet      = L["Pet Happiness"],
     }
 
     CONTENT_TYPES = {
@@ -154,6 +158,24 @@ local function RefreshLocaleStrings()
         -- BACKGROUND ELEMENTS)
         { key = "backdrop",          label = L["Background"],                 category = "shapes"   },
     }
+    -- Pet Happiness (WoW Forever only; Render.lua's "pet" hint, Resolver.lua).
+    if DF.IS_FOREVER then
+        local pet = {
+            { key = "pet_mood",            label = L["Happiness"] },
+            { key = "pet_mood_color",      label = L["Happiness (Color)"] },
+            { key = "pet_damage",          label = L["Pet Damage %"] },
+            { key = "pet_loyalty_trend",   label = L["Loyalty Trend"] },
+            { key = "pet_loyalty",         label = L["Loyalty Level"] },
+            { key = "pet_training_points", label = L["Training Points"] },
+            { key = "pet_xp",              label = L["Pet XP"] },
+            { key = "pet_xp_percent",      label = L["Pet XP %"] },
+            { key = "pet_diet",            label = L["Diet"] },
+        }
+        for _, t in ipairs(pet) do
+            t.category = "pet"
+            CONTENT_TYPES[#CONTENT_TYPES + 1] = t
+        end
+    end
 end
 
 RefreshLocaleStrings()
@@ -182,6 +204,15 @@ DF.TextDesigner = DF.TextDesigner or {}
 -- ============================================================
 local P = {}
 DF.TextDesigner._priv = P
+
+-- Is this category offered on the designer being edited? The pet tokens only
+-- ever answer for the player's own pet, so they are offered only on the unit
+-- frames pet's designer (P.offerPetTokens, set per island build). A template
+-- shared with another unit still RENDERS a pet token there -- as nothing.
+local function CategoryOffered(cat)
+    return cat ~= "pet" or P.offerPetTokens == true
+end
+P.CategoryOffered = CategoryOffered
 
 -- ============================================================
 -- HOW MANY THINGS EACH TAB HOLDS
@@ -401,6 +432,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
        or ct.key == "absorb_amount"
        or ct.key == "heal_absorb_amount"
        or ct.key == "incoming_heal" or ct.key == "incoming_heal_mine"
+       or ct.key == "pet_xp"
     then
         elem.abbreviate = elem.abbreviate
         if elem.abbreviate == nil then elem.abbreviate = true end
@@ -425,7 +457,8 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
 
     -- Percent types: decimals slider
     elseif ct.key == "hp_percent" or ct.key == "power_percent"
-           or ct.key == "hp_max_reduction" or ct.key == "threat_percent" then
+           or ct.key == "hp_max_reduction" or ct.key == "threat_percent"
+           or ct.key == "pet_xp_percent" then
         elem.decimals = elem.decimals or 0
         local function decCB()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
@@ -1258,14 +1291,18 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
         if maxW <= 0 then maxW = 260 end
         local cx, cy = 0, 0
         for _, btn in ipairs(pills) do
-            local bw = btn:GetWidth()
-            if cx > 0 and (cx + bw) > maxW then
-                cx = 0
-                cy = cy - (CHIP_H + CHIP_ROW_GAP)
+            local offered = btn.key == "_all" or CategoryOffered(btn.key)
+            btn:SetShown(offered)
+            if offered then
+                local bw = btn:GetWidth()
+                if cx > 0 and (cx + bw) > maxW then
+                    cx = 0
+                    cy = cy - (CHIP_H + CHIP_ROW_GAP)
+                end
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", pillRow, "TOPLEFT", cx, cy)
+                cx = cx + bw + CHIP_GAP
             end
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", pillRow, "TOPLEFT", cx, cy)
-            cx = cx + bw + CHIP_GAP
         end
         pillRow:SetHeight(math.max(-cy + CHIP_H, CHIP_H))
     end
@@ -1371,7 +1408,7 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
         local y = -2
         local renderedSection = false
         for _, cat in ipairs(CONTENT_CATEGORIES) do
-            if activePill == "_all" or activePill == cat then
+            if (activePill == "_all" or activePill == cat) and CategoryOffered(cat) then
                 local matches = {}
                 for _, t in ipairs(CONTENT_TYPES) do
                     if t.category == cat and t.key ~= excludeKey then
@@ -1459,6 +1496,7 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
         searchPlaceholder:Show()
         clearBtn:Hide()
         activePill = "_all"
+        LayoutPills()   -- the pet pill comes and goes with the designer edited
         ApplyPillState()
         RenderList()
         drop:ClearAllPoints()
@@ -2099,7 +2137,7 @@ local CHIP_H, CHIP_GAP, CHIP_ROW_GAP = 24, 4, 4
 local function TextFilterChips()
     local out = { { key = "_all", label = L["All"] } }
     for _, cat in ipairs(CONTENT_CATEGORIES) do
-        if cat ~= "group" then  -- groups have their own tab
+        if cat ~= "group" and CategoryOffered(cat) then  -- groups have their own tab
             out[#out + 1] = { key = cat, label = CONTENT_CATEGORY_LABELS[cat] }
         end
     end
@@ -2905,6 +2943,8 @@ local function BuildTextDesignerIsland(GUI, page, db, opts)
     tdDB = tdDB or (DF.TextDesigner:EnsureDB(db))
     -- Ring spots in every Anchor To on this page (a unit frame's target asks).
     P.offerRingAnchors = (target and target.ringAnchors) and true or false
+    -- The Pet Happiness tokens: WoW Forever, the unit frames pet's designer only.
+    P.offerPetTokens = (DF.IS_FOREVER and target and target.petTokens) and true or false
     DF.TextDesigner:EnsureDB({ textDesigner = tdDB })
     local state = GetState(page)
 

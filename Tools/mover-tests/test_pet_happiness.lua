@@ -40,6 +40,7 @@ local function Make(kind, parent)
     function f:RegisterEvent(e) self._events[e] = true end
     function f:RegisterUnitEvent(e) self._events[e] = true end
     function f:UnregisterAllEvents() self._events = {} end
+    function f:UnregisterEvent(e) self._events[e] = nil end
     function f:CreateTexture() return Make("Texture", self) end
     function f:CreateFontString() return Make("FontString", self) end
     function f:SetAtlas(a) self._atlas = a end
@@ -969,5 +970,220 @@ for _, k in ipairs({ "A happy pet keeps its normal colors.", "Color by Pet Happi
 end
 DF.db = savedDB
 eq(#DF.errs, 0, "no element errored")
+
+-- ============================================================
+-- PHASE 5: TEXT DESIGNER TOKENS
+-- The core's accessors, the data events registered only while a pet token is
+-- placed, the sources (live: the "pet" unit only; mock / test: the sample) and
+-- the resolvers, then the wiring by source.
+-- ============================================================
+print("-- Phase 5: core accessors")
+do
+    local T = NewDF(true)
+    local P5 = T.PetHappiness
+    mood, damage, rate = 2, 100, -1
+    loyalty, foods, tp, xp = "Loyalty Level 6 (Best Friend)", { "Meat", "Fish" }, { 150, 30 }, { 1200, 4800 }
+    eq(P5:Loyalty(), "Loyalty Level 6 (Best Friend)", "Loyalty: the API's words")
+    eq(P5.DietText(P5:Diet()), "Meat, Fish", "Diet: joined with Blizzard's delimiter")
+    eq(P5:TrainingPoints(), 120, "TrainingPoints: total - used")
+    local c, n = P5:Experience()
+    eq(c, 1200, "Experience: current"); eq(n, 4800, "...and next")
+    eq(P5.MoodText(2), "Content", "MoodText: Blizzard's global")
+    eq(P5.MoodText(9), nil, "MoodText: an unknown mood is nothing")
+    hunterPet = false
+    eq(P5:Loyalty(), nil, "not a hunter pet: no loyalty")
+    eq(P5:Diet(), nil, "...no diet"); eq(P5:TrainingPoints(), nil, "...no points"); eq(P5:Experience(), nil, "...no XP")
+    hunterPet = true
+    loyalty, foods, tp, xp = Secret("loy"), Secret("foods"), { Secret("tp"), 0 }, { 10, 0 }
+    eq(P5:Loyalty(), nil, "a secret loyalty: nothing")
+    eq(P5:Diet(), nil, "a secret diet: nothing")
+    eq(P5:TrainingPoints(), nil, "secret points: nothing")
+    eq(P5:Experience(), nil, "at the level cap (next XP 0): nothing")
+    eq(P5.DietText({ "Meat", Secret("x"), 5 }), "Meat", "DietText skips a secret or non-string food")
+    eq(P5.DietText({}), nil, "DietText: empty is nothing")
+    loyalty, foods, tp, xp = "Loyalty Level 6 (Best Friend)", { "Meat", "Fish" }, { 150, 30 }, { 1200, 4800 }
+    eq(P5:Loyalty(true), "Loyalty Level 6", "mock loyalty: the sample")
+    eq(P5.DietText(P5:Diet(true)), "Meat, Fish", "mock diet")
+    eq(P5:TrainingPoints(true), 120, "mock points")
+    eq(select(2, P5:Experience(true)), 4800, "mock XP")
+
+    print("-- Phase 5: data events only while a token is placed")
+    local frame = Make("Frame")
+    frame.dfUFUnit = "pet"
+    local renders = 0
+    function T:UpdateTextDesigner(f, hint)
+        if f == frame and hint == "pet" then renders = renders + 1 end
+    end
+    P5:WatchTokens(frame, false)
+    eq(P5.registered, nil, "no token: nothing registered")
+    P5:WatchTokens(frame, true)
+    eq(P5.registered, true, "a token placed: events on")
+    local ev = P5.driver._events
+    check(ev.UNIT_PET_EXPERIENCE and ev.UNIT_PET_TRAINING_POINTS, "...with the XP and training point events")
+    check(ev.UNIT_HAPPINESS and ev.UNIT_PET, "...and the base events")
+    P5:OnEvent("UNIT_PET_EXPERIENCE")
+    eq(renders, 1, "XP gained: the pet tokens re-render")
+    P5:OnEvent("UNIT_PET_TRAINING_POINTS")
+    eq(renders, 2, "training points: re-render")
+    P5:OnEvent("UNIT_HAPPINESS")
+    P5:OnEvent("UNIT_HAPPINESS")
+    eq(renders, 4, "every UNIT_HAPPINESS too (loyalty level has no event of its own)")
+    P5:OnEvent("UNIT_PET")
+    eq(renders, 5, "a new pet: re-render")
+    frame._shown = false
+    P5:OnEvent("UNIT_PET_EXPERIENCE")
+    eq(renders, 5, "a hidden frame is not rendered")
+    frame._shown = true
+    -- An icon consumer as well: turning the tokens off keeps the base events.
+    local iconCalls = 0
+    P5:SetConsumer("icon", true, function() iconCalls = iconCalls + 1 end)
+    P5:OnEvent("UNIT_PET_EXPERIENCE")
+    eq(iconCalls, 0, "an icon consumer is not told about XP")
+    P5:WatchTokens(frame, false)
+    eq(P5.registered, true, "tokens off, icon on: base events stay")
+    check(not P5.driver._events.UNIT_PET_EXPERIENCE and not P5.driver._events.UNIT_PET_TRAINING_POINTS,
+          "...the XP and training point events go")
+    check(P5.driver._events.UNIT_HAPPINESS, "...UNIT_HAPPINESS stays")
+    P5:WatchTokens(frame, true)
+    check(P5.driver._events.UNIT_PET_EXPERIENCE, "tokens back: XP event back")
+    P5:SetConsumer("icon", false)
+    P5:WatchTokens(frame, false)
+    eq(P5.registered, false, "nothing left: everything off")
+    eq(next(P5.driver._events), nil, "...every event unregistered")
+    local R = NewDF(false)
+    R.PetHappiness:WatchTokens(frame, true)
+    eq(R.PetHappiness.registered, nil, "retail: a token never registers anything")
+
+    print("-- Phase 5: sources and resolvers")
+    AbbreviateNumbers = function(v) return string.format("%.1fk", v / 1000) end
+    function T:DebugActive() return false end
+    function T:UTF8Len(s) return #s end
+    function T:UTF8Sub(s, i, j) return s:sub(i, j) end
+    load_df_file_into("TextDesigner/MidnightSafe.lua", T)
+    load_df_file_into("TextDesigner/DataSource.lua", T)
+    load_df_file_into("TextDesigner/Resolver.lua", T)
+    local TD = T.TextDesigner
+    local Res = TD.Resolver
+    local function rs(ct, source, extra)
+        local elem = { contentType = ct }
+        for k, v in pairs(extra or {}) do elem[k] = v end
+        return Res:Resolve(elem, source)
+    end
+    local KEYS = { "pet_mood", "pet_mood_color", "pet_damage", "pet_loyalty_trend", "pet_loyalty",
+                   "pet_training_points", "pet_xp", "pet_xp_percent", "pet_diet" }
+    for _, k in ipairs(KEYS) do check(Res._RESOLVERS[k] ~= nil, "resolver: " .. k) end
+
+    mood, damage, rate = 3, 125, -1
+    local live = TD.DataSource.Live({ unit = "pet" })
+    eq(rs("pet_mood", live), "Happy", "live: mood")
+    eq(rs("pet_mood_color", live), "|cff59d959Happy|r", "live: mood in the happiness colour (the default happy green)")
+    eq(rs("pet_damage", live), "125%", "live: damage")
+    local arrow = rs("pet_loyalty_trend", live)
+    check(arrow:find("expand_more.png", 1, true) and arrow:find("^|T"), "live: losing loyalty = the down arrow (texture escape)")
+    rate = 1
+    check(rs("pet_loyalty_trend", live):find("expand_less.png", 1, true), "live: gaining = the up arrow")
+    rate = 0
+    eq(rs("pet_loyalty_trend", live), "", "live: steady = nothing")
+    rate = -1
+    eq(rs("pet_loyalty", live), "Loyalty Level 6 (Best Friend)", "live: loyalty")
+    eq(rs("pet_training_points", live), "120", "live: training points")
+    eq(rs("pet_xp", live), "1.2k / 4.8k", "live: XP, abbreviated by default")
+    eq(rs("pet_xp", live, { abbreviate = false }), "1200 / 4800", "live: XP, Abbreviate off")
+    eq(rs("pet_xp_percent", live), "25%", "live: XP %")
+    eq(rs("pet_xp_percent", live, { hidePercent = true }), "25", "live: XP %, Hide % Symbol")
+    eq(rs("pet_diet", live), "Meat, Fish", "live: diet")
+
+    -- Every other unit, no pet, a secret: every token renders empty, never an error.
+    local function allEmpty(source, why)
+        for _, k in ipairs(KEYS) do eq(rs(k, source), "", why .. ": " .. k) end
+    end
+    allEmpty(TD.DataSource.Live({ unit = "player" }), "the player's own frame (a vehicle-swapped pet frame)")
+    allEmpty(TD.DataSource.Live({ unit = "party1" }), "another unit")
+    mood = nil; hunterPet = false; xp = { 0, 0 }
+    allEmpty(live, "no hunter pet")
+    hunterPet = true
+    mood, damage, rate = Secret("m"), Secret("d"), Secret("r")
+    loyalty, foods, tp = Secret("l"), Secret("f"), { Secret("t"), 0 }
+    allEmpty(live, "every answer secret")
+    mood, damage, rate = 3, 125, -1
+    loyalty, foods, tp, xp = "Loyalty Level 6 (Best Friend)", { "Meat", "Fish" }, { 150, 30 }, { 1200, 4800 }
+    local saveP = C_PetInfo
+    C_PetInfo = { GetPetHappiness = saveP.GetPetHappiness }
+    GetPetExperience = nil
+    eq(rs("pet_loyalty", live), "", "an API missing on this build: empty")
+    eq(rs("pet_diet", live), "", "...diet"); eq(rs("pet_training_points", live), "", "...points")
+    eq(rs("pet_xp", live), "", "...XP")
+    C_PetInfo = saveP
+    GetPetExperience = function() return xp[1], xp[2] end
+
+    -- Off Forever the live source answers nothing, whatever the API says.
+    T.IS_FOREVER = false
+    allEmpty(live, "retail")
+    T.IS_FOREVER = true
+
+    -- The designer preview and the unit frames pet's test frame: the sample.
+    local mock = TD.DataSource.Mock()
+    eq(rs("pet_mood", mock), "Unhappy", "mock: the sample (unhappy)")
+    eq(rs("pet_mood_color", mock), "|cfff24d4dUnhappy|r", "mock: in the unhappy colour")
+    eq(rs("pet_damage", mock), "75%", "mock: damage")
+    check(rs("pet_loyalty_trend", mock):find("expand_more.png", 1, true), "mock: losing loyalty")
+    eq(rs("pet_loyalty", mock), "Loyalty Level 6", "mock: loyalty")
+    eq(rs("pet_training_points", mock), "120", "mock: points")
+    eq(rs("pet_xp", mock), "1.2k / 4.8k", "mock: XP")
+    eq(rs("pet_xp_percent", mock), "25%", "mock: XP %")
+    eq(rs("pet_diet", mock), "Meat, Fish", "mock: diet")
+    mood = nil   -- no pet at all: the previews still show the sample
+    local petTest = TD.DataSource.Test({ dfUFUnit = "pet", dfTestData = { name = "Wolf" } })
+    eq(rs("pet_mood", petTest), "Unhappy", "test (UF pet preview): the sample, without a pet")
+    eq(rs("pet_diet", petTest), "Meat, Fish", "test: diet")
+    local happyTest = TD.DataSource.Test({ dfUFUnit = "pet", dfTestData = { petHappiness = 3, petLoyaltyRate = 1 } })
+    eq(rs("pet_mood", happyTest), "Happy", "test: the sample's own fields win")
+    check(rs("pet_loyalty_trend", happyTest):find("expand_less.png", 1, true), "test: its own loyalty rate")
+    allEmpty(TD.DataSource.Test({ dfUFUnit = "player", dfTestData = {} }), "test: another unit's preview")
+    allEmpty(TD.DataSource.Test({ dfTestData = {} }), "test: a party test frame")
+    mood = 3
+    -- In a group (a text group joins its items' text).
+    eq(rs("group", live, { groupItems = { "pet_mood", "pet_damage" }, groupSeparator = " " }), "Happy 125%",
+       "a text group of pet tokens")
+    eq(#T.errs, 0, "phase 5: no errors")
+    AbbreviateNumbers = nil
+end
+
+print("-- Phase 5: wiring (source)")
+local function norm5(s) return (s:gsub("\r\n", "\n")) end
+local render5 = norm5(df_file_source("TextDesigner/Render.lua"))
+for _, k in ipairs({ "pet_mood", "pet_mood_color", "pet_damage", "pet_loyalty_trend", "pet_loyalty",
+                     "pet_training_points", "pet_xp", "pet_xp_percent", "pet_diet" }) do
+    check(render5:find("\n%s*" .. k .. "%s*= \"pet\","), "refresh hint " .. k .. " = pet")
+end
+check(render5:find('if hint == "all" or not tdDB.enabled then watchPetTokens(frame, tdDB, isPreview) end', 1, true),
+      "a full render tells the core whether a pet token is placed")
+check(render5:find('if not DF.IS_FOREVER or isPreview or frame.dfUFUnit ~= "pet" then return end', 1, true),
+      "...the live unit frames pet frame only, Forever only")
+local opts5 = norm5(options_file_source("TextDesigner/UI/Options.lua"))
+check(opts5:find('if DF.IS_FOREVER then table.insert(CONTENT_CATEGORIES, #CONTENT_CATEGORIES, "pet") end', 1, true),
+      "picker: a Pet Happiness category, Forever only")
+for _, k in ipairs({ "pet_mood", "pet_mood_color", "pet_damage", "pet_loyalty_trend", "pet_loyalty",
+                     "pet_training_points", "pet_xp", "pet_xp_percent", "pet_diet" }) do
+    check(opts5:find('{ key = "' .. k .. '",', 1, true), "picker offers " .. k)
+end
+check(opts5:find('pet      = L["Pet Happiness"],', 1, true), "the category reads Pet Happiness")
+check(opts5:find('return cat ~= "pet" or P.offerPetTokens == true', 1, true), "the category is offered only where asked")
+check(opts5:find("P.offerPetTokens = (DF.IS_FOREVER and target and target.petTokens) and true or false", 1, true),
+      "...on a designer whose target asks for it, on Forever")
+check(opts5:find('if (activePill == "_all" or activePill == cat) and CategoryOffered(cat) then', 1, true),
+      "the picker's list skips it elsewhere")
+check(opts5:find('if cat ~= "group" and CategoryOffered(cat) then', 1, true), "so do the filter chips")
+check(opts5:find('or ct.key == "pet_xp"\n', 1, true), "Pet XP: Abbreviate")
+check(opts5:find('or ct.key == "pet_xp_percent" then', 1, true), "Pet XP %: decimals and Hide % Symbol")
+local pages5 = norm5(options_file_source("UnitFrames/Pages.lua"))
+check(pages5:find('target.petTokens = (unit == "pet" and DF.IS_FOREVER) and true or nil', 1, true),
+      "the unit frames pet's designer asks for the pet tokens")
+local enUS5 = norm5(df_file_source("Locales/enUS.lua"))
+for _, k in ipairs({ "Diet", "Happiness", "Happiness (Color)", "Loyalty Level", "Loyalty Trend", "Pet Damage %",
+                     "Pet XP", "Pet XP %", "Training Points" }) do
+    local _, n = enUS5:gsub('\nL%["' .. k:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%0") .. '"%] = true', "")
+    eq(n, 1, "enUS: " .. k)
+end
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

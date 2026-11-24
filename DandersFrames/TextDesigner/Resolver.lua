@@ -390,6 +390,97 @@ RESOLVERS.range_text = function(elem, source)
     return elem.rangeOutText or L["OOR"]
 end
 
+-- ───── Pet Happiness (WoW Forever, the unit frames pet frame) ─────
+-- The source answers nil for anything but the player's own hunter pet, and for
+-- an empty or secret answer: each token then renders empty. The words come
+-- from the shared core (Blizzard's own, so localised by the client).
+
+local function petCore() return DF.PetHappiness end
+
+local function petMood(source)
+    if not source.GetPetHappiness then return nil end
+    return source:GetPetHappiness()
+end
+
+RESOLVERS.pet_mood = function(elem, source)
+    local PH = petCore()
+    local mood = petMood(source)
+    return (PH and mood and PH.MoodText(mood)) or ""
+end
+
+-- The same word in the profile's happiness colour (Display > Colors > Pet
+-- Happiness), whatever the mood -- like Level (Difficulty Color).
+local petMoodColor = {}   -- scratch: colorize only reads it
+RESOLVERS.pet_mood_color = function(elem, source)
+    local PH = petCore()
+    local mood = petMood(source)
+    local text = PH and mood and PH.MoodText(mood)
+    if not text then return "" end
+    local c = PH.Color(mood)
+    if not c then return text end
+    petMoodColor.r, petMoodColor.g, petMoodColor.b, petMoodColor.a = c.r, c.g, c.b, 1
+    return colorize(text, petMoodColor)
+end
+
+RESOLVERS.pet_damage = function(elem, source)
+    if not source.GetPetHappiness then return "" end
+    local _, damage = source:GetPetHappiness()
+    if type(damage) ~= "number" then return "" end
+    return string.format("%d%%", damage)
+end
+
+-- A down arrow while the pet is losing loyalty, an up arrow while gaining,
+-- nothing when steady. The trend badge's own art and colours (a texture escape:
+-- the default fonts have no arrow glyphs).
+local function petArrow(dir)
+    local PH = petCore()
+    local file = PH and PH.BADGE_ART and PH.BADGE_ART[dir]
+    local c = PH and PH.TITLE_COLORS and PH.TITLE_COLORS[dir < 0 and 1 or 3]
+    if not (file and c) then return "" end
+    local floor = math.floor
+    return string.format("|T%s:0:0:0:0:64:64:0:64:0:64:%d:%d:%d|t", file,
+        floor(c[1] * 255 + 0.5), floor(c[2] * 255 + 0.5), floor(c[3] * 255 + 0.5))
+end
+
+RESOLVERS.pet_loyalty_trend = function(elem, source)
+    if not source.GetPetHappiness then return "" end
+    local _, _, rate = source:GetPetHappiness()
+    if type(rate) ~= "number" or rate == 0 then return "" end
+    return petArrow(rate < 0 and -1 or 1)
+end
+
+RESOLVERS.pet_loyalty = function(elem, source)
+    local s = source.GetPetLoyalty and source:GetPetLoyalty()
+    return type(s) == "string" and s or ""
+end
+
+RESOLVERS.pet_training_points = function(elem, source)
+    local n = source.GetPetTrainingPoints and source:GetPetTrainingPoints()
+    if type(n) ~= "number" then return "" end
+    return tostring(n)
+end
+
+-- "1.2k / 4.8k" (Abbreviate on, the default) or "1200 / 4800"; nothing at the cap.
+RESOLVERS.pet_xp = function(elem, source)
+    if not source.GetPetExperience then return "" end
+    local cur, nxt = source:GetPetExperience()
+    if type(cur) ~= "number" or type(nxt) ~= "number" then return "" end
+    local ab = elem.abbreviate ~= false
+    return getMS().FormatNumber(cur, ab) .. " / " .. getMS().FormatNumber(nxt, ab)
+end
+
+RESOLVERS.pet_xp_percent = function(elem, source)
+    if not source.GetPetExperience then return "" end
+    local cur, nxt = source:GetPetExperience()
+    if type(cur) ~= "number" or type(nxt) ~= "number" or nxt <= 0 then return "" end
+    return getMS().PctText(cur / nxt * 100, elem.decimals or 0, elem.hidePercent)
+end
+
+RESOLVERS.pet_diet = function(elem, source)
+    local s = source.GetPetDiet and source:GetPetDiet()
+    return type(s) == "string" and s or ""
+end
+
 -- ───── Group (meta) ─────
 
 -- Groups concatenate other elements' resolved text. Phase B renders
