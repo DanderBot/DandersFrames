@@ -192,7 +192,8 @@ TRAINING_POINTS, PET_DAMAGE_PERCENTAGE = "Training Points: %d", "Pet is doing %d
 mood = nil
 eq(#PH:TooltipLines(), 0, "no pet: no lines")
 local mock = PH:TooltipLines(true)
-eq(mock[1].text, "Happy", "the test-mode sample reads without a pet")
+eq(mock[1].text, "Unhappy", "the test-mode sample (unhappy, losing loyalty) reads without a pet")
+eq(mock[3].text, "Losing loyalty", "...losing loyalty, so the Losing Only arrow shows in test mode")
 eq(#mock, 7, "...every line")
 mood = 3
 local owner = Make("Frame")
@@ -343,12 +344,13 @@ PV.dfUFPreview = true
 IN:Attach(PV)
 IN:Preview(PV)
 check(PV.dfUFIcons.happiness:IsShown(), "test mode: the sample shows without a pet")
-eq(PV.dfUFIcons.happiness.tex._atlas, "UI-PetHappiness", "...a happy pet")
+eq(PV.dfUFIcons.happiness.tex._atlas, "UI-PetMad", "...an unhappy pet")
 PV.dfUFIcons.happiness:GetScript("OnEnter")(PV.dfUFIcons.happiness)
 eq(#tip.lines, 7, "...its tooltip shows the sample lines")
-PV.dfTestData = { petHappiness = 1 }
+PV.dfTestData = { petHappiness = 3 }
 IN:Preview(PV)
-eq(PV.dfUFIcons.happiness.tex._atlas, "UI-PetMad", "test data can pick the mood")
+eq(PV.dfUFIcons.happiness.tex._atlas, "UI-PetHappiness", "test data can pick the mood")
+PV.dfTestData = nil
 mood = 3
 eq(#DF.errs, 0, "no element errored (" .. tostring(DF.errs[1]) .. ")")
 
@@ -511,7 +513,7 @@ mood = nil                                   -- no pet at all
 local tParty, tRaid1, tRaid2 = PetFrame("pet", false, true), PetFrame("raidpet1", true, true), PetFrame("raidpet2", true, true)
 GP:UpdateGroupFrame(tParty); GP:UpdateGroupFrame(tRaid1); GP:UpdateGroupFrame(tRaid2)
 check(tParty.dfHappinessIcon and tParty.dfHappinessIcon:IsShown(), "party preview: the player's slot shows the sample without a pet")
-eq(tParty.dfHappinessIcon.tex._atlas, "UI-PetHappiness", "...a happy pet")
+eq(tParty.dfHappinessIcon.tex._atlas, "UI-PetMad", "...the unhappy sample")
 check(tRaid1.dfHappinessIcon and tRaid1.dfHappinessIcon:IsShown(), "raid preview: slot 1 (the player) shows it")
 eq(tRaid2.dfHappinessIcon, nil, "raid preview: other slots do not")
 tParty.dfHappinessIcon:GetScript("OnEnter")(tParty.dfHappinessIcon)
@@ -542,7 +544,163 @@ for _, k in ipairs({ "petHappinessIconSize", "petHappinessIconAnchor", "petHappi
 end
 local disables = 0
 for _ in opts:gmatch("%.disableOn = HappinessOff") do disables = disables + 1 end
-eq(disables, 5, "every control greys while the face is off")
+eq(disables, 7, "every control greys while the face is off")
+eq(#DF.errs, 0, "no element errored")
+
+-- ============================================================
+-- PHASE 3: the loyalty trend badge and Hide While Happy, on both sides.
+-- ============================================================
+print("-- Phase 3: core")
+eq(PH.TrendArrow(-1, "LOSING"), -1, "losing / Losing Only: down")
+eq(PH.TrendArrow(1, "LOSING"), nil, "gaining / Losing Only: nothing")
+eq(PH.TrendArrow(0, "LOSING"), nil, "steady: nothing")
+eq(PH.TrendArrow(-1, "BOTH"), -1, "losing / Both: down")
+eq(PH.TrendArrow(1, "BOTH"), 1, "gaining / Both: up")
+eq(PH.TrendArrow(0, "BOTH"), nil, "steady / Both: nothing")
+eq(PH.TrendArrow(-1, "OFF"), nil, "Off: never")
+eq(PH.TrendArrow(-1, nil), -1, "no mode stored: the default (Losing Only)")
+eq(PH.TrendArrow(nil, "BOTH"), nil, "no readable rate: nothing")
+local rm, rd = PH.Resolve(3, -1, true, "LOSING", false)
+eq(rm, nil, "Hide While Happy: a happy pet hides"); eq(rd, nil, "...its arrow with it")
+rm, rd = PH.Resolve(3, -1, true, "LOSING", true)
+eq(rm, 3, "...but never in test mode"); eq(rd, -1, "...arrow and all")
+rm, rd = PH.Resolve(1, -1, true, "LOSING", false)
+eq(rm, 1, "Hide While Happy: an unhappy pet still shows"); eq(rd, -1, "...with its arrow")
+eq((PH.Resolve(2, 0, true, "LOSING", false)), 2, "...a content pet too")
+eq((PH.Resolve(nil, -1, false, "BOTH", false)), nil, "no pet: nothing")
+local topts = PH.TrendOptions()
+eq(topts.LOSING, "Losing Only", "options: localised labels"); eq(topts.BOTH, "Both", "..."); eq(topts.OFF, "Off", "...")
+eq(table.concat(topts._order, ","), "LOSING,BOTH,OFF", "...in order, raw keys stored")
+
+local bi = Make("Frame")
+PH.PaintBadge(bi, -1, 16)
+local bb = bi.dfTrend
+check(bb and bb:IsShown(), "badge: built and shown")
+eq(bb._texture, PH.BADGE_ART[-1], "...the addon's own down chevron")
+eq(bb._w, 7, "...45% of a 16px face")
+eq(bb._vertex.r, PH.TITLE_COLORS[1][1], "...tinted red")
+check(bb.shadow:IsShown() and bb.shadow._vertex.r == 0, "...with a dark copy behind")
+local bpt = bb._points[#bb._points]
+eq(bpt[1] .. ">" .. bpt[3], "CENTER>BOTTOMRIGHT", "...on the face's bottom-right corner")
+eq(bpt[2], bi, "...of the face")
+bb._texture = "sentinel"
+PH.PaintBadge(bi, -1, 16)
+eq(bb._texture, "sentinel", "the same arrow: not repainted")
+PH.PaintBadge(bi, 1, 16)
+eq(bb._texture, PH.BADGE_ART[1], "up: the up chevron")
+eq(bb._vertex.g, PH.TITLE_COLORS[3][2], "...tinted green")
+PH.PaintBadge(bi, nil, 16)
+check(not bb:IsShown() and not bb.shadow:IsShown(), "no arrow: hidden")
+PH.PaintBadge(bi, -1, 30)
+eq(bb._w, 14, "resized with the face")
+-- A build that refuses the addon's file falls back to Blizzard's arrow.
+local fb = Make("Frame")
+local heldCT = fb.CreateTexture
+fb.CreateTexture = function(self)
+    local t = heldCT(self)
+    function t:SetTexture(p) if p and p:find("AddOns", 1, true) then return false end self._texture = p return true end
+    return t
+end
+PH.PaintBadge(fb, -1, 16)
+eq(fb.dfTrend._texture, PH.BADGE_FALLBACK[-1], "the file refused: Blizzard's arrow")
+check(fb.dfTrend:IsShown(), "...shown")
+local nb = Make("Frame")
+nb.CreateTexture = function(self)
+    local t = heldCT(self)
+    function t:SetTexture() return false end
+    return t
+end
+PH.PaintBadge(nb, -1, 16)
+check(not nb.dfTrend:IsShown(), "no art at all: the badge stays hidden")
+
+print("-- Phase 3: unit frames")
+eq(pdb.happinessIconTrend, "LOSING", "UF default: Losing Only")
+eq(pdb.happinessIconHideHappy, false, "UF default: Hide While Happy off")
+mood, rate = 1, -1
+IN:Update(PET)
+check(icon:IsShown(), "unhappy and losing: the face")
+check(icon.dfTrend and icon.dfTrend:IsShown(), "...with the arrow")
+eq(icon.dfTrend.dfDir, -1, "...down")
+mood, rate = 3, 1
+IN:Update(PET)
+check(icon:IsShown() and not icon.dfTrend:IsShown(), "happy and gaining, Losing Only: the face, no arrow")
+pdb.happinessIconTrend = "BOTH"
+IN:Update(PET)
+eq(icon.dfTrend:IsShown() and icon.dfTrend.dfDir, 1, "Both: the up arrow")
+pdb.happinessIconTrend = "OFF"
+mood, rate = 1, -1
+IN:Update(PET)
+check(icon:IsShown() and not icon.dfTrend:IsShown(), "Off: no arrow even while losing")
+pdb.happinessIconTrend = "LOSING"
+pdb.happinessIconHideHappy = true
+mood, rate = 3, 1
+IN:Update(PET)
+check(not icon:IsShown(), "Hide While Happy: hidden while happy")
+mood, rate = 2, 0
+IN:Update(PET)
+check(icon:IsShown(), "...content: shown")
+eq(icon.tex._atlas, "UI-PetNeutral", "...the content face")
+mood, rate = 3, 1
+IN:Update(PET)
+check(not icon:IsShown(), "...happy again: hidden")
+mood = nil
+local PV3 = Owner("pet")
+PV3.dfUFPreview = true
+IN:Attach(PV3)
+PV3.dfTestData = { petHappiness = 3 }
+IN:Preview(PV3)
+check(PV3.dfUFIcons.happiness:IsShown(), "test mode: a happy sample still shows with Hide While Happy on")
+PV3.dfTestData = nil
+IN:Preview(PV3)
+local pvb = PV3.dfUFIcons.happiness.dfTrend
+check(pvb and pvb:IsShown() and pvb.dfDir == -1, "test mode: the sample's down arrow shows under Losing Only")
+pdb.happinessIconHideHappy = false
+mood, rate = 3, 1
+IN:Update(PET)
+
+print("-- Phase 3: group pet frames")
+for _, kv in ipairs({ { "petHappinessIconTrend", '"LOSING"' }, { "petHappinessIconHideHappy", "false" } }) do
+    check(cfg:find("    " .. kv[1] .. " = " .. kv[2] .. ",", 1, true), "PartyDefaults: " .. kv[1] .. " = " .. kv[2])
+    check(exportSrc:find('"' .. kv[1] .. '",', 1, true), "export: " .. kv[1])
+end
+mood, rate = 1, -1
+GP:UpdateGroupFrame(own)
+check(gi:IsShown() and gi.dfTrend and gi.dfTrend:IsShown(), "group: unhappy and losing, face and arrow")
+eq(gi.dfTrend._w, 6, "...45% of the 14px face")
+gdb.petHappinessIconTrend = "OFF"
+GP:UpdateGroupFrame(own)
+check(not gi.dfTrend:IsShown(), "group Off: no arrow")
+gdb.petHappinessIconTrend = "BOTH"
+mood, rate = 3, 1
+GP:UpdateGroupFrame(own)
+eq(gi.dfTrend:IsShown() and gi.dfTrend.dfDir, 1, "group Both: the up arrow")
+gdb.petHappinessIconHideHappy = true
+GP:UpdateGroupFrame(own)
+check(not gi:IsShown(), "group Hide While Happy: hidden while happy")
+mood, rate = 1, -1
+GP:OnEvent("UNIT_HAPPINESS")
+check(gi:IsShown() and gi.dfTrend.dfDir == -1, "...the event: unhappy again, shown with the down arrow")
+mood = nil
+local tP3 = PetFrame("pet", false, true)
+GP:UpdateGroupFrame(tP3)
+check(tP3.dfHappinessIcon:IsShown(), "group test mode: shown with Hide While Happy on")
+check(tP3.dfHappinessIcon.dfTrend and tP3.dfHappinessIcon.dfTrend:IsShown(), "...with the sample's arrow")
+gdb.petHappinessIconHideHappy, gdb.petHappinessIconTrend = false, "LOSING"
+mood, rate = 3, 1
+
+print("-- Phase 3: settings (source)")
+local pages3 = options_file_source("UnitFrames/Pages.lua")
+check(pages3:find('"happinessIconTrend"', 1, true), "UF: a Loyalty Arrow control")
+check(pages3:find('"happinessIconHideHappy"', 1, true), "UF: a Hide While Happy control")
+local opts3 = options_file_source("GUI/Pages/Options.lua")
+check(opts3:find('"petHappinessIconTrend"', 1, true), "group: a Loyalty Arrow control")
+check(opts3:find('"petHappinessIconHideHappy"', 1, true), "group: a Hide While Happy control")
+local enUS3 = df_file_source("Locales/enUS.lua")
+for _, k in ipairs({ "Loyalty Arrow", "Losing Only", "Hide While Happy", "Both", "Off",
+                     "A small arrow on the face's corner while your pet is losing (or gaining) loyalty.",
+                     "Show the face only when your pet is content or unhappy. Test mode always shows it." }) do
+    check(enUS3:find('L["' .. k .. '"] = true', 1, true), "enUS: " .. k)
+end
 eq(#DF.errs, 0, "no element errored")
 
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

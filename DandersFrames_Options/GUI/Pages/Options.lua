@@ -2303,6 +2303,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     ApplyPetHappiness), 30)
                 tooltip.disableOn = HappinessOff
                 tooltip.tooltip = L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."]
+
+                local PH = DF.PetHappiness
+                if PH and PH.TrendOptions then
+                    local trend = group:AddWidget(GUI:CreateDropdown(parent, L["Loyalty Arrow"], PH.TrendOptions(), db,
+                        "petHappinessIconTrend", ApplyPetHappiness), 55)
+                    trend.disableOn = HappinessOff
+                    trend.tooltip = L["A small arrow on the face's corner while your pet is losing (or gaining) loyalty."]
+                end
+
+                local hideHappy = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide While Happy"], db,
+                    "petHappinessIconHideHappy", ApplyPetHappiness), 30)
+                hideHappy.disableOn = HappinessOff
+                hideHappy.tooltip = L["Show the face only when your pet is content or unhappy. Test mode always shows it."]
             end
 
             -- Where the face sits, in the dropdown's own words.

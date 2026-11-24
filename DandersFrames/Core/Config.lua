@@ -2431,8 +2431,10 @@ DF.PartyDefaults = {
     -- (Features/PetHappiness.lua, GROUP PET FRAMES), outside its right edge.
     petHappinessIconAnchor = "OUTSIDE_RIGHT",
     petHappinessIconEnabled = true,
+    petHappinessIconHideHappy = false,      -- hide the face (and its arrow) while happy
     petHappinessIconSize = 14,
     petHappinessIconTooltip = true,
+    petHappinessIconTrend = "LOSING",       -- the loyalty arrow: "LOSING" / "BOTH" / "OFF"
     petHappinessIconX = 2,
     petHappinessIconY = 0,
     petMatchOwnerHeight = false,

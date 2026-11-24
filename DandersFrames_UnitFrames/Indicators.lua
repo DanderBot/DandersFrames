@@ -383,8 +383,9 @@ function IN:Update(f)
     end
     if icons.happiness then
         -- Only while the frame shows the pet itself (in a vehicle it shows you).
-        local mood = (IN:Enabled(db, "happiness") and unit == "pet" and exists) and IN.HappinessMood() or nil
-        IN.PaintHappiness(icons.happiness, mood)
+        local mood, rate
+        if IN:Enabled(db, "happiness") and unit == "pet" and exists then mood, rate = IN.HappinessMood() end
+        IN.PaintHappiness(icons.happiness, mood, rate, db, false)
     end
 end
 
@@ -441,11 +442,13 @@ function IN:Preview(f)
         IN.PaintDecorations(icons, db, c)
     end
     if icons.happiness then
-        -- The sample: a happy pet, whatever your class, so it can be set up
-        -- before you have one.
+        -- The sample (an unhappy pet losing loyalty), whatever your class, so it
+        -- can be set up before you have one.
         local data = f.dfTestData
-        local mood = (data and data.petHappiness) or (DF.PetHappiness and DF.PetHappiness.MOCK.mood) or 3
-        IN.PaintHappiness(icons.happiness, IN:Enabled(db, "happiness") and mood or nil)
+        local PH = DF.PetHappiness
+        local mood = (data and data.petHappiness) or (PH and PH.MOCK.mood) or 1
+        local rate = (data and data.petLoyaltyRate) or (PH and PH.MOCK.rate) or -1
+        IN.PaintHappiness(icons.happiness, IN:Enabled(db, "happiness") and mood or nil, rate, db, true)
     end
 end
 
@@ -482,22 +485,30 @@ function IN.NewHappinessIcon(host, f)
     return icon
 end
 
--- The pet's mood (1..3), or nil: no pet, not a hunter pet, or unreadable.
+-- The pet's mood (1..3) and loyalty rate, or nil: no pet, not a hunter pet,
+-- or unreadable.
 function IN.HappinessMood()
     local PH = DF.PetHappiness
     if not PH then return nil end
-    return (PH:Read())
+    local mood, _, rate = PH:Read()
+    return mood, rate
 end
 
--- Paints only on a change of mood.
-function IN.PaintHappiness(icon, mood)
+-- The face (painted only on a change of mood) and the loyalty arrow on its
+-- corner. Hide While Happy hides both, except in test mode (`preview`).
+function IN.PaintHappiness(icon, mood, rate, db, preview)
+    local PH = DF.PetHappiness
+    local dir
+    if PH and PH.Resolve then
+        mood, dir = PH.Resolve(mood, rate, db and db.happinessIconHideHappy, db and db.happinessIconTrend, preview)
+        PH.PaintBadge(icon, mood and dir or nil, db and tonumber(db.happinessIconSize) or 16)
+    end
     if not mood then
         icon.dfMood = nil
         icon:Hide()
         return
     end
     if icon.dfMood ~= mood then
-        local PH = DF.PetHappiness
         if not (PH and PH:SetArt(icon.tex, mood)) then icon:Hide(); return end
         icon.dfMood = mood
     end
