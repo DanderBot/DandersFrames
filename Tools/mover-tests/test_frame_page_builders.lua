@@ -688,3 +688,31 @@ do
     check(PAGE:find('L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames', 1, true) ~= nil,
           "growth: Frames Grow From still needs no rebuild")
 end
+
+-- ============================================================
+-- 8. TOOLTIPS (settings tooltip plan, batch 2)
+-- ============================================================
+print("-- Frame page: tooltips on the settings a label cannot explain")
+do
+    local function wrapped(call, tipStart)
+        local at = PAGE:find("GUI:WithTooltip(" .. call, 1, true)
+        local tip = at and PAGE:find(tipStart, at, true)
+        return at ~= nil and tip ~= nil and tip - at < 400
+    end
+    check(wrapped('GUI:CreateSlider(parent, L["Frame Padding"]', 'L["Space between the edge of the frame'), "tooltips: Frame Padding")
+    check(wrapped('GUI:CreateCheckbox(parent, L["Separate Combat Fade"]', 'L["Uses one opacity out of combat'), "tooltips: Separate Combat Fade")
+    check(wrapped('GUI:CreateCheckbox(parent, L["Use Group-Based Layout"]', 'L["Lays the raid out as separate groups'), "tooltips: Use Group-Based Layout")
+    check(wrapped('GUI:CreateDropdown(parent, L["Grid Alignment"]', 'L["Where the grid sits'), "tooltips: Grid Alignment")
+    check(wrapped('GUI:CreateDropdown(parent, flatColumnLabel', 'flatColumnTip), 55)'), "tooltips: Rows / Columns Grow From")
+    check(PAGE:find('local flatColumnTip = db.growDirection == "VERTICAL"\n                and L["Which side the first column', 1, true) ~= nil
+      and PAGE:find('or L["Which edge the first row', 1, true) ~= nil,
+          "tooltips: ...whose text swaps with the growth direction, as the label does")
+    local PM = 'L["Adds a handle beside your frames that stays on screen while they are locked.'
+    check(wrapped('GUI:CreateCheckbox(parent, L["Enable Permanent Mover"]', PM), "tooltips: Enable Permanent Mover in the body")
+    local _, call = sectionBlock("Permanent Mover", "BuildPermanentMoverGroup({")
+    check(call:find('label = L["Enable Permanent Mover"], tooltip = ' .. PM, 1, true) ~= nil,
+          "tooltips: ...and on the card's header tick")
+    local body = builderBody("BuildPermanentMoverGroup")
+    eq(select(2, body:gsub("%.tooltip = actionTip", "")), 4, "tooltips: one shared tooltip on all four click dropdowns")
+    eq(select(2, body:gsub('L%["What clicking the handle this way does', "")), 1, "tooltips: ...written once")
+end

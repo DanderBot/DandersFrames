@@ -3027,6 +3027,26 @@ L["While your interrupt is on cooldown, a mark shows where in the enemy's cast i
 L["Who draws this frame. DandersFrames draws its own, Blizzard keeps the game's frame, and Hidden shows neither. Takes a reload."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: raid layout, moving, sorting and pinned frames
+-- (Frame, Sorting and Pinned Frames pages). Alphabetical within the block.
+-- ============================================================
+L["Adds a handle beside your frames that stays on screen while they are locked. Drag it to move the frames, or click it to run the actions set below."] = true
+L["Lays the raid out as separate groups 1 to 8. Turn it off to put everyone in one grid that wraps after a set number of players and sorts the whole raid together."] = true
+L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."] = true
+L["Player Frames shows the group members you choose. Friendly Boss NPCs shows friendly encounter NPCs instead, such as an ally you must keep alive during a boss fight."] = true
+L["Space between the edge of the frame and its health bar on every side, so the frame background shows as a margin around the bar."] = true
+L["Splits damage dealers into melee and ranged, so each gets its own place in Role Priority. Your own spec is read directly, but other players are judged by class, so melee specs of hybrid classes such as Feral or Enhancement count as ranged."] = true
+L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."] = true
+L["What clicking the handle this way does: Quick Switch opens a list of profiles to pick from, and Cycle Next moves straight to the next one. In combat only Open Settings, Reload UI, Ready Check and Pull Timer work."] = true
+L["Where the grid sits inside the space kept for a full 40-player raid when fewer players are shown. Center keeps it in the middle, and the other options push it to that edge."] = true
+L["Where your own frame goes. Always First or Always Last keeps you at that end, and Sorted with Group places you by the same rules as everyone else."] = true
+L["Which Aura Designer template sets the auras on these frames. Inherit uses the one your party or raid frames use, named in brackets."] = true
+L["Which edge the first row starts at. New rows are added towards the other edge as the raid fills."] = true
+L["Which of your frame setups, party or raid, these frames copy their width, height, scale, spacing and border from. Change any of them below to override it for these frames only."] = true
+L["Which side the first column starts at. New columns are added towards the other side as the raid fills."] = true
+L["Which Text Designer template sets the text on these frames. Inherit uses the one your party or raid frames use, named in brackets."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,

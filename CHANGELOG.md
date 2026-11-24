@@ -8,6 +8,7 @@
 - (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
 - (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
 - (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
+- (Settings) Added tooltips to the raid layout, sorting and pinned frames settings.
 
 ### Bug Fixes
 
