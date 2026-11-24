@@ -663,6 +663,11 @@ function Search:BuildFullRegistryBudgeted(onDone, msBudget)
         -- bumps the token; carrying on would append pages built under the new
         -- mode to a registry whose first half was built under the old one.
         if self._buildToken ~= ctx.token then return end
+        -- A page build makes frames: not mid-fight. Pick up again after it.
+        if InCombatLockdown and InCombatLockdown() then
+            C_Timer.After(0.5, drain)
+            return
+        end
 
         local deadline = debugprofilestop() + budget
         while i <= n do
@@ -670,6 +675,12 @@ function Search:BuildFullRegistryBudgeted(onDone, msBudget)
             i = i + 1
             if not ok and err then geterrorhandler()(err) end
             if i <= n and debugprofilestop() > deadline then
+                -- What has landed so far is searchable now (the page list's
+                -- filter answers from it and widens as the rest arrives).
+                if self._OnBuildProgress then
+                    local pOK, pErr = pcall(self._OnBuildProgress, self)
+                    if not pOK and pErr then geterrorhandler()(pErr) end
+                end
                 C_Timer.After(0, drain)
                 return
             end
