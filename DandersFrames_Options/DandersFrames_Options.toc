@@ -67,6 +67,10 @@ GUI\SettingsWidgets.lua
 # Settings search. It has no entry point of its own -- the search bar is built
 # by GUI\Panel.lua -- so it is only ever reachable with this addon loaded.
 Features\Search.lua
+# Its synonyms and per-setting tags (search data, not UI text), then the
+# matcher that indexes the registry. Both extend DF.Search, so AFTER it.
+Features\SearchSynonyms.lua
+Features\SearchMatch.lua
 # The changed-settings ledger. AFTER Search.lua (it reads DF.Search's registry
 # at build time) and before the pages, one of which reads its PAGE_ID at file
 # scope to name its own tab.
