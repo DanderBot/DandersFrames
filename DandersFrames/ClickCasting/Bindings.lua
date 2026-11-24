@@ -559,21 +559,112 @@ end
 -- Check if a binding should apply to a specific frame based on frames checkboxes
 function CC:ShouldBindingApplyToFrame(binding, frame)
     if not binding or not frame then return false end
-    
-    -- Get frames settings (with defaults for backwards compatibility)
-    local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-    
-    -- Determine if this is a DandersFrames frame or an "other" frame
-    -- DandersFrames = frames created by our addon (marked with dfIsDandersFrame)
-    -- Other frames = Blizzard frames AND third-party addon frames
-    local isDandersFrame = frame.dfIsDandersFrame == true
-    
-    -- Check if binding applies to this frame type
-    if isDandersFrame then
-        return frames.dandersFrames == true
-    else
-        return frames.otherFrames == true
+    return self:BindingScopeOn(binding, self:GetFrameScope(frame))
+end
+
+-- ============================================================
+-- FRAME SCOPES (Constants.lua FRAME_SCOPES)
+-- The ONE reader of binding.frames. Lazy migration: nothing is rewritten.
+--   * no frames table                -> on everywhere (the oldest default)
+--   * "other"                        -> frames.otherFrames
+--   * frames.scopes[scope] a boolean -> that
+--   * anything else                  -> frames.dandersFrames
+-- So a binding saved before scopes existed, an imported string from an older
+-- version, and the hard-coded default binds all behave exactly as they did:
+-- every DF frame follows the old "DandersFrames" box. A scope added later
+-- falls back the same way, so a new frame type inherits "on DF frames".
+-- ☠ frames/scopes may come from an import string (another player): type-check,
+-- never trust truthiness -- a non-table `scopes` is ignored, not indexed.
+-- ============================================================
+function CC:BindingScopeOn(binding, scope)
+    local frames = binding and binding.frames
+    if type(frames) ~= "table" then return true end
+    if scope == "other" then return frames.otherFrames == true end
+    local scopes = frames.scopes
+    if type(scopes) == "table" then
+        local v = scopes[scope]
+        if type(v) == "boolean" then return v end
     end
+    return frames.dandersFrames == true
+end
+
+-- Does the binding work on any frame at all (a DF scope or Other Frames)?
+-- Decides whether its macro needs the [@mouseover] clause for frame clicks.
+function CC:BindingOnAnyFrame(binding)
+    if self:BindingScopeOn(binding, "other") then return true end
+    for _, scope in ipairs(self.FRAME_SCOPES) do
+        if self:BindingScopeOn(binding, scope) then return true end
+    end
+    return false
+end
+
+-- Write every scope explicitly, plus the legacy summary flag an older client
+-- reads (frames.dandersFrames = any DF scope on). Missing members are read
+-- through BindingScopeOn first, so a legacy binding keeps what it had.
+function CC:NormalizeBindingScopes(binding)
+    if type(binding) ~= "table" then return end
+    local resolved = {}
+    local any = false
+    for _, scope in ipairs(self.FRAME_SCOPES) do
+        local on = self:BindingScopeOn(binding, scope)
+        resolved[scope] = on
+        any = any or on
+    end
+    local other = self:BindingScopeOn(binding, "other")
+    binding.frames = { dandersFrames = any, otherFrames = other, scopes = resolved }
+end
+
+-- Which scope a frame answers to. Read LIVE, never cached: a unit frame is
+-- registered by its template's OnLoad (InitializeHeaderChild) before
+-- Units:Build stamps dfUFUnit, so a value taken at registration would call
+-- it a party frame (UF.Units:Build re-applies once it is stamped).
+--   unit frames      -> their dfUFUnit (boss slots share "boss")
+--   other DF frames  -> raid when isRaidFrame, else party. Arena runs on
+--                       party settings, pinned frames on the mode they were
+--                       built in, group pets on their owner's.
+--   everything else  -> "other"
+function CC:GetFrameScope(frame)
+    if not frame or frame.dfIsDandersFrame ~= true then return "other" end
+    local ufUnit = frame.dfUFUnit
+    if type(ufUnit) == "string" then return ufUnit end
+    return frame.isRaidFrame and "raid" or "party"
+end
+
+-- The macro map a frame applies: built from only the bindings on in its
+-- scope, so one key can do different things on different frame types.
+-- Lazily built per scope and keyed to the union map's identity: every site
+-- that rebuilds (or nils) self.unifiedMacroMap invalidates these with it.
+function CC:GetMacroMapForScope(scope)
+    if not self.unifiedMacroMap then
+        self.unifiedMacroMap = self:BuildUnifiedMacroMap()
+    end
+    if self.scopeMapsFor ~= self.unifiedMacroMap then
+        self.scopeMacroMaps = {}
+        self.scopeMapsFor = self.unifiedMacroMap
+    end
+    local map = self.scopeMacroMaps[scope]
+    if not map then
+        map = self:BuildUnifiedMacroMap(scope)
+        self.scopeMacroMaps[scope] = map
+    end
+    return map
+end
+
+function CC:GetMacroMapForFrame(frame)
+    return self:GetMacroMapForScope(self:GetFrameScope(frame))
+end
+
+-- Re-apply one frame whose scope just became known (a unit frame stamped after
+-- its registration). Out of combat only; otherwise a full refresh is queued.
+function CC:RefreshFrameScope(frame)
+    if not (frame and self.registeredFrames and self.registeredFrames[frame]) then return end
+    if not (self.db and self.db.enabled) then return end
+    if InCombatLockdown() then
+        self:Defer("bindingRefresh")
+        return
+    end
+    self:ApplyBindingsToFrameUnified(frame)
+    self:UpdateFrameBindingAttributes(frame)
 end
 
 -- Apply bindings to all registered frames
@@ -1208,6 +1299,19 @@ end
 -- BINDING MANAGEMENT API
 -- ============================================================
 
+-- Do two bindings share any frame they work on? Same key on disjoint scopes
+-- (Left = Target on the target frame, Left = heal on party) is not a clash:
+-- each frame type gets its own macro map. A binding on no frame at all lives
+-- only on the global key, which every scope shares, so it always overlaps.
+function CC:BindingScopesOverlap(a, b)
+    if not (self:BindingOnAnyFrame(a) and self:BindingOnAnyFrame(b)) then return true end
+    if self:BindingScopeOn(a, "other") and self:BindingScopeOn(b, "other") then return true end
+    for _, scope in ipairs(self.FRAME_SCOPES) do
+        if self:BindingScopeOn(a, scope) and self:BindingScopeOn(b, scope) then return true end
+    end
+    return false
+end
+
 -- Check if a duplicate binding already exists
 -- Returns the index of the duplicate if found, nil otherwise
 function CC:FindDuplicateBinding(newBinding, excludeIndex)
@@ -1257,7 +1361,7 @@ function CC:FindDuplicateBinding(newBinding, excludeIndex)
                 end
             end
             
-            if sameKey and sameMods and sameAction then
+            if sameKey and sameMods and sameAction and self:BindingScopesOverlap(newBinding, existing) then
                 return i
             end
         end
@@ -1288,7 +1392,7 @@ function CC:FindKeyConflicts(newBinding, excludeIndex)
             -- Check if same modifiers
             local sameMods = (newBinding.modifiers or "") == (existing.modifiers or "")
             
-            if sameKey and sameMods then
+            if sameKey and sameMods and self:BindingScopesOverlap(newBinding, existing) then
                 table.insert(conflicts, {
                     index = i,
                     binding = existing
@@ -2214,8 +2318,7 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         -- For frame click-casting to work, we ALWAYS need @mouseover when binding applies to frames
         -- because WoW sets the frame's unit as mouseover when you hover/click it
         -- BUT for global bindings (when not hovering frames), only use explicit fallback settings
-        local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(binding)
         local hasMouseover
         if forGlobalBinding then
             -- Global binding: only include @mouseover if explicitly enabled as fallback
@@ -2283,8 +2386,7 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         
     elseif actionType == "focus" then
         local parts = {}
-        local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(binding)
         local hasMouseover
         if forGlobalBinding then
             hasMouseover = fallback.mouseover == true
@@ -2305,8 +2407,7 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         
     elseif actionType == "assist" then
         local parts = {}
-        local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(binding)
         local hasMouseover
         if forGlobalBinding then
             hasMouseover = fallback.mouseover == true
@@ -2340,8 +2441,7 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         -- Frame click-casting always needs @mouseover so hovering a frame
         -- targets that unit. Global keybinds only get @mouseover when the
         -- user explicitly opts in via the fallback.
-        local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(binding)
         local hasMouseover
         if forGlobalBinding then
             hasMouseover = fallback.mouseover == true
@@ -2490,8 +2590,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         spell = GetCastSpellName(friendlyBinding, spell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
-        local frames = friendlyBinding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(friendlyBinding)
         
         -- Mouseover help (required for frames, optional for world units)
         local hasMouseover = forGlobalBinding and fb.mouseover == true or (not forGlobalBinding and (appliesToFrames or fb.mouseover == true))
@@ -2518,8 +2617,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         spell = GetCastSpellName(hostileBinding, spell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
-        local frames = hostileBinding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(hostileBinding)
         
         -- Mouseover harm (required for frames, optional for world units)
         local hasMouseover = forGlobalBinding and fb.mouseover == true or (not forGlobalBinding and (appliesToFrames or fb.mouseover == true))
@@ -2544,8 +2642,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         anySpell = GetCastSpellName(anyBinding, anySpell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
-        local frames = anyBinding.frames or { dandersFrames = true, otherFrames = true }
-        local appliesToFrames = frames.dandersFrames or frames.otherFrames
+        local appliesToFrames = CC:BindingOnAnyFrame(anyBinding)
         
         -- Check what fallbacks are enabled for "any" binding
         local hasMouseover = forGlobalBinding and fb.mouseover == true or (not forGlobalBinding and (appliesToFrames or fb.mouseover == true))
@@ -2695,13 +2792,17 @@ function CC:ResolveColdStartProfile(reason)
     end)
 end
 
-function CC:BuildUnifiedMacroMap()
+-- `scope` (optional): build only from the bindings on in that frame scope
+-- (CC:GetMacroMapForScope). Without it this is the UNION map, one entry per
+-- key across every scope: what the hovercast global binds, the self-heal
+-- checks and the debug dumps read.
+function CC:BuildUnifiedMacroMap(scope)
     local macroMap = {}
 
     -- Group all bindings by their key string
     local keyGroups = {}
     for i, binding in ipairs(self.db.bindings) do
-        if binding.enabled ~= false then
+        if binding.enabled ~= false and (scope == nil or self:BindingScopeOn(binding, scope)) then
             local keyString = self:GetBindingKeyString(binding)
             if keyString then
                 if not keyGroups[keyString] then
@@ -3003,7 +3104,13 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     local thirdPartyHasUnit = type(tpUnit) == "string" and tpUnit ~= ""
     local useProxy = isDandersFrame or isBlizzardFrame or thirdPartyHasUnit
 
-    for keyString, data in pairs(self.unifiedMacroMap) do
+    -- This frame's own map: only the bindings on in its scope (party, raid, a
+    -- unit frame, other), so the same key can carry a different action on a
+    -- different frame type. The applicability test below still runs -- for
+    -- the scope map it is always true, and it keeps a direct caller honest.
+    local frameMap = self:GetMacroMapForFrame(frame)
+
+    for keyString, data in pairs(frameMap) do
         local binding = data.templateBinding
         if self:ShouldBindingApplyToFrame(binding, frame) then
             hasAnyBindings = true
@@ -3070,7 +3177,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
 
     -- Apply each macro binding (these will override defaults where bindings exist)
     local isThirdPartyFrame = not frame.dfIsDandersFrame and not frame.dfIsBlizzardFrame
-    for keyString, data in pairs(self.unifiedMacroMap) do
+    for keyString, data in pairs(frameMap) do
         local binding = data.templateBinding
 
         -- Check if this binding should apply to this frame
@@ -3823,6 +3930,7 @@ SlashCmdList["DFCCFRAMEATTRS"] = function()
     print("  " .. DF.OUT.SECTION .. "Frame State|r")
     print("  registered=" .. tostring(frame.dfClickCastRegistered) .. 
           ", isDandersFrame=" .. tostring(frame.dfIsDandersFrame) ..
+          ", scope=" .. tostring(CC:GetFrameScope(frame)) ..
           ", handlersSetup=" .. tostring(frame.dfKeyboardHandlersSetup))
 end
 

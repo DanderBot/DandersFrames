@@ -16,7 +16,37 @@ local DEFAULT_BINDING_SCOPE = CC.DEFAULT_BINDING_SCOPE
 local DEFAULT_BINDING_COMBAT = CC.DEFAULT_BINDING_COMBAT
 local DEFAULT_TARGET_TYPE = CC.DEFAULT_TARGET_TYPE
 local TARGET_INFO = CC.TARGET_INFO
-local FRAME_INFO = CC.FRAME_INFO
+-- Frame scope labels (Constants.lua FRAME_SCOPE_FAMILIES): the editor's rows
+-- and the binding list's "Frames:" summary.
+local SCOPE_LABEL = {
+    party = L["Party"], raid = L["Raid"],
+    player = L["Player"], target = L["Target"], targettarget = L["Target of Target"],
+    focus = L["Focus"], focustarget = L["Focus Target"], pet = L["Pet"], boss = L["Boss"],
+}
+local FAMILY_INFO = {
+    group = { name = L["Group Frames"], desc = L["Your party and raid frames, including pinned, arena and group pet frames."] },
+    unit  = { name = L["Unit Frames"],  desc = L["The DandersFrames unit frames: player, target, focus, pet, boss and the rest."] },
+}
+
+-- "Group Frames, Target, Focus, Other Frames": a family that is fully on is
+-- named once, a partial one lists its members. None -> "None".
+local function FramesSummary(binding)
+    local parts = {}
+    for _, fam in ipairs(CC.FRAME_SCOPE_FAMILIES) do
+        local on = {}
+        for _, scope in ipairs(fam.members) do
+            if CC:BindingScopeOn(binding, scope) then on[#on + 1] = SCOPE_LABEL[scope] or scope end
+        end
+        if #on == #fam.members then
+            parts[#parts + 1] = FAMILY_INFO[fam.key].name
+        else
+            for _, label in ipairs(on) do parts[#parts + 1] = label end
+        end
+    end
+    if CC:BindingScopeOn(binding, "other") then parts[#parts + 1] = L["Other Frames"] end
+    return #parts > 0 and table.concat(parts, ", ") or L["None"]
+end
+CC.FramesSummary = FramesSummary
 local FALLBACK_INFO = CC.FALLBACK_INFO
 local COMBAT_INFO = CC.COMBAT_INFO
 -- A new binding's priority (10 = highest, 1 = lowest). Anything else opens Advanced.
@@ -274,12 +304,8 @@ function CC:CreateBindingRow(parent, binding, index)
             lines[#lines + 1] = { text = L["Out of Combat Only"], color = C.nocombat }
         end
 
-        local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-        local framesParts = {}
-        if frames.dandersFrames then table.insert(framesParts, "DandersFrames") end
-        if frames.otherFrames then table.insert(framesParts, L["Other Frames"]) end
         lines[#lines + 1] = {
-            text  = format(L["Frames: %s"], #framesParts > 0 and table.concat(framesParts, ", ") or L["None"]),
+            text  = format(L["Frames: %s"], FramesSummary(binding)),
             color = { 0.6, 0.6, 0.6 },
         }
         lines[#lines + 1] = " "
@@ -563,27 +589,184 @@ function CC:CreateEditBindingPanel()
         })
     end
     
-    -- DandersFrames checkbox
-    local dfFramesCB = CreateCheckbox(panel, FRAME_INFO.dandersFrames.name, FRAME_INFO.dandersFrames.desc)
-    dfFramesCB:SetPoint("TOPLEFT", 30, -168)
-    dfFramesCB.onClick = function(val)
-        panel.pendingBinding.frames = panel.pendingBinding.frames or {}
-        panel.pendingBinding.frames.dandersFrames = val
+    -- ============================================================
+    -- FRAME SCOPES (Constants.lua FRAME_SCOPE_FAMILIES)
+    -- Three family rows -- Group Frames, Unit Frames, Other Frames -- the first
+    -- two with a chevron that unfolds one row per member (Party, Raid; Player,
+    -- Target, ...). A family's check is DERIVED: on when every member is, dimmed
+    -- when some are, off when none; clicking it sets every member it can.
+    -- Everything below this block hangs off panel.lower, which slides down by
+    -- the rows shown here (LayoutScopeRows), so unfolding never overlaps it.
+    -- ============================================================
+    local SCOPE_ROW_TOP, SCOPE_ROW_STEP = -168, 22
+    -- The old layout had two rows here; Target Type sat 28px under the second.
+    local SCOPE_BASE_ROWS = 2
+    local ICON_CHEVRON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png"
+    local ICON_EXPANDED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png"
+
+    -- Anchor for everything under the scope rows. At (0,0) it IS the panel's
+    -- top-left, so every offset below keeps its old meaning.
+    local lower = CreateFrame("Frame", nil, panel)
+    lower:SetSize(1, 1)
+    lower:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    panel.lower = lower
+    panel.scopeShift = 0
+    panel.baseHeight = 502
+
+    -- The panel's height for its content, plus whatever the scope rows took.
+    function panel:SetBaseHeight(h)
+        self.baseHeight = h
+        self:SetHeight(h + (self.scopeShift or 0))
     end
-    panel.dfFramesCB = dfFramesCB
-    
-    -- Other Frames checkbox
-    local otherFramesCB = CreateCheckbox(panel, FRAME_INFO.otherFrames.name, FRAME_INFO.otherFrames.desc)
-    otherFramesCB:SetPoint("TOPLEFT", 30, -190)
+
+    -- The pending binding's frames table, in the explicit per-scope shape.
+    local function PendingFrames()
+        local b = panel.pendingBinding
+        if type(b.frames) ~= "table" or type(b.frames.scopes) ~= "table" then
+            CC:NormalizeBindingScopes(b)
+        end
+        return b.frames
+    end
+
+    -- Why a member cannot be used right now, or nil. Nothing is cleared: the
+    -- tick stays as it is, so turning the frames back on brings the bind back.
+    local function ScopeBlockedReason(scope)
+        local GUI = DF.GUI
+        if scope == "party" or scope == "raid" then
+            local GF = GUI and GUI.GroupFrames
+            local isOn = GF and ((scope == "raid") and GF.RaidOn or GF.PartyOn)
+            if isOn and not isOn() then
+                return format(L["%s are turned off on the Modules page."],
+                    (scope == "raid") and L["Raid Frames"] or L["Party Frames"])
+            end
+            return nil
+        end
+        local UFO = GUI and GUI.UnitFrameOptions
+        if not UFO then return nil end
+        if UFO.SubSwitchesDisabled then
+            local off, reason = UFO.SubSwitchesDisabled()
+            if off then return reason end
+        end
+        local source = UFO.GetSource and UFO.GetSource(scope) or "DF"
+        if source == "Blizzard" then
+            return format(L["%s uses Blizzard's frame, so Other Frames covers it."], SCOPE_LABEL[scope] or scope)
+        elseif source == "Hidden" then
+            return format(L["%s is hidden by its Frame Source."], SCOPE_LABEL[scope] or scope)
+        end
+        return nil
+    end
+    panel.ScopeBlockedReason = ScopeBlockedReason
+
+    panel.scopeFamilies = {}
+    panel.scopeMemberCBs = {}
+    panel.scopeExpanded = {}
+
+    local RefreshScopeRows, LayoutScopeRows
+
+    for _, fam in ipairs(CC.FRAME_SCOPE_FAMILIES) do
+        local info = FAMILY_INFO[fam.key]
+        local famCB = CreateCheckbox(panel, info.name, info.desc)
+        famCB.familyKey = fam.key
+        famCB.onClick = function(val)
+            local frames = PendingFrames()
+            for _, scope in ipairs(fam.members) do
+                if not ScopeBlockedReason(scope) then frames.scopes[scope] = val end
+            end
+            RefreshScopeRows()
+        end
+
+        -- The unfold chevron, right of the label: the shared icon button.
+        local chevron = CreateFrame("Button", nil, panel, "BackdropTemplate")
+        DF.GUI:StyleButton(chevron, {
+            width = 18, height = 18,
+            accent = CC.ACCENT,
+            icon = { texture = ICON_CHEVRON, size = 12, color = C_TEXT_DIM },
+        })
+        chevron:SetPoint("LEFT", famCB.label, "RIGHT", 4, 0)
+        chevron:SetScript("OnClick", function()
+            panel.scopeExpanded[fam.key] = not panel.scopeExpanded[fam.key]
+            LayoutScopeRows()
+        end)
+        famCB.chevron = chevron
+
+        local members = {}
+        for _, scope in ipairs(fam.members) do
+            local key = scope
+            local cb = CreateCheckbox(panel, SCOPE_LABEL[key] or key, nil)
+            cb.scopeKey = key
+            cb.onClick = function(val)
+                PendingFrames().scopes[key] = val
+                RefreshScopeRows()
+            end
+            members[#members + 1] = cb
+            panel.scopeMemberCBs[key] = cb
+        end
+        famCB.members = members
+        panel.scopeFamilies[#panel.scopeFamilies + 1] = famCB
+    end
+
+    -- Other Frames: a single row, no members.
+    local otherFramesCB = CreateCheckbox(panel, L["Other Frames"],
+        L["Blizzard's frames (player, target, focus, pet, boss, arena), other addons' unit frames, and nameplates."])
     otherFramesCB.onClick = function(val)
-        panel.pendingBinding.frames = panel.pendingBinding.frames or {}
-        panel.pendingBinding.frames.otherFrames = val
+        PendingFrames().otherFrames = val
     end
     panel.otherFramesCB = otherFramesCB
+
+    -- Paint every row from the pending binding.
+    RefreshScopeRows = function()
+        if not panel.pendingBinding then return end
+        local frames = PendingFrames()
+        for _, famCB in ipairs(panel.scopeFamilies) do
+            local on, total, blocked = 0, 0, 0
+            for _, cb in ipairs(famCB.members) do
+                local v = frames.scopes[cb.scopeKey] == true
+                cb:SetChecked(v)
+                local reason = ScopeBlockedReason(cb.scopeKey)
+                cb:SetBlocked(reason)
+                total = total + 1
+                if v then on = on + 1 end
+                if reason then blocked = blocked + 1 end
+            end
+            famCB:SetChecked(on == total)
+            if on > 0 and on < total then famCB:SetMixed(true) end
+            famCB:SetBlocked((blocked == total) and ScopeBlockedReason(famCB.members[1].scopeKey) or nil)
+        end
+        otherFramesCB:SetChecked(frames.otherFrames == true)
+    end
+    panel.RefreshScopeRows = RefreshScopeRows
+
+    -- Stack the rows and slide everything below them.
+    LayoutScopeRows = function()
+        local y = SCOPE_ROW_TOP
+        local rows = 0
+        local function place(cb, x)
+            cb:ClearAllPoints()
+            cb:SetPoint("TOPLEFT", panel, "TOPLEFT", x, y)
+            cb:Show()
+            y = y - SCOPE_ROW_STEP
+            rows = rows + 1
+        end
+        for _, famCB in ipairs(panel.scopeFamilies) do
+            place(famCB, 30)
+            local open = panel.scopeExpanded[famCB.familyKey] and true or false
+            famCB.chevron.Icon:SetTexture(open and ICON_EXPANDED or ICON_CHEVRON)
+            for _, cb in ipairs(famCB.members) do
+                if open then place(cb, 48) else cb:Hide() end
+            end
+        end
+        place(otherFramesCB, 30)
+        panel.scopeShift = (rows - SCOPE_BASE_ROWS) * SCOPE_ROW_STEP
+        lower:ClearAllPoints()
+        lower:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -panel.scopeShift)
+        panel:SetBaseHeight(panel.baseHeight)
+    end
+    panel.LayoutScopeRows = LayoutScopeRows
+    LayoutScopeRows()
     
     -- Target Type section (moved up, was below Fallback)
     local targetLabel = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    targetLabel:SetPoint("TOPLEFT", 12, -218)
+    targetLabel:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -218)
     targetLabel:SetText(L["Target Type:"])
     targetLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.targetLabel = targetLabel
@@ -597,7 +780,7 @@ function CC:CreateEditBindingPanel()
     
     for i, opt in ipairs(targetOptions) do
         local radio = CreateRadioButton(panel, opt.text, opt.desc)
-        radio:SetPoint("TOPLEFT", 30, -236 - ((i-1) * 20))
+        radio:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 30, -236 - ((i-1) * 20))
         radio.key = opt.key
         
         radio:SetScript("OnClick", function(self)
@@ -613,7 +796,7 @@ function CC:CreateEditBindingPanel()
     
     -- Combat/Active section (moved up, was below Target Type)
     local combatLabel = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    combatLabel:SetPoint("TOPLEFT", 12, -302)
+    combatLabel:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -302)
     combatLabel:SetText(L["Active:"])
     combatLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     panel.combatLabel = combatLabel
@@ -627,7 +810,7 @@ function CC:CreateEditBindingPanel()
     
     for i, opt in ipairs(combatOptions) do
         local radio = CreateRadioButton(panel, opt.text, opt.desc)
-        radio:SetPoint("TOPLEFT", 30, -320 - ((i-1) * 20))
+        radio:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 30, -320 - ((i-1) * 20))
         radio.key = opt.key
         
         radio:SetScript("OnClick", function(self)
@@ -650,7 +833,7 @@ function CC:CreateEditBindingPanel()
     
     -- Advanced header/toggle button
     local advancedToggle = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    advancedToggle:SetPoint("TOPLEFT", 12, -385)
+    advancedToggle:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -385)
     -- Chrome + hover (accent border/wash) from the shared styler; the chevron icon
     -- and "Advanced" label are owned by StyleButton (left-aligned, icon at 6px to
     -- match the prior layout). Collapse/expand OnClick + chevron rotation are wired
@@ -851,7 +1034,7 @@ function CC:CreateEditBindingPanel()
     
     -- Global Keybind heading
     local globalBindLabel = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    globalBindLabel:SetPoint("TOPLEFT", 12, -302)  -- Will be repositioned dynamically
+    globalBindLabel:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -302)  -- Will be repositioned dynamically
     globalBindLabel:SetText(L["Global Keybind:"])
     globalBindLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     globalBindLabel:Hide()
@@ -859,7 +1042,7 @@ function CC:CreateEditBindingPanel()
     
     -- Description for Global Keybind (below heading)
     local globalBindDesc = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    globalBindDesc:SetPoint("TOPLEFT", 12, -318)  -- Will be repositioned dynamically
+    globalBindDesc:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -318)  -- Will be repositioned dynamically
     globalBindDesc:SetWidth(280)
     globalBindDesc:SetJustifyH("LEFT")
     globalBindDesc:SetWordWrap(true)
@@ -870,7 +1053,7 @@ function CC:CreateEditBindingPanel()
     
     -- Global Keybind checkbox (below description)
     local globalBindCB = CreateCheckbox(panel, L["Enable"], L["Makes this binding work everywhere, consuming the keybind."])
-    globalBindCB:SetPoint("TOPLEFT", 30, -350)  -- Will be repositioned dynamically
+    globalBindCB:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 30, -350)  -- Will be repositioned dynamically
     globalBindCB.onClick = function(val)
         panel.pendingBinding.useGlobalBind = val
     end
@@ -893,11 +1076,11 @@ function CC:CreateEditBindingPanel()
         if panel.advancedExpanded then
             advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             advancedContent:Show()
-            panel:SetHeight(expandedHeight)
+            panel:SetBaseHeight(expandedHeight)
         else
             advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             advancedContent:Hide()
-            panel:SetHeight(collapsedHeight)
+            panel:SetBaseHeight(collapsedHeight)
         end
     end
     
@@ -905,7 +1088,7 @@ function CC:CreateEditBindingPanel()
     panel.ToggleAdvanced = ToggleAdvanced
     
     -- Start collapsed
-    panel:SetHeight(COLLAPSED_HEIGHT)
+    panel:SetBaseHeight(COLLAPSED_HEIGHT)
     
     -- Bottom buttons
     local saveBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
@@ -1098,8 +1281,10 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     -- Initialize pending binding data
     if existingBinding then
         panel.pendingBinding = CopyTable(existingBinding)
-        -- Ensure frames and fallback exist
-        panel.pendingBinding.frames = panel.pendingBinding.frames or { dandersFrames = true, otherFrames = true }
+        -- Ensure frames and fallback exist. Frames in the explicit per-scope
+        -- shape (CC:NormalizeBindingScopes): a legacy binding keeps exactly
+        -- what it had, read through CC:BindingScopeOn.
+        CC:NormalizeBindingScopes(panel.pendingBinding)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or { mouseover = false, target = false, selfCast = false }
     else
         panel.pendingBinding = {
@@ -1108,7 +1293,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             button = nil,
             key = nil,
             modifiers = "",
-            frames = { dandersFrames = true, otherFrames = true },
+            frames = nil,  -- every scope on: filled by NormalizeBindingScopes below
             fallback = { mouseover = false, target = false, selfCast = false },
             combat = DEFAULT_BINDING_COMBAT,
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
@@ -1117,6 +1302,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             priority = DEFAULT_PRIORITY,
         }
         self:ApplySpellRank(panel.pendingBinding, spellData)
+        self:NormalizeBindingScopes(panel.pendingBinding)
         
         if spellData.isMacro then
             panel.pendingBinding.actionType = self.ACTION_TYPES.MACRO
@@ -1210,10 +1396,18 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     -- Advanced section is hidden for them further below.
     local isMenuOrTarget = (actionType == CC.ACTION_TYPES.TARGET or actionType == CC.ACTION_TYPES.MENU)
     
-    -- Update frames checkboxes (always shown)
-    local frames = panel.pendingBinding.frames or { dandersFrames = true, otherFrames = true }
-    panel.dfFramesCB:SetChecked(frames.dandersFrames)
-    panel.otherFramesCB:SetChecked(frames.otherFrames)
+    -- Update the frame scope rows (always shown). A family opens on its own
+    -- when only some of its members are on, so a partial pick is never hidden.
+    panel.scopeExpanded = {}
+    for _, fam in ipairs(CC.FRAME_SCOPE_FAMILIES) do
+        local on, total = 0, #fam.members
+        for _, scope in ipairs(fam.members) do
+            if CC:BindingScopeOn(panel.pendingBinding, scope) then on = on + 1 end
+        end
+        if on > 0 and on < total then panel.scopeExpanded[fam.key] = true end
+    end
+    panel.RefreshScopeRows()
+    panel.LayoutScopeRows()
     
     -- Check if this binding has advanced options set (should auto-expand)
     local fallback = panel.pendingBinding.fallback or { mouseover = false, target = false, selfCast = false }
@@ -1249,18 +1443,18 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if panel.globalBindLabel then
             panel.globalBindLabel:Show()
             panel.globalBindLabel:ClearAllPoints()
-            panel.globalBindLabel:SetPoint("TOPLEFT", 12, -218)  -- Same Y as where Active would be for spells
+            panel.globalBindLabel:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -218)  -- Same Y as where Active would be for spells
         end
         if panel.globalBindDesc then
             panel.globalBindDesc:Show()
             panel.globalBindDesc:ClearAllPoints()
-            panel.globalBindDesc:SetPoint("TOPLEFT", 12, -234)  -- Below heading
+            panel.globalBindDesc:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -234)  -- Below heading
         end
         if panel.globalBindCB then
             panel.globalBindCB:Show()
             panel.globalBindCB:SetChecked(panel.pendingBinding.useGlobalBind == true)
             panel.globalBindCB:ClearAllPoints()
-            panel.globalBindCB:SetPoint("TOPLEFT", 30, -270)  -- Below description
+            panel.globalBindCB:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 30, -270)  -- Below description
         end
         
         -- Move priority slider up since fallback is hidden
@@ -1361,29 +1555,29 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         
         -- Move Active section down to make room for Global Keybind section above it
         panel.combatLabel:ClearAllPoints()
-        panel.combatLabel:SetPoint("TOPLEFT", 12, -295)
+        panel.combatLabel:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -295)
         
         -- Move combat radios down
         for i, radio in ipairs(panel.combatRadios) do
             radio:ClearAllPoints()
-            radio:SetPoint("TOPLEFT", 30, -313 - ((i-1) * 20))
+            radio:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 30, -313 - ((i-1) * 20))
         end
         
         -- Move advanced toggle below Active section
         panel.advancedToggle:ClearAllPoints()
-        panel.advancedToggle:SetPoint("TOPLEFT", 12, -380)
+        panel.advancedToggle:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -380)
     else
         -- Restore normal positions for spells
         panel.combatLabel:ClearAllPoints()
-        panel.combatLabel:SetPoint("TOPLEFT", 12, -302)
+        panel.combatLabel:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -302)
         
         for i, radio in ipairs(panel.combatRadios) do
             radio:ClearAllPoints()
-            radio:SetPoint("TOPLEFT", 30, -320 - ((i-1) * 20))
+            radio:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 30, -320 - ((i-1) * 20))
         end
         
         panel.advancedToggle:ClearAllPoints()
-        panel.advancedToggle:SetPoint("TOPLEFT", 12, -385)
+        panel.advancedToggle:SetPoint("TOPLEFT", panel.lower, "TOPLEFT", 12, -385)
     end
 
     -- Target / menu binds: hide the entire Advanced section. Its options do
@@ -1406,17 +1600,17 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     if hideTargeting then
         -- For macros/items: no target type section
         if panel.advancedExpanded then
-            panel:SetHeight(MACRO_EXPANDED_HEIGHT)
+            panel:SetBaseHeight(MACRO_EXPANDED_HEIGHT)
         else
-            panel:SetHeight(MACRO_COLLAPSED_HEIGHT)
+            panel:SetBaseHeight(MACRO_COLLAPSED_HEIGHT)
         end
     elseif isMenuOrTarget then
         -- Target/menu: Advanced section hidden entirely
-        panel:SetHeight(SPECIAL_COLLAPSED_HEIGHT)
+        panel:SetBaseHeight(SPECIAL_COLLAPSED_HEIGHT)
     elseif panel.advancedExpanded then
-        panel:SetHeight(SPELL_EXPANDED_HEIGHT)
+        panel:SetBaseHeight(SPELL_EXPANDED_HEIGHT)
     else
-        panel:SetHeight(SPELL_COLLAPSED_HEIGHT)
+        panel:SetBaseHeight(SPELL_COLLAPSED_HEIGHT)
     end
     
     -- Update priority slider. The slider's internal value equals the stored
@@ -1496,7 +1690,11 @@ function CC:FinalizeSaveBinding()
     if not panel or not panel.pendingBinding then return end
     
     local binding = panel.pendingBinding
-    
+
+    -- Every scope written out, plus frames.dandersFrames (any DF scope on) for
+    -- older versions that only know the one "DandersFrames" box.
+    self:NormalizeBindingScopes(binding)
+
     -- Macros handle their own targeting, so force no fallbacks for macro bindings
     if binding.actionType == self.ACTION_TYPES.MACRO or binding.actionType == "macro" then
         binding.fallback = {

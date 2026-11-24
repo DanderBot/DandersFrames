@@ -3906,4 +3906,12 @@ L["Training Points"] = true
 L["Training Points: %d"] = true
 L["Unhappy"] = true
 L["XP: %s / %s"] = true
+
+-- Click-casting frame scopes (Binding Editor)
+L["%s are turned off on the Modules page."] = true
+L["%s is hidden by its Frame Source."] = true
+L["%s uses Blizzard's frame, so Other Frames covers it."] = true
+L["Blizzard's frames (player, target, focus, pet, boss, arena), other addons' unit frames, and nameplates."] = true
+L["The DandersFrames unit frames: player, target, focus, pet, boss and the rest."] = true
+L["Your party and raid frames, including pinned, arena and group pet frames."] = true
 --@end-do-not-package@
