@@ -87,6 +87,7 @@ local function NewWindow()
     load_options_file_into("Features/Search.lua", NS)
     load_options_file_into("Features/SearchSynonyms.lua", NS)
     load_options_file_into("Features/SearchMatch.lua", NS)
+    load_options_file_into("Features/SearchPrebuilt.lua", NS)
     load_options_file_into("Features/SearchFilter.lua", NS)
     DandersFrames = savedDF
     S = DF.Search
@@ -209,8 +210,7 @@ check(S:FilterActive(), "filter: active once the debounce fires")
 check(GUI.Tabs.general_frame._shown and GUI.Tabs.display_fading._shown, "nav: pages with a match stay")
 check(not GUI.Tabs.auras_buffs._shown, "nav: a page with no match leaves the list")
 check(GUI.Tabs.uf_player_health._shown, "nav: the view's deferred page was indexed and matched")
-check(S.scopedPages and S.scopedPages.uf_player_health and not S.scopedPages.uf_target_health,
-      "scope: only the view's deferred pages joined the index")
+check(S.scopedPages == nil, "scope: the filter adds no page to the registry build")
 check(not GUI.Tabs.bars_absorb._shown, "nav: a match its 'only shown when' hides does not keep a page")
 
 print("-- Filter: the page shows only what matches")
@@ -319,19 +319,19 @@ GUI:LinkToSetting({ page = "auras_buffs" })
 check(not S:FilterActive() and S.Filter.text == "", "link: the filter is cleared")
 eq(linkCalls, 1, "link: ...and the link still runs")
 
-print("-- Filter: never builds the index in combat")
+print("-- Filter: in combat it still answers, from what it has, building nothing")
 NewWindow()
 local p = Page("general_frame", "Frame")
 Card(p, "Appearance", { { "Global Frame Fade", "frameFadeAlpha" } })
 GUI.CurrentPageName = "general_frame"
-S.RegistryBuilt = false   -- a build would be needed
-p.GetIndexEntries = function() return nil end
 local built = 0
 p.Refresh = function() built = built + 1 end
+p.RefreshForIndex = p.Refresh
 inCombat = true
 Type("fade")
-check(not S:FilterActive() and built == 0, "combat: no build, no filter yet")
+check(S:FilterActive() and built == 0, "combat: the filter answers and no page is built")
 inCombat = false
+Type("")
 
 print("-- Filter: every page the list shows has something showing on it")
 do
@@ -424,49 +424,87 @@ do
     Type("")
 end
 
-print("-- Filter: while the index builds, typing filters on what has landed")
+print("-- Filter: pages nobody has opened are searched from the prebuilt index, building nothing")
 do
     NewWindow()
-    local savedClock = debugprofilestop
-    local clk = 0
-    debugprofilestop = function() clk = clk + 10; return clk end   -- every page step overruns a slice
-    local function LazyPage(name, label, title, rowLabel, key)
+    local built = 0
+    local function Unbuilt(name, label)
         local p = Page(name, label)
-        p.GetIndexEntries = function() return nil end   -- never built this session
-        local done = false
-        p.RefreshForIndex = function(self)
-            if done then return end
-            done = true
-            Card(self, title, { { rowLabel, key } })
-        end
+        p.GetIndexEntries = function() return nil end   -- no build this session
+        p.Refresh = function() built = built + 1 end
+        p.RefreshForIndex = p.Refresh
         return p
     end
-    LazyPage("general_frame", "Frame", "Frame Fade", "Global Frame Fade", "frameFadeAlpha")
-    LazyPage("display_fading", "Fading", "Out of Range", "Frame Alpha (Out of Range)", "rangeFadeAlpha")
-    LazyPage("general_layout", "Layout", "Size", "Width", "frameWidth")
-    S.RegistryBuilt = false
+    local fp = Unbuilt("general_frame", "Frame")
+    Unbuilt("display_fading", "Fading")
+    Unbuilt("general_layout", "Layout")
+    -- What the generator writes (Features/SearchIndexData.lua): strings, conditions,
+    -- and per page flat rows of six (label, title, key, tooltip, condition, flags).
+    S.PrebuiltIndex = {
+        version = "test", commit = "0", rows = 5,
+        S = { "Global Frame Fade", "Frame Fade", "frameFadeAlpha", "Frame Alpha (Out of Range)", "Out of Range",
+              "rangeFadeAlpha", "Width", "Size", "frameWidth", "Range Check Spell", "rangeCheckSpellID",
+              "Hidden Thing", "hiddenAlpha" },
+        C = { { { "showHidden", true } } },
+        P = {
+            general_frame  = { 1, 2, 3, 0, 0, 0,   2, 2, 0, 0, 0, 1 },
+            display_fading = { 4, 5, 6, 0, 0, 0,   10, 5, 11, 0, 0, 0 },
+            general_layout = { 7, 8, 9, 0, 0, 0,   12, 8, 13, 0, 1, 0 },
+        },
+    }
+    DF.db.party.showHidden = false
     GUI.CurrentPageName = "general_frame"
-    local function Listed()
-        local n = 0
-        for _, btn in pairs(GUI.Tabs) do if btn._shown and S:FilterActive() then n = n + 1 end end
-        return n
+    Type("fade")
+    eq(built, 0, "prebuilt: focusing and typing build no page")
+    check(GUI.Tabs.general_frame._shown and GUI.Tabs.display_fading._shown and not GUI.Tabs.general_layout._shown,
+          "prebuilt: unopened pages are listed from the index")
+    Type("")
+    Type("hidden thing")
+    check(not GUI.Tabs.general_layout._shown, "prebuilt: a row hidden by its recorded condition does not list its page")
+    DF.db.party.showHidden = true
+    Type("")
+    Type("hidden thing")
+    check(GUI.Tabs.general_layout._shown, "prebuilt: ...and does once the condition holds")
+    Type("")
+    Type("out of range")
+    check(GUI.Tabs.display_fading._shown, "prebuilt: a card title row finds its page")
+
+    print("-- Filter: a page's live build takes over from its prebuilt rows")
+    -- The Frame page is opened: it now has a build whose entries the filter uses.
+    fp.GetIndexEntries = function() return fp._entries end
+    S:SetCurrentTab("general_frame", "Frame")
+    Card(fp, "Movement", { { "Show Handle", "permanentMoverShow" } })
+    Type("")
+    Type("handle")
+    check(GUI.Tabs.general_frame._shown, "live: a setting only the live build has is found")
+    Type("")
+    Type("global frame fade")
+    check(not GUI.Tabs.general_frame._shown, "live: the live build replaces the prebuilt rows (it has no such setting here)")
+    eq(built, 0, "live: still nothing built by the search")
+
+    print("-- Filter: the word index fills in slices, and the answer widens as it does")
+    local savedClock = debugprofilestop
+    local clk = 0
+    debugprofilestop = function() clk = clk + 1; return clk end
+    local rows = {}
+    for i = 1, 200 do
+        S.PrebuiltIndex.S[#S.PrebuiltIndex.S + 1] = "Fade Thing " .. i
+        local idx = #S.PrebuiltIndex.S
+        rows[#rows + 1] = idx; rows[#rows + 1] = 2; rows[#rows + 1] = 0
+        rows[#rows + 1] = 0; rows[#rows + 1] = 0; rows[#rows + 1] = 0
     end
-    local function OneFrame()
+    Unbuilt("big_page", "Big Page")
+    S.PrebuiltIndex.P.big_page = rows
+    S:SetFilterText("thing")
+    local sawPartial, frames = false, 0
+    while #timers > 0 and frames < 200 do
         local batch = timers; timers = {}
         for _, fn in ipairs(batch) do fn() end
-        return #batch
-    end
-    S:SetFilterText("fade")
-    local sawPartial, frames = false, 0
-    while #timers > 0 and frames < 60 do
-        OneFrame()
         frames = frames + 1
-        if S.RegistryBuilding and S:FilterActive() and Listed() >= 1 then sawPartial = true end
+        if S.Filter.partial then sawPartial = true end
     end
-    check(sawPartial, "partial: pages are listed while the build is still running")
-    check(not S.RegistryBuilding, "partial: the build finished (" .. frames .. " frames)")
-    check(GUI.Tabs.general_frame._shown and GUI.Tabs.display_fading._shown and not GUI.Tabs.general_layout._shown,
-          "partial: ...and the finished list has every match and nothing else")
+    check(sawPartial, "slices: the filter answered while the word index was still filling")
+    check(not S.Filter.partial and GUI.Tabs.big_page._shown, "slices: ...and the finished answer lists the page")
     debugprofilestop = savedClock
     Type("")
 end

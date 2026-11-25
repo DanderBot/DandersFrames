@@ -88,14 +88,18 @@ end
 -- Would this registry entry's control be drawn, filter aside?
 local dbByTab = {}
 local function EntryWouldShow(entry)
-    local w = entry.sourceWidget
-    if type(w) ~= "table" then return true end
     local tab = entry.tab
     local db = dbByTab[tab]
     if db == nil then
         db = PageDB(GUI.Pages and GUI.Pages[tab]) or false
         dbByTab[tab] = db
     end
+    -- A prebuilt row has no widget: its generator recorded the condition.
+    if entry.prebuilt then
+        return Search:PrebuiltShown(entry, db or nil)
+    end
+    local w = entry.sourceWidget
+    if type(w) ~= "table" then return true end
     if not db then return true end
     if CondHidden(w, db) then return false end
     local g = rawget(w, "settingsGroup")
@@ -108,8 +112,6 @@ end
 -- Returns false while the registry is still being built for it (the window then
 -- stays unfiltered until the build lands and calls back).
 -- ------------------------------------------------------------
-local waitingForCombat
-
 local function ViewPages()
     local inView, names = {}, {}
     for name, btn in pairs(GUI.Tabs or {}) do
@@ -133,9 +135,10 @@ end
 -- the answer only moves with the query, the pages in view, the mode or the
 -- registry, so it is computed once for those and handed back after.
 local function MemoKey(sig)
-    local reg = Search.Registry
-    return F.text .. "\1" .. sig .. "\1" .. tostring(GUI.SelectedMode) .. "\1"
-        .. tostring(reg) .. "\1" .. tostring(reg and #reg or 0)
+    local src = F.source
+    local ix = Search._filterIndex
+    return F.text .. "|" .. sig .. "|" .. tostring(GUI.SelectedMode) .. "|"
+        .. tostring(src) .. "|" .. tostring(ix and ix.n or 0)
 end
 
 function Search:_FilterCompute()
@@ -145,51 +148,19 @@ function Search:_FilterCompute()
     F.inView = inView
     local viewMoved = (sig ~= F.viewSig)
     F.viewSig = sig
-    if F.memo and F.memo == MemoKey(sig) and not self.RegistryBuilding then
+    -- ★ NO PAGE IS BUILT HERE, EVER. What the filter searches is each page's
+    -- live entries when it has a current build, else its prebuilt ones
+    -- (Features/SearchPrebuilt.lua). Building every page in view the first time
+    -- the box took focus was the stutter on clicking into it.
+    F.source = self:_FilterSource(inView)
+    if F.memo and F.memo == MemoKey(sig) then
         return true, viewMoved
     end
-
-    -- The view's deferred pages (one unit's pages) join the index; nothing else.
-    self:IncludeScopedPages(inView)
-    self:TryReuseRegistry()
-    F.partial = false
-    if self:RegistryIsStale() or self.RegistryBuilding then
-        -- A build creates frames: never in combat. Try again once it ends.
-        if InCombatLockdown() and not self.RegistryBuilding then
-            if not waitingForCombat then
-                waitingForCombat = CreateFrame("Frame")
-                waitingForCombat:SetScript("OnEvent", function(f)
-                    f:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                    Search:RefreshFilter(true)
-                end)
-            end
-            waitingForCombat:RegisterEvent("PLAYER_REGEN_ENABLED")
-        elseif not (self.RegistryBuilding and F.waitToken == self._buildToken) then
-            -- ONE wait per build. The list is laid out again and again while a
-            -- build runs (every page select does it), and each would otherwise
-            -- queue another refresh for when it lands. A build that was dropped
-            -- (InvalidateRegistry drops its waiters too) has a new token by then,
-            -- so this asks again rather than waiting on nothing.
-            self:EnsureRegistryAsync(function(ok)
-                F.waitToken = nil
-                if ok then Search:RefreshFilter(true) end
-            end)
-            F.waitToken = self._buildToken
-        end
-        -- ★ WHILE THE INDEX IS BUILDING, ANSWER FROM WHAT HAS LANDED. The build
-        -- appends page after page; the answer is recomputed as it grows (the
-        -- registry's length is part of the memo key, and the build reports its
-        -- progress -- _OnBuildProgress below), so the list widens as pages land.
-        -- Nothing found YET is not "nothing found": the window stays unfiltered.
-        if not self.RegistryBuilding then
-            Deactivate()
-            return false, viewMoved
-        end
-        F.partial = true
-    end
-
-    local compiled = self:CompileQuery(F.text)
+    local compiled = self:CompileQuery(F.text, F.source, "_filterIndex")
     if not compiled then Deactivate() return true, viewMoved end
+    -- The word index fills in slices: until it has everything, the answer is
+    -- what it holds so far (and is asked again as it grows).
+    F.partial = not (compiled.index and compiled.index.complete)
 
     F.gen = F.gen + 1
     F.keepCache = {}
@@ -236,7 +207,7 @@ function Search:_FilterCompute()
         return false, viewMoved
     end
     F.active = true
-    F.memo = MemoKey(sig)
+    F.memo = (not F.partial) and MemoKey(sig) or nil
     return true, viewMoved
 end
 
@@ -668,12 +639,13 @@ local function QueueProgressRefresh()
         if F.text ~= "" then Search:RefreshFilter(false) end
     end)
 end
-function Search:_OnBuildProgress()
-    QueueProgressRefresh()
-end
-function Search:_OnIndexProgress(complete)
-    QueueProgressRefresh()
-    if complete and self.RefreshIfActive then self:RefreshIfActive() end
+function Search:_OnIndexProgress(complete, slot)
+    if slot == "_filterIndex" then
+        QueueProgressRefresh()
+    elseif complete and self.RefreshIfActive then
+        -- The live registry's index (Home's results) finished: re-run them.
+        self:RefreshIfActive()
+    end
 end
 
 -- Enter in the box: when the page on screen has nothing matching, go to the
@@ -682,40 +654,13 @@ function Search:FilterJump()
     if F.active and F.any then MoveOffEmptyPage() end
 end
 
--- Focus on the box: get the view's index built before the first letter, as a
--- query would (budgeted, never in combat), so typing finds it ready.
+-- Focus on the box, or the window opening: start the word index over what the
+-- filter searches, in slices. Builds no page.
 function Search:WarmFilterIndex()
-    if InCombatLockdown() or not GUI.Tabs then return end
+    if not (GUI.Tabs and GUI.Pages) then return end
     local inView = ViewPages()
-    self:IncludeScopedPages(inView)
-    self:TryReuseRegistry()
-    if (self:RegistryIsStale() or self.RegistryBuilding) and not (self.RegistryBuilding and F.waitToken == self._buildToken) then
-        self:EnsureRegistryAsync(function(ok)
-            F.waitToken = nil
-            if ok then
-                self:_MatchIndex(self.INDEX_SLICE_MS)
-                if F.text ~= "" then self:RefreshFilter(true) end
-            end
-        end)
-        F.waitToken = self._buildToken
-    elseif self._MatchIndex then
-        -- Sliced: the word index never builds in the frame of the click.
-        self:_MatchIndex(self.INDEX_SLICE_MS)
-    end
-end
-
--- On the settings window opening (after a moment, out of combat): only the work
--- that makes NO frames -- the index assembled from pages already built this
--- session, and its word index in slices. Building the pages nobody has opened
--- waits for the box to take focus: those builds make every page's frames, which
--- a player who never searches should not pay for (see the report on a frameless
--- recording pass, which is what would lift this).
-function Search:WarmFilterIndexCheap()
-    if InCombatLockdown() then return end
-    self:TryReuseRegistry()
-    if not self:RegistryIsStale() and self._MatchIndex then
-        self:_MatchIndex(self.INDEX_SLICE_MS)
-    end
+    F.source = self:_FilterSource(inView)
+    self:_MatchIndexFor(F.source, "_filterIndex", self.INDEX_SLICE_MS)
 end
 
 -- Every page a filter touched goes back as it was. Pages not on screen are put
@@ -774,7 +719,7 @@ function Search:CreateFilterBar(parent)
     if parent and type(parent.HookScript) == "function" then
         parent:HookScript("OnShow", function()
             C_Timer.After(1, function()
-                if parent:IsVisible() then Search:WarmFilterIndexCheap() end
+                if parent:IsVisible() then Search:WarmFilterIndex() end
             end)
         end)
     end
