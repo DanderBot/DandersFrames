@@ -1190,7 +1190,6 @@ end
 --   fontSize   the typed text and the placeholder, at the settings font (default:
 --              the small template font)
 --   onFocus    fn() when the box takes focus (the filter starts its index then)
---   onEnter    fn() on Enter, after the box lets go of focus
 --   onChange   fn(text) called with the box's text on every edit, clear and Escape
 --              INSTEAD of the results view; a bar built with it never becomes
 --              Search.SearchBar (the page list's filter box -- Features/SearchFilter.lua)
@@ -1331,7 +1330,6 @@ function Search:CreateSearchBar(parent, opts)
     
     editbox:SetScript("OnEnterPressed", function(self)
         self:ClearFocus()
-        if opts.onEnter then opts.onEnter() end
     end)
     
     frame.editbox = editbox

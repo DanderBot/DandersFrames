@@ -184,6 +184,11 @@ function Search:_FilterCompute()
     for entry in pairs(F.hit) do
         if not candidate[entry.tab] and EntryWouldShow(entry) then candidate[entry.tab] = true end
     end
+    -- The page on screen is always asked, hit or not: a title match on it
+    -- shows things the hit list does not hold.
+    local cur = GUI.CurrentPageName
+    local curPage = cur and inView[cur] and GUI.Pages[cur]
+    if curPage and type(curPage.children) == "table" and #curPage.children > 0 then candidate[cur] = true end
     -- ★ LISTED ONLY WHEN THE PAGE WOULD SHOW SOMETHING: the same decision the
     -- page pass makes (_FilterPage, dry), on the page's own widgets. A page with
     -- no build to ask (its entries came from a build that is not on it) keeps
@@ -279,7 +284,12 @@ function Search:_FilterPage(page, db, dry)
     local name = page.tabName
     if dry then
         if F.pageWhole[name] or PageHasFill(page) then return true end
-    elseif not (F.active and F.any and name and F.inView[name]) or F.pageWhole[name] or PageHasFill(page) then
+    elseif not (F.active and name and F.inView[name]) or F.pageWhole[name] or PageHasFill(page) then
+        -- Not narrowed: either no filter is on (nothing to say), or the page
+        -- shows whole (its name matched, or it is a designer) -- it shows.
+        -- ★ A FILTER WITH NO MATCH ANYWHERE STILL NARROWS: the page then shows
+        -- the note and nothing else, never its settings under "nothing matches".
+        page._dfShows = (F.active and name and F.inView[name]) and true or nil
         if page._dfFiltered then return self:_UnfilterPage(page) end
         return false
     end
@@ -520,6 +530,12 @@ function Search:_FilterPage(page, db, dry)
         end
     end
     if dry then return anyShown end
+    -- ★ WHAT THIS PASS LEFT SHOWING is the one answer the note reads
+    -- (Search:_FilterNote) -- never the page list's earlier verdict, which is
+    -- worked out ahead of the page from the index and can differ from what the
+    -- page's live widgets keep.
+    -- A page with no widgets yet (never built) has not been looked at: no answer.
+    if #children > 0 then page._dfShows = anyShown else page._dfShows = nil end
     return moved
 end
 
@@ -527,6 +543,7 @@ GUI.FilterPagePass = function(page, db)
     local ok, err = pcall(Search._FilterPage, Search, page, db)
     if not ok and err then geterrorhandler()(err) end
     if page and page.tabName and page.tabName == GUI.CurrentPageName and Search._FilterNote then
+        Search:_ReconcileCurrentPage(page)
         Search:_FilterNote()
     end
 end
@@ -600,16 +617,43 @@ end
 local noteText
 function Search:_FilterNote()
     local cur = GUI.CurrentPageName
-    local show = F.active and F.any and cur and F.inView[cur] and not F.pageHit[cur] and true or false
+    local page = cur and GUI.Pages and GUI.Pages[cur]
+    -- Shown exactly when the page's own pass left nothing showing on it.
+    local show = F.active and cur and F.inView[cur] and page
+        and rawget(page, "_dfShows") == false and true or false
     if show and not noteText and GUI.contentFrame then
         noteText = GUI.contentFrame:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
         noteText:SetPoint("TOPLEFT", GUI.contentFrame, "TOPLEFT", 16, -16)
         noteText:SetPoint("TOPRIGHT", GUI.contentFrame, "TOPRIGHT", -16, -16)
         noteText:SetJustifyH("LEFT")
         noteText:SetWordWrap(true)
-        noteText:SetText(L["Nothing on this page matches. Press Enter to go to a page that does."])
+        noteText:SetText(L["Nothing on this page matches."])
     end
     if noteText then noteText:SetShown(show) end
+end
+
+-- The page on screen, after its own pass: the page list's verdict on it follows
+-- what the pass left showing, so the list, the note and the page cannot
+-- disagree. (The list decides ahead of the page from the index; a page whose
+-- live widgets keep more, or less, than its index rows -- a page searched from
+-- prebuilt rows while open, a title that matched -- is corrected here.)
+local navFixQueued
+function Search:_ReconcileCurrentPage(page)
+    if not F.active then return end
+    local name = page and page.tabName
+    if not (name and F.inView[name]) then return end
+    local shows = rawget(page, "_dfShows")
+    if shows == nil or (F.pageHit[name] and true or false) == shows then return end
+    F.pageHit[name] = shows or nil
+    F.any = next(F.pageHit) ~= nil
+    if navFixQueued or not GUI.UpdateTabLayout then return end
+    navFixQueued = true
+    -- Out of the page's own layout pass: the list is laid out on the next frame.
+    C_Timer.After(0, function()
+        navFixQueued = nil
+        F.navDrawn = nil
+        if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
+    end)
 end
 
 -- What the page list shows: changes only when the set of listed pages does.
@@ -651,6 +695,7 @@ function Search:RefreshFilter(moved)
                 pcall(page.SetVerticalScroll, page, 0)
             end
         end
+        self:_ReconcileCurrentPage(page)
     end
     self:_FilterNote()
 end
@@ -674,12 +719,6 @@ function Search:_OnIndexProgress(complete, slot)
         -- The live registry's index (Home's results) finished: re-run them.
         self:RefreshIfActive()
     end
-end
-
--- Enter in the box: when the page on screen has nothing matching, go to the
--- first listed page that does.
-function Search:FilterJump()
-    if F.active and F.any then MoveOffEmptyPage() end
 end
 
 -- Focus on the box, or the window opening: start the word index over what the
@@ -741,7 +780,6 @@ function Search:CreateFilterBar(parent)
     local bar = self:CreateSearchBar(parent, {
         onChange = function(text) Search:SetFilterText(text) end,
         onFocus  = function() Search:WarmFilterIndex() end,
-        onEnter  = function() Search:FilterJump() end,
     })
     F.bar = bar
     if parent and type(parent.HookScript) == "function" then

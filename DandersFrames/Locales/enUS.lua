@@ -3925,5 +3925,5 @@ L["Show When Pet Is Not Happy"] = true
 L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."] = true
 L["Without Separate Combat Fade, the frame shows at full opacity instead."] = true
 -- Settings search: the note over a page the side menu's filter found nothing on.
-L["Nothing on this page matches. Press Enter to go to a page that does."] = true
+L["Nothing on this page matches."] = true
 --@end-do-not-package@
