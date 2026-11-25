@@ -253,6 +253,14 @@ function Search:_UnfilterPage(page)
             if rawget(w, "sectionChildren") then RestoreCard(w) end
         end
     end
+    -- Cards re-folded over a filtered body get their outline back, now that
+    -- every body's mark is cleared.
+    for _, w in ipairs(page.children or {}) do
+        if type(w) == "table" and rawget(w, "dfFoldBodyHidden") then
+            rawset(w, "dfFoldBodyHidden", nil)
+            if w.ShowFold then w:ShowFold() end
+        end
+    end
     page._dfFiltered = nil
     return true
 end
@@ -460,7 +468,27 @@ function Search:_FilterPage(page, db, dry)
             if keep then
                 Mark(w, nil)
                 anyShown = true
-                if not dry and OpenCard(w) then moved = true end
+                if not dry then
+                    -- ★ OPENED ONLY OVER ROWS THAT SHOW. A card kept by its header
+                    -- tick alone ("show", "hide") has nothing left in its body: it
+                    -- shows as its header, not opened -- an opened card over a body
+                    -- the filter took away was a tall empty panel.
+                    local body = rawget(w, "cardBody")
+                    local bodyHidden = type(body) == "table" and IsHidden(body) or false
+                    if bodyHidden then
+                        if RestoreCard(w) then moved = true end
+                    elseif OpenCard(w) then
+                        moved = true
+                    end
+                    -- The card's outline follows its body (SettingsWidgets'
+                    -- _ApplyCardFold reads the body's mark): re-fold it whenever
+                    -- that mark moved, before this pass lays the page out.
+                    if (rawget(w, "dfFoldBodyHidden") or false) ~= bodyHidden then
+                        rawset(w, "dfFoldBodyHidden", bodyHidden or nil)
+                        if w.ShowFold then w:ShowFold() end
+                        moved = true
+                    end
+                end
             else
                 Mark(w, true)
                 if not dry and RestoreCard(w) then moved = true end

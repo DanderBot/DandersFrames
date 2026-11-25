@@ -1220,7 +1220,13 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         section.fixedRowHeight = true
         section._ApplyCardFold = function(self)
             local body = self.cardBody
-            local open = (body and self.expanded) and true or false
+            -- ☠ A BODY THE SEARCH FILTER TOOK OFF THE PAGE IS NO BODY. The card is
+            -- drawn down to the body's bottom edge, and a hidden body keeps the
+            -- place it last had: the card stretched into a tall empty panel with
+            -- the next card's header inside it (a card kept by its header tick
+            -- alone while its rows were filtered out). Features/SearchFilter.lua
+            -- re-folds the card whenever that mark moves.
+            local open = (body and self.expanded and not rawget(body, "dfFilterHidden")) and true or false
             cardRect:ClearAllPoints()
             cardRect:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
             cardRect:SetPoint("BOTTOMRIGHT", open and body or self, "BOTTOMRIGHT", 0, 0)
