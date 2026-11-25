@@ -1,6 +1,6 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [6.1.0]
 
 ### New Features
 
@@ -30,6 +30,8 @@
 ### Bug Fixes
 
 - (Unit Frames) Fix raid buffs such as Fortitude never showing on the buff bar, even with All Buffs on.
+- (Fading) Fix a frame with a dispellable debuff dropping back to fully faded instead of showing.
+- (Fading) Fix the health fade briefly resetting with Element-Specific Alpha on.
 
 ## [6.0.0]
 
