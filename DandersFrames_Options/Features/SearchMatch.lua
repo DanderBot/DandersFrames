@@ -637,8 +637,10 @@ end
 
 -- Home's ranked list. Entries that answer every word come first; only when no
 -- entry does, entries that answer some of the words, most words first.
-function Search:RankedMatches(query)
-    local compiled = self:CompileQuery(query)
+-- `reg`, `slot`: rank over that list (Home: every page's live or prebuilt
+-- entries, slot "_homeIndex"); by default, the live registry.
+function Search:RankedMatches(query, reg, slot)
+    local compiled = self:CompileQuery(query, reg, slot)
     if not compiled then return {} end
     local ix = compiled.index
     local nWords = #compiled.words
@@ -652,14 +654,15 @@ function Search:RankedMatches(query)
     end
 
     local anyAll = false
-    for entry, m in pairs(matched) do
-        if m >= nWords and not entry.isSection then anyAll = true break end
+    for _, m in pairs(matched) do
+        if m >= nWords then anyAll = true break end
     end
 
     local list = {}
     for entry, s in pairs(score) do
-        -- A card's own entry (isSection) has no control to show inline.
-        if not entry.isSection and (not anyAll or matched[entry] >= nWords) then
+        -- A card's own entry (isSection) is a result like any other: a row that
+        -- takes you to the card.
+        if not anyAll or matched[entry] >= nWords then
             local label = type(entry.label) == "string" and Fold(entry.label) or ""
             if find(label, compiled.text, 1, true) then s = s + PHRASE_BONUS end
             list[#list + 1] = { entry = entry, score = s, words = matched[entry] }
@@ -674,6 +677,12 @@ function Search:RankedMatches(query)
     local out = {}
     for i, r in ipairs(list) do out[i] = r.entry end
     return out
+end
+
+-- An entry's tooltip as text: its widget's, or a prebuilt row's own.
+function Search.EntryTooltipText(entry)
+    if type(entry) ~= "table" then return nil end
+    return TooltipText(entry.sourceWidget) or (type(entry.tooltipText) == "string" and entry.tooltipText) or nil
 end
 
 -- For the tests: the pure pieces, so their rules can be pinned on their own.

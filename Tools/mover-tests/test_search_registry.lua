@@ -435,17 +435,21 @@ do
     RunAllFrames()
     eq(d.builds, 1, "deferred: ...adding the deferred page")
 
-    -- Typing a search includes them (ShowResults / Find).
+    -- Home's search builds NO page, deferred or not: it reads the pages' live
+    -- entries and the prebuilt index (Find, Features/SearchPrebuilt.lua).
     DF, GUI, rec = NewHost()
     Search = DF.Search
     rec.page("general_frame", true)
     d = rec.page("uf_player_castbar", false)
     d.deferIndex = true
     Search:Find("fakeKey")
-    eq(d.builds, 1, "deferred: a search covers them")
+    eq(d.builds, 0, "deferred: Home's search builds no page")
+    eq(GUI.Pages.general_frame.builds, 0, "deferred: ...not even the page on screen")
     local src = options_file_source("Features/Search.lua"):gsub("\r\n", "\n")
-    check(src:find("if query and query ~= \"\" then self:IncludeDeferredPages() end\n    self:TryReuseRegistry()", 1, true) ~= nil,
-          "deferred: the search box includes them before it reads the index")
+    local show = src:match("function Search:ShowResults%(query%)(.-)\nend\n") or ""
+    check(show ~= "" and not show:find("EnsureRegistry", 1, true) and not show:find("IncludeDeferredPages", 1, true)
+          and not show:find("TryReuseRegistry", 1, true),
+          "deferred: Home's results start no index build")
 end
 
 -- Everything this file swapped, put back -- one runtime serves every suite.

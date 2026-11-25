@@ -274,6 +274,17 @@ local SW = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n")
 check(SW:find("if self.dfFilterOpened then\n            self.dfFilterOpened = nil\n            self.dfFilterUser = true", 1, true) ~= nil,
       "user: SetExpanded hands a filter-opened card to the user")
 
+local function Showing0(page)
+    for _, w in ipairs(page.children) do
+        if not rawget(w, "dfFilterHidden") and not w.isSectionHeader and not w.isPageFooter then
+            if w.sectionChildren or w.searchEntry then return true end
+            if w.groupChildren then
+                for _, e in ipairs(w.groupChildren) do if not e.filterHidden then return true end end
+            end
+        end
+    end
+    return false
+end
 print("-- Filter: nothing matching anywhere")
 Type("zzzqqqxx")
 check(S:FilterActive(), "empty: still filtering")
@@ -281,20 +292,23 @@ local any = false
 for _, btn in pairs(GUI.Tabs) do if btn._shown then any = true end end
 check(not any, "empty: every row leaves the list")
 GUI.RelayoutCurrentPage()
-check(not rawget(framePage, "_dfFiltered"), "empty: the page on screen is left whole rather than blank")
+check(rawget(framePage, "_dfFiltered") and not Showing0(framePage) and GUI._note.shown,
+      "empty: the page on screen shows the note and nothing under it")
 
-print("-- Filter: typing never switches the page; Enter goes to one that matches")
+print("-- Filter: typing never switches the page; an empty page says so and shows nothing")
 Type("")
 GUI.CurrentPageName = "auras_buffs"
 selected = {}
 Type("transparency")
 eq(#selected, 0, "move: typing leaves the page on screen alone")
 check(GUI._note and GUI._note.shown, "move: ...and says nothing on it matches")
-S:FilterJump()
-check(#selected == 1 and selected[1] == "general_frame", "move: Enter selects the first listed page with a match (" .. tostring(selected[1]) .. ")")
+eq(GUI._note.text, "Nothing on this page matches.", "move: the note is the short one (no Enter)")
+check(rawget(buffContent, "dfFilterHidden") and rawget(buffBox, "dfFilterHidden"),
+      "move: ...and nothing is left showing under it")
+check(S.FilterJump == nil, "move: the dead Enter jump is gone")
+GUI.CurrentPageName = "general_frame"
 GUI.RelayoutCurrentPage()
-S:RefreshFilter(false)
-check(not GUI._note.shown, "move: the note goes once the page has a match")
+check(not GUI._note.shown, "move: the note goes on a page with a match")
 
 print("-- Filter: a keystroke costs one compute and at most one layout")
 Type("")
@@ -611,6 +625,101 @@ do
               "clear: " .. c.title .. " is back to its own fold, drawn as before")
         check(rawget(c.section, "dfFoldBodyHidden") == nil, "clear: ...with no filter mark left on it")
     end
+end
+
+print("-- Filter: the note shows exactly when nothing on the page shows")
+do
+    NewWindow()
+    -- What is showing on a page after its pass: a card, a box with a row left,
+    -- or a control. Headers and the page's tools are not settings.
+    local function Showing(page)
+        for _, w in ipairs(page.children) do
+            if not rawget(w, "dfFilterHidden") and not w.isSectionHeader then
+                if w.sectionChildren then return true end
+                if w.groupChildren then
+                    for _, e in ipairs(w.groupChildren) do
+                        if not e.filterHidden and not e.widget.isSectionHeader then return true end
+                    end
+                elseif w.searchEntry then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    local function Header(page, title, col)
+        local h = { isSectionHeader = true, layoutCol = col or 1, GetText = function() return title end }
+        page.children[#page.children + 1] = h
+        return h
+    end
+    -- A debuff-bar-like page, built, whose live build the index cannot reuse:
+    -- the filter searches its PREBUILT rows, which say less than its widgets
+    -- (the reported case: the list's verdict came from rows, the page from widgets).
+    local db = Page("auras_debuffs", "Debuff Bar")
+    db.GetIndexEntries = function() return nil end
+    Header(db, "Content")
+    Card(db, "Order & Limits", { { "Sort Order", "debuffSortOrder" }, { "My Auras First", "debuffMineFirst" },
+                                 { "Reverse Order", "debuffReverse" }, { "Hide Long Debuffs", "debuffMaxDurationEnabled" } })
+    Card(db, "Border", { { "Show Border", "debuffShowBorder" } })
+    local fr = Page("general_frame", "Frame")
+    Card(fr, "Appearance", { { "Global Frame Fade", "frameFadeAlpha" } })
+    local hp = Page("bars_health", "Health Bar")
+    Card(hp, "Colors", { { "Bar Color", "healthColor" } })
+    -- Unit frame pages, in another view.
+    local uf = Page("uf_player_debuffs", "Player Debuffs", { outOfView = true })
+    Card(uf, "Order & Limits", { { "Sort Order", "debuffSortOrder" } })
+    S.PrebuiltIndex = { version = "t", commit = "0", rows = 1,
+        S = { "Show Border", "Border", "debuffShowBorder" }, C = {},
+        P = { auras_debuffs = { 1, 2, 3, 0, 0, 0 } } }
+
+    local function NoteTruth(q, pages)
+        for _, name in ipairs(pages) do
+            GUI.CurrentPageName = name
+            S:RefreshFilter(false)
+            local page = GUI.Pages[name]
+            local shows = Showing(page)
+            if S:FilterActive() and S.Filter.inView[name] and page._dfFiltered then
+                local noteShown = GUI._note and GUI._note.shown or false
+                check(noteShown == not shows,
+                      "note: '" .. q .. "' on " .. name .. " shows=" .. tostring(shows) .. " note=" .. tostring(noteShown))
+            else
+                check(not (GUI._note and GUI._note.shown), "note: '" .. q .. "' on " .. name .. " (not narrowed) has no note")
+            end
+        end
+    end
+    for _, q in ipairs({ "sort", "order", "limits", "content", "hide", "border", "fade", "transparency",
+                         "reverse", "color", "zzzq" }) do
+        Type("")
+        Type(q)
+        RunTimers()
+        NoteTruth(q, { "auras_debuffs", "general_frame", "bars_health" })
+    end
+
+    print("-- Filter: the list follows what the page on screen shows")
+    Type("")
+    GUI.CurrentPageName = "auras_debuffs"
+    Type("sort order")
+    RunTimers()
+    check(not (GUI._note and GUI._note.shown) and Showing(db), "list: 'sort order' shows the Order & Limits card, no note")
+    check(GUI.Tabs.auras_debuffs._shown, "list: ...and the page is listed (its prebuilt rows did not say so)")
+
+    print("-- Filter: after a module switch, the page shown gets the same rule")
+    Type("")
+    Type("sort")
+    for _, btn in pairs(GUI.Tabs) do btn.inView = not btn.inView end   -- the Unit Frames view
+    GUI.CurrentPageName = "uf_player_debuffs"
+    GUI:UpdateTabLayout()
+    RunTimers()
+    S:RefreshFilter(false)
+    check(not (GUI._note and GUI._note.shown) and Showing(uf), "switch: the unit page shows its match and no note")
+    Type("")
+    Type("fade")
+    RunTimers()
+    GUI.CurrentPageName = "uf_player_debuffs"
+    S:RefreshFilter(false)
+    check(GUI._note and GUI._note.shown and not Showing(uf), "switch: with nothing matching, the note and nothing under it")
+    Type("")
+    check(not (GUI._note and GUI._note.shown), "clear: the note goes with the filter")
 end
 
 print("-- Filter: the wiring in the shared files")

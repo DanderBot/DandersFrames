@@ -3401,9 +3401,6 @@ L["Building the list of settings..."] = true
 L["Changed Settings"] = true
 L["Copy as Text"] = true
 L["Everything is at its defaults."] = true
--- The search panel's own "the index is still being built" state. Lives with the
--- ledger block because it is the same budgeted build behind both surfaces.
-L["Indexing settings..."] = true
 L["Not everything is listed: a few controls and ordered lists are not tracked here."] = true
 L["On"] = true
 L["Showing %s settings in the current profile. Click a row to jump to the setting."] = true
@@ -3925,5 +3922,5 @@ L["Show When Pet Is Not Happy"] = true
 L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."] = true
 L["Without Separate Combat Fade, the frame shows at full opacity instead."] = true
 -- Settings search: the note over a page the side menu's filter found nothing on.
-L["Nothing on this page matches. Press Enter to go to a page that does."] = true
+L["Nothing on this page matches."] = true
 --@end-do-not-package@

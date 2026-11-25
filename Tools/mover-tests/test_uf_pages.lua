@@ -2013,8 +2013,10 @@ do
           "Search: a filtered entry is marked before anything else can return early")
     check(search:find("page.searchTabLabel or page.tabLabel or tabName", 1, true),
           "Search: the index labels a page by its search label")
-    check(search:find("local db = EntryDB(entry)", 1, true) and not search:find("local db = DF.db[DF.GUI.SelectedMode]", 1, true),
-          "Search: an inline result control edits its page's own table")
+    -- Results are "go to setting" rows now (no inline controls bound to a table):
+    -- a unit frame result lands on that unit's page (test_search_home.lua).
+    check(not search:find("local db = DF.db[DF.GUI.SelectedMode]", 1, true) and search:find("function Search:ResultRowModel(entry)", 1, true),
+          "Search: results are go-to rows, never controls bound to the mode table")
     local panel = options_file_source("GUI/Panel.lua")
     check(panel:find("if page then page.dfBuilder = builderFunc end", 1, true), "Panel: a page keeps its builder")
     check(panel:find("Search.CurrentTabLabel = self.searchTabLabel or self.tabLabel or self.tabName", 1, true),

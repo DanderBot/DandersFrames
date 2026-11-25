@@ -249,9 +249,11 @@ do
     check(sec ~= nil and sec.sourceWidget == card, "section: the card is an entry, pointing at the card")
     local set = S3:MatchEntries(S3:CompileQuery("combat icon"))
     check(set[sec] ~= nil, "section: the filter finds the card by its title")
+    local found = false
     for _, r in ipairs(S3:RankedMatches("combat icon")) do
-        check(not r.isSection, "section: ...and Home's results leave it out")
+        if r == sec then found = true end
     end
+    check(found, "section: ...and Home lists it too (a result row goes to the card)")
 end
 
 print("-- Search match: finished words match whole, the word being typed matches its start")
