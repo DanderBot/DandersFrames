@@ -582,6 +582,10 @@ local PROFILED_FUNCTIONS = {
     "Search.MatchEntries",
     "Search._MatchIndex",
     "Search._FilterPage",
+    -- Home's box: one search's whole cost (Find ranks over the live and
+    -- prebuilt entries; ShowResults fills the row pool). Neither builds a page.
+    "Search.Find",
+    "Search.ShowResults",
     "ChangedSettings.BuildReport",
 
     "LightweightUpdateFrameSize",

@@ -97,7 +97,7 @@ end
 -- table) comes back while nothing about it changed, so its word index is kept;
 -- a page built since makes a new list and the index starts again, in slices.
 -- Never builds a page.
-function Search:_FilterSource(inView)
+function Search:_FilterSource(inView, cacheSlot)
     local GUI = DF.GUI
     local names = {}
     for name in pairs(inView) do names[#names + 1] = name end
@@ -118,14 +118,26 @@ function Search:_FilterSource(inView)
         end
     end
     local sig = concat(parts, ",")
-    local src = self._filterSourceCache
+    cacheSlot = cacheSlot or "_filterSourceCache"
+    local src = self[cacheSlot]
     if src and src.sig == sig then return src.list end
     local list = {}
     for _, l in ipairs(lists) do
         for _, e in ipairs(l) do list[#list + 1] = e end
     end
-    self._filterSourceCache = { sig = sig, list = list }
+    self[cacheSlot] = { sig = sig, list = list }
     return list
+end
+
+-- What Home's box searches: the same, over EVERY page that has a sidebar row
+-- (not just the view showing) -- a result has to be somewhere a click can go.
+function Search:_HomeSource()
+    local GUI = DF.GUI
+    local all = {}
+    for name, page in pairs(GUI.Pages or {}) do
+        if GUI.Tabs and GUI.Tabs[name] and not page.skipSearchIndex then all[name] = true end
+    end
+    return self:_FilterSource(all, "_homeSourceCache")
 end
 
 -- ★ DRIFT, for the developer (/df debug searchdrift): every page that has a live

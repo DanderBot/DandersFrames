@@ -712,12 +712,20 @@ local function QueueProgressRefresh()
         if F.text ~= "" then Search:RefreshFilter(false) end
     end)
 end
+-- Home's results re-run as their word index grows (throttled the same way).
+local function QueueHomeRefresh()
+    if F.homeQueued then return end
+    F.homeQueued = true
+    C_Timer.After(PROGRESS_EVERY, function()
+        F.homeQueued = nil
+        if Search.RefreshIfActive then Search:RefreshIfActive() end
+    end)
+end
 function Search:_OnIndexProgress(complete, slot)
     if slot == "_filterIndex" then
         QueueProgressRefresh()
-    elseif complete and self.RefreshIfActive then
-        -- The live registry's index (Home's results) finished: re-run them.
-        self:RefreshIfActive()
+    elseif slot == "_homeIndex" then
+        QueueHomeRefresh()
     end
 end
 
