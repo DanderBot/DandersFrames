@@ -71,6 +71,10 @@ Features\Search.lua
 # matcher that indexes the registry. Both extend DF.Search, so AFTER it.
 Features\SearchSynonyms.lua
 Features\SearchMatch.lua
+# The prebuilt search index (generated data: see its header) and its reader.
+# The page list's filter searches these, so focusing the box builds no page.
+Features\SearchIndexData.lua
+Features\SearchPrebuilt.lua
 # The page list's in-place filter. After the matcher (it reads its answers);
 # the page list and the page state pass find it through GUI.Filter* at run time.
 Features\SearchFilter.lua

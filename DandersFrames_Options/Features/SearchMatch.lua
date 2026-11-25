@@ -315,9 +315,15 @@ local function IndexEntry(ix, entry)
     if key then
         AddField(ix, entry, KeyWords(key), W_KEY, false, true)
     end
-    local tip = TooltipText(entry.sourceWidget)
+    -- A prebuilt entry carries its tooltip as text (it has no widget yet).
+    local tip = TooltipText(entry.sourceWidget) or (type(entry.tooltipText) == "string" and entry.tooltipText) or nil
     if tip then
         AddField(ix, entry, Words(tip), W_TIP, false, true, true)
+    end
+    -- ...and its English label beside the translated one, so an English word still
+    -- finds it on a translated client (the same as a key's English words do).
+    if type(entry.labelEn) == "string" and entry.labelEn ~= entry.label then
+        AddField(ix, entry, Words(entry.labelEn), W_TAG, true)
     end
 end
 
@@ -330,15 +336,20 @@ end
 -- one piece -- the freeze on clicking into the box). The partial index answers
 -- for what it holds; Search:_OnIndexProgress is told as it grows. Without a
 -- budget (tests, tools) it completes now.
+-- ★ ANY LIST OF ENTRIES, in its own slot. The live registry (Home's results, the
+-- ledger) is indexed in slot "_matchIndex"; the page list's filter indexes its own
+-- list -- live entries of built pages plus prebuilt ones for the rest
+-- (Features/SearchPrebuilt.lua) -- in "_filterIndex". Each slot grows and slices
+-- on its own.
 local INDEX_SLICE_MS = 4
-function Search:_MatchIndex(budgetMs)
+function Search:_MatchIndexFor(reg, slot, budgetMs)
     EnsureConcepts()
-    local reg = self.Registry or {}
-    local ix = self._matchIndex
+    reg = reg or {}
+    local ix = self[slot]
     if not ix or ix.reg ~= reg or ix.n > #reg then
-        ix = { reg = reg, n = 0, words = {}, cons = {}, raw = {}, vocab = {}, indexed = {} }
+        ix = { reg = reg, n = 0, words = {}, cons = {}, raw = {}, vocab = {}, indexed = {}, slot = slot }
         for w, n in pairs(conceptVocab) do ix.vocab[w] = n end
-        self._matchIndex = ix
+        self[slot] = ix
     end
     local total = #reg
     if ix.n < total then
@@ -353,18 +364,26 @@ function Search:_MatchIndex(budgetMs)
         ix.n = i
     end
     ix.complete = ix.n >= #reg
-    if not ix.complete and budgetMs then self:_QueueIndexSlice() end
+    if not ix.complete and budgetMs then self:_QueueIndexSlice(slot) end
     return ix
 end
 
-function Search:_QueueIndexSlice()
-    if self._indexSliceQueued or not C_Timer then return end
-    self._indexSliceQueued = true
+function Search:_MatchIndex(budgetMs)
+    return self:_MatchIndexFor(self.Registry, "_matchIndex", budgetMs)
+end
+
+function Search:_QueueIndexSlice(slot)
+    slot = slot or "_matchIndex"
+    self._indexSliceQueued = self._indexSliceQueued or {}
+    if self._indexSliceQueued[slot] or not C_Timer then return end
+    self._indexSliceQueued[slot] = true
     C_Timer.After(0, function()
-        self._indexSliceQueued = nil
-        local ix = self:_MatchIndex(INDEX_SLICE_MS)
+        self._indexSliceQueued[slot] = nil
+        local cur = self[slot]
+        if not cur then return end
+        local ix = self:_MatchIndexFor(cur.reg, slot, INDEX_SLICE_MS)
         if self._OnIndexProgress then
-            local ok, err = pcall(self._OnIndexProgress, self, ix.complete)
+            local ok, err = pcall(self._OnIndexProgress, self, ix.complete, slot)
             if not ok and err then geterrorhandler()(err) end
         end
     end)
@@ -445,11 +464,18 @@ local function CompileWord(ix, qw, isLast)
 end
 
 -- query -> compiled query, or nil when there is nothing to search for.
-function Search:CompileQuery(query)
+-- `reg`, `slot`: compile against that list's index (the page list's filter);
+-- by default, the live registry's.
+function Search:CompileQuery(query, reg, slot)
     if type(query) ~= "string" then return nil end
     local folded = Fold(query):gsub("^%s+", ""):gsub("%s+$", "")
     if #folded < 2 then return nil end
-    local ix = self:_MatchIndex(INDEX_SLICE_MS)
+    local ix
+    if reg then
+        ix = self:_MatchIndexFor(reg, slot or "_filterIndex", INDEX_SLICE_MS)
+    else
+        ix = self:_MatchIndex(INDEX_SLICE_MS)
+    end
 
     -- Phrases that name one thing ("target of target") become that thing's word.
     local text = folded
