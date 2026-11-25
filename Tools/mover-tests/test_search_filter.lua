@@ -509,6 +509,110 @@ do
     Type("")
 end
 
+print("-- Filter: a shown card is never an empty stretched panel")
+do
+    NewWindow()
+    -- The card's outline as SettingsWidgets draws it (_ApplyCardFold): open runs
+    -- down to the body, unless the body is filtered off the page. Recorded at
+    -- each fold, so a fold left stale after a mark moved is caught.
+    local function Foldable(section, body)
+        section.cardBody = body
+        function section:ShowFold()
+            self.folds = (self.folds or 0) + 1
+            self.foldOpen = (self.expanded and not rawget(body, "dfFilterHidden")) and true or false
+        end
+        section:ShowFold()
+    end
+    local pt = Page("indicators_personaltargeted", "Personal Targeted")
+    local function capture(fn) S._captureEntries = pt._entries; fn(); S._captureEntries = nil end
+    local cards = {}
+    local function TickCard(title, tickLabel, tickKey, rows, shut)
+        local section, box
+        capture(function()
+            section, box = Card(pt, title, rows, { col = 1, shut = shut })
+            S:SetCurrentSection(title, section)
+            section.headerToggle = Control(pt, tickLabel, tickKey)
+        end)
+        Foldable(section, box)
+        cards[#cards + 1] = { section = section, box = box, title = title, expanded = section.expanded }
+        return section, box
+    end
+    TickCard("Interrupted Visual", "Show Interrupted Visual", "personalTargetedSpellShowInterrupted", {
+        { "Duration", "personalTargetedSpellInterruptedDuration" },
+        { "Tint Color", "personalTargetedSpellInterruptedTintColor" },
+        { "Tint Opacity", "personalTargetedSpellInterruptedTintAlpha" },
+    })
+    TickCard("X Mark", "Show X Mark", "personalTargetedSpellInterruptedShowX", {
+        { "X Color", "personalTargetedSpellInterruptedXColor" },
+        { "X Size", "personalTargetedSpellInterruptedXSize" },
+    }, true)
+    -- A card whose body holds a nested box with its own header and rows.
+    local outer, outerBox = Card(pt, "Cast Bar Look", { { "Bar Texture", "castTexture" } }, { col = 1 })
+    local sub = { isSettingsGroup = true, groupChildren = {} }
+    function sub:SetChildFiltered(w, on)
+        for _, e in ipairs(self.groupChildren) do if e.widget == w then e.filterHidden = on and true or nil end end
+    end
+    function sub:ClearChildFilter() for _, e in ipairs(self.groupChildren) do e.filterHidden = nil end end
+    local subHead = { isSectionHeader = true, settingsGroup = sub }
+    sub.groupChildren[1] = { widget = subHead }
+    capture(function()
+        for _, r in ipairs({ { "Border Size", "castBorderSize" }, { "Kick Mark Color", "castKickColor" } }) do
+            local w = Control(pt, r[1], r[2])
+            w.settingsGroup = sub
+            sub.groupChildren[#sub.groupChildren + 1] = { widget = w }
+        end
+    end)
+    sub.settingsGroup = outerBox
+    outerBox.groupChildren[#outerBox.groupChildren + 1] = { widget = sub }
+    Foldable(outer, outerBox)
+    cards[#cards + 1] = { section = outer, box = outerBox, title = "Cast Bar Look", expanded = outer.expanded }
+    GUI.CurrentPageName = "indicators_personaltargeted"
+
+    local function VisibleRows(box)
+        local n = 0
+        for _, e in ipairs(box.groupChildren) do
+            local w = e.widget
+            if not e.filterHidden and not w.isSectionHeader then
+                if w.groupChildren then n = n + VisibleRows(w) else n = n + 1 end
+            end
+        end
+        return n
+    end
+    for _, q in ipairs({ "interrupt", "x mark", "cast", "kick", "border", "fade", "show", "hide",
+                         "visual", "tint", "show x", "color" }) do
+        Type("")
+        Type(q)
+        GUI.FilterPagePass(pt, DF.db.party)
+        for _, c in ipairs(cards) do
+            local sec, box = c.section, c.box
+            if not rawget(sec, "dfFilterHidden") then
+                local bodyHidden = rawget(box, "dfFilterHidden") and true or false
+                check(sec.foldOpen == ((sec.expanded and not bodyHidden) and true or false),
+                      "fold: '" .. q .. "' " .. c.title .. " is drawn for its body as it is now")
+                if sec.foldOpen then
+                    check(VisibleRows(box) > 0, "fold: '" .. q .. "' " .. c.title .. " is open over visible rows")
+                end
+                if bodyHidden then
+                    check(not sec.dfFilterOpened, "fold: '" .. q .. "' " .. c.title .. " is not opened over a hidden body")
+                end
+            end
+        end
+    end
+    Type("")
+    Type("show")
+    check(not rawget(cards[1].section, "dfFilterHidden") and rawget(cards[1].box, "dfFilterHidden"),
+          "tick: 'show' keeps Interrupted Visual by its tick with its rows filtered out")
+    check(not cards[1].section.foldOpen, "tick: ...and draws it as its header alone")
+    Type("x mark")
+    check(cards[2].section.foldOpen and VisibleRows(cards[2].box) == 2, "title: 'x mark' shows the X Mark card whole")
+    Type("")
+    for _, c in ipairs(cards) do
+        check(c.section.expanded == c.expanded and c.section.foldOpen == c.expanded,
+              "clear: " .. c.title .. " is back to its own fold, drawn as before")
+        check(rawget(c.section, "dfFoldBodyHidden") == nil, "clear: ...with no filter mark left on it")
+    end
+end
+
 print("-- Filter: the wiring in the shared files")
 local P = options_file_source("GUI/Panel.lua"):gsub("\r\n", "\n")
 check(P:find("if GUI.FilterPagePass then GUI.FilterPagePass(self, db) end", 1, true) ~= nil,
@@ -517,6 +621,9 @@ local _, nHidden = P:gsub('rawget%(widget, "dfFilterHidden"%)', "")
 eq(nHidden, 2, "wiring: both the box branch and the widget branch honour the filter mark")
 check(P:find("not (navFilter and navFilter(btn))", 1, true) ~= nil, "wiring: the page list asks per row")
 check(P:find("DF.Search:CreateFilterBar(tabFrame)", 1, true) ~= nil, "wiring: the page list's box is the filter bar")
+local SWS = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n")
+check(SWS:find('local open = (body and self.expanded and not rawget(body, "dfFilterHidden")) and true or false', 1, true) ~= nil,
+      "wiring: a card's outline runs only down to a body the filter left on the page")
 local TOC = options_file_source("DandersFrames_Options.toc")
 check(TOC:find("Features\\SearchMatch.lua", 1, true) < TOC:find("Features\\SearchFilter.lua", 1, true),
       "wiring: the filter loads after the matcher")
