@@ -1,5 +1,38 @@
 # DandersFrames Changelog
 
+## [6.1.0]
+
+### New Features
+
+- (Fading) New **Show Below Threshold Through Frame Fade** option in **Health Threshold Fading**. Below the threshold a frame ignores Frame Fade, so you can hide healthy frames out of combat and still see anyone who is hurt. Try Frame Fade at 0% out of combat and 100% in combat with this on.
+- (Fading) WoW Forever: new **Show When Pet Is Not Happy** option in **Frame Fade**. Your pet's frame shows through Frame Fade while your pet is Content or Unhappy, in or out of combat.
+
+- (Pet Frames) WoW Forever: your hunter pet's happiness now shows as a face beside the unit frames pet frame and your own party/raid pet frame. Hover it for damage, loyalty, diet, training points and experience; a small arrow warns when loyalty is dropping. The pet frame's border, name and health bar can also be colored by happiness (colors under **Display > Colors**), and the pet's **Text Designer** has a **Pet Happiness** category. Settings are on the pet's **Unit Icons** page and **Display > Pet Frames**.
+
+- (Click-Casting) Choose exactly which frames each binding works on: party and raid separately, each unit frame (player, target, target of target, focus, focus target, pet, boss) on its own, and Other Frames. One button can now do different things on different frames, like targeting on the target frame and healing on your party. Set it under **Apply to Frames** when you edit a binding; your existing bindings keep working everywhere they did.
+
+### Improvements
+
+- (Modules) Modules now use on/off switches instead of checkboxes, so it's clearer what's on.
+- (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
+- (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
+- (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
+- (Settings) Added tooltips to many settings that weren't clear from their name alone, across raid layout, sorting, pinned frames, aura bars, targeted spells, fading, tooltips, highlights, icons, absorbs, heal prediction and health bars.
+- (Resource Bar) With **Placement** Below or Above a horizontal health bar (or Left of / Right of a vertical one), the health bar keeps its full size and the resource bar is cut out of it, so a see-through frame border tints the health bar the same on every side. A bar at the end the health bar fills from or towards still shrinks the health bar, so the whole health range stays readable. (by Krathe)
+- (Fading) **Frame Fade** has moved from the **Frame** page to the **Fading** page, for party, raid and every unit frame. Your settings are unchanged. Linked unit frames now share Frame Fade through the **Fading** link instead of **Frame**.
+- (Fading) **Frame Fade** and Health Threshold Fading's above-threshold opacity can now go down to 0% to hide a frame completely. A hidden frame can still be clicked and click-cast.
+- (Fading) Status icons (summon, AFK, phased, raid role, ping and the rest) now fade along with **Frame Fade** instead of staying bright on a faded frame.
+- (Unit Frames) The **Visibility** page can now show a frame only in a **Party** or only in a **Raid**, and show or hide it while **Resting** in an inn or city.
+- (Fading) **Show In-Combat Fade When Hovering** now works without **Separate Combat Fade**: hovering a faded frame shows it at full opacity.
+- (Settings) The search box at the top of the side menu now filters in place: the menu shows only pages with a matching setting, and each page shows only the matching settings. Clear the box to see everything again. The search on **Home** lists results from every module, and clicking one takes you straight to that setting.
+- (Settings) Search understands related words and small typos. Try "transparency" or "opacity" to find fade and alpha settings, or "hide" to find visibility options. Partial words work as you type.
+
+### Bug Fixes
+
+- (Unit Frames) Fix raid buffs such as Fortitude never showing on the buff bar, even with All Buffs on.
+- (Fading) Fix a frame with a dispellable debuff dropping back to fully faded instead of showing.
+- (Fading) Fix the health fade briefly resetting with Element-Specific Alpha on.
+
 ## [6.0.0]
 
 ### New Features

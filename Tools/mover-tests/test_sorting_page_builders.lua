@@ -255,7 +255,7 @@ do
     local a = PAGE:find('OpenSection(L["FrameSort Integration"]', 1, true)
     local b = a and PAGE:find("CloseSection(band)", a, true)
     local block = (a and b) and PAGE:sub(a, b):gsub("%s+", " ") or ""
-    check(block:find('OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, { db = db, key = "useFrameSort", label = L["Use FrameSort Addon"], onChanged = UseFrameSortChanged, })', 1, true) ~= nil,
+    check(block:find('OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, { db = db, key = "useFrameSort", label = L["Use FrameSort Addon"], tooltip = L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."], onChanged = UseFrameSortChanged, })', 1, true) ~= nil,
           "framesort: a card in column 1 whose header tick is Use FrameSort Addon, same commit, no pin")
     check(block:find("BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })", 1, true) ~= nil,
           "framesort: ...mounting the builder with hoistToggle, so there is one checkbox")
@@ -292,4 +292,22 @@ do
         end
     end
     eq(missing, 0, "locale: the page adds no new string")
+end
+
+-- ============================================================
+-- 7. TOOLTIPS (settings tooltip plan, batch 2)
+-- ============================================================
+print("-- Sorting page: tooltips on the settings a label cannot explain")
+do
+    local ENUS = options_file_source("../DandersFrames/Locales/enUS.lua")
+    local FS = 'L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."]'
+    for _, line in ipairs({
+        'sortMeleeRanged.tooltip = L["Splits damage dealers into melee and ranged',
+        'selfPos.tooltip = L["Where your own frame goes.',
+        'GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged), ' .. FS .. '), 30)',
+        'tooltip = ' .. FS .. ',',
+    }) do
+        check(PAGE:find(line, 1, true) ~= nil, "tooltips: `" .. line:sub(1, 60) .. "`")
+    end
+    check(ENUS:find(FS .. ' = true', 1, true) ~= nil, "tooltips: the FrameSort tooltip ships in enUS")
 end

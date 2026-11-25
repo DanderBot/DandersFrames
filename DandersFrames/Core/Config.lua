@@ -1738,6 +1738,7 @@ DF.PartyDefaults = {
     healthFadeEnabled = false,
     healthFadeAlpha = 0.5,
     healthFadeThreshold = 100,
+    healthFadeRevealsFrame = false,   -- below the threshold, show through Frame Fade (DF:GetFrameRevealAlpha)
     hfCancelOnDispel = true,
 
     -- Unhealable fading (Spirit of Redemption): a cover over the frame while the aura is up
@@ -2427,6 +2428,21 @@ DF.PartyDefaults = {
     petHealthTextColor = {r = 1, g = 1, b = 1},
     petHealthX = -2,
     petHealthY = 0,
+    -- WoW Forever only: your hunter pet's happiness face on the group pet frame
+    -- (Features/PetHappiness.lua, GROUP PET FRAMES), outside its right edge.
+    -- Colour by happiness (the colours: DF.db.petHappinessColors, the Colors page).
+    -- The health bar's is petHealthColorMode = "HAPPINESS".
+    petHappinessColorBorder = false,
+    petHappinessColorName = false,
+    petHappinessColorOnlyUnhappy = true,    -- a happy pet keeps its normal colours
+    petHappinessIconAnchor = "OUTSIDE_RIGHT",
+    petHappinessIconEnabled = true,
+    petHappinessIconHideHappy = false,      -- hide the face (and its arrow) while happy
+    petHappinessIconSize = 14,
+    petHappinessIconTooltip = true,
+    petHappinessIconTrend = "LOSING",       -- the loyalty arrow: "LOSING" / "BOTH" / "OFF"
+    petHappinessIconX = 2,
+    petHappinessIconY = 0,
     petMatchOwnerHeight = false,
     petMatchOwnerWidth = true,
     petNameAnchor = "CENTER",
@@ -2551,6 +2567,7 @@ DF.PartyDefaults = {
     frameFadeHoverUsesCombat = false,
     frameFadeHoverScope = "ALL",   -- "ALL" = every frame lifts while any is hovered; "FRAME" = just the hovered one
     frameFadeInstanceUsesCombat = false,   -- inside a dungeon/raid/arena/BG, hold the in-combat value between pulls
+    frameFadeRevealUnhappyPet = false,     -- WoW Forever: your pet's frame shows through Frame Fade while it is not happy
 
     -- Ping Icon (mirror of Blizzard's 12.1 frame pings; see Features/PingMirror.lua)
     pingIconAlpha = 1,

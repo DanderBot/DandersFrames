@@ -9,35 +9,50 @@ DF.CHANGELOG_TEXT = [===[
 
 ### New Features
 
-- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. It starts switched off: say yes to the popup, or turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
-- (Unit Frames) Each frame can be drawn as bars or as **rings** round a round portrait. Use up to 8 rings to show health, power, class power, shields, heal absorbs and heal prediction. Find it on a frame's **Frame Style** page; settings a ring doesn't use grey out and say why.
-- (Unit Frames) Each frame has its own Text Designer template, and Player and Pet have their own Aura Designer. Link frames on the **Linked Frames** page so that changing one changes the other.
-- (Unit Frames) New **Units** test mode to preview every frame without a group or a target, and copy a page's settings from another frame or from your party and raid frames.
-- (Unit Frames) Target, focus, pet, boss and the other frames that fade out of range can now stay fully visible: untick **Fade When Out of Range** on the frame's **Fading** page.
-- (Settings) The settings window has a new layout: an icon bar down the left side replaces the Global / Party / Raid / Binds tabs. **Groups** holds your party and raid settings (switch between them with the Party and Raid tabs along the top), **Binds** is click-casting, and **Modules**, **Profiles** and **Global** sit at the bottom.
-- (Settings) New **Home** page: search every setting, jump to any part of the addon, see what's new in this version, and get a short **Needs attention** list of problems with a one-click fix, such as Blizzard frames still showing, a reload being needed, or test mode left on.
-- (Settings) New **Modules** page to turn Group Frames (with separate Party and Raid switches) and Click-Casting on or off in one place. Turned-off modules leave the icon bar.
-- (Profiles) Every profile tool now lives on the **Profiles** page: manage profiles, spec switching, Auto Layouts, click-casting profiles, import/export and changed settings. You can now **rename** profiles, and one import box accepts profile, click-casting and filter strings.
-
-- (Test Mode) The test popup is now a slim popout with a rail of modes. With Indicator Info on, click an element on a test frame to open its settings.
-- (Mover) An anchored element can mirror its target's position on X and Y.
-- (Rested Indicator) New soft outer glow style.
-- (Modules) Reset a module to its defaults from the **Modules** page.
-- (Icons) Combat and leader icons use sharper art.
-- (DandersMover) Frames anchored to another addon's frames now follow them automatically.
-- (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
-- (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction: the shield and incoming heals can run past the end of the health bar again, up to a full bar's length. Off (0%) by default. (by Krathe)
-- (Resource Bar) New **Placement** option in the resource bar's Position settings, for party, raid and unit frames: keep the bar **On Top of Health Bar** (as before), or put it **Below**, **Above**, **Left of** or **Right of** the health bar. Along a side the health bar shrinks to make room, so it never shows through the resource bar, and the side has its own **Offset X / Y** and **Frame Level**. Turn off **Match Health Bar Width** to set a shorter bar and use **Anchor** to pick where along the side it sits. Frames that don't show a resource bar keep the full health bar. (by Krathe)
-- (Frame) New **Keep Health Bar Inside Border** option (Border card): the health bar stops at the inner edge of the frame border instead of running under it, so a see-through border sits over the frame background on every side. The resource bar keeps inside the border too. Off by default. (by Krathe)
-- (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (never on tanks, off by default) and one paladin blessing per role. Find them on the new **Class Buffs (WoW Forever)** card; with auto-detect on, priests, druids and paladins watch the ones they can cast.
-- (Aura Designer) New **Only on My Frame** option for indicators and effects. Turn it on to show a buff, or a "missing" reminder such as Inner Fire, only on your own frame instead of on everyone's.
+- (Pet Frames) WoW Forever: your hunter pet's happiness now shows as a face beside the unit frames pet frame and your own party/raid pet frame. Hover it for damage, loyalty, diet, training points and experience; a small arrow warns when loyalty is dropping. The pet frame's border, name and health bar can also be colored by happiness (colors under **Display > Colors**), and the pet's **Text Designer** has a **Pet Happiness** category. Settings are on the pet's **Unit Icons** page and **Display > Pet Frames**.
 
 ### Improvements
 
-- (Unit Frames) The **Linked Frames** page is easier to read: each linked pair folds away to one line showing how many parts are linked, mirrored or separate, and its group and column headings stand out.
-- (WoW Forever) Arcane Intellect and Divine Spirit no longer show as missing on warriors and rogues, who have no mana.
-- (Performance) Debug logging now costs nothing while it is off: diagnostics and log messages are skipped entirely instead of being built and thrown away, and turning logging off stops them at once. (by Krathe)
-- (Absorbs) The absorb and heal absorb Display Mode options have clearer names: Overlay on Health, Attached (overflows), Attached (wraps back) (was Attached + Overflow) and, for heal absorbs, Attached (into health). The dropdowns now have a tooltip that explains each mode. Saved settings are unchanged. (by Krathe)
+- (Modules) Modules now use on/off switches instead of checkboxes, so it's clearer what's on.
+- (Modules) Each unit frame (player, target, focus, pet, boss) has its own on/off switch on the Modules page.
+- (Modules) The Unit Frames and Party/Raid lists on the Modules page can be folded away.
+- (Unit Frames) Added tooltips to settings that weren't self-explanatory, like Frame Source and Kick-Ready Mark.
+- (Settings) Added tooltips to many settings that weren't clear from their name alone, across raid layout, sorting, pinned frames, aura bars, targeted spells, fading, tooltips, highlights, icons, absorbs, heal prediction and health bars.
+- (Resource Bar) With **Placement** Below or Above a horizontal health bar (or Left of / Right of a vertical one), the health bar keeps its full size and the resource bar is cut out of it, so a see-through frame border tints the health bar the same on every side. A bar at the end the health bar fills from or towards still shrinks the health bar, so the whole health range stays readable. (by Krathe)
+
+### Bug Fixes
+
+- (Unit Frames) Fix raid buffs such as Fortitude never showing on the buff bar, even with All Buffs on.
+
+## [6.0.0]
+
+### New Features
+
+- (Unit Frames) New **Unit Frames** module: player, target, target of target, focus, focus target, pet and boss frames, with the same depth of settings as your party and raid frames. It starts switched off: say yes to the popup, or turn it on from the **Modules** page, then find each frame's settings under **Units** in the icon bar. This is an early version, so please report anything odd.
+- (Unit Frames) Draw each frame as bars or as **rings** round a round portrait, with up to 8 rings for health, power, class power, shields, heal absorbs and heal prediction. Find it on a frame's **Frame Style** page.
+- (Unit Frames) Each frame has its own Text Designer template, and Player and Pet have their own Aura Designer. Link frames on the **Linked Frames** page so changing one changes the other, preview everything with the **Units** test mode, and copy a page's settings from another frame or from your party and raid frames.
+- (Settings) New settings layout: an icon bar down the left side replaces the Global / Party / Raid / Binds tabs. **Groups** holds your party and raid settings, **Binds** is click-casting, and **Modules**, **Profiles** and **Global** sit at the bottom.
+- (Settings) New **Home** page: search every setting, jump to any part of the addon, see what's new, and get a short **Needs attention** list with one-click fixes, such as Blizzard frames still showing or test mode left on.
+- (Settings) New **Modules** page to turn Group Frames (Party and Raid separately), Click-Casting and Unit Frames on or off, or reset one to its defaults.
+- (Profiles) Every profile tool now lives on the **Profiles** page: profiles, spec switching, Auto Layouts, click-casting profiles, import/export and changed settings. You can now **rename** profiles, and one import box accepts profile, click-casting and filter strings.
+- (Pet Frames) Pet frames can now show buffs and debuffs. Set their size, count and position on the new **Buffs** and **Debuffs** cards of the **Pet Frames** page; what they show follows your main buff and debuff settings.
+- (Aura Designer) New **Only on My Frame** option for indicators and effects: show a buff, or a "missing" reminder such as Inner Fire, only on your own frame.
+- (Resource Bar) New **Placement** option: keep the bar on top of the health bar (as before), or put it **Below**, **Above**, **Left of** or **Right of** it. Along a side the health bar shrinks to make room, and the bar gets its own offsets and frame level. Turn off **Match Health Bar Width** for a shorter bar and use **Anchor** to place it. (by Krathe)
+- (Frame) New **Keep Health Bar Inside Border** option on the Border card, so a see-through border sits over the frame background on every side. Off by default. (by Krathe)
+- (Absorbs) New **Overflow** sliders for absorbs (Attached (overflows) mode) and heal prediction, so shields and incoming heals can run past the end of the health bar, up to a full bar's length. Off by default. (by Krathe)
+- (Test Mode) The test popup is now a slim popout with a rail of modes. With Indicator Info on, click an element on a test frame to open its settings.
+- (WoW Forever) Missing Buffs can now watch Divine Spirit, Thorns (tanks only by default), Blessing of Salvation (off by default) and one paladin blessing per role, on the new **Class Buffs (WoW Forever)** card.
+- (Mover) An anchored element can mirror its target's position on X and Y.
+- (Rested Indicator) New soft outer glow style.
+- (Icons) Combat and leader icons use sharper art.
+- (DandersMover) Frames anchored to another addon's frames now follow them automatically.
+- (DandersMover) Adding DandersMover to an addon now takes far less code. Addon authors can pass `db` and `dbKey` in place of `getPos`, leave out `onChanged`, and let DandersMover place the frame and detect protected frames. See the Developer Guide.
+
+### Improvements
+
+- (Absorbs) Clearer names for the absorb and heal absorb Display Mode options, with a tooltip explaining each. Saved settings are unchanged. (by Krathe)
+- (Performance) Debug logging now costs nothing while it is off. (by Krathe)
+- (WoW Forever) Arcane Intellect and Divine Spirit no longer show as missing on warriors and rogues.
 
 ### Bug Fixes
 
@@ -45,25 +60,13 @@ DF.CHANGELOG_TEXT = [===[
 - (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
 - (Aura Designer) Group sliders and global text colours now update your frames while you drag them.
 - (Pinned Frames) Fix pinned frames staying registered after leaving raid mode.
-- (Unit Frames) Frame Fade's tick boxes now update your frames straight away, and hovering works with Separate Combat Fade.
-- (Unit Frames) The Unlock button on the Unit Frames pages now moves unit frames without showing other addons' movers.
-- (Unit Frames) Fix the cast bar vanishing mid-cast when pressing another spell while casting.
-- (Unit Frames) Turning the cast bar on or off on one frame no longer changes a linked frame.
-- (Unit Frames) The selection, hover and aggro outlines no longer include space for a hidden class power bar.
-- (Unit Frames) Target, Focus and Boss now have the important debuff highlight settings.
-- (Unit Frames) The global font "Apply to All" button now changes unit frame text too.
-- (Unit Frames) Reset Page on a Text page now resets the frame's text. A text template another frame also uses is left alone: the frame gets its own copy instead.
-- (Unit Frames) "Make Own Template" no longer moves a linked frame onto the new template too.
-- (Unit Frames) Turning a part on or off (portrait, power bar, auras, icons and so on) no longer changes a linked frame. Its look stays linked.
-- (Unit Frames) Picking a different text template on a linked frame no longer snaps back to the other frame's. That frame's text is unlinked, and a short note says so.
 - (Search) Fix search staying stuck on "Indexing settings..." after combat.
 - (Mover) Clicking now brings the mover controls back if they stayed faded after alt-tabbing.
 - (Test Mode) Turning off Color by Time Remaining now takes effect on test frames.
 - (Settings) Fix a large gap above Reduced Max Health and uneven resource colour swatches.
-- (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everything else.
+- (DandersMover) One addon with a broken mover registration can no longer stop the editor opening for everyone else.
 - (DandersMover) Anchoring a frame to something that isn't on screen yet no longer makes it jump.
-- (WoW Forever) Flasks, potions, elixirs, Spirit of Redemption and Camp Benefits now show in aura filters, and shadow protection potions no longer count as the priest buff.
-- (WoW Forever) Prayer of Mending now shows on your frames and in the healing aura filter.
+- (WoW Forever) Flasks, potions, elixirs, Spirit of Redemption, Camp Benefits and Prayer of Mending now show in aura filters, and shadow protection potions no longer count as the priest buff.
 
 ## [5.6.2]
 

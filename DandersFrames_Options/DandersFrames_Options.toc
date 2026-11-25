@@ -2,7 +2,7 @@
 ## Title: DandersFrames |cff9482c9Options|r
 ## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
 ## Author: Danders
-## Version: v6.0.0
+## Version: v6.1.0-alpha.1
 ## Category: Danders
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## LoadOnDemand: 1
@@ -67,6 +67,17 @@ GUI\SettingsWidgets.lua
 # Settings search. It has no entry point of its own -- the search bar is built
 # by GUI\Panel.lua -- so it is only ever reachable with this addon loaded.
 Features\Search.lua
+# Its synonyms and per-setting tags (search data, not UI text), then the
+# matcher that indexes the registry. Both extend DF.Search, so AFTER it.
+Features\SearchSynonyms.lua
+Features\SearchMatch.lua
+# The prebuilt search index (generated data: see its header) and its reader.
+# The page list's filter searches these, so focusing the box builds no page.
+Features\SearchIndexData.lua
+Features\SearchPrebuilt.lua
+# The page list's in-place filter. After the matcher (it reads its answers);
+# the page list and the page state pass find it through GUI.Filter* at run time.
+Features\SearchFilter.lua
 # The changed-settings ledger. AFTER Search.lua (it reads DF.Search's registry
 # at build time) and before the pages, one of which reads its PAGE_ID at file
 # scope to name its own tab.

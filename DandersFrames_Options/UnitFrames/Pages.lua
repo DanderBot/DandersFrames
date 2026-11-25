@@ -277,7 +277,9 @@ function UFO.Prefixes(kind)
     if kind == "rings" then
         return { "frameStyle", "ringSize", "rings", "ringShow", "ringPortrait3D", "textDesignerPreset", "ringTextDesignerPreset" }
     end
-    if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder" } end
+    if kind == "unitIcons" then
+        return { "restingIcon", "pvpIcon", "classification", "classDragon", "classBorder", "happinessIcon", "happinessColor" }
+    end
     if kind == "bosslayout" then return { "boss" } end
     return {}
 end
@@ -1271,6 +1273,7 @@ function UFO.BuildResourceDetachedCard(page, ctx, changed)
     end, ctx.offRow, nil, nil, {
         db = db, key = "resourceBarDetached", label = L["Detach"],
         disableOn = ctx.offRow, onChanged = changed,
+        tooltip = L["Moves the power bar out of the frame with its own size, onto the point of the frame's edge you pick below."],
     })
     local w = band:AddWidget(GUI:CreateCheckbox(page.child, L["Match Frame Width"], db,
         "resourceBarDetachedMatchWidth", changed), 30)
@@ -1455,6 +1458,9 @@ function UFO.AddTextPreviewFrame(target, unit)
     -- The ring spots in its Anchor To lists, markers for them on the mock, and a
     -- Show Hover State switch (TextDesigner/UI/Options.lua).
     target.ringAnchors = true
+    -- WoW Forever: the Pet Happiness tokens are offered on the pet's designer only
+    -- (they answer only for your own hunter pet).
+    target.petTokens = (unit == "pet" and DF.IS_FOREVER) and true or nil
     target.getSizeDB = function() return UF.FrameDB and UF:FrameDB(unit) or UF:GetUnitDB(unit) end
     target.decorateMock = function(mock, chrome)
         local R = UF.Rings
@@ -1555,8 +1561,11 @@ UFO.VIS_SHOW = {
     { key = "visCombat",         label = function() return L["In Combat"] end },
     { key = "visNoCombat",       label = function() return L["Out of Combat"] end },
     { key = "visGroup",          label = function() return L["In a Group"] end },
+    { key = "visParty",          label = function() return L["Party"] end },
+    { key = "visRaid",           label = function() return L["Raid"] end },
     { key = "visSolo",           label = function() return L["Solo"] end },
     { key = "visInstance",       label = function() return L["In an Instance"] end },
+    { key = "visResting",        label = function() return L["Resting"] end },
     { key = "visHasTarget",      label = function() return L["Have a Target"] end },
     { key = "visHasEnemyTarget", label = function() return L["Have a Hostile Target"] end },
 }
@@ -1565,6 +1574,7 @@ UFO.VIS_HIDE = {
     { key = "visHideVehicle",   label = function() return L["In a Vehicle"] end },
     { key = "visHideMounted",   label = function() return L["Mounted"] end },
     { key = "visHideSkyriding", label = function() return L["Skyriding"] end },
+    { key = "visHideResting",   label = function() return L["Resting"] end },
 }
 
 function UFO.VisControlShown(rec, unit, key)
@@ -1683,6 +1693,7 @@ local function DetachedControls(self, band, unit, kind, changed, off, attached)
         function() return UFO.ChildFollowing(unit, kind) end,
         function(v) UFO.SetChildFollowing(unit, kind, v); changed() end), 30)
     w.disableOn, w.hideOn = off, attached
+    w.tooltip = L["Keeps the detached bar pinned to its frame's edge, so it moves when the frame moves. Off leaves it where you put it on screen."]
     w = band:AddWidget(GUI:CreateButtonRow(self.child, {
         { label = L["Edit in Mover"], width = 120, icon = "open_with",
           onClick = function() UFO.EditChildInMover(unit, kind) end },
@@ -1704,14 +1715,18 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
         "settings", { db = db, key = "castbarEnabled", label = L["Enable Cast Bar"], onChanged = changed })
     for _, c in ipairs({
         { "castbarHideIdle", L["Hide When Not Casting"] },
-        { "castbarLatency", L["Show Latency"] },
+        { "castbarLatency", L["Show Latency"],
+          L["Shades the end of the bar by your current network delay. You can queue your next spell once the fill reaches the shaded part."] },
         { "castbarEmpower", L["Show Empower Stages"] },
-        { "castbarKickTick", L["Show Kick-Ready Mark"] },
-        { "castbarPriorityHighlight", L["Glow Important Spells"] },
+        { "castbarKickTick", L["Show Kick-Ready Mark"],
+          L["While your interrupt is on cooldown, a mark shows where in the enemy's cast it comes back. If the mark is before the end, you can still interrupt in time."] },
+        { "castbarPriorityHighlight", L["Glow Important Spells"],
+          L["Puts a glow round the bar when the game marks the spell as important, usually one worth interrupting or avoiding."] },
     }) do
         if shown(c[1]) then
             w = band:AddWidget(GUI:CreateCheckbox(self.child, c[2], db, c[1], changed), 30)
             w.disableOn = off
+            if c[3] then w.tooltip = c[3] end
         end
     end
     Close(band)
@@ -1735,6 +1750,7 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
     if shown("castbarDetached") then
         w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "castbarDetached", changed), 30)
         w.disableOn = off
+        w.tooltip = L["Frees the cast bar from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."]
     end
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
         { BOTTOM = L["Bottom"], TOP = L["Top"], _order = { "BOTTOM", "TOP" } }, db, "castbarSide", changed), 55)
@@ -1767,12 +1783,14 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
         { "castbarNonInterruptibleColor", L["Not Interruptible"] },
         { "castbarChannelColor", L["Channel"] },
         { "castbarFailedColor", L["Interrupted / Failed"] },
-        { "castbarKickNotReadyColor", L["Kick Not Ready"] },
+        { "castbarKickNotReadyColor", L["Kick Not Ready"],
+          L["Fill colour used while your interrupt is still on cooldown. Needs Show Kick-Ready Mark on."] },
         { "castbarPriorityHighlightColor", L["Important Glow"] },
     }) do
         if shown(c[1]) then
             w = band:AddWidget(GUI:CreateColorPicker(self.child, c[2], db, c[1], false, changed), 30)
             w.disableOn = off
+            if c[3] then w.tooltip = c[3] end
         end
     end
     if shown("castbarClassColor") then
@@ -1860,6 +1878,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Display Mode"],
         { PIPS = L["Pips"], BAR = L["Single Bar"], _order = { "PIPS", "BAR" } }, db, "classPowerMode", changed), 55)
     w.disableOn = off
+    w.tooltip = L["Pips shows one block per point. Single Bar shows one bar that fills up."]
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide When Empty"], db, "classPowerHideEmpty", changed), 30)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Out of Combat"], db, "classPowerHideOOC", changed), 30)
@@ -1869,8 +1888,10 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     band = Open(L["Class Options"], "uf_cp_class", 1, nil, "settings")
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Death Knight Runes"], db, "classPowerRunes", changed), 30)
     w.disableOn = off
+    w.tooltip = L["Shows a Death Knight's six runes, each refilling on its own. Off shows nothing on a Death Knight."]
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Brewmaster Stagger"], db, "classPowerStagger", changed), 30)
     w.disableOn = off
+    w.tooltip = L["Shows a Brewmaster's staggered damage as a bar that turns from green to yellow to red as it grows. Off shows nothing on a Brewmaster."]
     Close(band)
 
     band = Open(L["Size"], "uf_cp_size", 1, nil, "size")
@@ -1889,6 +1910,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
         function(d) return detached(d) and L["Detached"] or L["Attached"] end, "position")
     w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "classPowerDetached", changed), 30)
     w.disableOn = off
+    w.tooltip = L["Frees the class power from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."]
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
         { TOP = L["Top"], BOTTOM = L["Bottom"], _order = { "TOP", "BOTTOM" } }, db, "classPowerPosition", changed), 55)
     w.disableOn, w.hideOn = off, detached
@@ -1909,6 +1931,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
         { CLASS = L["Class"], POWER = L["Power Type"], CUSTOM = L["Custom"], _order = { "CLASS", "POWER", "CUSTOM" } },
         db, "classPowerColorMode", changed), 55)
     w.disableOn = off
+    w.tooltip = L["Class uses your class colour, Power Type uses the game's own colour for that resource, and Custom uses one colour you pick."]
     w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Custom Color"], db, "classPowerColor", false, changed), 30)
     w.disableOn = off
     w.hideOn = function(d) return not (d and d.classPowerColorMode == "CUSTOM") end
@@ -1916,6 +1939,7 @@ function UFO.BuildClassPowerPage(self, db, Add, rec, unit)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateColorPicker(self.child, L["Charged Pip"], db, "classPowerChargedColor", false, changed), 30)
     w.disableOn = off
+    w.tooltip = L["Colour for charged combo points, which some Rogue talents create."]
     Close(band)
 
     band = Open(L["Border"], "uf_cp_border", 2, nil, "border", BorderToggle(db, "classPower", changed))
@@ -1953,6 +1977,7 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
             { ["3D"] = L["3D Model"], ["2D"] = L["2D Portrait"], _order = { "3D", "2D" } }, db, "portraitNpcMode", changed), 55)
         w.disableOn = off
         w.hideOn = function(d) return not (d and (d.portraitMode == "CLASS" or d.portraitMode == "SPEC")) end
+        w.tooltip = L["Class and Spec Icons have nothing to show for an NPC, so choose what NPCs show instead."]
     end
     if shown("portraitDesatDead") then
         w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Desaturate When Dead"], db, "portraitDesatDead", changed), 30)
@@ -1967,6 +1992,7 @@ function UFO.BuildPortraitPage(self, db, Add, rec, unit)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Size (0 = frame height)"], -60, 100, 1, db, "portraitSize", changed), 55)
     w.disableOn = off
+    w.tooltip = L["Added to the frame's height. 0 makes the portrait as tall as the frame, negative values shrink it and positive values grow it."]
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "portraitX", changed), 55)
     w.disableOn = off
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "portraitY", changed), 55)
@@ -2350,8 +2376,10 @@ function UFO.BuildRingsPage(self, db, Add, rec, unit)
             changed()
         end, nil, set, { optionsFunc = UFO.TextTemplateOptions }), 55)
     end
-    textTemplate(L["Bars Text Template"], "textDesignerPreset")
-    textTemplate(L["Ring Text Template"], "ringTextDesignerPreset")
+    textTemplate(L["Bars Text Template"], "textDesignerPreset").tooltip =
+        L["The Text Designer template this frame uses while its style is Bars. Each style keeps its own, so switching style also switches the text layout."]
+    textTemplate(L["Ring Text Template"], "ringTextDesignerPreset").tooltip =
+        L["The Text Designer template this frame uses while its style is Ring. Each style keeps its own, so switching style also switches the text layout."]
     band:AddWidget(GUI:CreateLabel(self.child,
         L["Ring draws health and power as rings round a round portrait, and the frame becomes a square of Ring Size. The cast bar stays a bar."], 250), 70)
     Close(band)
@@ -2678,7 +2706,103 @@ UFO.UNIT_ICON_CARDS = {
     { card = "resting_icon", prefix = "restingIcon", key = "uf_icon_resting", label = function() return L["Resting Icon"] end },
     { card = "pvp_icon", prefix = "pvpIcon", key = "uf_icon_pvp", label = function() return L["PvP Icon"] end },
     { card = "elite_rare", prefix = "classification", key = "uf_icon_classification", label = function() return L["Elite / Rare"] end },
+    -- WoW Forever only (Indicators.lua, PET HAPPINESS).
+    { card = "pet_happiness", prefix = "happinessIcon", key = "uf_icon_happiness", forever = true,
+      label = function() return L["Pet Happiness"] end,
+      tooltip = function() return L["Show whether your hunter pet is happy, content or unhappy, beside the pet frame."] end },
 }
+
+-- The page data is generated and knows nothing of WoW Forever: on Forever the
+-- pet gets the Unit Icons page, with the Pet Happiness card on it.
+function UFO.AddForeverPetIcons(data)
+    if not (DF.IS_FOREVER and data and data.pages) then return end
+    for _, rec in ipairs(data.pages) do
+        if rec.kind == "unitIcons" then
+            rec.units = rec.units or {}
+            rec.cards = rec.cards or {}
+            rec.units.pet = true
+            rec.cards.pet_happiness = { pet = true }
+        end
+    end
+end
+UFO.AddForeverPetIcons(DF.UnitFramePageData)
+
+-- Pet Happiness: beside the frame (the default, outside its right edge) or at
+-- one of the nine points inside it.
+function UFO.HappinessPositionOptions()
+    local opts = PointOptions()
+    opts.OUTSIDE_RIGHT, opts.OUTSIDE_LEFT = L["Outside Right"], L["Outside Left"]
+    opts.OUTSIDE_TOP, opts.OUTSIDE_BOTTOM = L["Outside Top"], L["Outside Bottom"]
+    local order = { "OUTSIDE_RIGHT", "OUTSIDE_LEFT", "OUTSIDE_TOP", "OUTSIDE_BOTTOM" }
+    for _, k in ipairs(opts._order) do order[#order + 1] = k end
+    opts._order = order
+    return opts
+end
+
+-- ---- Color by Pet Happiness (WoW Forever only) -------------------------------
+-- The pet frame's border, name and health bar in the happiness colour. Shared by
+-- this page and the group Pet Frames page (GUI/Pages/Options.lua), which pass
+-- their own keys. No colour pickers: the colours live once on the Colors page,
+-- and the card links there.
+
+-- "Border · Name · Health Bar", the targets that are on, or Off.
+function UFO.HappinessColorsText(border, name, healthMode)
+    local parts = {}
+    if border then parts[#parts + 1] = L["Border"] end
+    if name then parts[#parts + 1] = L["Name"] end
+    if healthMode == "HAPPINESS" then parts[#parts + 1] = L["Health Bar"] end
+    if #parts == 0 then return L["Off"] end
+    return concat(parts, " \194\183 ")
+end
+
+-- The "Set the Pet Happiness colors on the Colors page." note: jumps to the
+-- Colors page's Pet Happiness card (GUI/Pages/Auras.lua) and flashes it.
+-- nil when the GUI cannot make the jump.
+function UFO.PetHappinessColorsLink(parent, width)
+    if not (GUI.CreateLink and GUI.LinkToSetting) then return nil end
+    local link = format("|cffffffff|HdfColors|h%s|h|r", L["Colors page"])
+    return GUI:CreateLink(parent, format(L["Set the Pet Happiness colors on the %s."], link), {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "display_classcolors",
+                section = L["Pet Happiness"],
+                flash   = { border = true, fill = false },
+            })
+        end,
+    })
+end
+
+-- The card's controls into `group`. keys: { border, name, only, mode } -- the db
+-- keys of the two switches, Only When Not Happy, and the health colour mode.
+function UFO.AddHappinessColorControls(group, parent, db, keys, changed, gate)
+    local function none(d)
+        return not (d and (d[keys.border] or d[keys.name] or d[keys.mode] == "HAPPINESS"))
+    end
+    local off = UFO.Gate(L["Color by Pet Happiness"], none, gate)
+    local w = group:AddWidget(GUI:CreateCheckbox(parent, L["Border"], db, keys.border, changed), 30)
+    w.disableOn = gate
+    w = group:AddWidget(GUI:CreateCheckbox(parent, L["Name"], db, keys.name, changed), 30)
+    w.disableOn = gate
+    w = group:AddWidget(GUI:CreateCheckbox(parent, L["Only When Not Happy"], db, keys.only, changed), 30)
+    w.disableOn = off
+    w.tooltip = L["A happy pet keeps its normal colors."]
+    group:AddWidget(GUI:CreateLabel(parent, L["To color the health bar too, pick Pet Happiness as its color."], 260), 35)
+    local note = UFO.PetHappinessColorsLink(parent, GUI:GroupInnerWidth(group))
+    if note then group:AddWidget(note, (note.layoutHeight or 16) + 2) end
+end
+
+UFO.UF_HAPPINESS_COLOR_KEYS = { border = "happinessColorBorder", name = "happinessColorName",
+                                only = "happinessColorOnlyUnhappy", mode = "healthColorMode" }
+
+function UFO.BuildHappinessColorsCard(self, db, Open, Close, changed, col)
+    local k = UFO.UF_HAPPINESS_COLOR_KEYS
+    local band = Open(L["Color by Pet Happiness"], "uf_icon_happiness_colors", col, function(d)
+        return d and UFO.HappinessColorsText(d[k.border], d[k.name], d[k.mode]) or ""
+    end, "icons")
+    UFO.AddHappinessColorControls(band, self.child, db, k, changed)
+    Close(band)
+end
 
 function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     UFO.AddPageHead(self, rec, unit, Add)
@@ -2686,12 +2810,13 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     local function changed() self:RefreshStates(); RefreshFrames() end
     local col = 0
     for _, c in ipairs(UFO.UNIT_ICON_CARDS) do
-        if UFO.CardShown(rec, unit, c.card) then
+        if UFO.CardShown(rec, unit, c.card) and (DF.IS_FOREVER or not c.forever) then
             local pre = c.prefix
             local off = UFO.Gate(c.label(), function(d) return not (d and d[pre .. "Enabled"]) end)
             col = (col % 2) + 1
             local band = Open(c.label(), c.key, col, function(d) return OnOff(d, pre .. "Enabled") end, "icons",
-                { db = db, key = pre .. "Enabled", label = L["Show"], onChanged = changed })
+                { db = db, key = pre .. "Enabled", label = L["Show"], onChanged = changed,
+                  tooltip = c.tooltip and c.tooltip() or nil })
             local w
             if pre == "classification" then
                 w = band:AddWidget(GUI:CreateDropdown(self.child, L["Style"],
@@ -2700,7 +2825,12 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
             end
             w = band:AddWidget(GUI:CreateSlider(self.child, L["Size"], 8, 48, 1, db, pre .. "Size", changed), 55)
             w.disableOn = off
-            w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, pre .. "Anchor", changed), 55)
+            if pre == "happinessIcon" then
+                w = band:AddWidget(GUI:CreateDropdown(self.child, L["Position"], UFO.HappinessPositionOptions(), db,
+                    pre .. "Anchor", changed), 55)
+            else
+                w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], PointOptions(), db, pre .. "Anchor", changed), 55)
+            end
             w.disableOn = off
             w = band:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, pre .. "X", changed), 55)
             w.disableOn = off
@@ -2720,8 +2850,29 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
                 w.disableOn = glowOff
                 w.tooltip = L["Draw the glow around the portrait too when it sits beside the frame."]
             end
+            if pre == "happinessIcon" then
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tooltip"], db, "happinessIconTooltip", changed), 30)
+                w.disableOn = off
+                w.tooltip = L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."]
+                local PH = DF.PetHappiness
+                if PH and PH.TrendOptions then
+                    w = band:AddWidget(GUI:CreateDropdown(self.child, L["Loyalty Arrow"], PH.TrendOptions(), db,
+                        "happinessIconTrend", changed), 55)
+                    w.disableOn = off
+                    w.tooltip = L["A small arrow on the face's corner while your pet is losing (or gaining) loyalty."]
+                end
+                w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide While Happy"], db, "happinessIconHideHappy",
+                    changed), 30)
+                w.disableOn = off
+                w.tooltip = L["Show the face only when your pet is content or unhappy. Test mode always shows it."]
+            end
             Close(band)
         end
+    end
+    -- WoW Forever: the pet frame coloured by happiness, beside the face's card.
+    if DF.IS_FOREVER and UFO.CardShown(rec, unit, "pet_happiness") then
+        col = (col % 2) + 1
+        UFO.BuildHappinessColorsCard(self, db, Open, Close, changed, col)
     end
     -- The dragon and the class border: every unit with a classification, Boss
     -- included (Boss has no Elite / Rare icon card, only these).
@@ -2854,7 +3005,8 @@ function UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
     end, "layout")
     band:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growth, db, "bossGrowth", changed), 55)
     band:AddWidget(GUI:CreateSlider(self.child, L["Frame Spacing"], 0, 150, 1, db, "bossSpacing", changed), 55)
-    band:AddWidget(GUI:CreateSlider(self.child, L["Units Per Row"], 1, count, 1, db, "bossUnitsPerRow", changed), 55)
+    band:AddWidget(GUI:WithTooltip(GUI:CreateSlider(self.child, L["Units Per Row"], 1, count, 1, db, "bossUnitsPerRow", changed),
+        L["How many boss frames sit in a line before the next one starts a new line. With Up or Down growth, each new line is a column beside the first."]), 55)
     w = band:AddWidget(GUI:CreateSlider(self.child, L["Row Spacing"], -5, 50, 1, db, "bossRowSpacing", changed), 55)
     -- Only matters once a row wraps.
     w.disableOn = UFO.Explain(function(d) return not (d and tonumber(d.bossUnitsPerRow) and d.bossUnitsPerRow < count) end,
@@ -3236,6 +3388,15 @@ end
 function UFO.GetSource(unit)
     local UF = DF.UnitFrames
     local db = UF and UF:GetUnitDB(unit)
+    if not UF then
+        -- Not loaded (the Modules page lists the frames while the module is
+        -- off): the stored value as it is, read-only. Absent means "DF", the
+        -- default every unit starts with (DandersFrames_UnitFrames/Defaults.lua).
+        local root = DF.db and DF.db.unitframes
+        local units = type(root) == "table" and root.units
+        db = type(units) == "table" and units[unit] or nil
+        if type(db) ~= "table" then db = nil end
+    end
     return (db and db.source) or "DF"
 end
 
@@ -3264,6 +3425,49 @@ function UFO.SetSource(unit, value)
         UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
     end
     return true
+end
+
+-- ============================================================
+-- THE MODULES PAGE'S PER-FRAME SWITCHES (GUI:ModuleSubSwitches,
+-- GUI/Pages/ModulesPage.lua)
+-- One switch per frame, over the frame's EXISTING source: on = "DF" (we draw
+-- it); off = "Blizzard" (Blizzard's own frame comes back), or "Hidden" where
+-- Blizzard is not allowed (UFO.INSIDE: target of target / focus target while
+-- their host is not Blizzard's). Through UFO.SetSource, so its rules and its
+-- reload prompt stay in one place. Boss is one switch for boss1-5 (one table).
+-- Greyed while the module is not running: its unit tables are the companion's.
+-- ============================================================
+function UFO.OffSource(unit)
+    local inside = UFO.INSIDE[unit]
+    if inside and UFO.GetSource(inside) ~= "Blizzard" then return "Hidden" end
+    return "Blizzard"
+end
+
+function UFO.SubSwitchesDisabled()
+    if not UFO.IsEnabled() then return true, L["Turn on Unit Frames first."] end
+    if not (UFO.IsLoaded() and DF.UnitFrames) then
+        return true, L["Reload to finish turning on Unit Frames."]
+    end
+    return false
+end
+
+function UFO.SubSwitches()
+    local out = {}
+    for _, unit in ipairs(UFO.UNITS) do
+        local u = unit
+        out[#out + 1] = {
+            key = u,
+            label = UFO.UnitLabel(u),
+            isOn = function() return UFO.GetSource(u) == "DF" end,
+            setOn = function(on) UFO.SetSource(u, on and "DF" or UFO.OffSource(u)) end,
+            offStatus = function()
+                return (UFO.GetSource(u) == "Hidden") and L["Hidden"] or L["Blizzard"]
+            end,
+            disabled = UFO.SubSwitchesDisabled,
+            openModule = UFO.MODULE, openTab = UFO.TabOf(u),
+        }
+    end
+    return out
 end
 
 -- Blizzard's player cast bar is hidden (the user's choice, or following ours).
@@ -3314,11 +3518,12 @@ function UFO.BuildSettingsPage(self, db, Add)
     end, "framemodes")
     for _, unit in ipairs(UF and UF.SPAWNED_UNITS or {}) do
         local u = unit
-        band:AddWidget(GUI:CreateDropdown(self.child, UFO.UnitLabel(u), UFO.SourceOptions(u), nil, nil,
+        band:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(self.child, UFO.UnitLabel(u), UFO.SourceOptions(u), nil, nil,
             function() self:RefreshStates() end,
             function() return UFO.GetSource(u) end,
             function(v) UFO.SetSource(u, v) end,
-            { optionsFunc = function() return UFO.SourceOptions(u) end }), 55)
+            { optionsFunc = function() return UFO.SourceOptions(u) end }),
+            L["Who draws this frame. DandersFrames draws its own, Blizzard keeps the game's frame, and Hidden shows neither. Takes a reload."]), 55)
     end
     band:AddWidget(GUI:CreateLabel(self.child, L["Target of Target can only be Blizzard when Target is."], 250), 30)
     band:AddWidget(GUI:CreateLabel(self.child, L["Focus Target can only be Blizzard when Focus is."], 250), 30)
@@ -3329,12 +3534,13 @@ function UFO.BuildSettingsPage(self, db, Add)
     band = Open(L["Blizzard Frames"], "uf_blizzard", 2,
         function() return UFO.HidesBlizzardCastBar() and format(L["%s hidden"], L["Cast Bar"]) or L["Shown"] end,
         "visibility")
-    band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Blizzard Player Cast Bar"], db, "hideBlizzardCastbar",
+    band:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(self.child, L["Hide Blizzard Player Cast Bar"], db, "hideBlizzardCastbar",
         function()
             UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
         end,
         function() return UFO.HidesBlizzardCastBar() end,
-        function(v) if db then db.hideBlizzardCastbar = v and true or false end end), 30)
+        function(v) if db then db.hideBlizzardCastbar = v and true or false end end),
+        L["Hides the game's own cast bar for your character. Until you change it, this follows your DandersFrames player cast bar and hides while that is on."]), 30)
     Close(band)
 end
 
@@ -3447,6 +3653,7 @@ function UFO.RegisterModule()
         pageForTab = function(tabId, from) return UFO.PageForTab(tabId, from) end,
         isEnabled = UFO.IsEnabled,
         setEnabled = UFO.SetEnabled,
+        subSwitches = UFO.SubSwitches,
         status = UFO.Status,
         description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
         reset = UFO.Reset,
@@ -3511,6 +3718,11 @@ function UFO.BuildPages(CreateCategory, CreateSubTab, BuildPage)
                         end
                         if rec.kind == "health" then
                             pg.extraHealthColorModes = { REACTION = L["Reaction"], CLASS_REACTION = L["Class / Reaction"] }
+                            -- WoW Forever: the pet's health bar by Pet Happiness
+                            -- (Indicators.lua, PET HAPPINESS COLOURS).
+                            if u == "pet" and DF.IS_FOREVER then
+                                pg.extraHealthColorModes.HAPPINESS = L["Pet Happiness"]
+                            end
                         end
                         GUI:SetPageModule(name, UFO.MODULE)
                         UFO.pageMeta[name] = { unit = u, tab = UFO.TabOf(u), kind = rec.kind }
@@ -3538,6 +3750,7 @@ function UFO.ApplyInstallState()
     def.comingSoon = nil
     def.isEnabled = UFO.IsEnabled
     def.setEnabled = UFO.SetEnabled
+    def.subSwitches = UFO.SubSwitches
     def.status = UFO.Status
     -- Switched on but not loaded yet: its rail item says so, with the reload.
     def.placeholderNote = UFO.PlaceholderNote

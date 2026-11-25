@@ -144,10 +144,12 @@ DF.TestData = {
         -- exercising that setting — the pool then needs another duration-less buff.
         {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
         -- ☠ NO RAID BUFFS IN THIS POOL. Spells in `DF.RaidBuffs` (Frames/Bars.lua) are what
-        -- MISSING BUFFS tracks, and `missingBuffHideFromBar` DEFAULTS TO TRUE, which unions every
-        -- RaidBuffs id into the row's `excludeSpellIDs` (Features/Auras.lua). So on a default
+        -- MISSING BUFFS tracks, and `missingBuffHideFromBar` DEFAULTS TO TRUE, which -- while
+        -- the Missing Buff icon is also on (`missingBuffIconEnabled`) -- unions every RaidBuffs
+        -- id into the row's `excludeSpellIDs` (Features/Auras.lua). So on a default group
         -- profile a live buff row can never show them, and a preview that did would be a
-        -- test-vs-live divergence.
+        -- test-vs-live divergence. (With the icon off -- the unit-frame default -- the live
+        -- row does show them; the pool still leaves them out so one list serves both.)
         -- ⇒ Anything added here must NOT appear in `DF.RaidBuffs`. Check it.
         {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
         {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},

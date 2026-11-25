@@ -463,6 +463,7 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     w.flashSpeed = group:AddWidget(GUI:CreateSlider(parent, L["Flash Speed"], 0.2, 3, 0.1,
         dbTable, K("FlashSpeed"), nil, onStructural, true), 54)
     w.flashSpeed.disableOn = function() return not dbTable[K("Flash")] end
+    w.flashSpeed.tooltip = L["How long one pulse out and back takes, in seconds. Higher values pulse more slowly."]
 
     -- ── TINT: a solid wash. Colour, opacity and inset — three controls, because that is
     -- genuinely all a wash has.
@@ -5171,6 +5172,18 @@ function GUI:CreatePopoutPageTools(page)
                 db     = RowDB,
             }
         end
+        -- ☠ A FILTERED CARD REGISTERS NOTHING, ITS HEADER INCLUDED. The header
+        -- registers the card's own title and builds the header tick (a real
+        -- checkbox, so a registered setting) -- and the suppression below used
+        -- to start only after the header was made. The search then counted a
+        -- card that never shows: a unit frame's Frame page listed for "move"
+        -- by Permanent Mover's tick, with nothing on the page. So it starts
+        -- HERE, and CloseSection ends it as before.
+        local heldSuppress
+        if filtered and DF.Search then
+            heldSuppress = { held = DF.Search.SuppressRegistration }
+            DF.Search.SuppressRegistration = true
+        end
         -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
         -- in SettingsWidgets.lua).
         local section = GUI:CreateCollapsibleSection(page.child, label, not (extra and extra.collapsed),
@@ -5197,13 +5210,9 @@ function GUI:CreatePopoutPageTools(page)
         section:RegisterChild(band)
         if extra and extra.twoTrack then WireTwoTrack(band) end
         if extra and extra.quietLabels then band.dfQuietLabels = true end
-        if filtered then
+        if heldSuppress then
             -- Held until this card's CloseSection; see CardFilteredOut.
-            local Search = DF.Search
-            if Search then
-                band.dfHeldSuppress = { held = Search.SuppressRegistration }
-                Search.SuppressRegistration = true
-            end
+            band.dfHeldSuppress = heldSuppress
         end
         return band
     end

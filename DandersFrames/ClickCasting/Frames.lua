@@ -1199,8 +1199,7 @@ function CC:AnyBindingNeedsBlizzardFrames()
         -- false, and the frames those macros needed were never registered.
         if self:ShouldBindingLoad(binding) then
             -- Check if binding applies to other frames
-            local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-            if frames.otherFrames then
+            if self:BindingScopeOn(binding, "other") then
                 return true
             end
             
@@ -1220,8 +1219,7 @@ function CC:AnyBindingNeedsOtherFrames()
         -- See AnyBindingNeedsBlizzardFrames: ShouldBindingLoad already carries the
         -- `enabled ~= false` semantics; a leading truthiness test breaks imports.
         if self:ShouldBindingLoad(binding) then
-            local frames = binding.frames or { dandersFrames = true, otherFrames = true }
-            if frames.otherFrames then
+            if self:BindingScopeOn(binding, "other") then
                 return true
             end
         end
@@ -2260,7 +2258,7 @@ function CC:SetupSecureHandlers(frame)
         -- One-shot per frame: the flag is reset when a rebuild gives the frame
         -- a real snippet again, so legitimately-empty frames don't loop.
         if not hasKeyboardBindings and self.dfIsDandersFrame
-            and not self.dfSnippetRepairTried and CC:ProfileHasKeyboardBindings() then
+            and not self.dfSnippetRepairTried and CC:ProfileHasKeyboardBindings(self) then
             self.dfSnippetRepairTried = true
             DF:DebugWarn("CLICK", "EMPTY SNIPPET on %s but profile has keyboard binds", frameName)
             CC:RequestBindingRepair("empty-snippet")
@@ -2478,7 +2476,9 @@ function CC:UpdateFrameBindingAttributes(frame)
     local snippetLines = {}
     
     if self.unifiedMacroMap then
-        for keyString, data in pairs(self.unifiedMacroMap) do
+        -- The frame's own scope map (CC:GetMacroMapForFrame), the same one its
+        -- mouse attributes and virtual buttons were written from.
+        for keyString, data in pairs(self:GetMacroMapForFrame(frame)) do
             local binding = data.templateBinding
             local bindType = binding.bindType or "mouse"
             
@@ -2556,14 +2556,21 @@ end
 -- hover snippet path (keyboard, scroll, or meta-mouse). Used by the
 -- self-heal detection to tell "snippet legitimately empty" apart from
 -- "snippet wiped". Cached per macro-map instance so hover hooks stay cheap.
-function CC:ProfileHasKeyboardBindings()
+--
+-- ⚠ Pass the FRAME. With frame scopes a frame's snippet is built from its own
+-- scope map, so "the profile has keyboard binds" is not the question -- a
+-- target frame whose scope has none legitimately has an empty snippet, and
+-- asking the union map would call that a wipe and request a repair on every
+-- hover (the #976 self-heal looping). No frame = the union, as before.
+function CC:ProfileHasKeyboardBindings(frame)
     if not self.unifiedMacroMap then return false end
-    if self.kbCheckMap == self.unifiedMacroMap then
-        return self.kbCheckResult
-    end
+    local map = frame and self:GetMacroMapForFrame(frame) or self.unifiedMacroMap
+    self.kbCheckCache = self.kbCheckCache or setmetatable({}, { __mode = "k" })
+    local cached = self.kbCheckCache[map]
+    if cached ~= nil then return cached end
 
     local result = false
-    for _, data in pairs(self.unifiedMacroMap) do
+    for _, data in pairs(map) do
         local binding = data.templateBinding
         local bindType = binding.bindType or "mouse"
         local isMetaMouse = (bindType == "mouse") and binding.modifiers
@@ -2574,8 +2581,7 @@ function CC:ProfileHasKeyboardBindings()
         end
     end
 
-    self.kbCheckMap = self.unifiedMacroMap
-    self.kbCheckResult = result
+    self.kbCheckCache[map] = result
     return result
 end
 

@@ -268,6 +268,7 @@ local function RefreshOverrideTabMap()
     {"hideBlizzardRaidFrames", "display_visibility", L["Visibility"]},
     {"showBlizzardSideMenu", "display_visibility",  L["Visibility"]},
     {"tooltip",             "display_tooltips",     L["Tooltips"]},
+    {"frameFade",           "display_fading",       L["Fading"]},   -- before "frame" below
     {"rangeFade",           "display_fading",       L["Fading"]},
     {"oor",                 "display_fading",       L["Fading"]},
     {"dead",                "display_fading",       L["Fading"]},

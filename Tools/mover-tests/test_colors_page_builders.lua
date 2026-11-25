@@ -282,8 +282,8 @@ print("-- Colors page: the cards' order and the page's own furniture")
 do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
-    eq(table.concat(order, " | "), "Class Colors | Role Colors | Dispel Type Colors | Color by Time",
-       "order: the four cards open in the page's own order, which is the one-column fold's")
+    eq(table.concat(order, " | "), "Class Colors | Role Colors | Pet Happiness | Dispel Type Colors | Color by Time",
+       "order: the cards (Pet Happiness: WoW Forever only) open in the page's own order, which is the one-column fold's")
 
     check(PAGE:find("INLINE_BOX", 1, true) == nil, "boxes: nothing wears the old band skin")
 
@@ -360,7 +360,7 @@ do
           "non-profile: and nothing is hoisted, because no palette has an on/off")
     local resets = 0
     for _ in PAGE:gmatch('text = L%["Reset All to Default"%]') do resets = resets + 1 end
-    eq(resets, 3, "non-profile: three Reset All buttons, one per palette, still inside their groups")
+    eq(resets, 4, "non-profile: four Reset All buttons (Pet Happiness's on Forever), one per palette, still inside their groups")
 end
 
 -- ============================================================

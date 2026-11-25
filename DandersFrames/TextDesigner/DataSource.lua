@@ -95,6 +95,50 @@ end
 DataSource.DifficultyColor = difficultyColor
 
 -- ============================================================
+-- PET HAPPINESS (WoW Forever only)
+-- The hunter pet's answers for the Text Designer's pet tokens, read through the
+-- shared core (Features/PetHappiness.lua), which owns every API call and gate.
+-- The API takes no unit and only describes the player's own pet, so a live
+-- source answers only for the unit "pet" (the unit frames pet frame; in a
+-- vehicle that frame shows "player" and answers nothing). Mock and test answer
+-- with the core's sample (PH.MOCK): an unhappy pet losing loyalty.
+-- Every getter answers nil (the token renders empty) when there is nothing.
+-- ============================================================
+local function petCore()
+    local PH = DF.PetHappiness
+    if PH and DF.IS_FOREVER then return PH end
+    return nil
+end
+
+-- mood (1..3), damage %, loyalty rate
+local function petHappiness(mock)
+    local PH = petCore()
+    if not PH then return nil end
+    if mock then
+        local m = PH.MOCK
+        return m.mood, m.damage, m.rate
+    end
+    return PH:Read()
+end
+local function petLoyalty(mock)
+    local PH = petCore()
+    return PH and PH:Loyalty(mock) or nil
+end
+local function petDiet(mock)
+    local PH = petCore()
+    return PH and PH.DietText(PH:Diet(mock)) or nil
+end
+local function petTrainingPoints(mock)
+    local PH = petCore()
+    return PH and PH:TrainingPoints(mock) or nil
+end
+local function petExperience(mock)
+    local PH = petCore()
+    if not PH then return nil end
+    return PH:Experience(mock)
+end
+
+-- ============================================================
 -- MOCK FACTORY
 -- Returns a source that reads from MOCK_DATA. Used for the preview.
 -- ============================================================
@@ -146,6 +190,11 @@ function MockSource:IsAFK() return MOCK_DATA.isAFK end
 function MockSource:GetLevelColor() return difficultyColor(MOCK_DATA.level) end
 function MockSource:GetClassification() return MOCK_DATA.classification end
 function MockSource:GetTargetName() return MOCK_DATA.targetName end
+function MockSource:GetPetHappiness() return petHappiness(true) end
+function MockSource:GetPetLoyalty() return petLoyalty(true) end
+function MockSource:GetPetDiet() return petDiet(true) end
+function MockSource:GetPetTrainingPoints() return petTrainingPoints(true) end
+function MockSource:GetPetExperience() return petExperience(true) end
 
 function DataSource.Mock()
     if not mockSourceInstance then
@@ -403,6 +452,28 @@ function LiveSource:IsInRange()
     return getMS().SafeBoolean(UnitInRange(self.unit), true)
 end
 
+-- The player's own pet only (see PET HAPPINESS above).
+function LiveSource:GetPetHappiness()
+    if self.unit ~= "pet" then return nil end
+    return petHappiness(false)
+end
+function LiveSource:GetPetLoyalty()
+    if self.unit ~= "pet" then return nil end
+    return petLoyalty(false)
+end
+function LiveSource:GetPetDiet()
+    if self.unit ~= "pet" then return nil end
+    return petDiet(false)
+end
+function LiveSource:GetPetTrainingPoints()
+    if self.unit ~= "pet" then return nil end
+    return petTrainingPoints(false)
+end
+function LiveSource:GetPetExperience()
+    if self.unit ~= "pet" then return nil end
+    return petExperience(false)
+end
+
 -- Cached per frame. This wrapper carries nothing but the frame and its unit, and every
 -- LiveSource method is a pure read -- none of them write to self -- so a fresh table
 -- plus setmetatable on each call was pure churn. It ran once per frame per Text
@@ -521,6 +592,27 @@ function TestSource:IsAFK() return tdata(self).isAFK and true or false end
 function TestSource:GetAggroFlag() return 0 end          -- threat not simulated in test
 function TestSource:GetThreatPercent() return nil end
 function TestSource:IsInRange() return not tdata(self).outOfRange end
+
+-- Pet Happiness: the unit frames pet preview only (no other test frame shows
+-- the player's pet), the sample's own fields first (a test panel may set them),
+-- else the core's sample.
+local function petTest(self)
+    return self.frame ~= nil and self.frame.dfUFUnit == "pet"
+end
+function TestSource:GetPetHappiness()
+    if not petTest(self) then return nil end
+    local mood, damage, rate = petHappiness(true)
+    if not mood then return nil end
+    local d = tdata(self)
+    return d.petHappiness or mood, d.petDamage or damage, d.petLoyaltyRate or rate
+end
+function TestSource:GetPetLoyalty() return petTest(self) and petLoyalty(true) or nil end
+function TestSource:GetPetDiet() return petTest(self) and petDiet(true) or nil end
+function TestSource:GetPetTrainingPoints() return petTest(self) and petTrainingPoints(true) or nil end
+function TestSource:GetPetExperience()
+    if not petTest(self) then return nil end
+    return petExperience(true)
+end
 
 function DataSource.Test(frame)
     local instance = setmetatable({}, TestSource)

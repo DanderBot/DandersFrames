@@ -55,7 +55,7 @@ check(MODS:find("GUI:CreateElementBackdrop", 1, true) == nil, "modules: no squar
 check(MODS:find('row.plate = GUI:CreateRoundedSurface(row, { radius = 6,', 1, true) ~= nil, "modules: a row is a rounded plate")
 check(MODS:find('box.surface = GUI:CreateRoundedSurface(box, { radius = 6,', 1, true) ~= nil, "modules: ...with a rounded icon box")
 check(MODS:find('note.surface = GUI:CreateRoundedSurface(note, { radius = 6,', 1, true) ~= nil, "modules: the reload note is a rounded box")
-check(MODS:find("GUI:CreateCheckRow(row,", 1, true) ~= nil, "modules: the switch is the shared checkbox, not a hand-rolled one")
+check(MODS:find("GUI:CreateSwitch(row, {", 1, true) ~= nil, "modules: the switch is the kit's shared switch, not a hand-rolled one")
 
 print("-- Settings design: every Profiles page is the shared cards")
 check(PROF:find("GUI:CreateSettingsGroup", 1, true) == nil, "profiles: no bare settings box left")

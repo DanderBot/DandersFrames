@@ -406,6 +406,7 @@ L["ToT"] = true
 L["Turn off %s to change this"] = true
 L["Turn on %s to change this"] = true
 L["Turn on Show Border to use this"] = true
+L["Turn on Unit Frames first."] = true
 L["Turning Unit Frames on or off requires a UI reload to take effect.\n\nReload now?"] = true
 L["Turning it on or off stays separate on each frame."] = true
 L["Unit Frames handles the Blizzard player frame."] = true
@@ -3001,6 +3002,95 @@ L["How far inside the frame edge the highlight sits. Negative values push it out
 L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."] = true
 
 -- ============================================================
+-- SETTING TOOLTIPS: Unit Frames pages (same rules as the curated sets above).
+-- Alphabetical within the block.
+-- ============================================================
+L["Added to the frame's height. 0 makes the portrait as tall as the frame, negative values shrink it and positive values grow it."] = true
+L["Class and Spec Icons have nothing to show for an NPC, so choose what NPCs show instead."] = true
+L["Class uses your class colour, Power Type uses the game's own colour for that resource, and Custom uses one colour you pick."] = true
+L["Colour for charged combo points, which some Rogue talents create."] = true
+L["Fill colour used while your interrupt is still on cooldown. Needs Show Kick-Ready Mark on."] = true
+L["Frees the cast bar from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."] = true
+L["Frees the class power from the frame so you can place it anywhere with the mover. Off keeps it just above or below the frame."] = true
+L["Hides the game's own cast bar for your character. Until you change it, this follows your DandersFrames player cast bar and hides while that is on."] = true
+L["How many boss frames sit in a line before the next one starts a new line. With Up or Down growth, each new line is a column beside the first."] = true
+L["Keeps the detached bar pinned to its frame's edge, so it moves when the frame moves. Off leaves it where you put it on screen."] = true
+L["Moves the power bar out of the frame with its own size, onto the point of the frame's edge you pick below."] = true
+L["Pips shows one block per point. Single Bar shows one bar that fills up."] = true
+L["Puts a glow round the bar when the game marks the spell as important, usually one worth interrupting or avoiding."] = true
+L["Shades the end of the bar by your current network delay. You can queue your next spell once the fill reaches the shaded part."] = true
+L["Shows a Brewmaster's staggered damage as a bar that turns from green to yellow to red as it grows. Off shows nothing on a Brewmaster."] = true
+L["Shows a Death Knight's six runes, each refilling on its own. Off shows nothing on a Death Knight."] = true
+L["The Text Designer template this frame uses while its style is Bars. Each style keeps its own, so switching style also switches the text layout."] = true
+L["The Text Designer template this frame uses while its style is Ring. Each style keeps its own, so switching style also switches the text layout."] = true
+L["While your interrupt is on cooldown, a mark shows where in the enemy's cast it comes back. If the mark is before the end, you can still interrupt in time."] = true
+L["Who draws this frame. DandersFrames draws its own, Blizzard keeps the game's frame, and Hidden shows neither. Takes a reload."] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS: raid layout, moving, sorting and pinned frames
+-- (Frame, Sorting and Pinned Frames pages). Alphabetical within the block.
+-- ============================================================
+L["Adds a handle beside your frames that stays on screen while they are locked. Drag it to move the frames, or click it to run the actions set below."] = true
+L["Lays the raid out as separate groups 1 to 8. Turn it off to put everyone in one grid that wraps after a set number of players and sorts the whole raid together."] = true
+L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."] = true
+L["Player Frames shows the group members you choose. Friendly Boss NPCs shows friendly encounter NPCs instead, such as an ally you must keep alive during a boss fight."] = true
+L["Space between the edge of the frame and its health bar on every side, so the frame background shows as a margin around the bar."] = true
+L["Splits damage dealers into melee and ranged, so each gets its own place in Role Priority. Your own spec is read directly, but other players are judged by class, so melee specs of hybrid classes such as Feral or Enhancement count as ranged."] = true
+L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."] = true
+L["What clicking the handle this way does: Quick Switch opens a list of profiles to pick from, and Cycle Next moves straight to the next one. In combat only Open Settings, Reload UI, Ready Check and Pull Timer work."] = true
+L["Where the grid sits inside the space kept for a full 40-player raid when fewer players are shown. Center keeps it in the middle, and the other options push it to that edge."] = true
+L["Where your own frame goes. Always First or Always Last keeps you at that end, and Sorted with Group places you by the same rules as everyone else."] = true
+L["Which Aura Designer template sets the auras on these frames. Inherit uses the one your party or raid frames use, named in brackets."] = true
+L["Which edge the first row starts at. New rows are added towards the other edge as the raid fills."] = true
+L["Which of your frame setups, party or raid, these frames copy their width, height, scale, spacing and border from. Change any of them below to override it for these frames only."] = true
+L["Which side the first column starts at. New columns are added towards the other side as the raid fills."] = true
+L["Which Text Designer template sets the text on these frames. Inherit uses the one your party or raid frames use, named in brackets."] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS: aura bars (Buff Bar, Debuff Bar, Defensive Icon, Dispel
+-- Overlay and the shared border animation / pandemic controls). Alphabetical within the block.
+-- ============================================================
+L["Adds a moving effect to the border to draw the eye, such as a blink, a glow or sparkles running round it. Pick None to keep the border still."] = true
+L["Glow brightens what is underneath so the colour shines, and shows best over dark bars. Solid lays the colour on top exactly as picked, which reads better over bright class colours."] = true
+L["How far the wash reaches in from the frame edge, as a share of the frame. Has no effect on Full Frame, which always covers the whole bar."] = true
+L["How long one pulse out and back takes, in seconds. Higher values pulse more slowly."] = true
+L["Keeps the duration text hidden until the time left drops below the seconds set under it, so only auras close to running out show a number. Not available with the Percent format."] = true
+L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."] = true
+L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS: targeted spells (Targeted List and Personal Targeted
+-- Spells). Alphabetical within the block.
+-- ============================================================
+L["Also lists casts with no target, such as ground effects and area spells. With this off, only casts aimed at someone in your group appear."] = true
+L["Applies a ready-made look in one go, setting bar size, spacing, icon, which text shows, border, background opacity and font size. You can still change any of them afterwards."] = true
+L["Only shows casts the game itself marks as important, usually ones worth interrupting or avoiding, and hides the rest."] = true
+L["Puts a < after the target's name, like an arrow pointing back at them."] = true
+L["Puts a > before the target's name, like an arrow pointing at them."] = true
+L["The order the bars appear in. Newest First puts the latest cast first, Oldest First keeps the earliest first, and Static gives each cast a fixed spot so bars never move, which can leave gaps as casts end."] = true
+L["The widest this text can be before it is cut short. 0 uses the full width of the bar."] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS: display and indicators (Fading, Tooltips, Highlights,
+-- Icons). Alphabetical within the block.
+-- ============================================================
+L["Brings a faded frame back to full view while that player has a debuff you can dispel, so the fade never hides it. Only works while the Dispel Overlay is turned on."] = true
+L["Fades each part of an out-of-range frame by its own amount instead of the whole frame at once. Useful for keeping names readable while the health bar dims."] = true
+L["How a player with threat is shown. Health Bar Color tints their health bar by threat level instead of drawing a border or glow, and Hidden turns it off."] = true
+L["How long the ready check result stays on the frames after the check ends. 0 clears it as soon as the check finishes."] = true
+L["Used when an enemy is attacking the player but someone else has more threat on it, so it may soon switch targets."] = true
+L["When a player is in a separate group from you, such as a dungeon finder group, shows the dungeon finder eye instead of the usual phased icon."] = true
+L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS: bars (Absorbs, Heal Prediction, Health Bar). Alphabetical
+-- within the block.
+-- ============================================================
+L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."] = true
+L["How the reduced section's colour mixes with what is under it. Blend draws the colour as picked, Add brightens it into a glow, and Modulate darkens what is underneath."] = true
+L["Shortens the health bar so it stops where the reduced section begins, instead of drawing the reduced section over the end of it."] = true
+
+-- ============================================================
 -- FILTER MEMBERSHIP
 -- No strings here, and that is the answer rather than an omission. A buff
 -- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,
@@ -3311,9 +3401,6 @@ L["Building the list of settings..."] = true
 L["Changed Settings"] = true
 L["Copy as Text"] = true
 L["Everything is at its defaults."] = true
--- The search panel's own "the index is still being built" state. Lives with the
--- ledger block because it is the same budgeted build behind both surfaces.
-L["Indexing settings..."] = true
 L["Not everything is listed: a few controls and ordered lists are not tracked here."] = true
 L["On"] = true
 L["Showing %s settings in the current profile. Click a row to jump to the setting."] = true
@@ -3775,4 +3862,65 @@ L["Blessing of Might"] = true
 L["Blessing of Wisdom"] = true
 L["Blessing of Kings"] = true
 L["A paladin is reminded about their own blessing, so several paladins each cover everyone. If you don't know the chosen blessing, Kings is used."] = true
+-- WoW Forever Pet Happiness (DandersFrames/Features/PetHappiness.lua, the unit frames pet page).
+-- The tooltip lines are fallbacks for Blizzard's own global strings; L["Content"], L["Both"] and L["Off"] are reused.
+L["A happy pet keeps its normal colors."] = true
+L["A small arrow on the face's corner while your pet is losing (or gaining) loyalty."] = true
+L["Color by Pet Happiness"] = true
+L["Diet"] = true
+L["Diet: %s"] = true
+L["Fish"] = true
+L["Gaining loyalty"] = true
+L["Happiness"] = true
+L["Happiness (Color)"] = true
+L["Happy"] = true
+L["Hide While Happy"] = true
+L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."] = true
+L["Losing loyalty"] = true
+L["Losing Only"] = true
+L["Loyalty Arrow"] = true
+L["Loyalty Level"] = true
+L["Loyalty Level %d"] = true
+L["Loyalty Trend"] = true
+L["Meat"] = true
+L["Only When Not Happy"] = true
+L["Outside Bottom"] = true
+L["Outside Left"] = true
+L["Outside Right"] = true
+L["Outside Top"] = true
+L["Pet Damage %"] = true
+L["Pet Happiness"] = true
+L["Pet is doing %d%% damage"] = true
+L["Pet XP"] = true
+L["Pet XP %"] = true
+L["Set the Pet Happiness colors on the %s."] = true
+L["Show the face only when your pet is content or unhappy. Test mode always shows it."] = true
+L["Show Tooltip"] = true
+L["Show whether your hunter pet is happy, content or unhappy, beside the pet frame."] = true
+L["The colors your hunter pet's frame takes when it is happy, content or unhappy, wherever Color by Pet Happiness is on."] = true
+L["To color the health bar too, pick Pet Happiness as its color."] = true
+L["Training Points"] = true
+L["Training Points: %d"] = true
+L["Unhappy"] = true
+L["XP: %s / %s"] = true
+
+-- Click-casting frame scopes (Binding Editor)
+L["%s are turned off on the Modules page."] = true
+L["%s is hidden by its Frame Source."] = true
+L["%s uses Blizzard's frame, so Other Frames covers it."] = true
+L["Blizzard's frames (player, target, focus, pet, boss, arena), other addons' unit frames, and nameplates."] = true
+L["The DandersFrames unit frames: player, target, focus, pet, boss and the rest."] = true
+L["Your party and raid frames, including pinned, arena and group pet frames."] = true
+
+-- Frame Fade at 0%, Health Fade's reveal, the unhappy-pet reveal (Fading page) and the
+-- unit frames' Resting visibility condition. L["Party"] and L["Raid"] are reused.
+L["At 0% the frame is invisible but can still be clicked, hovered and click-cast."] = true
+L["Below the threshold the frame ignores Frame Fade and shows at full opacity, or at your In Combat Frame Fade with Separate Combat Fade on. Use it to hide healthy frames out of combat but still see anyone who is hurt."] = true
+L["Resting"] = true
+L["Show Below Threshold Through Frame Fade"] = true
+L["Show When Pet Is Not Happy"] = true
+L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."] = true
+L["Without Separate Combat Fade, the frame shows at full opacity instead."] = true
+-- Settings search: the note over a page the side menu's filter found nothing on.
+L["Nothing on this page matches."] = true
 --@end-do-not-package@

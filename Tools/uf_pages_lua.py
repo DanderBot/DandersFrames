@@ -109,6 +109,13 @@ HOOKED_CARDS = {
     "auras_buffs": {"Purgeable": "buffs_purgeable"},
 }
 
+# DF cards that moved page but kept their old section key (so a saved collapse / pin
+# state carries over): page id -> card title -> the key the builder still opens it with.
+#   Frame Fade  moved from general_frame to display_fading; still "frame_fade".
+MOVED_CARDS = {
+    "display_fading": {"Frame Fade": "frame_fade"},
+}
+
 def slug(title):
     return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
 # Section-key prefix of each DF page's cards (tools.OpenSection's collapseKey).
@@ -170,7 +177,8 @@ def main():
                 if p["origin"] == "df":
                     want = PREFIX[pid]
                     hits = sorted({k for t, k in pairs if t == c["title"] and k.startswith(want)})
-                    hooked = HOOKED_CARDS.get(pid, {}).get(c["title"])
+                    hooked = (HOOKED_CARDS.get(pid, {}).get(c["title"])
+                              or MOVED_CARDS.get(pid, {}).get(c["title"]))
                     if hooked:
                         hits = [hooked]
                     elif c.get("new"):

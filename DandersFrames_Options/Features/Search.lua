@@ -24,19 +24,13 @@ local C_BORDER     = {r = 0, g = 0, b = 0, a = 1}
 local C_ACCENT     = {r = 0.2, g = 0.6, b = 1.0, a = 1}
 local C_RAID       = {r = 1.0, g = 0.4, b = 0.2, a = 1}
 
--- Result-card geometry. The control's own height is NOT here on purpose -- it
--- comes from the widget's preferredHeight (GUI.RowHeight owns that slot). These
--- are only the card's own chrome: the breadcrumb strip above the control, and
--- the padding around it.
+-- Result geometry.
 -- ★ READ, NOT COPIED. These numbers come off GUI.SettingsBox, the ONE declaration the
 -- page layout and CreateSettingsGroup read too. A comment is not a link: a literal
 -- justified by "copied from the page layout" goes on claiming to mirror the page after
 -- the page has moved.
 local SETTINGS_BOX = DF.GUI.SettingsBox
 
-local CARD_PAD_X     = SETTINGS_BOX.pad
-local CARD_CONTENT_Y = 28   -- top of the control, below the breadcrumb button
-local CARD_CHROME    = 38   -- breadcrumb strip + top and bottom padding
 
 -- ★ A RESULT CARD IS A SETTINGS BOX, so it is exactly as wide as one -- the same
 -- SettingsBox.group that CreateSettingsGroup builds, with the same SettingsBox.pad
@@ -114,8 +108,33 @@ function Search:SetCurrentTab(tabName, tabLabel)
     self.CurrentSection = nil
 end
 
-function Search:SetCurrentSection(sectionName)
+-- `widget`, when the caller passes one, is the card or header that opens the
+-- section: the section itself is then registered as an entry of its own (an
+-- isSection entry, label = its title), so a card is findable by its title even
+-- when the controls in it are of kinds that register nothing -- a header's
+-- on/off tick, a check row, a segment toggle. The page list's filter counts it;
+-- Home's ranked results leave it out (it has no control to show inline).
+function Search:SetCurrentSection(sectionName, widget)
     self.CurrentSection = sectionName
+    if widget and type(sectionName) == "string" and sectionName ~= "" and self.CurrentTab then
+        local entry = self:Register({
+            label = sectionName, searchKey = "section:" .. sectionName,
+            isSection = true, type = "section",
+        })
+        if entry and entry.id then entry.sourceWidget = widget end
+    end
+end
+
+-- The table a page builds against when it has one of its own (a module's page:
+-- a unit frame's table, not the party/raid one), or nil. Asked fresh every time
+-- rather than cached by page name: a profile switch hands the same page a new table.
+function Search:_OwnPageDb()
+    local tab = self.CurrentTab
+    local GUI = DF.GUI
+    local page = GUI and GUI.Pages and tab and GUI.Pages[tab]
+    if not (page and GUI.PageBuildDb) then return nil end
+    local ok, db = pcall(GUI.PageBuildDb, page)
+    return (ok and type(db) == "table") and db or nil
 end
 
 -- ============================================================
@@ -204,7 +223,16 @@ function Search:Register(entry)
     
     -- If entry has a dbKey, check if it exists in the current mode's defaults
     -- Skip settings that don't exist for the current mode
-    if entry.dbKey and type(entry.dbKey) == "string" and defaults then
+    -- ☠ ...UNLESS THE PAGE HAS A TABLE OF ITS OWN. A unit frame page builds
+    -- against the unit's table, and about 200 unit-frame settings (the whole cast
+    -- bar, the resting / PvP / elite icons, the portrait) have no party or raid
+    -- default at all -- this check dropped every one of them, so a search in the
+    -- Unit Frames module found nothing for "resting", "portrait" or "cast bar".
+    -- Such a page answers for its own keys: the key exists when its table has it.
+    local ownDb = entry.dbKey and type(entry.dbKey) == "string" and self:_OwnPageDb()
+    if ownDb then
+        if ownDb[entry.dbKey] == nil then return entry end
+    elseif entry.dbKey and type(entry.dbKey) == "string" and defaults then
         if defaults[entry.dbKey] == nil then
             -- This setting doesn't exist in the current mode's defaults, skip it
             return entry
@@ -314,6 +342,7 @@ function Search:RegistryIsStale()
     local currentMode = DF.GUI and DF.GUI.SelectedMode or "party"
     return (not self.RegistryBuilt) or #self.Registry == 0 or self.BuiltForMode ~= currentMode
         or (self.BuiltWithDeferred or false) ~= (self.deferredIndexOn or false)
+        or (self.BuiltScopeEpoch or 0) ~= (self.scopeEpoch or 0)
 end
 
 -- ============================================================
@@ -334,8 +363,33 @@ end
 -- ============================================================
 function Search:IsPageIndexed(page)
     if not page or page.skipSearchIndex then return false end
-    if page.deferIndex and not self.deferredIndexOn then return false end
+    if page.deferIndex and not self.deferredIndexOn
+        and not (self.scopedPages and page.tabName and self.scopedPages[page.tabName]) then
+        return false
+    end
     return true
+end
+
+-- ★ SOME DEFERRED PAGES, NOT ALL OF THEM. The page list's filter only needs the
+-- pages of the view it is narrowing -- one unit's pages, not every unit's -- so it
+-- asks for those by name. Same staleness rule as IncludeDeferredPages: a name
+-- not asked for before moves the epoch, the index reads stale, and the next build
+-- adds just those pages (reusing every page that already holds a valid build).
+-- Returns true when anything new was asked for.
+function Search:IncludeScopedPages(names)
+    local added = false
+    self.scopedPages = self.scopedPages or {}
+    for name in pairs(names) do
+        local page = DF.GUI and DF.GUI.Pages and DF.GUI.Pages[name]
+        if page and page.deferIndex and not self.scopedPages[name] then
+            self.scopedPages[name] = true
+            added = true
+        end
+    end
+    if added and not self.deferredIndexOn then
+        self.scopeEpoch = (self.scopeEpoch or 0) + 1
+    end
+    return added
 end
 
 function Search:IncludeDeferredPages()
@@ -379,6 +433,7 @@ function Search:TryReuseRegistry()
     registrationId = 0
     self.BuiltForMode = GUI.SelectedMode
     self.BuiltWithDeferred = self.deferredIndexOn or false
+    self.BuiltScopeEpoch = self.scopeEpoch or 0
     self._buildToken = (self._buildToken or 0) + 1
     for _, entries in ipairs(lists) do AppendIndexEntries(self, entries) end
     self.RegistryBuilt = true
@@ -446,6 +501,7 @@ function Search:_BeginRegistryBuild()
     self.BuiltForMode = DF.GUI.SelectedMode
     -- ...and whether the deferred pages are in it (DEFERRED PAGES, above).
     self.BuiltWithDeferred = self.deferredIndexOn or false
+    self.BuiltScopeEpoch = self.scopeEpoch or 0
 
     -- Bumped on every build AND by InvalidateRegistry, so a budgeted drain can
     -- tell "still mine" from "superseded" between slices.
@@ -601,6 +657,11 @@ function Search:BuildFullRegistryBudgeted(onDone, msBudget)
         -- bumps the token; carrying on would append pages built under the new
         -- mode to a registry whose first half was built under the old one.
         if self._buildToken ~= ctx.token then return end
+        -- A page build makes frames: not mid-fight. Pick up again after it.
+        if InCombatLockdown and InCombatLockdown() then
+            C_Timer.After(0.5, drain)
+            return
+        end
 
         local deadline = debugprofilestop() + budget
         while i <= n do
@@ -608,6 +669,12 @@ function Search:BuildFullRegistryBudgeted(onDone, msBudget)
             i = i + 1
             if not ok and err then geterrorhandler()(err) end
             if i <= n and debugprofilestop() > deadline then
+                -- What has landed so far is searchable now (the page list's
+                -- filter answers from it and widens as the rest arrives).
+                if self._OnBuildProgress then
+                    local pOK, pErr = pcall(self._OnBuildProgress, self)
+                    if not pOK and pErr then geterrorhandler()(pErr) end
+                end
                 C_Timer.After(0, drain)
                 return
             end
@@ -629,23 +696,6 @@ end
 -- Several callers can wait on ONE build (the ledger page and the search box both
 -- do), which is the other half of why this is not just "call the budgeted
 -- builder": two surfaces asking at once must not start two builds.
--- A build that finished in combat can't draw its results, and nothing else would come
--- back for them: the box would say "Indexing settings..." until its text changed.
-function Search:ShowResultsAfterCombat()
-    local f = self._afterCombatFrame
-    if not f then
-        f = CreateFrame("Frame")
-        f:SetScript("OnEvent", function(frame)
-            frame:UnregisterEvent("PLAYER_REGEN_ENABLED")
-            if not (self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
-            local live = self.SearchBar and self.SearchBar.editbox:GetText()
-            if live and live ~= "" then self:ShowResults(live) end
-        end)
-        self._afterCombatFrame = f
-    end
-    f:RegisterEvent("PLAYER_REGEN_ENABLED")
-end
-
 function Search:EnsureRegistryAsync(onReady)
     -- Assembled from the pages' own builds when it can be, which needs no frame.
     if self:TryReuseRegistry() then return "ready" end
@@ -665,610 +715,161 @@ function Search:EnsureRegistryAsync(onReady)
 end
 
 -- ============================================================
--- KEYWORD ALIASES
--- ============================================================
-Search.KeywordAliases = {
-    -- Transparency related
-    ["transparency"] = {"alpha", "opacity", "fade"},
-    ["alpha"] = {"transparency", "opacity", "fade"},
-    ["opacity"] = {"alpha", "transparency", "fade"},
-    ["fade"] = {"alpha", "transparency", "opacity"},
-    
-    -- Size related
-    ["size"] = {"width", "height", "scale", "thickness"},
-    ["big"] = {"scale", "size", "large"},
-    ["small"] = {"scale", "size"},
-    
-    -- Position related
-    ["position"] = {"anchor", "offset", "location"},
-    ["move"] = {"position", "anchor", "offset"},
-    ["location"] = {"position", "anchor"},
-    
-    -- Color related
-    ["color"] = {"colour", "rgb", "tint"},
-    ["colour"] = {"color", "rgb", "tint"},
-    
-    -- Text related
-    ["text"] = {"font", "label"},
-    ["font"] = {"text", "typeface"},
-    
-    -- Visibility related
-    ["hide"] = {"show", "visible", "hidden", "display"},
-    ["show"] = {"hide", "visible", "display"},
-    ["visible"] = {"hide", "show", "hidden"},
-    
-    -- Bar related
-    ["bar"] = {"health", "resource", "power", "absorb"},
-    ["health"] = {"hp", "life"},
-    
-    -- Icon related (NOTE: buff and debuff are NOT aliases of each other)
-    ["icon"] = {"aura", "role", "leader"},
-    ["aura"] = {"icon"},
-    
-    -- Frame related
-    ["frame"] = {"unit", "party", "raid", "layout"},
-    ["unit"] = {"frame", "player", "target"},
-    
-    -- Group label related
-    ["label"] = {"group", "text", "number"},
-    ["group"] = {"raid", "label"},
-}
-
--- ============================================================
--- WORD STEMMING
--- Strips common suffixes so "buff" matches "buffs" equally
--- ============================================================
-function Search:StemWord(word)
-    if not word or #word < 3 then return word end
-    
-    word = word:lower()
-    
-    -- Remove common plural/verb suffixes
-    -- Order matters - check longer suffixes first
-    if word:sub(-3) == "ies" and #word > 4 then
-        return word:sub(1, -4) .. "y"  -- "entries" -> "entry"
-    elseif word:sub(-2) == "es" and #word > 3 then
-        local stem = word:sub(1, -3)
-        -- Handle cases like "boxes" -> "box", "classes" -> "class"
-        if word:sub(-3, -3):match("[sxz]") or word:sub(-4, -3) == "ch" or word:sub(-4, -3) == "sh" then
-            return stem
-        end
-        return word:sub(1, -2)  -- Just remove 's' for other cases
-    elseif word:sub(-1) == "s" and #word > 3 and not word:sub(-2, -2):match("[su]") then
-        return word:sub(1, -2)  -- "buffs" -> "buff", but not "class" -> "clas"
-    elseif word:sub(-3) == "ing" and #word > 5 then
-        return word:sub(1, -4)  -- "scaling" -> "scal"
-    elseif word:sub(-2) == "ed" and #word > 4 then
-        return word:sub(1, -3)  -- "enabled" -> "enabl"
-    end
-    
-    return word
-end
-
--- Check if two words match (considering stemming)
-function Search:WordsMatch(word1, word2)
-    if not word1 or not word2 then return false end
-    
-    word1 = word1:lower()
-    word2 = word2:lower()
-    
-    -- Direct match
-    if word1 == word2 then return true end
-    
-    -- Stemmed match
-    local stem1 = self:StemWord(word1)
-    local stem2 = self:StemWord(word2)
-    
-    if stem1 == stem2 then return true end
-    
-    -- One contains the other's stem (for partial matching)
-    if stem1:find(stem2, 1, true) or stem2:find(stem1, 1, true) then
-        return true
-    end
-    
-    return false
-end
-
--- Check if a word appears in text (with stemming support)
--- Returns: found (bool), isWholeWord (bool), isPartOfAnotherWord (bool)
-function Search:WordInText(word, text)
-    if not word or not text then return false, false, false end
-    
-    word = word:lower()
-    text = text:lower()
-    local stemmedWord = self:StemWord(word)
-    
-    -- First, check each word in the text individually
-    for textWord in text:gmatch("%w+") do
-        local stemmedTextWord = self:StemWord(textWord)
-        
-        -- Exact match or stemmed match of a whole word
-        if textWord == word or stemmedTextWord == stemmedWord then
-            return true, true, false
-        end
-        
-        -- Check if search word is contained WITHIN this text word (e.g., "buff" in "debuff")
-        -- This is a partial match and should be penalized
-        if #textWord > #word and textWord:find(word, 1, true) then
-            -- It's a substring of a larger word - this is NOT a good match
-            -- "buff" found in "debuff" should return found=true, isWholeWord=false, isPartOfAnotherWord=true
-            return true, false, true
-        end
-    end
-    
-    return false, false, false
-end
-
--- ============================================================
 -- SEARCH FUNCTION
--- Improved scoring: exact matches >> partial matches >> aliases
--- Now with stemming support
+-- The matching itself lives in Features/SearchMatch.lua (the word index, the
+-- synonyms and tags, prefixes and typos). Find is Home's ranked list: settings
+-- that answer every word first, then -- only when none do -- the closest.
 -- ============================================================
+-- ★ BUILDS NO PAGE. It searches every page's live entries when the page has a
+-- current build, else its prebuilt rows (Features/SearchPrebuilt.lua) -- the
+-- same sources as the side menu's filter. It used to build every page the first
+-- time it was asked (~34 page builders plus the unit pages), which is what made
+-- Home's box hitch.
 function Search:Find(query)
     if not query or query == "" then return {} end
-    
-    -- A search covers every page, deferred ones included (DEFERRED PAGES).
-    self:IncludeDeferredPages()
-    self:EnsureRegistry()
-    
-    query = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
-    if #query < 2 then return {} end
-    
-    local results = {}
-    local queryWords = {}
-    local queryWordsStemmed = {}
-    local numQueryWords = 0
-    
-    -- Split query into individual words and their stems
-    for word in string.gmatch(query, "%w+") do
-        table.insert(queryWords, word)
-        table.insert(queryWordsStemmed, self:StemWord(word))
-        numQueryWords = numQueryWords + 1
-    end
-    
-    -- Build expanded query with aliases (but track which are exact vs aliases)
-    local exactWords = {}      -- Words the user actually typed (and stems)
-    local aliasWords = {}      -- Words added via aliases (lower priority)
-    
-    for i, word in ipairs(queryWords) do
-        exactWords[word] = true
-        exactWords[queryWordsStemmed[i]] = true  -- Also add stemmed version
-        
-        if self.KeywordAliases[word] then
-            for _, alias in ipairs(self.KeywordAliases[word]) do
-                if not exactWords[alias] then
-                    aliasWords[alias] = true
-                end
-            end
-        end
-        -- Check aliases for stemmed word too
-        if self.KeywordAliases[queryWordsStemmed[i]] then
-            for _, alias in ipairs(self.KeywordAliases[queryWordsStemmed[i]]) do
-                if not exactWords[alias] then
-                    aliasWords[alias] = true
-                end
-            end
-        end
-    end
-    
-    for _, entry in ipairs(self.Registry) do
-        -- All entries in registry are for the current mode (registry is rebuilt when mode changes)
-        local score = 0
-        local exactWordsMatched = 0
-        
-        local labelLower = entry.label and entry.label:lower() or ""
-        local sectionLower = entry.section and entry.section:lower() or ""
-        local dbKeyLower = (entry.dbKey and type(entry.dbKey) == "string") and entry.dbKey:lower() or ""
-        
-        -- ===========================================
-        -- HIGHEST PRIORITY: Full query match in label
-        -- "buff scale" found exactly in "Buff Scale" = huge bonus
-        -- ===========================================
-        if labelLower:find(query, 1, true) then
-            score = score + 1000
-            exactWordsMatched = numQueryWords
-        else
-            -- ===========================================
-            -- Check each query word against the label
-            -- ===========================================
-            for i, word in ipairs(queryWords) do
-                local found, isWholeWord, isPartOfAnotherWord = self:WordInText(word, labelLower)
-                
-                if found then
-                    if isPartOfAnotherWord then
-                        -- "buff" found inside "debuff" - very low score, almost a non-match
-                        score = score + 5
-                    elseif isWholeWord or #word >= 4 then
-                        score = score + 200
-                        exactWordsMatched = exactWordsMatched + 1
-                    else
-                        score = score + 100
-                        exactWordsMatched = exactWordsMatched + 1
-                    end
-                end
-            end
-            
-            -- ===========================================
-            -- Lower priority: Alias word matches in label
-            -- ===========================================
-            for word in pairs(aliasWords) do
-                local found, isWholeWord, isPartOfAnotherWord = self:WordInText(word, labelLower)
-                if found and not isPartOfAnotherWord then
-                    score = score + 30
-                end
-            end
-        end
-        
-        -- ===========================================
-        -- BONUS: Multiple query words matched = more relevant
-        -- ===========================================
-        if numQueryWords > 1 and exactWordsMatched >= numQueryWords then
-            score = score + 500
-        elseif numQueryWords > 1 and exactWordsMatched > 1 then
-            score = score + (exactWordsMatched * 100)
-        end
-        
-        -- ===========================================
-        -- MEDIUM PRIORITY: Section name matches
-        -- ===========================================
-        for _, word in ipairs(queryWords) do
-            local found, isWholeWord, isPartOfAnotherWord = self:WordInText(word, sectionLower)
-            if found and not isPartOfAnotherWord then
-                score = score + 50
-            elseif found and isPartOfAnotherWord then
-                score = score + 5  -- Minimal score for partial match
-            end
-        end
-        
-        -- ===========================================
-        -- LOWER PRIORITY: Keyword matches
-        -- ===========================================
-        if entry.keywords then
-            for _, keyword in ipairs(entry.keywords) do
-                for _, word in ipairs(queryWords) do
-                    if self:WordsMatch(keyword, word) then
-                        score = score + 40
-                    elseif keyword:find(word, 1, true) and #keyword > #word then
-                        -- Word is substring of keyword - low score
-                        score = score + 5
-                    end
-                end
-                for alias in pairs(aliasWords) do
-                    if self:WordsMatch(keyword, alias) then
-                        score = score + 10
-                    end
-                end
-            end
-        end
-        
-        -- ===========================================
-        -- LOWEST PRIORITY: dbKey matches
-        -- ===========================================
-        if dbKeyLower ~= "" then
-            for _, word in ipairs(queryWords) do
-                if dbKeyLower:find(word, 1, true) then
-                    score = score + 25
-                end
-            end
-        end
-        
-        if score > 0 then
-            table.insert(results, {entry = entry, score = score})
-        end
-    end
-    
-    table.sort(results, function(a, b) return a.score > b.score end)
-    
-    local finalResults = {}
-    for _, result in ipairs(results) do
-        table.insert(finalResults, result.entry)
-    end
-    
-    return finalResults
+    if not self.RankedMatches then return {} end
+    local src = self._HomeSource and self:_HomeSource() or self.Registry
+    return self:RankedMatches(query, src, "_homeIndex")
 end
 
 -- ============================================================
--- INLINE WIDGET FACTORIES
--- Create actual editable widgets in search results
+-- RESULT ROWS -- "go to setting"
+-- ------------------------------------------------------------
+-- A result is a row that names the setting -- its label, where it lives
+-- (module > page > card) and its tooltip -- and takes you there on a click,
+-- through the same "show me" link every settings link uses. Every row works the
+-- same way, for opened and unopened pages alike: a result can be a prebuilt row
+-- for a page that has never been built, and there is no live control to show
+-- for one of those (the old live, editable cards needed the page built).
+--
+-- ★ A FIXED POOL. At most MAX_RESULTS rows exist, made the first time each slot
+-- is needed and reused for every search after -- the old per-setting card cache
+-- only ever grew (see the parking note at _ParkResultsPanel).
 -- ============================================================
+local MAX_RESULTS = 60
+local PATH_SEP = " \226\128\186 "   -- " > " as the single right-pointing angle
 
--- The settings table an entry's setting lives in: its page's own table when the
--- page has one (a module page -- GUI.PageBuildDb), else the frame mode's. An inline
--- control bound to the mode table would edit the wrong settings for such a page.
-local function EntryDB(entry)
+-- Where a result lives, for its second line: module, page, card.
+local function ModuleLabel(tab)
     local GUI = DF.GUI
-    local page = entry and entry.tab and GUI.Pages and GUI.Pages[entry.tab]
-    local own = page and GUI.PageBuildDb and GUI.PageBuildDb(page)
-    return own or DF.db[GUI.SelectedMode]
-end
-
-function Search:CreateInlineCheckbox(parent, entry)
-    -- A custom checkbox has no dbKey to bind, so there is nothing for the shared
-    -- builder to drive -- show the label and point at the real page instead.
-    if entry.isCustom or not entry.dbKey then
-        local container = CreateFrame("Frame", nil, parent)
-        container:SetSize(340, 30)
-        container.preferredHeight = DF.GUI.RowHeight.checkbox
-
-        local text = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        text:SetPoint("LEFT", 0, 0)
-        text:SetText(entry.label)
-        local ct = DF.GUI.Colors.text
-        text:SetTextColor(ct.r, ct.g, ct.b)
-
-        local note = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        note:SetPoint("LEFT", text, "RIGHT", 10, 0)
-        note:SetText(L["(click header to edit)"])
-        local cd = DF.GUI.Colors.textDim
-        note:SetTextColor(cd.r, cd.g, cd.b)
-
-        return container
+    local id = GUI.ModuleForPage and GUI:ModuleForPage(tab)
+    local def = id and GUI.GetModule and GUI:GetModule(id)
+    local label = def and def.label
+    if type(label) == "function" then
+        local ok, v = pcall(label)
+        label = ok and v or nil
     end
-
-    -- Delegate to the shared checkbox builder, exactly as the slider and dropdown
-    -- already do. It brings the themed box, the factory row height, the override
-    -- indicators and the label-only tooltip -- all of which the hand-rolled copy
-    -- here lacked. Re-registration is not a concern: Search:Register early-returns
-    -- once RegistryBuilt is set, and Find() sets it before any result is built.
-    local db = EntryDB(entry)
-    return DF.GUI:CreateCheckbox(parent, entry.label, db, entry.dbKey, entry.callback)
+    return type(label) == "string" and label or nil
 end
 
-function Search:CreateInlineSlider(parent, entry)
-    -- Delegate to the shared slider builder so the inline search editor stays in
-    -- sync with the canonical slider (drag/throttle/profile-override behaviour).
-    -- db[dbKey] maps directly onto CreateSlider's dbTable/dbKey get/set, and
-    -- entry.callback onto its callback.
-    --
-    -- accentColor is left nil ON PURPOSE: CreateSlider falls back to
-    -- GetThemeColor(), so the thumb and fill track party purple / raid orange like
-    -- every other slider.
-    local db = EntryDB(entry)
-    local minVal = entry.minVal or 0
-    local maxVal = entry.maxVal or 100
-    local step = entry.step or 1
-
-    -- Returns CreateSlider's container Frame (exposes .slider). The caller only
-    -- repositions it via :SetPoint, so the Frame return shape is preserved.
-    return DF.GUI:CreateSlider(parent, entry.label, minVal, maxVal, step,
-        db, entry.dbKey, entry.callback)
+-- What a result row says and where it goes. Pure, so the tests can pin it.
+function Search:ResultRowModel(entry)
+    local GUI = DF.GUI
+    local tab = entry.tab
+    local page = tab and GUI.Pages and GUI.Pages[tab]
+    local parts = {}
+    local mod = tab and ModuleLabel(tab)
+    if mod then parts[#parts + 1] = mod end
+    local pageLabel = (page and (page.searchTabLabel or page.tabLabel)) or entry.tabLabel
+    if type(pageLabel) == "string" and pageLabel ~= "" then parts[#parts + 1] = pageLabel end
+    local section = entry.section
+    if type(section) == "string" and section ~= "" and section ~= "General" and section ~= entry.label then
+        parts[#parts + 1] = section
+    end
+    local tip = self.EntryTooltipText and self.EntryTooltipText(entry) or nil
+    return {
+        label = entry.label or "",
+        path = table.concat(parts, PATH_SEP),
+        tip = (type(tip) == "string" and tip ~= "") and tip or nil,
+        page = tab,
+        section = (type(section) == "string" and section ~= "") and section or nil,
+        key = entry.dbKey or entry.searchKey,
+    }
 end
 
-function Search:CreateInlineColorPicker(parent, entry)
-    -- Delegate to the shared colour picker: it ignores the spurious swatchFunc
-    -- Blizzard raises during setup (a hand-rolled copy committed an override and ran
-    -- a full refresh merely on OPENING the picker) and mutates db[dbKey] in place
-    -- rather than rebuilding it as a fresh table, plus the themed swatch, the factory
-    -- row height and the label-only tooltip.
-    local db = EntryDB(entry)
-    return DF.GUI:CreateColorPicker(parent, entry.label, db, entry.dbKey,
-        entry.hasAlpha, entry.callback)
+local ROW_PAD_X, ROW_PAD_Y, ROW_GAP = 10, 8, 3
+
+local function FitRow(row)
+    local h = ROW_PAD_Y * 2
+    h = h + math.max(row.label:GetStringHeight() or 0, 14)
+    h = h + ROW_GAP + math.max(row.path:GetStringHeight() or 0, 12)
+    if row.tip:IsShown() then
+        h = h + ROW_GAP + math.max(row.tip:GetStringHeight() or 0, 12)
+    end
+    row:SetHeight(h)
+    row.calculatedHeight = h
 end
 
-function Search:CreateInlineDropdown(parent, entry)
-    -- Delegate to the shared dropdown builder so the inline search editor stays in
-    -- sync with the canonical dropdown (menu/option-order/profile-override
-    -- behaviour). db[dbKey] maps directly onto CreateDropdown's dbTable/dbKey
-    -- get/set, and entry.callback onto its callback. entry.values is the same
-    -- keyed value->display table (with optional _order) that was registered, so
-    -- it passes straight through as the builder's options arg.
-    local db = EntryDB(entry)
-    local values = entry.values or {}
-
-    -- Returns CreateDropdown's container Frame (exposes :UpdateText / :SetEnabled /
-    -- :RebuildOptions). The caller only repositions it via :SetPoint, so the Frame
-    -- return shape is preserved.
-    -- NOT inline: inline mode hides the dropdown's own label, but this is a
-    -- labeled setting in the search results, so keep the label (matches the
-    -- slider/checkbox search widgets). No opts.accent -- the dropdown follows the
-    -- mode theme like every other one (see CreateInlineSlider for the why).
-    return DF.GUI:CreateDropdown(parent, entry.label, values,
-        db, entry.dbKey, entry.callback)
-end
-
--- ============================================================
--- CREATE RESULT WIDGET WITH INLINE EDITOR
--- ============================================================
-function Search:CreateResultWidget(parent, entry, index)
-    local widget = CreateFrame("Frame", nil, parent)
-    -- Capped at one settings-box width; the panel is wider than that, and a card that
-    -- used all of it did not read as a settings box any more.
-    local cardW = math.min((parent:GetWidth() or CARD_MAX_W) - 20, CARD_MAX_W)
-    widget:SetSize(cardW, CARD_CHROME + DF.GUI.RowHeight.checkbox)
-
-    -- Card chrome from the shared palette. These were three retyped literals
-    -- (0.14 fill, 0.25 border) that matched nothing -- the panel token is the
-    -- surface every other card sits on.
+function Search:_AcquireRow(panel, i)
+    panel.rowPool = panel.rowPool or {}
+    local row = panel.rowPool[i]
+    if row then return row end
+    row = CreateFrame("Button", nil, panel.scrollChild, "BackdropTemplate")
     local cP, cB = DF.GUI.Colors.panel, DF.GUI.Colors.border
-    CreateBackdrop(widget)
-    widget:SetBackdropColor(cP.r, cP.g, cP.b, 1)
-    widget:SetBackdropBorderColor(cB.r, cB.g, cB.b, 1)
+    CreateBackdrop(row)
+    row:SetBackdropColor(cP.r, cP.g, cP.b, 1)
+    row:SetBackdropBorderColor(cB.r, cB.g, cB.b, 1)
 
-    -- Clickable Breadcrumb (Tab > Section)
-    local tabDisplay = entry.tabLabel or entry.tab or "Unknown"
-    local sectionDisplay = entry.section or ""
+    row.label = row:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
+    row.label:SetPoint("TOPLEFT", ROW_PAD_X, -ROW_PAD_Y)
+    row.label:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD_X, 0)
+    row.label:SetJustifyH("LEFT")
+    row.label:SetWordWrap(false)
 
-    -- Create breadcrumb as a styled clickable button (shared GUI chrome). No
-    -- accent override -- StyleButton falls back to the mode theme, so the
-    -- breadcrumb wash matches the controls below it.
-    local breadcrumb = CreateFrame("Button", nil, widget, "BackdropTemplate")
-    breadcrumb:SetPoint("TOPLEFT", 8, -5)
+    local dim = DF.GUI.Colors.textDim
+    row.path = row:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+    row.path:SetPoint("TOPLEFT", row.label, "BOTTOMLEFT", 0, -ROW_GAP)
+    row.path:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD_X, 0)
+    row.path:SetJustifyH("LEFT")
+    row.path:SetWordWrap(false)
+    row.path:SetTextColor(dim.r, dim.g, dim.b)
 
-    local fullPath = tabDisplay .. (sectionDisplay ~= "" and ("  >  " .. sectionDisplay) or "")
-    DF.GUI:StyleButton(breadcrumb, {
-        height = 18,
-        text = fullPath,
-        align = "left",
-        leftPad = 8,
-    })
-    local breadcrumbText = breadcrumb.Text
+    row.tip = row:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+    row.tip:SetPoint("TOPLEFT", row.path, "BOTTOMLEFT", 0, -ROW_GAP)
+    row.tip:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD_X, 0)
+    row.tip:SetJustifyH("LEFT")
+    row.tip:SetWordWrap(true)
+    if row.tip.SetMaxLines then row.tip:SetMaxLines(2) end
+    row.tip:SetTextColor(dim.r, dim.g, dim.b)
 
-    -- Size the button to fit the text with padding
-    local textWidth = breadcrumbText:GetStringWidth()
-    breadcrumb:SetWidth(textWidth + 24)
-
-    -- Tooltip on hover (the accent wash/border hover is handled by StyleButton).
-    --
-    -- ⚠ TITLE PLUS A LINE, which is the house shape -- see BindingEditor and the AD
-    -- editor, and ResolveTooltipSpec, which builds { title = label, lines = { desc } }
-    -- for every settings widget. This passed a bare title and so rendered as a lone
-    -- floating string with no body, which is why it did not look like the rest of them.
-    --
-    -- "Show me" rather than "Go to <tab>": the button's own label already spells the
-    -- destination out ("Frame > Frame Size"), so repeating it in the title said nothing
-    -- twice. The verb is also the honest one now that the target pulses on arrival --
-    -- FlashWidget's own comment describes itself as the "show me" highlight.
-    breadcrumb:HookScript("OnEnter", function(self)
+    -- Hover: the accent border (state: under the cursor) and the house
+    -- "show me" tooltip the old cards' breadcrumb had.
+    row:SetScript("OnEnter", function(self)
+        local c = GetThemeColor()
+        self:SetBackdropBorderColor(c.r, c.g, c.b, 1)
         DF.GUI:ShowTooltip(self, {
             title = L["Show me"],
             lines = { L["Open this setting's own page and highlight it."] },
         })
     end)
-    breadcrumb:HookScript("OnLeave", function()
+    row:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(cB.r, cB.g, cB.b, 1)
         DF.GUI:HideTooltip()
     end)
-
-    -- Click to navigate
-    breadcrumb:SetScript("OnClick", function()
-        Search:NavigateToTab(entry.tab, entry.section, entry.dbKey or entry.searchKey)
+    row:SetScript("OnClick", function(self)
+        local m = self.model
+        if not m then return end
+        Search:NavigateToTab(m.page, m.section, m.key)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
-    
-    -- Create the actual editable widget based on type
-    local inlineWidget
-
-    if entry.widgetType == "checkbox" then
-        inlineWidget = self:CreateInlineCheckbox(widget, entry)
-    elseif entry.widgetType == "slider" then
-        inlineWidget = self:CreateInlineSlider(widget, entry)
-    elseif entry.widgetType == "colorpicker" then
-        inlineWidget = self:CreateInlineColorPicker(widget, entry)
-    elseif entry.widgetType == "dropdown" then
-        inlineWidget = self:CreateInlineDropdown(widget, entry)
-    end
-
-    -- ☠ Take the slot height from the WIDGET, never from a number typed here. Every shared
-    -- builder stamps container.preferredHeight from GUI.RowHeight, which owns the slot for its
-    -- type, so search results space exactly like the real settings pages and follow any
-    -- change to GUI.RowHeight for free.
-    local widgetHeight = (inlineWidget and inlineWidget.preferredHeight)
-        or DF.GUI.RowHeight.checkbox
-    
-    if inlineWidget then
-        inlineWidget:SetPoint("TOPLEFT", CARD_PAD_X, -CARD_CONTENT_Y)
-        -- The shared builders anchor by two corners in a real page column; here the card
-        -- IS the column. No separate cap needed: the card is already one settings box
-        -- wide, so this lands on GroupInnerWidth (280 - 2*10 = 260) on its own.
-        inlineWidget:SetWidth(widget:GetWidth() - CARD_PAD_X * 2)
-        -- Tooltip text lives on the page's widget, not on the search entry --
-        -- ResolveTooltipSpec reads .tooltip off the container it was attached to.
-        -- Forward it so a result explains itself exactly as the real setting does.
-        local src = entry.sourceWidget
-        if src and src.tooltip ~= nil then
-            inlineWidget.tooltip = src.tooltip
-        end
-    end
-
-    local cardHeight = CARD_CHROME + widgetHeight
-    widget:SetHeight(cardHeight)
-
-    widget.entry = entry
-    widget.inlineWidget = inlineWidget
-    widget.calculatedHeight = cardHeight
-    return widget
+    row.Refit = FitRow
+    row.isResultRow = true
+    panel.rowPool[i] = row
+    return row
 end
 
--- ☠ CARDS ARE CACHED AND REUSED. Building one is expensive -- it is a REAL settings
--- widget, so a single card is a frame, a breadcrumb button, the control's own container,
--- its check button / slider / swatch, its override indicators and a tooltip hit frame:
--- roughly six to ten frames. The old code built every result fresh on every call and then
--- did `SetParent(nil)` on the previous set, which does not free anything -- a WoW frame,
--- once created, is never really reclaimed. Combined with an un-debounced OnTextChanged
--- that meant typing one five-letter word over ~159 results stranded several thousand live
--- frames, each still carrying scripts. That is the "everything is sluggish until I
--- reload" -- it was not the search being slow, it was the whole UI carrying the wreckage.
---
--- The key is built from the registry entry rather than the registry's entry.id, on purpose:
---   * ids are reassigned whenever the registry rebuilds, so they are not stable;
---   * the shared builders bind dbTable/dbKey in CLOSURES at creation, so a card can never
---     be re-pointed at a different setting -- the cache has to be per setting, not a
---     generic pool;
---   * including the mode is what keeps that safe. `db` is captured as
---     DF.db[SelectedMode] at build time, so a party card must never be handed back for
---     raid. Different mode, different key, different card.
--- Total cards built is therefore bounded by the size of the registry, once each, instead
--- of growing without limit.
---
--- ☠ THE KEY MUST IDENTIFY THE RESULT, NOT JUST THE SETTING -- it was (mode, widgetType,
--- dbKey or label), which is coarser than what a card actually renders, and that is what
--- put the holes in a long result list. Two entries that share a key are handed the SAME
--- frame; ShowResults then appends it to resultWidgets twice and LayoutResults anchors it
--- twice, so the last placement wins and every earlier slot is left as an empty gap the
--- exact height of a card -- while the scroll extent still reserves room for all of them.
--- "159 found", a handful of cards, and acres of blank between them. Two ways to collide,
--- both real:
---   1. a custom checkbox registers with dbKey = nil (SettingsWidgets.lua) and identifies
---      itself by searchKey ("custom_<label>"), which this ignored entirely -- so every
---      custom checkbox sharing a label ("Enable", "Show Text") was one card;
---   2. the same dbKey registered from more than one page or section -- tab and section
---      were not in the key at all, even though the card's breadcrumb is BUILT from them,
---      so the survivor also showed the wrong breadcrumb for one of its two homes.
--- Carrying tab and section fixes both: a card is per place-a-setting-appears, which is
--- exactly what one result is.
-local function cardCacheKey(entry)
-    local mode = (DF.GUI and DF.GUI.SelectedMode) or "party"
-    -- searchKey before label: it is what a keyless (custom) entry is actually identified
-    -- by in the registry, and it is unique where a bare label is not.
-    local ident = entry.dbKey or entry.searchKey or entry.label
-    return table.concat({
-        mode,
-        tostring(entry.tab),
-        tostring(entry.section),
-        tostring(entry.widgetType),
-        tostring(ident),
-    }, "\0")
-end
-
-function Search:AcquireResultWidget(parent, entry, index)
-    local panel = self.ResultsPanel
-    panel.cardCache = panel.cardCache or {}
-    local key = cardCacheKey(entry)
-
-    -- ☠ THE TABLE IDENTITY IS PART OF THE CONTRACT, not just the mode name. DF.db is
-    -- REASSIGNED on a profile switch (Core/Profile.lua), and the shared builders captured
-    -- the OLD table in their closures -- so a card cached before the switch would happily
-    -- write the previous profile's settings while the user looks at the new one. The mode
-    -- in the key cannot catch that, because the mode name has not changed. Compare the
-    -- actual table and rebuild if it moved.
-    local liveDB = DF.db and DF.db[(DF.GUI and DF.GUI.SelectedMode) or "party"]
-
-    local widget = panel.cardCache[key]
-    if widget and widget.dfBoundDB ~= liveDB then
-        -- Profile switched under us. Drop it; nothing here can be re-pointed, because the
-        -- binding lives in closures. (The old frame cannot be freed -- WoW frames never
-        -- are -- but a profile switch is a rare, deliberate act, unlike a keystroke.)
-        widget:Hide()
-        panel.cardCache[key] = nil
-        widget = nil
+function Search:_FillRow(row, model)
+    row.model = model
+    row.label:SetText(model.label)
+    row.path:SetText(model.path)
+    if model.tip then
+        row.tip:SetText(model.tip)
+        row.tip:Show()
+    else
+        row.tip:SetText("")
+        row.tip:Hide()
     end
-
-    if widget then
-        -- Refresh what can legitimately have moved since it was built. The displayed
-        -- VALUE needs no help -- every shared builder re-reads its db on OnShow (see
-        -- CreateCheckbox's container:SetScript("OnShow", UpdateState)) -- but the entry
-        -- object itself is new after a registry rebuild, so re-point the tooltip source.
-        widget.entry = entry
-        local inline, src = widget.inlineWidget, entry.sourceWidget
-        if inline and src and src.tooltip ~= nil then
-            inline.tooltip = src.tooltip
-        end
-        return widget
-    end
-
-    widget = self:CreateResultWidget(parent, entry, index)
-    widget.dfBoundDB = liveDB
-    panel.cardCache[key] = widget
-    return widget
+    FitRow(row)
 end
 
 -- ============================================================
@@ -1402,8 +1003,14 @@ end
 --   iconX      its left inset (default 6); the text starts one gap after it
 --   fontSize   the typed text and the placeholder, at the settings font (default:
 --              the small template font)
+--   onFocus    fn() when the box takes focus (the filter starts its index then)
+--   onChange   fn(text) called with the box's text on every edit, clear and Escape
+--              INSTEAD of the results view; a bar built with it never becomes
+--              Search.SearchBar (the page list's filter box -- Features/SearchFilter.lua)
 function Search:CreateSearchBar(parent, opts)
     opts = opts or {}
+    local onChange = opts.onChange
+    local onFocus = opts.onFocus
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
 
@@ -1464,13 +1071,14 @@ function Search:CreateSearchBar(parent, opts)
         onClick    = function()
             editbox:SetText("")
             editbox:ClearFocus()
-            Search:HideResults()
+            if onChange then onChange("") else Search:HideResults() end
         end,
     })
     clearBtn:SetPoint("RIGHT", -4, 0)
     clearBtn:Hide()
     
     editbox:SetScript("OnEditFocusGained", function()
+        if onFocus then onFocus() end
         local c = GetThemeColor()
         if surface then
             surface:SetBorderColor(c.r, c.g, c.b, 1)
@@ -1499,6 +1107,12 @@ function Search:CreateSearchBar(parent, opts)
     
     editbox:SetScript("OnTextChanged", function(self, userInput)
         local text = self:GetText()
+        if onChange then
+            placeholder:SetShown((not text or text == "") and not self:HasFocus())
+            clearBtn:SetShown(text ~= nil and text ~= "")
+            onChange(text or "")
+            return
+        end
         if text and text ~= "" then
             placeholder:Hide()
             clearBtn:Show()
@@ -1525,7 +1139,7 @@ function Search:CreateSearchBar(parent, opts)
     editbox:SetScript("OnEscapePressed", function(self)
         self:SetText("")
         self:ClearFocus()
-        Search:HideResults()
+        if onChange then onChange("") else Search:HideResults() end
     end)
     
     editbox:SetScript("OnEnterPressed", function(self)
@@ -1535,8 +1149,8 @@ function Search:CreateSearchBar(parent, opts)
     frame.editbox = editbox
     frame.placeholder = placeholder
     frame.clearBtn = clearBtn
-    
-    self.SearchBar = frame
+
+    if not onChange then self.SearchBar = frame end
     return frame
 end
 
@@ -1731,9 +1345,7 @@ function Search:LayoutResults()
         -- so one built before the panel resolved its width would otherwise keep that
         -- wrong width for the session. This is also what makes a resize re-fit them.
         widget:SetWidth(cardW)
-        if widget.inlineWidget then
-            widget.inlineWidget:SetWidth(cardW - CARD_PAD_X * 2)
-        end
+        if widget.Refit then widget:Refit() end
 
         -- ClearAllPoints first: a reused card still carries the anchor from wherever it
         -- sat in the previous layout — including a different column.
@@ -1755,37 +1367,12 @@ function Search:ShowResults(query)
     -- Back into the window before anything measures or lays out against it.
     self:_AdoptResultsPanel()
 
-    -- ☠ THE FIRST SEARCH OF A SESSION IS A FULL INDEX BUILD (~34 page builders), so it is
-    -- budgeted: the panel SAYS it is indexing and the query is re-run when the registry lands.
-    --
-    -- ⚠ THE QUERY IS RE-READ FROM THE BOX on the way back, not replayed from this closure: a
-    -- build takes several frames and the user goes on typing, so the query they started with
-    -- would put stale results under a box that says something else.
-    -- (An index that can be assembled from the pages' retained builds comes first: no builder
-    -- runs and nothing waits -- see TryReuseRegistry.)
-    -- A search covers every page, deferred ones included (DEFERRED PAGES).
-    if query and query ~= "" then self:IncludeDeferredPages() end
-    self:TryReuseRegistry()
-    if self:RegistryIsStale() or self.RegistryBuilding then
-        self:ShowBuildingMessage()
-        self:EnsureRegistryAsync(function(ok)
-            if not (ok and self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
-            if InCombatLockdown() then
-                self:ShowResultsAfterCombat()
-                return
-            end
-            local live = self.SearchBar and self.SearchBar.editbox:GetText()
-            if live and live ~= "" then self:ShowResults(live) end
-        end)
-        return
-    end
-
+    -- ★ NOTHING IS BUILT. Find reads the pages' live entries and the prebuilt
+    -- index; its word index fills in slices, and the results are asked for again
+    -- as it grows (Search:_OnIndexProgress, slot "_homeIndex").
     local results = self:Find(query)
     local panel = self.ResultsPanel
-    local scrollChild = panel.scrollChild
-    
-    -- ⚠ HIDE, never SetParent(nil). These cards are cached and will be shown again; the
-    -- old teardown orphaned them instead, which freed nothing and lost the reuse.
+
     for _, widget in ipairs(panel.resultWidgets) do
         widget:Hide()
     end
@@ -1801,33 +1388,20 @@ function Search:ShowResults(query)
     else
         panel.noResults:Hide()
         panel.scroll:Show()
-
-        -- Build (or re-acquire) the cards; POSITIONING is LayoutResults' job, so that the
-        -- same code runs on a resize without re-querying.
-        --
-        -- ⚠ A FRAME MAY ONLY ENTER THIS LIST ONCE. The cache hands back one frame per key,
-        -- and a frame can only carry one anchor -- so appending the same one twice does not
-        -- draw it twice, it draws it once and leaves a card-sized hole where the earlier
-        -- copy was counted. cardCacheKey is what keeps distinct results distinct; this is
-        -- the backstop that stops a future key collision reaching the layout as a gap.
-        local placed = {}
-        for i, entry in ipairs(results) do
-            local widget = self:AcquireResultWidget(scrollChild, entry, i)
-            if not placed[widget] then
-                placed[widget] = true
-                widget:Show()
-                table.insert(panel.resultWidgets, widget)
-            end
+        -- The first MAX_RESULTS, best first (RankedMatches' order); the count says
+        -- how many there are in all.
+        for i = 1, math.min(#results, MAX_RESULTS) do
+            local row = self:_AcquireRow(panel, i)
+            self:_FillRow(row, self:ResultRowModel(results[i]))
+            row:Show()
+            panel.resultWidgets[#panel.resultWidgets + 1] = row
         end
-
-        -- Count the cards that exist, not what Find returned. If the two ever disagree,
-        -- the honest number is the one the user can confirm by scrolling.
-        panel.countText:SetText(string.format(L["(%d found)"], #panel.resultWidgets))
+        panel.countText:SetText(string.format(L["(%d found)"], #results))
         self:LayoutResults()
     end
-    
+
     panel:Show()
-    
+
     if DF.GUI and DF.GUI.Pages then
         for _, page in pairs(DF.GUI.Pages) do
             page:Hide()
@@ -1862,14 +1436,6 @@ end
 
 function Search:ShowCombatMessage()
     self:ShowPanelMessage(L["Search unavailable during combat"])
-end
-
--- The panel standing in for results while the index is still being built. Same
--- surface as the combat message and for the same reason: an empty panel reading
--- "No settings found" during a build is not a slower answer, it is a WRONG one.
--- HideResults puts EmptyMessage() back, so neither string can stick.
-function Search:ShowBuildingMessage()
-    self:ShowPanelMessage(L["Indexing settings..."])
 end
 
 function Search:ShowPanelMessage(text)

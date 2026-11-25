@@ -64,6 +64,17 @@ local CONTENT_HINTS = {
     aggro_flag        = "threat",
     threat_percent    = "threat",
     range_text        = "range",
+    -- pet happiness (WoW Forever, the unit frames pet frame): refreshed by the
+    -- Pet Happiness core's events (Features/PetHappiness.lua WatchTokens)
+    pet_mood          = "pet",
+    pet_mood_color    = "pet",
+    pet_damage        = "pet",
+    pet_loyalty_trend = "pet",
+    pet_loyalty       = "pet",
+    pet_training_points = "pet",
+    pet_xp            = "pet",
+    pet_xp_percent    = "pet",
+    pet_diet          = "pet",
     -- group (refreshes on any hint since it can mix categories)
     group             = "all",
     -- a plain backing shape (no text): changes with settings only
@@ -362,6 +373,31 @@ local function mirrorCategoryMatches(elem, category)
         end
     end
     return false
+end
+
+-- ============================================================
+-- PET TOKENS IN USE (WoW Forever only)
+-- On each full ("all") render of a LIVE unit frames pet frame, tell the Pet
+-- Happiness core whether the template shows a pet token (enabled, alone or in a
+-- group). The core listens for the pet's XP / training point events only while
+-- one does. Every template edit, template pick and full refresh renders "all",
+-- so the answer follows the designer without a hook of its own. Nothing is
+-- allocated; elsewhere (retail, any other frame, the previews) this is one test.
+-- ============================================================
+local function watchPetTokens(frame, tdDB, isPreview)
+    if not DF.IS_FOREVER or isPreview or frame.dfUFUnit ~= "pet" then return end
+    local PH = DF.PetHappiness
+    if not (PH and PH.WatchTokens) then return end
+    local uses = false
+    if tdDB.enabled then
+        for _, elem in ipairs(tdDB.elements or {}) do
+            if elem.enabled and mirrorCategoryMatches(elem, "pet") then
+                uses = true
+                break
+            end
+        end
+    end
+    PH:WatchTokens(frame, uses)
 end
 
 -- ============================================================
@@ -821,6 +857,13 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
     local ov = cat and frame._tdAuraColor and frame._tdAuraColor[cat]
     if ov then
         fs:SetTextColor(ov.r, ov.g, ov.b, ov.a or 1)
+    elseif elem.contentType == "name" and frame.dfHappinessName then
+        -- WoW Forever, the unit frames pet: the Pet Happiness name tint
+        -- (DandersFrames_UnitFrames/Indicators.lua), under an Aura Designer
+        -- override. nil on every other frame. The name element only: the
+        -- "name" hint category also holds level, class, race and the rest.
+        local hn = frame.dfHappinessName
+        fs:SetTextColor(hn.r, hn.g, hn.b, (app.color and app.color.a) or 1)
     end
     local text = getResolver():Resolve(elem, source)
     local safeText = getMS().SafeText(text)
@@ -860,6 +903,8 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
             tostring(frame.unit), tostring(hint), tostring(isPreview),
             tostring(tdDB.enabled), #(tdDB.elements or {}))
     end
+    hint = hint or "all"
+    if hint == "all" or not tdDB.enabled then watchPetTokens(frame, tdDB, isPreview) end
     if not isPreview and not tdDB.enabled then
         DF:Debug("TD", "Render:UpdateFrame: master toggle OFF, hiding all fontstrings")
         -- Master toggle off (live mode only) — hide all FontStrings
@@ -870,7 +915,6 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
         syncMirrors(frame)   -- mirrors follow their (now hidden) real FontStrings
         return
     end
-    hint = hint or "all"
     local globalDefaults = tdDB.globalDefaults
     -- Pre-create the FontString for every enabled element before any element is
     -- positioned, so one anchored to a later-listed element finds its target on

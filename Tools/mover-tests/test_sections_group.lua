@@ -1416,4 +1416,38 @@ do
     end
 end
 
+-- ============================================================
+-- THE FILTER MARK -- group:SetChildFiltered / ClearChildFilter
+-- ------------------------------------------------------------
+-- A settings search narrowing a page in place hides rows with its OWN mark, so
+-- clearing the search can never un-hide a row the host hid for another reason
+-- (and the other way round). Same guarantees as SetChildHidden: hidden, never
+-- removed, back in its own slot once cleared.
+-- ============================================================
+print("-- Group: the filter mark is its own reason")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local a, b, c = control(30), control(30), control(30)
+    g:AddWidget(a, 30); g:AddWidget(b, 30); g:AddWidget(c, 30)
+
+    g:SetChildFiltered(b, true)
+    eq(g:CountVisibleChildren(), 2, "filter: a filtered row is not counted")
+    g:LayoutChildren()
+    check(not b:IsShown() and a:IsShown() and c:IsShown(), "filter: ...and the layout leaves it out")
+
+    g:SetChildHidden(b, true)
+    g:ClearChildFilter()
+    eq(g:CountVisibleChildren(), 2, "filter: clearing the filter leaves the host's mark standing")
+    g:SetChildHidden(b, false)
+    g:SetChildFiltered(c, true)
+    g:SetChildHidden(c, false)
+    eq(g:CountVisibleChildren(), 2, "filter: clearing the host's mark leaves the filter standing")
+    g:SetChildFiltered(c, false)
+    g:LayoutChildren()
+    check(a:IsShown() and b:IsShown() and c:IsShown(), "filter: cleared, every row is back")
+    g:SetChildFiltered(control(30), true)
+    eq(g:CountVisibleChildren(), 3, "filter: a stranger's mark changes nothing")
+end
+
 CreateFrame = prevCreateFrame

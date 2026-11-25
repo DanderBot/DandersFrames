@@ -3,9 +3,10 @@
 -- The REAL DF:LayoutResourceBar (lifted from Bars.lua) and the REAL HealthRect.lua run
 -- together; the strip's anchors and the health bar's insets are resolved into rectangles
 -- (frame coords, origin bottom-left) and compared. For every side, Match on and off,
--- Adjust on and off, Keep Inside Border, offsets and pixel perfect: the health bar ends
--- exactly at the strip's inner edge (no gap, no overlap), the other three sides keep the
--- base inset, and On Top of Health Bar is untouched (full health, bar on top).
+-- Adjust on and off, Keep Inside Border, offsets and pixel perfect: the SEEN health ends
+-- exactly at the strip's inner edge (no gap, no overlap), whether the health bar stops
+-- there or the strip is cut out of it, the other three sides keep the base inset, and On
+-- Top of Health Bar is untouched (full health, bar on top).
 -- ============================================================
 
 local saved = {}
@@ -100,7 +101,7 @@ local function barRect(bar)
 end
 
 local function healthRect(fr)
-    local l, r, t, bb = DF:GetHealthBarInsets(fr, fr.db)
+    local l, r, t, bb = DF:GetHealthVisibleInsets(fr, fr.db)
     return { l = l, r = W - r, b = bb, t = H - t }
 end
 

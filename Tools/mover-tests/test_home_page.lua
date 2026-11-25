@@ -237,7 +237,7 @@ do
     check(MODS:find("if self.target and not GUI:IsModulePickLocked(self.target, self.targetTab) then", 1, true) ~= nil,
           "entry: a Modules-page Open button checks the lock")
     check(MODS:find("row.Open:SetEnabled(on and not GUI:IsModulePickLocked(def.id))", 1, true) ~= nil
-          and MODS:find('row.Open:SetEnabled(on and not GUI:IsModulePickLocked("group", mode))', 1, true) ~= nil,
+          and MODS:find("and not GUI:IsModulePickLocked(e.openModule, e.openTab))", 1, true) ~= nil,
           "entry: ...and is greyed while locked")
 end
 

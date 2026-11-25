@@ -14,8 +14,8 @@ local NS = ...
 --                            Display Order, Flat Grid Settings
 --              "Movement"    Permanent Mover (tick: permanentMover)
 --   column 2   "Appearance"  Border (tick: frameShowBorder), Border Shadow
---                            (tick: frameBorderShadowEnabled), Frame Fade
---                            (tick: frameFadeEnabled)
+--                            (tick: frameBorderShadowEnabled)
+--   (Frame Fade moved to the Fading page: test_fading_page_builders.lua.)
 --
 -- Each card is mounted from its own builder: same widgets, same order, same L
 -- keys, same db keys, same slot heights as the census below.
@@ -118,71 +118,16 @@ local function sectionBlock(labelKey, mount)
 end
 
 -- ============================================================
--- 1. FRAME FADE -- its enable is the card's header tick
--- The group had no boolean meaning "am I doing anything" for a whole release;
--- frameFadeSplitCombat is a MODE and it HIDES the global slider, so the boolean
--- was ADDED -- frameFadeEnabled, shipped true -- rather than borrowed.
+-- 1. FRAME FADE MOVED TO THE FADING PAGE
+-- Its card census and section checks live in test_fading_page_builders.lua now;
+-- this page must no longer open it (section 1b still drives the engine).
 -- ============================================================
-local FRAME_FADE = {
-    { "checkbox", "Enable Frame Fade",                 "frameFadeEnabled",            30 },
-    { "slider",   "Global Frame Fade",                 "frameFadeAlpha",              55 },
-    { "checkbox", "Separate Combat Fade",              "frameFadeSplitCombat",        30 },
-    { "slider",   "Out of Combat Frame Fade",          "frameFadeAlphaOutOfCombat",   55 },
-    { "slider",   "In Combat Frame Fade",              "frameFadeAlphaInCombat",      55 },
-    { "checkbox", "Use In-Combat Fade In Instances",   "frameFadeInstanceUsesCombat", 30 },
-    { "checkbox", "Show In-Combat Fade When Hovering", "frameFadeHoverUsesCombat",    30 },
-    { "dropdown", "Hover Applies To",                  "frameFadeHoverScope",         55 },
-}
-
-print("-- Frame page: Frame Fade")
+print("-- Frame page: Frame Fade is not here any more")
 do
-    local body = builderBody("BuildFrameFadeGroup")
-    checkCensus(census(body), FRAME_FADE, "frame fade")
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil
-      and body:find(".keepEnabled = true", 1, true) ~= nil,
-          "frame fade: the enable is skipped when the header carries it, and stays live in a pinned panel")
-
-    -- ☠ ...AND THE BODY'S FIRST CONTROL IS EXPECTED TO GREY. With the header
-    -- carrying the tick, the Global Frame Fade slider is child ONE of a band with
-    -- no header -- and the only mark that would spare it is a keepEnabled it must
-    -- not have. The kit spares by MARK now, not by position.
-    local hoisted = body:match("if not tools2%.hoistToggle then.-\n            end\n(.*)")
-    check(hoisted ~= nil, "frame fade: the builder's other half reads on its own")
-    if hoisted then
-        local first = census(hoisted)[1]
-        check(first ~= nil and first.key == FRAME_FADE[2][3], "frame fade: ...the global slider first")
-        eq(select(2, hoisted:gsub("%.keepEnabled", "")), 0,
-           "frame fade: ...and nothing in the body is spared from the gate")
-    end
-    local sections = ui_file_source("Sections.lua")
-    check(sections:find("groupOff and i > 1", 1, true) == nil
-      and sections:find('rawget(widget, "isSectionHeader")', 1, true) ~= nil
-      and sections:find('rawget(widget, "keepEnabled")', 1, true) ~= nil,
-          "frame fade: the group gate spares the header and the Enable by their marks, not by position")
-    check(options_file_source("GUI/SettingsWidgets.lua"):find("container.isSectionHeader = true", 1, true) ~= nil,
-          "frame fade: ...which GUI:CreateHeader stamps")
-    check(body:find("group.disableChildrenOn = function(d) return not d.frameFadeEnabled end", 1, true) ~= nil,
-          "frame fade: the group's grey-while-off gate is inside the builder")
-
-    check(df_file_source("Locales/enUS.lua"):find('L["' .. FRAME_FADE[1][2] .. '"] = true', 1, true) ~= nil,
-          "frame fade: the tick's label is a shipped enUS phrase")
-    check(options_file_source("Core/ExportCategories.lua"):find('"' .. FRAME_FADE[1][3] .. '"', 1, true) ~= nil,
-          "frame fade: ...and the key travels in a profile export")
-
-    local block, call = sectionBlock("Frame Fade", "BuildFrameFadeGroup({")
-    check(call:find('OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {', 1, true) ~= nil,
-          "frame fade: a card keyed frame_fade in column 2, pinnable from its own builder")
-    check(call:find('db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"]', 1, true) ~= nil,
-          "frame fade: the header tick is bound to frameFadeEnabled under the checkbox's own name")
-    check(call:find("RefreshFrameFade() self:RefreshStates() tools.ReflowMounted()", 1, true) ~= nil
-      and call:find("RefreshCurrentPage", 1, true) == nil,
-          "frame fade: ...committing the engine refresh, a state pass and a pinned-panel repaint -- never a rebuild")
-    check(block:find("BuildFrameFadeGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
-          "frame fade: mounts its builder with hoistToggle for its header tick")
-
-    local sum = PAGE:match("local function FrameFadeSummary%(d%)(.-)\n        end")
-    check(sum ~= nil and sum:find('L%["Alpha"%]') ~= nil and sum:find('L%["Combat"%]') ~= nil,
-          "frame fade: the summary labels its opacities in words the locale ships")
+    check(PAGE:find('OpenSection(L["Frame Fade"]', 1, true) == nil
+      and PAGE:find("BuildFrameFadeGroup", 1, true) == nil,
+          "frame fade: the Frame page no longer opens the card or declares its builder")
+    check(PAGE:find('"frame_fade"', 1, true) == nil, "frame fade: ...nor its section key")
 end
 
 -- ============================================================
@@ -559,7 +504,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Group Visibility | Frame Size | Border | Border Shadow | Frame Fade | Layout Direction | Raid Layout Mode | Group Layout Settings | Group Display Order | Flat Grid Settings | Permanent Mover",
+       "Group Visibility | Frame Size | Border | Border Shadow | Layout Direction | Raid Layout Mode | Group Layout Settings | Group Display Order | Flat Grid Settings | Permanent Mover",
        "order: the cards open in the order they stack -- Group Visibility under Content, then column 1's layout chain")
 
     -- Content holds the one raid-only card, so its header hides with it.
@@ -584,7 +529,7 @@ do
 
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggles? = true,") do hoists = hoists + 1 end
-    eq(hoists, 4, "ticks: four mounts skip their in-body toggle -- Border, Border Shadow, Frame Fade, Permanent Mover")
+    eq(hoists, 3, "ticks: three mounts skip their in-body toggle -- Border, Border Shadow, Permanent Mover")
 
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: Expand All / Collapse All at the top, spanning both columns")
@@ -687,4 +632,31 @@ do
     end
     check(PAGE:find('L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames', 1, true) ~= nil,
           "growth: Frames Grow From still needs no rebuild")
+end
+
+-- ============================================================
+-- 8. TOOLTIPS (settings tooltip plan, batch 2)
+-- ============================================================
+print("-- Frame page: tooltips on the settings a label cannot explain")
+do
+    local function wrapped(call, tipStart)
+        local at = PAGE:find("GUI:WithTooltip(" .. call, 1, true)
+        local tip = at and PAGE:find(tipStart, at, true)
+        return at ~= nil and tip ~= nil and tip - at < 400
+    end
+    check(wrapped('GUI:CreateSlider(parent, L["Frame Padding"]', 'L["Space between the edge of the frame'), "tooltips: Frame Padding")
+    check(wrapped('GUI:CreateCheckbox(parent, L["Use Group-Based Layout"]', 'L["Lays the raid out as separate groups'), "tooltips: Use Group-Based Layout")
+    check(wrapped('GUI:CreateDropdown(parent, L["Grid Alignment"]', 'L["Where the grid sits'), "tooltips: Grid Alignment")
+    check(wrapped('GUI:CreateDropdown(parent, flatColumnLabel', 'flatColumnTip), 55)'), "tooltips: Rows / Columns Grow From")
+    check(PAGE:find('local flatColumnTip = db.growDirection == "VERTICAL"\n                and L["Which side the first column', 1, true) ~= nil
+      and PAGE:find('or L["Which edge the first row', 1, true) ~= nil,
+          "tooltips: ...whose text swaps with the growth direction, as the label does")
+    local PM = 'L["Adds a handle beside your frames that stays on screen while they are locked.'
+    check(wrapped('GUI:CreateCheckbox(parent, L["Enable Permanent Mover"]', PM), "tooltips: Enable Permanent Mover in the body")
+    local _, call = sectionBlock("Permanent Mover", "BuildPermanentMoverGroup({")
+    check(call:find('label = L["Enable Permanent Mover"], tooltip = ' .. PM, 1, true) ~= nil,
+          "tooltips: ...and on the card's header tick")
+    local body = builderBody("BuildPermanentMoverGroup")
+    eq(select(2, body:gsub("%.tooltip = actionTip", "")), 4, "tooltips: one shared tooltip on all four click dropdowns")
+    eq(select(2, body:gsub('L%["What clicking the handle this way does', "")), 1, "tooltips: ...written once")
 end

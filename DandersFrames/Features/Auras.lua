@@ -3377,7 +3377,13 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- variants) into the exclude map. Legacy did this with an icon-texture match
         -- in the scan, OUT of combat only (reads); the native filter holds in combat
         -- too — a strict upgrade. Tuning (rides excludeSig in the row tuning signature).
-        if db.missingBuffHideFromBar and DF.RaidBuffs then
+        -- ☠ GATED ON THE MISSING BUFF ICON BEING ON. The hide only makes sense when the
+        -- icon is where those buffs appear instead. Unit frames inherit
+        -- missingBuffHideFromBar = true from the party defaults but switch the icon off
+        -- and have no Missing Buffs page, so ungated it hid every raid buff (Fortitude,
+        -- Arcane Intellect...) from their buff bar even with All Buffs on, with no way
+        -- to undo it. Same on group frames with the icon off: the toggle greys out.
+        if db.missingBuffHideFromBar and db.missingBuffIconEnabled and DF.RaidBuffs then
             candidateFilters = candidateFilters or {}
             local map = candidateFilters.excludeSpellIDs or {}
             candidateFilters.excludeSpellIDs = map

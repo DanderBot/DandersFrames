@@ -163,6 +163,10 @@ local function EntryVisible(group, entry, index, layoutDB, ignoreHostHidden)
     -- exactly like a hideOn that fired -- same fold, same Hide, same
     -- announcement, same way back.
     if entry.hostHidden and not ignoreHostHidden then return false end
+    -- A consumer's FILTER (a settings search narrowing the page in place). Its
+    -- own reason, beside the host mark: clearing a filter must never un-hide a
+    -- row the host is hiding for another reason, or the other way round.
+    if entry.filterHidden then return false end
     if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
     -- A widget that has folded itself away (a closed banner with nothing left to
     -- show) takes no row and no gap.
@@ -451,6 +455,25 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 return self
             end
         end
+        return self
+    end
+
+    -- FILTER ONE CHILD OUT, for a consumer narrowing the box to what matches
+    -- (see EntryVisible). Same shape and the same guarantees as SetChildHidden
+    -- -- hidden, never removed, back in its own slot on the next layout once
+    -- cleared -- under a separate mark. ClearChildFilter drops every mark.
+    group.SetChildFiltered = function(self, widget, filtered)
+        if not widget then return self end
+        for _, entry in ipairs(self.groupChildren) do
+            if entry.widget == widget then
+                entry.filterHidden = filtered and true or nil
+                return self
+            end
+        end
+        return self
+    end
+    group.ClearChildFilter = function(self)
+        for _, entry in ipairs(self.groupChildren) do entry.filterHidden = nil end
         return self
     end
 

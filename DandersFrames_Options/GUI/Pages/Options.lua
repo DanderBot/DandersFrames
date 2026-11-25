@@ -823,6 +823,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if not tools2.hoistToggle then
                 local bindTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Binding Tooltips"], db, "tooltipBindingEnabled", nil), 30)
                 bindTooltipEnable.keepEnabled = true
+                bindTooltipEnable.tooltip = L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."]
             end
             group.disableChildrenOn = function(d) return not d.tooltipBindingEnabled end
 
@@ -854,6 +855,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
             nil, nil, nil, {
                 db = db, key = "tooltipBindingEnabled", label = L["Enable Binding Tooltips"],
+                tooltip = L["When you hover a frame, shows a list of your click-casting bindings, so you can check what each click or key will cast."],
                 onChanged = function() self:RefreshStates() end,
             })
         BuildBindTooltipGroup({
@@ -1096,13 +1098,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "dead" and "offline" matched nothing: the keys are fadeDead*, which begins
         -- "fade". So the entire Dead/Offline Fading box was silently dropped from all
         -- three. Prefixes must be real key prefixes, not the box's name.
-        Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
+        Add(CreateCopyButton(self.child, {"frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
 
         -- ===== THE PAGE'S CARDS ===========================================
-        -- FOUR cards, because the range check and the per-element alphas are
+        -- SIX cards, because the range check and the per-element alphas are
         -- split (see BuildRangeCheckGroup):
         --
-        --   column 1   Out of Range (no on/off), Element-Specific Alpha (tick:
+        --   column 1   Frame Fade (tick: frameFadeEnabled; moved here from the
+        --              Frame page -- "frameFade" is the first prefix above, so this
+        --              page owns its keys for Copy / Sync / Reset and the UF links),
+        --              Out of Range (no on/off), Element-Specific Alpha (tick:
         --              oorEnabled)
         --   column 2   Dead/Offline Fading (tick: fadeDeadFrames), Health
         --              Threshold Fading (tick: healthFadeEnabled), Spirit of
@@ -1113,8 +1118,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- The fades are how a frame LOOKS, so they are pinnable; the range
         -- check is behaviour and is not.
         --
-        -- ⚠ NO CATEGORY HEADERS. A header names a SECTION -- and the section here
-        -- is the whole page, which the tab already calls "Fading".
+        -- Headers group the cards by what they fade on: Frame, Range, Unit State.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } and, where the toggle moved into the
@@ -1366,9 +1370,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- refresh alone never reaches a group living in a popout holder. On
             -- the page the tools2 hook IS self:RefreshStates.
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
                     tools2.refreshStates()
-                end), 30)
+                end), L["Fades each part of an out-of-range frame by its own amount instead of the whole frame at once. Useful for keeping names readable while the health bar dims."]), 30)
             end
 
             -- Element-specific sliders (shown when enabled)
@@ -1448,6 +1452,137 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- columns, and "both" carries them through the one-column fold intact.
         Add(tools.SectionControls(self.child), 24, "both")
 
+        -- Frame Fade moved here from the Frame page: it is the whole-frame base the
+        -- range and health fades multiply onto, and the health fade can now override it.
+        -- Its section key stays "frame_fade" so a saved collapse / pin state carries over.
+        Add(GUI:CreateHeader(self.child, L["Frame"]), 40, 1)
+        -- ===== FRAME FADE (column 1, first: the base every fade below multiplies onto) =====
+        -- Whole-frame base opacity, multiplied with the range / health fades
+        -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
+        -- split on -- an out-of-combat and an in-combat value, plus a hover option that
+        -- shows the in-combat value while the mouse is on a frame out of combat.
+        --
+        -- ☠ THE TICK IS frameFadeEnabled, AND IT IS NOT frameFadeSplitCombat.
+        -- The split is a MODE rather than an enable (both states fade), and it
+        -- HIDES the global slider, so a tick that switched it off would grey the
+        -- one control the group exists for. frameFadeEnabled (Config.lua,
+        -- defaulting true) is the group's own boolean, and the engine reads it
+        -- before anything else it fades on (DF:GetFrameBaseAlpha). Off means
+        -- alpha 1, not the slider's value.
+        -- Every slider that can reach 0% says what 0% means: the frame is invisible,
+        -- but alpha never stops the mouse, so it still clicks, hovers and click-casts.
+        local function WithZeroNote(tip)
+            local note = L["At 0% the frame is invisible but can still be clicked, hovered and click-cast."]
+            return tip and format("%s\n\n%s", tip, note) or note
+        end
+
+        local function RefreshFrameFade()
+            if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
+            -- Pets re-apply their fade only on a range-cache miss; flush it so the
+            -- next tick picks up the new base instead of waiting for a range change.
+            if DF.ClearRangeCache then DF:ClearRangeCache() end
+            DF:RefreshAllVisibleFrames()
+            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
+        end
+
+        -- The group's seven controls, verbatim, taking the group and parent they
+        -- should build into. Same factories, same L keys, same db keys, same
+        -- callbacks, same slot heights, same hideOn/disableOn -- the only thing
+        -- the move changed is where `group`, `parent` and the state refresh come
+        -- from. Guarded by test_frame_page_builders.lua, which reads this body
+        -- out of the source and checks it against the inventory it had inline.
+        local function BuildFrameFadeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the card's HEADER carries this tick.
+            if not tools2.hoistToggle then
+                local ffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Fade"], db, "frameFadeEnabled", RefreshFrameFade), 30)
+                ffEnable.keepEnabled = true
+            end
+            -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does on every other
+            -- header-tick group on this page, so a pinned copy greys alike.
+            group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
+
+            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
+            ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
+            ffGlobal.tooltip = WithZeroNote(L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."])
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
+                tools2.refreshStates()
+                RefreshFrameFade()
+            end), L["Uses one opacity out of combat and another in combat, in place of the single Global Frame Fade."]), 30)
+            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
+            ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
+            ffOOC.tooltip = WithZeroNote(L["Frame opacity while you are out of combat. The preview shows this value while you configure it."])
+            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
+            ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
+            ffCombat.tooltip = WithZeroNote()
+            local ffInstance = group:AddWidget(GUI:CreateCheckbox(parent, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
+            ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
+            ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
+            local ffHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
+            -- Works without the split too: there it lifts a hovered frame to full.
+            ffHover.tooltip = format("%s\n\n%s",
+                L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."],
+                L["Without Separate Combat Fade, the frame shows at full opacity instead."])
+            local ffHoverScope = group:AddWidget(GUI:CreateDropdown(parent, L["Hover Applies To"], {
+                ALL   = L["All Frames"],
+                FRAME = L["Hovered Frame Only"],
+            }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
+            ffHoverScope.disableOn = function(d) return not d.frameFadeHoverUsesCombat end
+            ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
+            -- WoW Forever only: your pet's frame shows through Frame Fade while it is not
+            -- happy (DF:GetFrameBaseAlpha + PetHappiness.lua's mood cache). Unit frames
+            -- show it on the pet page alone (PageData hide).
+            if DF.IS_FOREVER then
+                local ffPet = group:AddWidget(GUI:CreateCheckbox(parent, L["Show When Pet Is Not Happy"], db, "frameFadeRevealUnhappyPet", function()
+                    local PH = DF.PetHappiness
+                    if PH and PH.WatchFrameFade then PH:WatchFrameFade() end
+                    RefreshFrameFade()
+                end), 30)
+                ffPet.tooltip = L["Shows your pet's frame through Frame Fade while it is Content or Unhappy."]
+            end
+        end
+
+        -- The summary, per the same convention the border cards follow: at
+        -- most four items, a fixed order, "\194\183" between them, WORDS
+        -- localised and numbers raw, and every opacity carries the word that
+        -- says WHICH opacity it is. Two shapes, because the group has two: one
+        -- value when the split is off, the out-of-combat value plus the
+        -- in-combat one when it is on.
+        local function FrameFadeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
+                                                 or d.frameFadeAlpha
+            base = tonumber(base)
+            if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
+            if d.frameFadeSplitCombat then
+                local inc = tonumber(d.frameFadeAlphaInCombat)
+                if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
+            end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        -- ☠ ENABLE FRAME FADE IS THE HEADER'S TICK, so the builder is told not
+        -- to build its own (hoistToggle). The commit is what the in-body
+        -- checkbox ran plus the state pass that greys the seven behind it and
+        -- a repaint of a pinned panel -- never a page rebuild. How much of the
+        -- frame you can see is how it LOOKS, so it is pinnable.
+        local band = OpenSection(L["Frame Fade"], "frame_fade", 1, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {
+            db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"],
+            onChanged = function()
+                RefreshFrameFade()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end,
+        })
+        BuildFrameFadeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
+
         -- ☠ NO TICK, AND NO PIN. Out of range fading has no on/off: it fades
         -- either way, through the one frame-level alpha or the per-element
         -- ones below. The range spell and the check interval are behaviour,
@@ -1471,6 +1606,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, RangeFadeOff, nil,
             BuildElementAlphaGroup, {
                 db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
+                tooltip = L["Fades each part of an out-of-range frame by its own amount instead of the whole frame at once. Useful for keeping names readable while the health bar dims."],
                 onChanged = function()
                     self:RefreshStates()
                     tools.ReflowMounted()
@@ -1603,13 +1739,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 55)
             hfThreshold.tooltip = L["Units at or above this health percent are faded."]
 
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
+            -- Below the threshold, show through Frame Fade (HealthFade.lua's reveal):
+            -- the "hide healthy frames out of combat, still see the hurt ones" switch.
+            local hfReveal = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Below Threshold Through Frame Fade"], db, "healthFadeRevealsFrame", function()
+                RefreshHealthFade()
+                DF:UpdateAllFrames()
+            end), 30)
+            hfReveal.tooltip = L["Below the threshold the frame ignores Frame Fade and shows at full opacity, or at your In Combat Frame Fade with Separate Combat Fade on. Use it to hide healthy frames out of combat but still see anyone who is hurt."]
+
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
                 DF:UpdateAllFrames()
                 DF:RefreshAllVisibleFrames()
-            end), 30)
+            end), L["Brings a faded frame back to full view while that player has a debuff you can dispel, so the fade never hides it. Only works while the Dispel Overlay is turned on."]), 30)
 
-            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
-            hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
+            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
+            hfFrameAlpha.tooltip = WithZeroNote(L["Frame opacity when health is above the threshold."])
         end
 
         -- Threshold first, then the opacity it applies: the two numbers the
@@ -1816,6 +1960,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             HEALTH = L["Health Gradient"],
             CUSTOM = L["Custom Color"],
         }
+        -- WoW Forever: your hunter pet's frame by Pet Happiness (Features/PetHappiness.lua).
+        if DF.IS_FOREVER then healthColorValues.HAPPINESS = L["Pet Happiness"] end
         local powerColorValues = {
             POWER = L["By Power Type"],
             CUSTOM = L["Custom Color"],
@@ -2247,6 +2393,129 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             refreshStates = function() self:RefreshStates() end,
         })
         CloseSection(band)
+
+        -- ===== PET HAPPINESS (WoW Forever only, column 2, under Health Bar) =====
+        -- Your hunter pet's happy / content / unhappy face beside the pet frame
+        -- that shows YOUR pet (Features/PetHappiness.lua, GROUP PET FRAMES). The
+        -- same card the unit frames pet page has: Show is the header's tick, and
+        -- the positions are that page's (Outside Right ... plus the nine points).
+        --
+        -- ⚠ A do-block under the Forever gate: this page's builder is close to
+        -- Lua's 200-local ceiling, so nothing here leaves a local at page scope.
+        if DF.IS_FOREVER then
+            local function ApplyPetHappiness()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end
+            local function LivePetHappiness()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end
+            local UFO = GUI.UnitFrameOptions
+            local happinessPositions = UFO and UFO.HappinessPositionOptions and UFO.HappinessPositionOptions()
+                or textAnchorValues
+            local function HappinessOff(d) return not d.petHappinessIconEnabled end
+
+            local function BuildPetHappinessGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                group.disableChildrenOn = function(d) return not d.petEnabled end
+
+                if not tools2.hoistToggle then
+                    group:AddWidget(GUI:CreateCheckbox(parent, L["Show"], db, "petHappinessIconEnabled", function()
+                        ApplyPetHappiness()
+                        GateRefresh(tools2)
+                    end), 30)
+                end
+
+                local size = group:AddWidget(GUI:CreateSlider(parent, L["Size"], 8, 32, 1, db, "petHappinessIconSize",
+                    ApplyPetHappiness, LivePetHappiness, true), 55)
+                size.disableOn = HappinessOff
+
+                local position = group:AddWidget(GUI:CreateDropdown(parent, L["Position"], happinessPositions, db,
+                    "petHappinessIconAnchor", ApplyPetHappiness), 55)
+                position.disableOn = HappinessOff
+
+                local offX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "petHappinessIconX",
+                    ApplyPetHappiness, LivePetHappiness, true), 55)
+                offX.disableOn = HappinessOff
+
+                local offY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "petHappinessIconY",
+                    ApplyPetHappiness, LivePetHappiness, true), 55)
+                offY.disableOn = HappinessOff
+
+                local tooltip = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Tooltip"], db, "petHappinessIconTooltip",
+                    ApplyPetHappiness), 30)
+                tooltip.disableOn = HappinessOff
+                tooltip.tooltip = L["Hover the face to see your pet's damage, loyalty, diet, training points and experience."]
+
+                local PH = DF.PetHappiness
+                if PH and PH.TrendOptions then
+                    local trend = group:AddWidget(GUI:CreateDropdown(parent, L["Loyalty Arrow"], PH.TrendOptions(), db,
+                        "petHappinessIconTrend", ApplyPetHappiness), 55)
+                    trend.disableOn = HappinessOff
+                    trend.tooltip = L["A small arrow on the face's corner while your pet is losing (or gaining) loyalty."]
+                end
+
+                local hideHappy = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide While Happy"], db,
+                    "petHappinessIconHideHappy", ApplyPetHappiness), 30)
+                hideHappy.disableOn = HappinessOff
+                hideHappy.tooltip = L["Show the face only when your pet is content or unhappy. Test mode always shows it."]
+            end
+
+            -- Where the face sits, in the dropdown's own words.
+            local function PetHappinessSummary(d)
+                if not d then return "" end
+                local where = happinessPositions[d.petHappinessIconAnchor]
+                return where or ""
+            end
+
+            -- How the pets LOOK, so pinnable; greys with the page gate.
+            local happinessBand = OpenSection(L["Pet Happiness"], "pets_happiness", 2, PetHappinessSummary, PetsOffRow, nil,
+                BuildPetHappinessGroup, {
+                    db = db, key = "petHappinessIconEnabled", label = L["Show"],
+                    disableOn = PetsOffRow,
+                    onChanged = function()
+                        ApplyPetHappiness()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
+                })
+            happinessBand.disableChildrenOn = function(d) return not d.petEnabled end
+            BuildPetHappinessGroup({
+                group = happinessBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(happinessBand)
+
+            -- ===== COLOR BY PET HAPPINESS (under Pet Happiness) =====
+            -- The pet frame's border, name and health bar in the happiness colour
+            -- (Features/PetHappiness.lua, COLOUR BY HAPPINESS). The controls are the
+            -- unit frames card's (UFO.AddHappinessColorControls) on this page's keys;
+            -- no colour pickers, the card links to the Colors page instead.
+            local colorKeys = { border = "petHappinessColorBorder", name = "petHappinessColorName",
+                                only = "petHappinessColorOnlyUnhappy", mode = "petHealthColorMode" }
+            local function BuildPetHappinessColorsGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+                group.disableChildrenOn = function(d) return not d.petEnabled end
+                if UFO and UFO.AddHappinessColorControls then
+                    UFO.AddHappinessColorControls(group, parent, db, colorKeys, function()
+                        ApplyPetHappiness()
+                        GateRefresh(tools2)
+                    end, tools2.popout and PetsOffRow or nil)
+                end
+            end
+            local function PetHappinessColorsSummary(d)
+                if not (d and UFO and UFO.HappinessColorsText) then return "" end
+                return UFO.HappinessColorsText(d.petHappinessColorBorder, d.petHappinessColorName, d.petHealthColorMode)
+            end
+            local colorsBand = OpenSection(L["Color by Pet Happiness"], "pets_happiness_colors", 2,
+                PetHappinessColorsSummary, PetsOffRow, nil, BuildPetHappinessColorsGroup)
+            BuildPetHappinessColorsGroup({
+                group = colorsBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(colorsBand)
+        end
 
         -- ===== AURAS (Buffs, Debuffs -- column 2, under Appearance) =====
         -- One row of each on every pet frame (Frames/Pets.lua PET AURA ROWS). Only
@@ -3315,11 +3584,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --              "Movement"    Permanent Mover (tick: permanentMover)
         --   column 2   "Appearance"  Border (tick: frameShowBorder), Border Shadow
         --                            (tick: frameBorderShadowEnabled, greys with
-        --                            Show Border), Frame Fade (tick:
-        --                            frameFadeEnabled)
+        --                            Show Border). Frame Fade lives on the Fading
+        --                            page (display_fading owns frameFade*).
         --
         -- Pins on the cards that decide how the frames LOOK: Frame Size, the
-        -- three Appearance cards, Group Layout Settings and Flat Grid Settings.
+        -- two Appearance cards, Group Layout Settings and Flat Grid Settings.
         -- Layout Direction is not, because its dropdown rebuilds the page.
         --
         -- On a narrow window the page folds to one column in the order the
@@ -3390,7 +3659,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateSlider(parent, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true),
+                L["Space between the edge of the frame and its health bar on every side, so the frame background shows as a margin around the bar."]), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Scale"], 0.5, 2.0, 0.05, db, "frameScale", function() DF:UpdateContainerPosition() DF:UpdateRaidContainerPosition() UpdateFrames() end, function() DF:LightweightUpdateFrameScale() end, true), 55)
             local frameSpacingSlider = group:AddWidget(GUI:CreateSlider(parent, L["Frame Spacing"], -5, 50, 1, db, "frameSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSpacing() end, true), 55)
             frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
@@ -3484,7 +3754,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         })
         CloseSection(band)
 
-        -- ===== APPEARANCE: Border, Border Shadow, Frame Fade (column 2) =====
+        -- ===== APPEARANCE: Border, Border Shadow (column 2) =====
         -- Canonical border controls via the unified helper. classColor +
         -- roleColor are first-class helper include flags. (Pixel-Perfect
         -- Scaling lives on General > Settings > Rendering — it's a global,
@@ -3657,112 +3927,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             hoistToggles = true,
         })
         CloseSection(shadowBand)
-
-        -- ===== FRAME FADE (the third Appearance card) =====
-        -- Whole-frame base opacity, multiplied with the range / health fades
-        -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
-        -- split on -- an out-of-combat and an in-combat value, plus a hover option that
-        -- shows the in-combat value while the mouse is on a frame out of combat.
-        --
-        -- ☠ THE TICK IS frameFadeEnabled, AND IT IS NOT frameFadeSplitCombat.
-        -- The split is a MODE rather than an enable (both states fade), and it
-        -- HIDES the global slider, so a tick that switched it off would grey the
-        -- one control the group exists for. frameFadeEnabled (Config.lua,
-        -- defaulting true) is the group's own boolean, and the engine reads it
-        -- before anything else it fades on (DF:GetFrameBaseAlpha). Off means
-        -- alpha 1, not alpha 0.1.
-        local function RefreshFrameFade()
-            if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
-            -- Pets re-apply their fade only on a range-cache miss; flush it so the
-            -- next tick picks up the new base instead of waiting for a range change.
-            if DF.ClearRangeCache then DF:ClearRangeCache() end
-            DF:RefreshAllVisibleFrames()
-            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
-        end
-
-        -- The group's seven controls, verbatim, taking the group and parent they
-        -- should build into. Same factories, same L keys, same db keys, same
-        -- callbacks, same slot heights, same hideOn/disableOn -- the only thing
-        -- the move changed is where `group`, `parent` and the state refresh come
-        -- from. Guarded by test_frame_page_builders.lua, which reads this body
-        -- out of the source and checks it against the inventory it had inline.
-        local function BuildFrameFadeGroup(tools2)
-            local group, parent = tools2.group, tools2.parent
-
-            -- Suppressed when the card's HEADER carries this tick.
-            if not tools2.hoistToggle then
-                local ffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Fade"], db, "frameFadeEnabled", RefreshFrameFade), 30)
-                ffEnable.keepEnabled = true
-            end
-            -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does on every other
-            -- header-tick group on this page, so a pinned copy greys alike.
-            group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
-
-            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
-            ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
-            ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
-                tools2.refreshStates()
-                RefreshFrameFade()
-            end), 30)
-            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
-            ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
-            ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
-            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
-            ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
-            local ffInstance = group:AddWidget(GUI:CreateCheckbox(parent, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
-            ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
-            ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
-            local ffHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
-            ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
-            ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
-            local ffHoverScope = group:AddWidget(GUI:CreateDropdown(parent, L["Hover Applies To"], {
-                ALL   = L["All Frames"],
-                FRAME = L["Hovered Frame Only"],
-            }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
-            ffHoverScope.disableOn = function(d) return not d.frameFadeSplitCombat or not d.frameFadeHoverUsesCombat end
-            ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
-        end
-
-        -- The summary, per the same convention the border cards follow: at
-        -- most four items, a fixed order, "\194\183" between them, WORDS
-        -- localised and numbers raw, and every opacity carries the word that
-        -- says WHICH opacity it is. Two shapes, because the group has two: one
-        -- value when the split is off, the out-of-combat value plus the
-        -- in-combat one when it is on.
-        local function FrameFadeSummary(d)
-            if not d then return "" end
-            local parts = {}
-            local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
-                                                 or d.frameFadeAlpha
-            base = tonumber(base)
-            if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
-            if d.frameFadeSplitCombat then
-                local inc = tonumber(d.frameFadeAlphaInCombat)
-                if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
-            end
-            return table.concat(parts, " \194\183 ")
-        end
-
-        -- ☠ ENABLE FRAME FADE IS THE HEADER'S TICK, so the builder is told not
-        -- to build its own (hoistToggle). The commit is what the in-body
-        -- checkbox ran plus the state pass that greys the seven behind it and
-        -- a repaint of a pinned panel -- never a page rebuild. How much of the
-        -- frame you can see is how it LOOKS, so it is pinnable.
-        local band = OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {
-            db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"],
-            onChanged = function()
-                RefreshFrameFade()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end,
-        })
-        BuildFrameFadeGroup({
-            group = band, parent = self.child,
-            refreshStates = function() self:RefreshStates() end,
-            hoistToggle = true,
-        })
-        CloseSection(band)
 
         -- ===== LAYOUT DIRECTION (a Layout card) =====
         -- Three dropdowns and never more than two of them visible: the two
@@ -4012,10 +4176,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function BuildRaidModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Use Group-Based Layout"], db, "raidUseGroups", function()
                     ApplyRaidUseGroups()
                     if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end), 30)
+                end), L["Lays the raid out as separate groups 1 to 8. Turn it off to put everyone in one grid that wraps after a set number of players and sorts the whole raid together."]), 30)
             end
             group:AddWidget(GUI:CreateLabel(parent, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
         end
@@ -4371,13 +4535,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- this one ALIGNS the block in the reserved space, that one picks which end rows
             -- stack FROM.
             local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= CROSS_START, CENTER= L["Center"], END= CROSS_END }
-            group:AddWidget(GUI:CreateDropdown(parent, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames),
+                L["Where the grid sits inside the space kept for a full 40-player raid when fewer players are shown. Center keeps it in the middle, and the other options push it to that edge."]), 55)
 
             -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).
             -- VERTICAL (Columns) wraps left/right; HORIZONTAL (Rows) wraps top/bottom.
             local flatColumnLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
+            local flatColumnTip = db.growDirection == "VERTICAL"
+                and L["Which side the first column starts at. New columns are added towards the other side as the raid fills."]
+                or L["Which edge the first row starts at. New rows are added towards the other edge as the raid fills."]
             local flatColumnOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
-            group:AddWidget(GUI:CreateDropdown(parent, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), flatColumnTip), 55)
 
             -- Players Grow From = the direction players fill the grid's main axis.
             -- HORIZONTAL (Rows) fills Left/Right; VERTICAL (Columns) fills Top/Bottom.
@@ -4457,9 +4625,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local group, parent = tools2.group, tools2.parent
 
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
                     DF:UpdatePermanentMoverVisibility()
-                end), 30)
+                end), L["Adds a handle beside your frames that stays on screen while they are locked. Drag it to move the frames, or click it to run the actions set below."]), 30)
             end
 
             local permMoverAnchor = group:AddWidget(
@@ -4517,18 +4685,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             for id, data in pairs(DF.PERM_MOVER_ACTIONS) do
                 actionValues[id] = data.label
             end
+            -- One tooltip for all four click dropdowns.
+            local actionTip = L["What clicking the handle this way does: Quick Switch opens a list of profiles to pick from, and Cycle Next moves straight to the next one. In combat only Open Settings, Reload UI, Ready Check and Pull Timer work."]
 
             local permActionLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Left Click"], actionValues, db, "permanentMoverActionLeft"), 55)
             permActionLeft.disableOn = function(d) return not d.permanentMover end
+            permActionLeft.tooltip = actionTip
 
             local permActionRight = group:AddWidget(GUI:CreateDropdown(parent, L["Right Click"], actionValues, db, "permanentMoverActionRight"), 55)
             permActionRight.disableOn = function(d) return not d.permanentMover end
+            permActionRight.tooltip = actionTip
 
             local permActionShiftLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Left Click"], actionValues, db, "permanentMoverActionShiftLeft"), 55)
             permActionShiftLeft.disableOn = function(d) return not d.permanentMover end
+            permActionShiftLeft.tooltip = actionTip
 
             local permActionShiftRight = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Right Click"], actionValues, db, "permanentMoverActionShiftRight"), 55)
             permActionShiftRight.disableOn = function(d) return not d.permanentMover end
+            permActionShiftRight.tooltip = actionTip
 
             local permPullTimer = group:AddWidget(GUI:CreateSlider(parent, L["Pull Timer Duration"], 3, 30, 1, db, "permanentMoverPullTimerDuration"), 55)
             permPullTimer.disableOn = function(d) return not d.permanentMover end
@@ -4565,6 +4739,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- A drag handle and its click actions are behaviour, so no pin.
         local band = OpenSection(L["Permanent Mover"], "frame_permanentmover", 1, PermMoverSummary, nil, nil, nil, {
             db = db, key = "permanentMover", label = L["Enable Permanent Mover"],
+            tooltip = L["Adds a handle beside your frames that stays on screen while they are locked. Drag it to move the frames, or click it to run the actions set below."],
             onChanged = function()
                 DF:UpdatePermanentMoverVisibility()
                 self:RefreshStates()

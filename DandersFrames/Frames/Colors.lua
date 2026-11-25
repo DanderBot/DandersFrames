@@ -411,10 +411,15 @@ function DF:ApplyHealthColors(frame)
                 tex:SetAlpha(classColorAlpha)
             end
         end
-    elseif mode == "CLASS" then
-        -- Class color mode - use RGB only, alpha controlled separately
+    elseif mode == "CLASS" or mode == "HAPPINESS" then
+        -- Class color mode - use RGB only, alpha controlled separately.
+        -- HAPPINESS (WoW Forever, the unit frames pet; ElementAppearance has the
+        -- same branch): the stamped Pet Happiness tint, else class, its fallback.
         local r, g, b = 0, 1, 0
-        if unit then
+        local tint = mode == "HAPPINESS" and frame.dfHappinessHealth
+        if tint then
+            r, g, b = tint.r, tint.g, tint.b
+        elseif unit then
             local _, class = UnitClass(unit)
             local classColor = class and DF:GetClassColor(class)
             if classColor then

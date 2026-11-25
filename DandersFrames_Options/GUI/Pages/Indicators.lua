@@ -628,10 +628,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Same gate as its siblings on this page.
             group.disableChildrenOn = function(d) return not d.showBuffs end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Sort Order"], buffSortOptions, db, "directBuffSortOrder", function()
                 BuffOrderChanged()
                 tools2.refreshStates()   -- Mine First greys while Sort Order = Default
-            end), 55)
+            end), L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."]), 55)
 
             -- Sort refinements (native rows only — the legacy Lua scan doesn't read them)
             local bfSortMine = group:AddWidget(GUI:CreateCheckbox(parent, L["My Auras First"], db, "directBuffSortMineFirst", BuffOrderChanged), 30)
@@ -941,6 +941,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- banded into a seconds-sampled formatter — see GetDurationFormatFields).
             local durHideAbove = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Above Threshold"], db, "buffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
             durHideAbove.disableOn = function(d) return not d.buffShowDuration or DF:IsPercentDurationFormat(d.buffDurationFormat) end
+            durHideAbove.tooltip = L["Keeps the duration text hidden until the time left drops below the seconds set under it, so only auras close to running out show a number. Not available with the Percent format."]
             local durHideAboveSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, db, "buffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
             durHideAboveSlider.disableOn = function(d) return not d.buffShowDuration or not d.buffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.buffDurationFormat) end
             local durHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], db, "buffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
@@ -1134,10 +1135,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Position"], durBarPositionOptions, db, "buffDurationBarPosition", BuffBarChanged), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "buffDurationBarHeight", nil, BuffBarChanged, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "buffDurationBarGap", nil, BuffBarChanged, true), 55)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "buffDurationBarColorMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "buffDurationBarColorMode", function()
                 tools2.refreshStates()
                 BuffBarChanged()
-            end), 55)
+            end), L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."]), 55)
             local buffBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "buffDurationBarTexture", BuffBarChanged), 55)
             local buffBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "buffDurationBarColor", true, BuffBarChanged), 30)
             -- A curve mode brings its own ramp texture and forces white, so these two do
@@ -1968,10 +1969,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- live while the row it orders is switched off.
             group.disableChildrenOn = function(d) return not d.showDebuffs end
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
                 DebuffFilterChanged()
                 tools2.refreshStates()  -- My Auras First greys on Default / Order Applied
-            end), 55)
+            end), L["The order icons appear in. Default keeps the game's own order with your auras first, Time Remaining puts the ones about to run out first, Alphabetical sorts by name, and Order Applied keeps each aura where it first landed so icons never jump around."]), 55)
 
             local dfSortMine = group:AddWidget(GUI:CreateCheckbox(parent, L["My Auras First"], db, "directDebuffSortMineFirst", DebuffFilterChanged), 30)
             dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
@@ -2504,6 +2505,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Hide Above can't compose with the Percent format (see the buff page).
             local durHideAbove = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
             durHideAbove.disableOn = function(d) return not d.debuffShowDuration or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
+            durHideAbove.tooltip = L["Keeps the duration text hidden until the time left drops below the seconds set under it, so only auras close to running out show a number. Not available with the Percent format."]
             local durHideAboveSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
             durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
             local durHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
@@ -2759,10 +2761,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Position"], durBarPositionOptions, db, "debuffDurationBarPosition", DebuffBarChanged), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "debuffDurationBarHeight", nil, DebuffBarChanged, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "debuffDurationBarGap", nil, DebuffBarChanged, true), 55)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
                 tools2.refreshStates()
                 DebuffBarChanged()
-            end), 55)
+            end), L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."]), 55)
             local debuffBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
             local debuffBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
             -- A curve mode brings its own ramp texture and forces white, so these two do
@@ -3894,10 +3896,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Position"], defBarPositionOptions, db, "defensiveDurationBarPosition", DefBarChanged), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
                 tools2.refreshStates()
                 DefBarChanged()
-            end), 55)
+            end), L["Static uses your Texture and Bar Color. The other modes replace those and colour the bar from green to red as the aura runs out: DF Smooth blends between the colours, DF Stops changes in four clear steps, and Classic fades evenly along the whole bar."]), 55)
             local defBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
             local defBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
             -- A curve mode brings its own ramp texture and forces white, so these two do
@@ -4229,10 +4231,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     end), 30)
                 end
                 local tlImportantOnly = group:AddWidget(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "targetedListImportantOnly", TargetedListUpdate), 30)
+                tlImportantOnly.tooltip = L["Only shows casts the game itself marks as important, usually ones worth interrupting or avoiding, and hides the rest."]
                 tlImportantOnly.disableOn = HideTLOptions
                 local tlHideOwn = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Casts Targeting You"], db, "targetedListHideOwnCasts", TargetedListUpdate), 30)
                 tlHideOwn.disableOn = HideTLOptions
                 local tlShowUntargeted = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Untargeted Casts"], db, "targetedListShowUntargeted", TargetedListUpdate), 30)
+                tlShowUntargeted.tooltip = L["Also lists casts with no target, such as ground effects and area spells. With this off, only casts aimed at someone in your group appear."]
                 tlShowUntargeted.disableOn = HideTLOptions
                 local tlHideOOC = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Out-of-Combat Casts"], db, "targetedListHideOutOfCombat", TargetedListUpdate), 30)
                 tlHideOOC.disableOn = HideTLOptions
@@ -4300,6 +4304,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlGrowth = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growthOptions, db, "targetedListGrowth", TargetedListUpdate), 55)
                 tlGrowth.disableOn = HideTLOptions
                 local tlSort = group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], sortOptions, db, "targetedListSortOrder", TargetedListUpdate), 55)
+                tlSort.tooltip = L["The order the bars appear in. Newest First puts the latest cast first, Oldest First keeps the earliest first, and Static gives each cast a fixed spot so bars never move, which can leave gaps as casts end."]
                 tlSort.disableOn = HideTLOptions
             end
 
@@ -4373,6 +4378,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlPreset = group:AddWidget(GUI:CreateDropdown(parent, L["Bar Style"], stylePresetOptions, db, "targetedListStylePreset", function()
                     TargetedListPresetChanged(tools2)
                 end), 55)
+                tlPreset.tooltip = L["Applies a ready-made look in one go, setting bar size, spacing, icon, which text shows, border, background opacity and font size. You can still change any of them afterwards."]
                 tlPreset.disableOn = HideTLOptions
                 local tlTexture = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "targetedListTexture", TargetedListUpdate), 55)
                 tlTexture.disableOn = HideTLOptions
@@ -4648,8 +4654,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlClassColor = group:AddWidget(GUI:CreateCheckbox(parent, L["Target Name Class Color"], db, "targetedListTargetNameClassColor", TargetedListUpdate), 30)
                 tlClassColor.disableOn = HideTargetNameOptions
                 local tlArrow = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Arrow Prefix"], db, "targetedListShowArrowPrefix", TargetedListUpdate), 30)
+                tlArrow.tooltip = L["Puts a > before the target's name, like an arrow pointing at them."]
                 tlArrow.disableOn = HideTargetNameOptions
                 local tlArrowSuffix = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Arrow Suffix"], db, "targetedListShowArrowSuffix", TargetedListUpdate), 30)
+                tlArrowSuffix.tooltip = L["Puts a < after the target's name, like an arrow pointing back at them."]
                 tlArrowSuffix.disableOn = HideTargetNameOptions
             end
 
@@ -4742,6 +4750,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlSNFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListSpellNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
                 tlSNFontSize.disableOn = HideTLOptions
                 local tlSNWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListSpellNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSNWidth.tooltip = L["The widest this text can be before it is cut short. 0 uses the full width of the bar."]
                 tlSNWidth.disableOn = HideTLOptions
                 local tlSNAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListSpellNameAnchor", TargetedListUpdate), 55)
                 tlSNAnchor.disableOn = HideTLOptions
@@ -4767,6 +4776,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlTNFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListTargetNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
                 tlTNFontSize.disableOn = HideTargetNameOptions
                 local tlTNWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListTargetNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlTNWidth.tooltip = L["The widest this text can be before it is cut short. 0 uses the full width of the bar."]
                 tlTNWidth.disableOn = HideTargetNameOptions
                 local tlTNAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListTargetNameAnchor", TargetedListUpdate), 55)
                 tlTNAnchor.disableOn = HideTargetNameOptions
@@ -4818,6 +4828,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local tlIntFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListInterruptTextFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
                 tlIntFontSize.disableOn = HideTLOptions
                 local tlIntWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListInterruptTextWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlIntWidth.tooltip = L["The widest this text can be before it is cut short. 0 uses the full width of the bar."]
                 tlIntWidth.disableOn = HideTLOptions
                 local tlIntAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListInterruptTextAnchor", TargetedListUpdate), 55)
                 tlIntAnchor.disableOn = HideTLOptions
@@ -4966,7 +4977,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             -- ⚠ NO disableOn HERE: the card's gate greys it with the rest -- the
             -- kit's own syncGate, the same one the Dispel Overlay page accepted.
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), L["Only shows casts the game itself marks as important, usually ones worth interrupting or avoiding, and hides the rest."]), 30)
             -- Same game CVar as the Targeted List page — Personal detects casts through
             -- nameplate tokens too (IsValidCasterUnit), so it has the identical
             -- offscreen blind spot. Both checkboxes drive the one CVar.

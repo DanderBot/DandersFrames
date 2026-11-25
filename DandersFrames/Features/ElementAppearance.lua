@@ -133,6 +133,17 @@ function DF:GetFrameBaseAlpha(db, frame)
     -- shipped default (true) does. `not db.frameFadeEnabled` would fade nobody's
     -- frames on the first login after an upgrade.
     if db.frameFadeEnabled == false then return 1 end
+    -- ★ WoW Forever: "Show When Pet Is Not Happy". Your own pet's frame takes the
+    -- reveal value while it is Content or Unhappy. PH.fadeMood is a plain number the
+    -- PetHappiness consumer caches (nil unless the option is on somewhere), so this
+    -- is one table read on every other frame.
+    if db.frameFadeRevealUnhappyPet and frame then
+        local PH = DF.PetHappiness
+        local mood = PH and PH.fadeMood
+        if mood and mood < 3 and PH.IsOwnPetFrame and PH.IsOwnPetFrame(frame) then
+            return DF:GetFrameRevealAlpha(db)
+        end
+    end
     if db.frameFadeSplitCombat then
         -- "In Instances" holds the in-combat value for the whole dungeon / raid /
         -- arena / BG visit -- the M+ complaint: combat drops between every pack, so
@@ -152,62 +163,107 @@ function DF:GetFrameBaseAlpha(db, frame)
         end
         return db.frameFadeAlphaOutOfCombat or 1
     end
+    -- ★ HOVER WITHOUT THE SPLIT: there is no in-combat value to borrow, so a hovered
+    -- frame shows at full. Same scope rule as above; the global value holds in
+    -- combat too, so so does the lift (alpha only, legal in combat).
+    if db.frameFadeHoverUsesCombat then
+        local hovered = (db.frameFadeHoverScope == "FRAME")
+            and (frame and frame.dfIsHovered)
+            or (db.frameFadeHoverScope ~= "FRAME" and AnyFrameHovered())
+        if hovered then return 1 end
+    end
     return db.frameFadeAlpha or 1
 end
+
+-- The opacity a frame is REVEALED at when something overrides Frame Fade (missing
+-- health below the Health Fade threshold, an unhappy pet): what the frame would show
+-- in combat. Split on = the in-combat value; split off or Frame Fade off = full.
+function DF:GetFrameRevealAlpha(db)
+    if not db or db.frameFadeEnabled == false then return 1 end
+    if db.frameFadeSplitCombat then return db.frameFadeAlphaInCombat or 1 end
+    return 1
+end
+
+-- The Frame Fade share of a status icon's alpha (GetStatusIconFadeAlpha). The base,
+-- except while Health Fade's "show below threshold" override is on: the frame may
+-- then be revealed by SECRET health, which these icons cannot follow, so they take
+-- the reveal value -- never vanishing from a hurt frame, at worst staying visible on
+-- a hidden healthy one while an icon is actually up.
+function DF:GetStatusIconBaseAlpha(db, frame)
+    if db and db.healthFadeEnabled and db.healthFadeRevealsFrame then
+        return DF:GetFrameRevealAlpha(db)
+    end
+    return DF:GetFrameBaseAlpha(db, frame)
+end
+
+-- One frame's Frame Fade refresh: the frame's own alpha, and the status icons, which
+-- ignore their parent's alpha and so need their own write.
+local function RefreshFrameFadeOn(f)
+    DF:UpdateFrameAppearance(f)
+    if DF.UpdateStatusIconsAppearance then DF:UpdateStatusIconsAppearance(f) end
+end
+DF.RefreshFrameFadeOn = RefreshFrameFadeOn
 
 -- Every unit frame through UpdateFrameAppearance: the combat-edge sweep and the
 -- all-frames hover scope share it. Pets are left to the next range tick.
 local function SweepFrameFade()
     if DF.IterateAllFrames then
         DF:IterateAllFrames(function(f)
-            if f and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
+            if f and f.dfIsDandersFrame then RefreshFrameFadeOn(f) end
         end)
     end
     -- Pinned through the shared walker (player-set children AND boss sets), never a
     -- hand-rolled header loop -- see IteratePinnedFrames in Frames/Headers.lua.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(function(child)
-            if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
+            if child and child.dfIsDandersFrame then RefreshFrameFadeOn(child) end
         end)
     end
     -- Standalone frames (unit frames) are in neither walk. Preview frames are test
     -- frames, and their own refresh owns them.
     for f in pairs(DF.StandaloneFrames or {}) do
-        if not f.dfPreview and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
+        if not f.dfPreview and f.dfIsDandersFrame then RefreshFrameFadeOn(f) end
     end
 end
 
 -- Hover edge for the "Show In-Combat Fade When Hovering" option. Cheap gate first --
--- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the split
--- and the hover option are both on and the player is out of combat (in combat the
--- frame already shows the in-combat value). Called AFTER the hook has written
+-- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the hover
+-- option is on (with the split on, also only out of combat: in combat the frame
+-- already shows the in-combat value). Called AFTER the hook has written
 -- frame.dfIsHovered, so the flag is the truth here.
 -- Scope "ALL": track the hovered frame globally and sweep every frame on the
 -- none->some edge immediately; the some->none edge is settled one frame later, so
 -- crossing straight from one frame onto its neighbour (leave + enter in the same
 -- frame) costs one sweep and never flashes -- the deferred leave finds a new
 -- hovered frame and does nothing.
+-- ★ WITHOUT THE SPLIT the hover option lifts to full (GetFrameBaseAlpha), and the
+-- global value holds in combat too, so the combat skip only applies with the split
+-- on -- there, in combat, the frame already shows the in-combat value.
 local function SweepIfNothingHovered()
     if DF._frameFadeHoveredFrame == nil and not UnitAffectingCombat("player") then
         SweepFrameFade()
     end
 end
+local function SweepIfNothingHoveredAnyTime()
+    if DF._frameFadeHoveredFrame == nil then SweepFrameFade() end
+end
 function DF:RefreshFrameFadeForHover(frame)
     if not (frame and frame.dfIsDandersFrame) then return end
     local db = DF:GetFrameDB(frame)
-    if not (db and db.frameFadeSplitCombat and db.frameFadeHoverUsesCombat) then return end
+    if not (db and db.frameFadeHoverUsesCombat and db.frameFadeEnabled ~= false) then return end
+    local skipInCombat = db.frameFadeSplitCombat
     if db.frameFadeHoverScope == "FRAME" then
-        if UnitAffectingCombat("player") then return end
-        if DF.UpdateFrameAppearance then DF:UpdateFrameAppearance(frame) end
+        if skipInCombat and UnitAffectingCombat("player") then return end
+        RefreshFrameFadeOn(frame)
         return
     end
     if frame.dfIsHovered then
         local wasNone = DF._frameFadeHoveredFrame == nil
         DF._frameFadeHoveredFrame = frame
-        if wasNone and not UnitAffectingCombat("player") then SweepFrameFade() end
+        if wasNone and not (skipInCombat and UnitAffectingCombat("player")) then SweepFrameFade() end
     elseif DF._frameFadeHoveredFrame == frame then
         DF._frameFadeHoveredFrame = nil
-        C_Timer.After(0, SweepIfNothingHovered)
+        C_Timer.After(0, skipInCombat and SweepIfNothingHovered or SweepIfNothingHoveredAnyTime)
     end
 end
 
@@ -307,8 +363,11 @@ function DF:GetStatusIconFadeAlpha(frame, prefix)
     local db = GetDB(frame)
     if not db then return 1.0 end
 
-    local alpha = 1.0
-    -- Dead/offline first: applies to every icon, summon included.
+    -- ★ FRAME FADE FIRST. These icons ignore their parent's alpha, so the whole-frame
+    -- cascade never reaches them: without this they stayed bright on a faded frame, and
+    -- at a 0% Frame Fade floated over an empty spot. A plain number, so combat-safe.
+    local alpha = DF:GetStatusIconBaseAlpha(db, frame)
+    -- Dead/offline next: applies to every icon, summon included.
     local dead = IsDeadOrOffline(frame)   -- stamp-aware; see the helper
     if dead and db.fadeDeadFrames then
         alpha = alpha * (db.fadeDeadIcons or 1.0)
@@ -511,6 +570,14 @@ function DF:UpdateHealthBarAppearance(frame)
             -- Standalone frames' reaction / tapped colours (Frames/Colors.lua), the
             -- same answer ApplyHealthColors paints, so the two appliers agree.
             tex:SetVertexColor(DF:GetReactionHealthColor(unit, colorMode, frame))
+        elseif colorMode == "HAPPINESS" then
+            -- WoW Forever, the unit frames pet: Pet Happiness. The tint the happiness
+            -- side stamped (DandersFrames_UnitFrames/Indicators.lua, PET HAPPINESS
+            -- COLOURS); none stamped -- a happy pet under Only When Not Happy, a
+            -- vehicle, not Forever -- is the fixed fallback, the class colour.
+            local c = frame.dfHappinessHealth
+            if not c then c = GetClassColor(frame) end
+            tex:SetVertexColor(c.r, c.g, c.b)
         else
             -- Default fallback
             tex:SetVertexColor(0, 0.8, 0)
@@ -1935,6 +2002,14 @@ function DF:UpdateFrameAppearance(frame)
     if db.oorEnabled then
         -- Element mode pins the frame so per-element fades own the look; the pin IS
         -- the base now, not a hardcoded 1.0.
+        -- ☠ BUT AN ACTIVE HEALTH FADE OWNS THE FRAME'S ALPHA. Pinning to the base here
+        -- undid the health curve on every appearance pass until the next UNIT_HEALTH --
+        -- and with Frame Fade at 0% and the health reveal on, a hurt frame blinked out.
+        -- The curve's below value already leaves range out in element mode.
+        if IsHealthFadeEnabled(db) and frame.dfHealthFadeActive and DF.ApplyHealthFadeAlpha
+            and DF:ApplyHealthFadeAlpha(frame) then
+            return
+        end
         ApplyOORAlpha(frame, true, base, base)
     else
         local inRange = GetInRange(frame)

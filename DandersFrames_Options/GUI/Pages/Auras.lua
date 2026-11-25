@@ -216,6 +216,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 if tools2.refreshStates then tools2.refreshStates() end
             end), 30)
             sortMeleeRanged.hideOn = HideSortOptions
+            sortMeleeRanged.tooltip = L["Splits damage dealers into melee and ranged, so each gets its own place in Role Priority. Your own spec is read directly, but other players are judged by class, so melee specs of hybrid classes such as Feral or Enhancement count as ranged."]
 
             local sortByClass = group:AddWidget(GUI:CreateCheckbox(parent, L["Sort by Class (within role)"], db, "sortByClass", function()
                 TriggerSortForCurrentMode()
@@ -282,6 +283,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- builder's group gate while custom sorting is off.
         local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
         selfPos.hideOn = HideSortOptions
+        selfPos.tooltip = L["Where your own frame goes. Always First or Always Last keeps you at that end, and Sorted with Group places you by the same rules as everyone else."]
         CloseSection(band)
 
         -- ===== FRAMESORT INTEGRATION GROUP (a card in column 1) =====
@@ -310,7 +312,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateLabel(parent, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
             -- Suppressed when the CARD's header carries this tick.
             if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged), 30)
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged), L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."]), 30)
             end
         end
 
@@ -324,6 +326,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- and off the corner already reads "Off".
             local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
                 db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
+                tooltip = L["Lets the FrameSort addon decide the order of your frames, for party and raid alike. The sorting options on this page are hidden while it is on."],
                 onChanged = UseFrameSortChanged,
             })
             BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })
@@ -838,6 +841,61 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             refreshStates = function() self:RefreshStates() end,
         })
         CloseSection(band)
+
+        -- ===== PET HAPPINESS (WoW Forever only, column 1 under Role Colors) =====
+        -- The three colours the hunter pet's frame takes by happiness, wherever Color
+        -- by Pet Happiness is on (Features/PetHappiness.lua, COLOUR BY HAPPINESS):
+        -- DF.db.petHappinessColors, a registered profile-root table, so its defaults,
+        -- new profiles and export / import come from the registry. One set for the
+        -- unit frames pet and the group pet frames; their pages link here.
+        -- ⚠ ITS TITLE IS THE CROSS-LINK ANCHOR those pages jump to
+        -- (UFO.PetHappinessColorsLink): keep the two in step.
+        -- ⚠ A do-block: no page-scope locals.
+        do
+            local PH = DF.IS_FOREVER and DF.PetHappiness
+            if PH and PH.COLOR_ORDER and type(DF.db.petHappinessColors) == "table" then
+                local function PetHappinessChanged()
+                    PH:ColorsChanged()
+                end
+                local function BuildPetHappinessColorsGroup(tools2)
+                    local group, parent = tools2.group, tools2.parent
+                    local store = DF.db.petHappinessColors
+                    group:AddWidget(GUI:CreateLabel(parent, L["The colors your hunter pet's frame takes when it is happy, content or unhappy, wherever Color by Pet Happiness is on."], 260), 50)
+                    local resetBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+                    GUI:StyleButton(resetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
+                    resetBtn:SetScript("OnClick", function()
+                        for _, key in ipairs(PH.COLOR_ORDER) do
+                            local d = PH.COLOR_DEFAULTS[key]
+                            store[key] = { r = d.r, g = d.g, b = d.b }
+                        end
+                        PetHappinessChanged()
+                        RepaintSwatches(tools2)
+                    end)
+                    group:AddWidget(resetBtn, 30)
+                    local labels = { happy = L["Happy"], content = L["Content"], unhappy = L["Unhappy"] }
+                    for _, key in ipairs(PH.COLOR_ORDER) do
+                        if type(store[key]) ~= "table" then
+                            local d = PH.COLOR_DEFAULTS[key]
+                            store[key] = { r = d.r, g = d.g, b = d.b }
+                        end
+                        group:AddWidget(GUI:CreateColorPicker(parent, labels[key], store, key, false,
+                            PetHappinessChanged, PetHappinessChanged, true), 30)
+                    end
+                end
+                local function PetHappinessColorsSummary()
+                    local list = {}
+                    for i, key in ipairs(PH.COLOR_ORDER) do list[i] = { key = key } end
+                    return PaletteSummary(DF.db.petHappinessColors, list, "key", function(k) return PH.COLOR_DEFAULTS[k] end)
+                end
+                local petBand = OpenSection(L["Pet Happiness"], "colors_pet_happiness", 1, PetHappinessColorsSummary, nil, nil,
+                    BuildPetHappinessColorsGroup)
+                BuildPetHappinessColorsGroup({
+                    group = petBand, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(petBand)
+            end
+        end
 
         -- ===== DISPEL TYPE COLORS (the second card in column 1) =====
         -- The one palette whose commit is not a plain repaint: both callbacks
@@ -1461,7 +1519,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 55)
 
             local classAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Health Bar Alpha"], 0, 1, 0.05, db, "classColorAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-            classAlpha.hideOn = function(d) return d.healthColorMode ~= "CLASS" and d.healthColorMode ~= "PERCENT" end
+            -- (HAPPINESS: the unit frames pet on WoW Forever, painted with this alpha too.)
+            classAlpha.hideOn = function(d)
+                return d.healthColorMode ~= "CLASS" and d.healthColorMode ~= "PERCENT" and d.healthColorMode ~= "HAPPINESS"
+            end
 
             local customColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Health Color"], db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
             customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
@@ -2016,12 +2077,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end
 
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), L["Shortens the health bar so it stops where the reduced section begins, instead of drawing the reduced section over the end of it."]), 30)
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
             GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
                 { baseSize = true, refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
-            group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), L["How the reduced section's colour mixes with what is under it. Blend draws the colour as picked, Add brightens it into a glow, and Modulate darkens what is underneath."]), 55)
 
             GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
                 { baseSize = true, refreshStates = tools2.refreshStates })
@@ -2253,8 +2314,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ★ PLACEMENT: on top of the health bar (the bar goes wherever Anchor and the offsets
-        -- put it), or along one side of the frame with the health bar stopping at it
-        -- (DF:GetResourceBarRoomEdge, DF:GetHealthBarInsets). The side fixes one axis, so Anchor, Match and the length
+        -- put it), or along one side of the frame, cut out of the health bar or with the health
+        -- bar stopping at it (DF:GetResourceBarRoomEdge, DF:GetResourceBarCutEdge). The side fixes one axis, so Anchor, Match and the length
         -- still place the bar along it. The offsets and Frame Level swap to the strip's own
         -- keys (DF:LayoutResourceBar, DF:ResolveResourceBarLevelOffset), so each placement keeps
         -- its own and neither default moves the other.
@@ -2924,7 +2985,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "absorbBarColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 1)
 
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-            add(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "absorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
+            add(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "absorbBarBlendMode", function() DF:UpdateAllFrames() end), L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."]), 55, 1)
 
             local overlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "absorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
             overlayRev.hideOn = function(d) return d.absorbBarMode ~= "OVERLAY" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
@@ -3058,7 +3119,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "healAbsorbBarColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 1)
 
             local healBlendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-            add(GUI:CreateDropdown(parent, L["Blend Mode"], healBlendOptions, db, "healAbsorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
+            add(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Blend Mode"], healBlendOptions, db, "healAbsorbBarBlendMode", function() DF:UpdateAllFrames() end), L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."]), 55, 1)
 
             local healOverlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "healAbsorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
             healOverlayRev.hideOn = function(d) return d.healAbsorbBarMode ~= "OVERLAY" end
@@ -3262,6 +3323,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
             local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
+            blendDropdown.tooltip = L["How the bar's colour mixes with the health bar under it. Normal draws the colour as picked. Additive brightens what it covers for a glowing look, and shows best over dark bars."]
             blendDropdown.disableOn = function(d) return not d.healPredictionEnabled end
 
             GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",

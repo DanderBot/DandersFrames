@@ -1952,7 +1952,8 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         frameTypeGroup:AddWidget(
-            CreateRefreshableDropdown(self.child, L["Frame Type"], frameTypeOptions, "frameType", OnFrameTypeChanged),
+            GUI:WithTooltip(CreateRefreshableDropdown(self.child, L["Frame Type"], frameTypeOptions, "frameType", OnFrameTypeChanged),
+                L["Player Frames shows the group members you choose. Friendly Boss NPCs shows friendly encounter NPCs instead, such as an ally you must keep alive during a boss fight."]),
             55
         )
 
@@ -2031,10 +2032,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         local matchOptions = { party = L["Party"], raid = L["Raid"] }
-        layoutGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Size & Spacing From"], matchOptions, "matchMode", function()
+        layoutGroup:AddWidget(GUI:WithTooltip(CreateRefreshableDropdown(self.child, L["Size & Spacing From"], matchOptions, "matchMode", function()
             UpdateHighlightLayout()
             RefreshMatchOverrides()
-        end), 55)
+        end), L["Which of your frame setups, party or raid, these frames copy their width, height, scale, spacing and border from. Change any of them below to override it for these frames only."]), 55)
 
         -- Width / Height inherit the Match mode's frame size; changing either
         -- stores a per-set override (gold star + reset-to-Match), exactly like a
@@ -2053,9 +2054,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- are created and edited on the Aura/Text Designer pages — here you only choose
         -- which one this pinned set renders with. The Text picker shows whenever the
         -- Text Designer module is loaded.
-        layoutGroup:AddWidget(CreatePinnedPresetDropdown(self.child, L["Aura Designer Template"], "aura", "auraDesignerPreset", RefreshPinnedDisplay), 55)
+        layoutGroup:AddWidget(GUI:WithTooltip(CreatePinnedPresetDropdown(self.child, L["Aura Designer Template"], "aura", "auraDesignerPreset", RefreshPinnedDisplay),
+            L["Which Aura Designer template sets the auras on these frames. Inherit uses the one your party or raid frames use, named in brackets."]), 55)
         if DF.TextDesigner then
-            layoutGroup:AddWidget(CreatePinnedPresetDropdown(self.child, L["Text Designer Template"], "text", "textDesignerPreset", RefreshPinnedDisplay), 55)
+            layoutGroup:AddWidget(GUI:WithTooltip(CreatePinnedPresetDropdown(self.child, L["Text Designer Template"], "text", "textDesignerPreset", RefreshPinnedDisplay),
+                L["Which Text Designer template sets the text on these frames. Inherit uses the one your party or raid frames use, named in brackets."]), 55)
         end
 
         -- Border Override (Stage 2b): a single toggle. Off → inherit the Based-on

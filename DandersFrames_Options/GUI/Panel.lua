@@ -304,6 +304,14 @@ local function PageRefreshStatesBody(self)
     local db = (GUI.PageBuildDb and GUI.PageBuildDb(self)) or DF.db[GUI.SelectedMode]
     if not db then return end
 
+    -- ★ THE SETTINGS FILTER GOES FIRST (Features/SearchFilter.lua). While the page
+    -- list's search box narrows the window, it marks what this page leaves out --
+    -- dfFilterHidden on the page's own widgets, the kit's filter mark on rows
+    -- inside a box -- and opens the cards it keeps, all before anything below
+    -- lays out, so the flow closes up around what it took away. With no filter it
+    -- clears whatever an earlier one left.
+    if GUI.FilterPagePass then GUI.FilterPagePass(self, db) end
+
     -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
     -- BUILDS itself at a column width has to agree with the pass that POSITIONS it
     -- about whether there are two columns at all, and two copies of this condition
@@ -353,6 +361,10 @@ local function PageRefreshStatesBody(self)
             if not shouldHide and widget.hideOn then
                 shouldHide = widget.hideOn(db)
             end
+            -- ...and the settings filter's mark (see the top of this function).
+            if not shouldHide and rawget(widget, "dfFilterHidden") then
+                shouldHide = true
+            end
             
             if shouldHide then
                 -- ...and the box is TOLD it is going, because hiding a subtree
@@ -394,6 +406,9 @@ local function PageRefreshStatesBody(self)
             -- Then check widget's own hideOn
             if not shouldHide and widget.hideOn then
                 shouldHide = widget.hideOn(db)
+            end
+            if not shouldHide and rawget(widget, "dfFilterHidden") then
+                shouldHide = true
             end
             
             if shouldHide then
@@ -2524,7 +2539,11 @@ function DF:CreateGUI()
     local navRight = SnapLen(tabFrame, -GUI.Scroll.gutter) or -GUI.Scroll.gutter
     local tabScrollStartY = -navPad
     if DF.Search then
-        searchBar = DF.Search:CreateSearchBar(tabFrame)
+        -- ★ THE PAGE LIST'S BOX FILTERS IN PLACE (Features/SearchFilter.lua): it
+        -- narrows this list and the page to what matches, rather than swapping the
+        -- page for results. Home's box keeps the results view.
+        searchBar = DF.Search.CreateFilterBar and DF.Search:CreateFilterBar(tabFrame)
+            or DF.Search:CreateSearchBar(tabFrame)
         searchBar:SetPoint("TOPLEFT", navPad, -navPad)
         searchBar:SetPoint("TOPRIGHT", navRight, -navPad)
         tabScrollStartY = SnapLen(tabFrame, -36) or -36
@@ -3850,12 +3869,19 @@ function DF:CreateGUI()
         -- in raid), and a caption only where one of those follows it. A category
         -- left with nothing is hidden, header and all: GLOBAL has no Bars, Party
         -- and Raid no Debug.
+        -- ★ THE SETTINGS FILTER (Features/SearchFilter.lua): while the page list's
+        -- search box holds a query, a row with nothing matching on its page is left
+        -- out exactly like a row of another tab, and every category it leaves rows
+        -- in is laid out open (without touching the saved fold).
+        local navFilter = GUI.FilterNavHides and GUI.FilterNavPrepare and GUI.FilterNavPrepare()
+            and GUI.FilterNavHides or nil
+
         local function ViewRows(rows)
             local out, caption = {}, nil
             for _, btn in ipairs(rows) do
                 if btn.isNavCaption then
                     caption = btn
-                elseif GUI:IsTabInView(btn) then
+                elseif GUI:IsTabInView(btn) and not (navFilter and navFilter(btn)) then
                     if caption then out[#out + 1] = caption; caption = nil end
                     out[#out + 1] = btn
                 end
@@ -3876,7 +3902,7 @@ function DF:CreateGUI()
                     cat:SetPoint("TOPRIGHT", 0, y)
                     cat:SetHeight(catStride)
                     y = y - catStride
-                    if cat.expanded then
+                    if cat.expanded or navFilter then
                         for _, btn in ipairs(shown) do
                             local stride = btn.isNavCaption and capStride or tabStride
                             btn:Show()
@@ -3894,6 +3920,7 @@ function DF:CreateGUI()
         -- Update scroll child height
         local totalHeight = math.abs(y) + 20
         GUI.tabContainer:SetHeight(totalHeight)
+        if GUI.FilterNavDone then GUI.FilterNavDone(y) end
         -- A module's rows may carry a state glyph after their label (def.pageMark,
         -- GUI/ModuleRegistry.lua). Repainted with every layout so a row that comes
         -- into view shows its current state.

@@ -758,7 +758,22 @@ end
 function DF:ApplyPetHealthColor(frame, db, ownerUnit, unit, test)
     if not (frame and frame.healthBar and db) then return end
 
-    if db.petHealthColorMode == "CLASS" then
+    local mode = db.petHealthColorMode
+    -- WoW Forever: Pet Happiness. The tint the happiness core stamped on the frame
+    -- (Features/PetHappiness.lua, COLOUR BY HAPPINESS) -- only ever on the frame
+    -- showing your own pet. No stamp (a happy pet under Only When Not Happy,
+    -- someone else's pet, or not Forever): the normal health colour, the fixed
+    -- fallback. Every other mode never reaches this.
+    if mode == "HAPPINESS" then
+        local c = frame.dfHappinessHealth
+        if c then
+            frame.healthBar:SetStatusBarColor(c.r, c.g, c.b)
+            return
+        end
+        mode = "HEALTH"
+    end
+
+    if mode == "CLASS" then
         local class = test and test.class
         if not class and ownerUnit then
             local _, c = UnitClass(ownerUnit)
@@ -771,7 +786,7 @@ function DF:ApplyPetHealthColor(frame, db, ownerUnit, unit, test)
                 return
             end
         end
-    elseif db.petHealthColorMode == "HEALTH" then
+    elseif mode == "HEALTH" then
         if test then
             local tex = frame.healthBar:GetStatusBarTexture()
             if tex then
@@ -799,7 +814,7 @@ function DF:ApplyPetHealthColor(frame, db, ownerUnit, unit, test)
         -- Fallback if the curve is unavailable or failed - just use green
         frame.healthBar:SetStatusBarColor(0, 0.8, 0)
         return
-    elseif db.petHealthColorMode == "CUSTOM" then
+    elseif mode == "CUSTOM" then
         local c = db.petHealthColor or {r = 0, g = 0.8, b = 0}
         frame.healthBar:SetStatusBarColor(c.r, c.g, c.b)
         return
@@ -964,6 +979,11 @@ function DF:ApplyPetFrameStyle(frame)
     -- becomes worth its own resolver.
     if frame.border then
         DF.Border:Apply(frame.border, DF.Border:BuildSpec(db, "pet"))
+        -- WoW Forever: a standing Pet Happiness tint goes back over the border
+        -- just repainted (nil on every other frame).
+        if frame.dfHappinessBorder and DF.PetHappiness then
+            DF.PetHappiness.PaintBorder(frame.border, frame.dfHappinessBorder, db.petBorderColor)
+        end
     end
     
     -- Name text styling - use SafeSetFont like main frames
@@ -980,7 +1000,8 @@ function DF:ApplyPetFrameStyle(frame)
     frame.nameText:SetPoint(nameAnchor, frame.healthBar, nameAnchor, nameX, nameY)
     
     -- Name text color
-    local nameColor = db.petNameColor or {r = 1, g = 1, b = 1}
+    -- (WoW Forever: a standing Pet Happiness tint wins; nil on every other frame.)
+    local nameColor = frame.dfHappinessName or db.petNameColor or {r = 1, g = 1, b = 1}
     frame.nameText:SetTextColor(nameColor.r, nameColor.g, nameColor.b)
     
     -- Health text styling
@@ -1001,6 +1022,9 @@ function DF:ApplyPetFrameStyle(frame)
         local healthColor = db.petHealthTextColor or {r = 1, g = 1, b = 1}
         frame.healthText:SetTextColor(healthColor.r, healthColor.g, healthColor.b)
     end
+
+    -- WoW Forever: your hunter pet's happiness face (Features/PetHappiness.lua).
+    if DF.IS_FOREVER and DF.PetHappiness then DF.PetHappiness:UpdateGroupFrame(frame) end
 end
 
 -- `testName` is the only preview fork and it is pure DATA: the name a fabricated pet
@@ -1060,6 +1084,8 @@ function DF:UpdatePetFrame(frame)
         DF:UpdatePetFrameTestMode(frame)
         DF:SetPetFrameVisible(frame, true)
         DF:UpdatePetAuras(frame)
+        -- WoW Forever: the happiness face's sample on the player's slot.
+        if DF.IS_FOREVER and DF.PetHappiness then DF.PetHappiness:UpdateGroupFrame(frame) end
         return
     end
 
@@ -1076,6 +1102,9 @@ function DF:UpdatePetFrame(frame)
         DF:UpdatePetPower(frame)
         DF:SetPetFrameVisible(frame, true)
         DF:UpdatePetAuras(frame)
+        -- WoW Forever: the happiness face. ApplyPetFrameStyle stops in combat, and
+        -- the face is not protected, so it is painted here too.
+        if DF.IS_FOREVER and DF.PetHappiness then DF.PetHappiness:UpdateGroupFrame(frame) end
     else
         DF:SetPetFrameVisible(frame, false)
     end

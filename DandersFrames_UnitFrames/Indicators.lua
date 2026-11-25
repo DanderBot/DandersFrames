@@ -48,9 +48,12 @@ IN.ICONS = {
     resting = { player = true },
     pvp = { player = true, target = true, focus = true },
     classification = { target = true, focus = true, boss = true },
+    -- WoW Forever only: the hunter pet's happiness face (DF.PetHappiness).
+    happiness = DF.IS_FOREVER and { pet = true } or nil,
 }
 -- db key prefix per icon.
-IN.PREFIX = { resting = "restingIcon", pvp = "pvpIcon", classification = "classification" }
+IN.PREFIX = { resting = "restingIcon", pvp = "pvpIcon", classification = "classification",
+              happiness = "happinessIcon" }
 -- restingIconSize that draws the ZZZ at the party player frame's scale.
 IN.RESTING_BASE_SIZE = 16
 
@@ -98,6 +101,8 @@ function IN:Attach(f)
                         if db then ind:SetGlowRects(IN.GlowRects(f, db)) end
                     end)
                 end
+            elseif key == "happiness" then
+                icons[key] = IN.NewHappinessIcon(host, f)
             else
                 icons[key] = NewIcon(host)
             end
@@ -242,13 +247,18 @@ function IN:Layout(f)
                 icon:SetSize(size, size)
             end
             icon:ClearAllPoints()
-            local point = K.Point(db[pre .. "Anchor"], "TOPRIGHT")
-            icon:SetPoint(point, f, point, tonumber(db[pre .. "X"]) or 0, tonumber(db[pre .. "Y"]) or 0)
+            if key == "happiness" then
+                IN.PlaceHappiness(icon, f, db)
+            else
+                local point = K.Point(db[pre .. "Anchor"], "TOPRIGHT")
+                icon:SetPoint(point, f, point, tonumber(db[pre .. "X"]) or 0, tonumber(db[pre .. "Y"]) or 0)
+            end
             if key == "classification" then
                 K.Font(icon.text, db.statusIconFont, size, "OUTLINE", { r = 1, g = 0.82, b = 0 })
             end
         end
     end
+    if icons.happiness then IN.WatchHappiness(f, db) end
     if not f.dfUFPreview then IN:Update(f) end
 end
 
@@ -371,6 +381,14 @@ function IN:Update(f)
         local c = exists and IN:Classification(unit) or nil
         IN.PaintDecorations(icons, db, c)
     end
+    if icons.happiness then
+        -- Only while the frame shows the pet itself (in a vehicle it shows you).
+        local mood, rate
+        local face, tints = IN:Enabled(db, "happiness"), IN.WantsTints(db)
+        if (face or tints) and unit == "pet" and exists then mood, rate = IN.HappinessMood() end
+        IN.PaintHappiness(icons.happiness, face and mood or nil, rate, db, false)
+        IN.HappinessTints(f, db, tints and mood or nil)
+    end
 end
 
 function IN:Refresh(f)
@@ -425,6 +443,142 @@ function IN:Preview(f)
         if data then c = data.classification end
         IN.PaintDecorations(icons, db, c)
     end
+    if icons.happiness then
+        -- The sample (an unhappy pet losing loyalty), whatever your class, so it
+        -- can be set up before you have one.
+        local data = f.dfTestData
+        local PH = DF.PetHappiness
+        local mood = (data and data.petHappiness) or (PH and PH.MOCK.mood) or 1
+        local rate = (data and data.petLoyaltyRate) or (PH and PH.MOCK.rate) or -1
+        IN.PaintHappiness(icons.happiness, IN:Enabled(db, "happiness") and mood or nil, rate, db, true)
+        IN.HappinessTints(f, db, IN.WantsTints(db) and mood or nil)
+    end
+end
+
+-- ============================================================
+-- PET HAPPINESS (WoW Forever only)
+-- Blizzard's happy / content / unhappy face for your hunter pet, beside the pet
+-- frame (outside its right edge by default). DandersFrames' shared core
+-- (Features/PetHappiness.lua) reads the answer, owns the events and builds the
+-- hover tooltip; this side places and paints the icon.
+-- Position: one of the nine points inside the frame, or OUTSIDE_<side>: the
+-- icon's facing edge on the frame's <side> edge, centred along it.
+-- ============================================================
+function IN.PlaceHappiness(icon, f, db)
+    local PH = DF.PetHappiness
+    if not PH then return end
+    -- The shared placement (Features/PetHappiness.lua): inside, or OUTSIDE_<side>.
+    PH:Place(icon, f, db and db.happinessIconAnchor, db and db.happinessIconX, db and db.happinessIconY)
+    -- Hover shows the tooltip; clicks never stop at the icon.
+    PH.SetMouse(icon, not (db and db.happinessIconTooltip == false))
+end
+
+function IN.NewHappinessIcon(host, f)
+    local icon = NewIcon(host)
+    icon:SetScript("OnEnter", function(self)
+        local PH = DF.PetHappiness
+        local db = K.DB(f)
+        if not PH or (db and db.happinessIconTooltip == false) then return end
+        PH:ShowTooltip(self, f.dfUFPreview and true or false)
+    end)
+    icon:SetScript("OnLeave", function()
+        local PH = DF.PetHappiness
+        if PH then PH:HideTooltip() end
+    end)
+    return icon
+end
+
+-- The pet's mood (1..3) and loyalty rate, or nil: no pet, not a hunter pet,
+-- or unreadable.
+function IN.HappinessMood()
+    local PH = DF.PetHappiness
+    if not PH then return nil end
+    local mood, _, rate = PH:Read()
+    return mood, rate
+end
+
+-- The face (painted only on a change of mood) and the loyalty arrow on its
+-- corner. Hide While Happy hides both, except in test mode (`preview`).
+function IN.PaintHappiness(icon, mood, rate, db, preview)
+    local PH = DF.PetHappiness
+    local dir
+    if PH and PH.Resolve then
+        mood, dir = PH.Resolve(mood, rate, db and db.happinessIconHideHappy, db and db.happinessIconTrend, preview)
+        PH.PaintBadge(icon, mood and dir or nil, db and tonumber(db.happinessIconSize) or 16)
+    end
+    if not mood then
+        icon.dfMood = nil
+        icon:Hide()
+        return
+    end
+    if icon.dfMood ~= mood then
+        if not (PH and PH:SetArt(icon.tex, mood)) then icon:Hide(); return end
+        icon.dfMood = mood
+    end
+    icon.text:Hide()
+    icon.tex:Show()
+    icon:Show()
+end
+
+-- The live pet frame asks the core for its events while the icon is on or a
+-- target is coloured by happiness.
+function IN.WatchHappiness(f, db)
+    local PH = DF.PetHappiness
+    if not PH or f.dfUFPreview then return end
+    PH:SetConsumer("uf_pet", IN:Enabled(db, "happiness") or IN.WantsTints(db), function()
+        if f:IsVisible() then IN:Update(f) end
+    end)
+end
+
+-- ============================================================
+-- PET HAPPINESS COLOURS (WoW Forever only)
+-- The pet frame's border, name and health bar in the mood's colour (the shared
+-- core's COLOUR BY HAPPINESS: one set of colours per profile, on the Colors
+-- page). Settings: happinessColorBorder / happinessColorName /
+-- happinessColorOnlyUnhappy, and the Health page's healthColorMode = "HAPPINESS".
+-- The tints are worked out here when the answer changes and stamped on the
+-- frame; the painters read the stamp:
+--   health  DF:UpdateHealthBarAppearance's HAPPINESS branch (else class colour)
+--   border  the frame border's own SetColor; DF:ApplyFrameBorder repaints the
+--           normal border and lays a standing tint back over it
+--   name    the Text Designer's name elements (Render.lua updateOne)
+-- ============================================================
+function IN.WantsTints(db)
+    local PH = DF.PetHappiness
+    return PH and PH.WantsTints and db
+        and PH.WantsTints(db.happinessColorBorder, db.happinessColorName, db.healthColorMode) or false
+end
+
+IN.HAPPINESS_SIDE = {
+    health = function(f)
+        if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(f) end
+    end,
+    border = function(f, c)
+        if not f.border then return end
+        if c then
+            local db = K.DB(f)
+            DF.PetHappiness.PaintBorder(f.border, c, db and db.frameBorderColor)
+        elseif DF.ApplyFrameBorder then
+            DF:ApplyFrameBorder(f, K.DB(f))
+        end
+    end,
+    name = function(f)
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(f, "name") end
+    end,
+    refresh = function(f)
+        if f.dfUFPreview then IN:Preview(f) else IN:Update(f) end
+    end,
+}
+
+-- mood: the pet's (nil: no pet, a vehicle, or nothing asks for it).
+function IN.HappinessTints(f, db, mood)
+    local PH = DF.PetHappiness
+    if not (PH and PH.SetTints) then return end
+    local tint = db and PH.Tint(mood, db.happinessColorOnlyUnhappy)
+    local health = (tint and db.healthColorMode == "HAPPINESS") and tint or nil
+    local border = (tint and db.happinessColorBorder) and tint or nil
+    local name = (tint and db.happinessColorName) and tint or nil
+    PH.SetTints(f, IN.HAPPINESS_SIDE, health, border, name)
 end
 
 -- ============================================================

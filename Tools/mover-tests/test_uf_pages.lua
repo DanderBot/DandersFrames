@@ -118,6 +118,16 @@ local function NewGUI()
     function G:EnterView(g) G.GlobalView = g and true or false end
     G.SelectTab = function(n) calls[#calls + 1] = "tab:" .. tostring(n); G.CurrentPageName = n end
     function G:CreatePopoutPageTools() return nil end
+    -- The REAL GUI:WithTooltip, cut out of SettingsWidgets.lua: the pages wrap inline
+    -- widgets in it, so a stand-in here would test the stand-in.
+    do
+        local src = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n")
+        local a = src:find("function GUI:WithTooltip(w, text)", 1, true)
+        local b = a and src:find("\nend\n", a, true)
+        local fn = a and b and loadstring("local GUI = ...\n" .. src:sub(a, b + 4), "@SettingsWidgets.lua:WithTooltip")
+        check(fn ~= nil, "GUI:WithTooltip can be cut out of SettingsWidgets.lua")
+        if fn then fn(G) end
+    end
     DF.GUI = G
     DF.GUIPageProviders = {}
     load_options_file_into("GUI/ModuleRegistry.lua", NS)
@@ -469,11 +479,12 @@ do
         Add(row, 25, 2)
         for _, key in ipairs({ "frame_size", "frame_groupvisibility", "frame_border", "frame_bordershadow",
                                "frame_fade", "frame_permanentmover" }) do
+            -- frame_fade is asked to prove the Frame page no longer draws it (it moved to Fading)
             asked[key] = self.sectionFilter(key)
         end
         local band = Frame()
         band.groupChildren = {}
-        for _, dbKey in ipairs({ "frameWidth", "frameSpacing", "frameFadeSplitCombat" }) do
+        for _, dbKey in ipairs({ "frameWidth", "frameSpacing" }) do
             local w = Frame()
             local entry = { dbKey = dbKey }
             if Search.EntryFilter and Search.EntryFilter(entry) == false then entry.dfFilteredOut = true end
@@ -525,13 +536,12 @@ do
     eq(page.modeSeen, "party", "the party builder draws its PARTY variant")
     eq(asked.frame_size, true, "ToT: Frame Size shows")
     eq(asked.frame_border, true, "ToT: Border shows")
-    eq(asked.frame_fade, true, "ToT: Frame Fade shows")
+    eq(asked.frame_fade, false, "ToT: Frame Fade is not on the Frame page any more (it moved to Fading)")
     eq(asked.frame_bordershadow, false, "ToT: no Border Shadow (not in its relevance)")
     eq(asked.frame_groupvisibility, false, "a group-only card is filtered off")
     eq(asked.frame_permanentmover, false, "Permanent Mover is filtered off (the mover owns position)")
     check(built.frameWidth.hideOn == nil, "a relevant control stays")
     check(built.frameSpacing.hideOn and built.frameSpacing.hideOn(), "Frame Spacing is hidden for every unit")
-    check(built.frameFadeSplitCombat.hideOn and built.frameFadeSplitCombat.hideOn(), "a control not relevant to ToT is hidden")
     check(Search.EntryFilter == nil, "the search filter is lifted after the build")
     check(added[1].w.dfLinkBanner, "the page opens with the link banner...")
     eq(added[1].col, "both", "...across both columns")
@@ -590,6 +600,13 @@ do
     local castbar
     for _, c in ipairs(checks) do if c.key == "hideBlizzardCastbar" then castbar = c end end
     check(castbar and castbar.db == DF.db.unitframes.global, "Settings: Hide Blizzard Player Cast Bar is module-wide")
+    check(castbar and type(castbar.tooltip) == "string" and castbar.tooltip:find("follows your DandersFrames player cast bar", 1, true),
+          "Settings: Hide Blizzard Player Cast Bar explains that it follows ours until set")
+    local tipped = 0
+    for _, s in ipairs(sources) do
+        if type(s.tooltip) == "string" and s.tooltip:find("Who draws this frame.", 1, true) then tipped = tipped + 1 end
+    end
+    eq(tipped, #sources, "Settings: every Frame Source dropdown carries the one shared tooltip")
     -- Edit in Mover without the mover: DF's "DandersMover is disabled" line.
     says = {}
     rows[1].buttons[1].onClick()
@@ -625,8 +642,8 @@ do
         eq(table.concat(cardKeys, ","), "uf_vis_show,uf_vis_hide", unit .. " Visibility: Show When, Hide When")
         check(added[2].w.dfUnitRow ~= nil and added[1].w.dfLinkBanner, unit .. " Visibility: the link banner, then the unit row (Reset / Copy)")
         local want = (unit == "player")
-            and "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHasTarget,visHasEnemyTarget,visHidePetBattle,visHideVehicle,visHideMounted,visHideSkyriding"
-            or "visAlways,visCombat,visNoCombat,visGroup,visSolo,visInstance,visHidePetBattle,visHideMounted,visHideSkyriding"
+            and "visAlways,visCombat,visNoCombat,visGroup,visParty,visRaid,visSolo,visInstance,visResting,visHasTarget,visHasEnemyTarget,visHidePetBattle,visHideVehicle,visHideMounted,visHideSkyriding,visHideResting"
+            or "visAlways,visCombat,visNoCombat,visGroup,visParty,visRaid,visSolo,visInstance,visResting,visHidePetBattle,visHideMounted,visHideSkyriding,visHideResting"
         eq(table.concat(keys, ","), want, unit .. " Visibility: its controls")
         local combat = checks[2]
         check(combat and combat.disableOn, unit .. ": conditions grey while Always is on")
@@ -825,6 +842,44 @@ do
     check(w and w.hideOn and w.hideOn({ classPowerColorMode = "CLASS" }) and not w.hideOn({ classPowerColorMode = "CUSTOM" }),
           "Class Power: Custom Color shows only in Custom mode")
 
+    print("-- Tooltips on the settings a label cannot explain")
+    local function tipOf(w) return w and type(w.tooltip) == "string" and w.tooltip ~= "" end
+    local function followTip()
+        for _, x in ipairs(built) do if x.label == "Follow the Frame" then return tipOf(x) end end
+    end
+    for _, k in ipairs({ "classPowerMode", "classPowerRunes", "classPowerStagger", "classPowerDetached",
+                         "classPowerColorMode", "classPowerChargedColor" }) do
+        check(tipOf(byKey[k]), "Class Power: " .. k .. " has a tooltip")
+    end
+    check(followTip(), "Class Power: Follow the Frame has a tooltip")
+    check(not tipOf(byKey.classPowerHideEmpty), "...and a self-explaining tick has none")
+    cards, keys, byKey = BuildPage("player", "castbar")
+    check(tipOf(byKey.castbarLatency) and tipOf(byKey.castbarDetached), "Cast Bar: Show Latency, Detach")
+    check(followTip(), "Cast Bar: Follow the Frame (the shared detached controls)")
+    check(not tipOf(byKey.castbarHideIdle), "...Hide When Not Casting needs none")
+    cards, keys, byKey = BuildPage("target", "castbar")
+    check(tipOf(byKey.castbarKickTick) and tipOf(byKey.castbarPriorityHighlight), "target: Kick-Ready Mark, Glow Important Spells")
+    check(tipOf(byKey.castbarKickNotReadyColor), "target: the Kick Not Ready colour")
+    check(not tipOf(byKey.castbarColor), "...the plain colours need none")
+    cards, keys, byKey = BuildPage("player", "portrait")
+    check(tipOf(byKey.portraitNpcMode) and tipOf(byKey.portraitSize), "Portrait: For NPCs Use, Size")
+    cards, keys, byKey = BuildPage("boss", "bosslayout")
+    check(tipOf(byKey.bossUnitsPerRow), "Boss Layout: Units Per Row")
+    -- Every string the module's pages ask for ships in enUS.
+    do
+        local loc = df_file_source("Locales/enUS.lua")
+        local have, missing, seen = {}, 0, {}
+        for k in loc:gmatch('L%["([^"]+)"%]%s*=%s*true') do have[k] = true end
+        for k in options_file_source("UnitFrames/Pages.lua"):gmatch('L%["([^"]+)"%]') do
+            if not seen[k] and not have[k] then
+                missing = missing + 1
+                check(false, 'locale: UnitFrames/Pages.lua asks for L["' .. k .. '"], which enUS does not ship')
+            end
+            seen[k] = true
+        end
+        eq(missing, 0, "locale: every string the Unit Frames pages ask for exists in enUS")
+    end
+
     print("-- Stage F pages: Portrait")
     cards, keys, byKey = BuildPage("player", "portrait")
     eq(cards, "uf_po_settings,uf_po_position,uf_po_look,uf_po_border", "Portrait: Settings, Size & Position, Look, Border")
@@ -867,6 +922,8 @@ do
         for _, w in ipairs(built) do keys[#keys + 1] = w.key; byKey[w.key] = w end
         eq(added[1] and added[1].w.cardKey, "resource_detached", "Detach: one card, keyed as the page data lists it")
         eq(toggles.resource_detached and toggles.resource_detached.key, "resourceBarDetached", "...its switch is the header tick")
+        check(toggles.resource_detached and type(toggles.resource_detached.tooltip) == "string",
+              "...with its own tooltip (this Detach is not the mover one)")
         eq(table.concat(keys, ","), "resourceBarDetachedMatchWidth,resourceBarDetachedWidth,resourceBarDetachedHeight,"
             .. "resourceBarDetachedAnchor,resourceBarDetachedX,resourceBarDetachedY",
             "...Match Frame Width, Width, Height, Anchor, Offset X, Offset Y")
@@ -1088,8 +1145,8 @@ do
     eq(cards, "uf_icon_pvp,uf_icon_classification,uf_icon_dragon,uf_icon_classborder,uf_icon_classcolors",
        "target Unit Icons: PvP, Elite / Rare, Elite Dragon, Classification Border, Classification Colors")
     check(has(keys, "classificationStyle"), "...Elite / Rare: icon or text")
-    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification,classDragon,classBorder",
-       "Unit Icons: Reset / Copy act on the three icons' keys and the dragon / border")
+    eq(table.concat(UFO.Prefixes("unitIcons"), ","), "restingIcon,pvpIcon,classification,classDragon,classBorder,happinessIcon,happinessColor",
+       "Unit Icons: Reset / Copy act on the icons' keys (Pet Happiness and its colours included) and the dragon / border")
     eq(toggles.uf_icon_dragon and toggles.uf_icon_dragon.key, "classDragonEnabled", "Elite Dragon: its tick in the header")
     eq(toggles.uf_icon_classborder and toggles.uf_icon_classborder.key, "classBorderEnabled", "Classification Border: likewise")
     for _, k in ipairs({ "classDragonAnchor", "classDragonSize", "classDragonSide", "classDragonX", "classDragonY",
@@ -1293,7 +1350,20 @@ do
         bars_health = heldSP.bars_health, general_frame = heldSP.general_frame,
         indicators_highlights = { "selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro" },
         auras_debuffs = { "debuff", "showDebuffs", "directDebuff", "debuffBlacklist" },
+        -- "frameFade" out-ranks "frame": the Frame Fade card lives on the Fading page.
+        display_fading = { "frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf" },
     }
+    -- The shipped longest-prefix resolver (Core/Profile.lua), lifted from source so a
+    -- copy here resolves ownership exactly as the addon does.
+    local heldOwns, heldReg = DF.SectionOwnsKey, DF.SectionRegistry
+    do
+        local body = df_file_source("Core/Profile.lua"):gsub("\r\n", "\n")
+            :match("function DF:SectionOwnsKey%(prefixes, key%)\n(.-)\nend\n")
+        check(body ~= nil, "copy: the shipped SectionOwnsKey is liftable")
+        local mk = body and (loadstring or load)("local DF = ...\nreturn function(self, prefixes, key)\n" .. body .. "\nend", "@SectionOwnsKey")
+        DF.SectionOwnsKey = mk and mk(DF)
+        DF.SectionRegistry = DF.SECTION_PREFIXES
+    end
     for k in pairs(UFO.prefixes) do UFO.prefixes[k] = nil end
     UF.Links.ResetCaches()
     local refreshes = 0
@@ -1328,7 +1398,7 @@ do
     eq(skip("frame", "target", "frameBorderSize"), nil, "copied: a border's thickness is look")
     eq(skip("debuffs", "player", "debuffStackScale"), nil, "copied: the text scale inside an icon is look")
     eq(skip("health", "target", "healthColorStops"), nil, "copied: the health gradient")
-    eq(skip("frame", "targettarget", "frameFadeSplitCombat"), "hidden", "skip: a control the unit's page hides")
+    eq(skip("fading", "targettarget", "frameFadeSplitCombat"), "hidden", "skip: a control the unit's page hides")
     eq(skip("frame", "targettarget", "frameBorderShadowEnabled"), "hidden", "skip: a card the unit's page hides")
     eq(skip("frame", "player", "frameBorderShadowEnabled"), nil, "...copied where the card shows")
     eq(skip("highlights", "target", "aggroHighlightMode"), "meaning", "skip: aggro on an enemy frame")
@@ -1364,7 +1434,7 @@ do
     eq(tot.frameHeight, nil, "...either way")
     eq(tot.permanentMoverColor, nil, "...nor the group mover")
     eq(tot.frameBorderShadowEnabled, nil, "...nor a card ToT does not have")
-    eq(tot.frameFadeSplitCombat, nil, "...nor a control ToT does not have")
+    eq(tot.frameFadeSplitCombat, nil, "...nor Frame Fade (its keys belong to the Fading page now)")
     check(tot.frameBorderColor and tot.frameBorderColor.r == 0.2 and tot.frameBorderColor ~= party.frameBorderColor,
           "...but the border colour, copied")
     for k in pairs(tot) do tot[k] = nil end
@@ -1430,6 +1500,7 @@ do
         for k in pairs(t) do t[k] = nil end
     end
     DF.PartyDefaults, DF.SECTION_PREFIXES = heldPD, heldSP
+    DF.SectionOwnsKey, DF.SectionRegistry = heldOwns, heldReg
     DF.GetDB, DF.SettingsUndo, UF.RequestRefresh = heldGetDB, heldSU, heldRefresh
     for k in pairs(UFO.prefixes) do UFO.prefixes[k] = nil end
     UF.Links.ResetCaches()
@@ -1942,8 +2013,10 @@ do
           "Search: a filtered entry is marked before anything else can return early")
     check(search:find("page.searchTabLabel or page.tabLabel or tabName", 1, true),
           "Search: the index labels a page by its search label")
-    check(search:find("local db = EntryDB(entry)", 1, true) and not search:find("local db = DF.db[DF.GUI.SelectedMode]", 1, true),
-          "Search: an inline result control edits its page's own table")
+    -- Results are "go to setting" rows now (no inline controls bound to a table):
+    -- a unit frame result lands on that unit's page (test_search_home.lua).
+    check(not search:find("local db = DF.db[DF.GUI.SelectedMode]", 1, true) and search:find("function Search:ResultRowModel(entry)", 1, true),
+          "Search: results are go-to rows, never controls bound to the mode table")
     local panel = options_file_source("GUI/Panel.lua")
     check(panel:find("if page then page.dfBuilder = builderFunc end", 1, true), "Panel: a page keeps its builder")
     check(panel:find("Search.CurrentTabLabel = self.searchTabLabel or self.tabLabel or self.tabName", 1, true),

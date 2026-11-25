@@ -262,7 +262,8 @@ function GUI:CreateHeader(parent, text, opts)
     
     -- SEARCH: Track current section
     if DF.Search and not (opts and opts.keepSearchSection) then
-        DF.Search:SetCurrentSection(text)
+        -- The header is handed over too: the section is findable by its title.
+        DF.Search:SetCurrentSection(text, container)
     end
 
     return container
@@ -1063,9 +1064,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- it was.
     if pinRightInset then section:SetHeaderRightInset(pinRightInset) end
 
-    -- SEARCH: Track current section
+    -- SEARCH: Track current section (and register the card itself, by title)
     if DF.Search then
-        DF.Search:SetCurrentSection(text)
+        DF.Search:SetCurrentSection(text, section)
     end
 
     -- ============================================================
@@ -1135,8 +1136,27 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     --
     -- Returns whether the section actually MOVED, so a caller can skip the page
     -- pass entirely when nothing did.
+    -- The chevron and the card's fold, drawn from `expanded` as it stands. Shared
+    -- with the settings filter (Features/SearchFilter.lua), which opens a card for
+    -- as long as a search is narrowing the page WITHOUT going through SetExpanded,
+    -- so nothing it opens is ever saved.
+    section.ShowFold = function(self)
+        if self.expanded then
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
+        else
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
+        end
+        if self._ApplyCardFold then self:_ApplyCardFold() end
+    end
+
     section.SetExpanded = function(self, want)
         want = want and true or false
+        -- A card the filter opened, now moved by the user: theirs from here on.
+        -- The filter stops restoring it, and this press is saved like any other.
+        if self.dfFilterOpened then
+            self.dfFilterOpened = nil
+            self.dfFilterUser = true
+        end
         if self.expanded == want then return false end
         self.expanded = want
         if self.expanded then
@@ -1200,7 +1220,13 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         section.fixedRowHeight = true
         section._ApplyCardFold = function(self)
             local body = self.cardBody
-            local open = (body and self.expanded) and true or false
+            -- ☠ A BODY THE SEARCH FILTER TOOK OFF THE PAGE IS NO BODY. The card is
+            -- drawn down to the body's bottom edge, and a hidden body keeps the
+            -- place it last had: the card stretched into a tall empty panel with
+            -- the next card's header inside it (a card kept by its header tick
+            -- alone while its rows were filtered out). Features/SearchFilter.lua
+            -- re-folds the card whenever that mark moves.
+            local open = (body and self.expanded and not rawget(body, "dfFilterHidden")) and true or false
             cardRect:ClearAllPoints()
             cardRect:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
             cardRect:SetPoint("BOTTOMRIGHT", open and body or self, "BOTTOMRIGHT", 0, 0)
@@ -2534,7 +2560,34 @@ function GUI:CreateCheckRow(parent, opts)
             on = on and true or false
             baseSetChecked(self, on)
             self.check:SetShown(on)
+            -- A plain set ends any partial state (SetMixed below).
+            self.mixed = nil
+            self.check:SetAlpha(self.blockedReason and 0.4 or 1)
         end
+
+        -- PARTIAL ("some but not all"): a parent row over members, e.g. click-
+        -- casting's Group Frames over Party and Raid. Drawn as the check, dimmed;
+        -- the native checked state is left false so a click means "turn all on".
+        -- Manual rows only -- the native texture has no partial look.
+        function cb:SetMixed(on)
+            if not on then return end
+            baseSetChecked(self, false)
+            self.mixed = true
+            self.check:Show()
+            self.check:SetAlpha(0.4)
+        end
+    end
+
+    -- BLOCKED: shown greyed with the reason in its tooltip, and deaf to clicks.
+    -- The value stays as it is (nothing is cleared), so lifting the block gives
+    -- the row back exactly as it was. Not :Disable() -- a disabled button gets
+    -- no OnEnter, and the reason has to be readable on hover.
+    -- reason = a string to block, nil to unblock.
+    function cb:SetBlocked(reason)
+        self.blockedReason = reason
+        local col = reason and C_TEXT_DIM or (opts.labelColor or C_TEXT)
+        self.label:SetTextColor(col.r or col[1], col.g or col[2], col.b or col[3])
+        self.check:SetAlpha((reason or self.mixed) and 0.4 or 1)
     end
 
     -- Keep the checked state and the texture in step. Equivalent to SetChecked above on
@@ -2562,7 +2615,18 @@ function GUI:CreateCheckRow(parent, opts)
     -- A call site that genuinely defers its write simply passes no `set`.
     cb:SetScript("OnClick", function(self)
         local val = self:GetChecked() and true or false
-        if self.manualCheck then self.check:SetShown(val) end
+        if self.blockedReason then
+            -- Undo the client's own toggle; a blocked row keeps its value.
+            local wasMixed = self.mixed
+            self:SetChecked(not val)
+            if wasMixed and self.SetMixed then self:SetMixed(true) end
+            return
+        end
+        if self.manualCheck then
+            self.check:SetShown(val)
+            self.mixed = nil
+            self.check:SetAlpha(1)
+        end
         -- Before set/onClick so the click still sounds if a handler errors. Opt-in:
         -- the settings pages deliberately do not sound their checkboxes, but the
         -- binding editor's always have and that is a behaviour, not a style.
@@ -2573,7 +2637,17 @@ function GUI:CreateCheckRow(parent, opts)
 
     if opts.tooltip then
         cb:SetScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, opts.tooltip)
+            if self.blockedReason then
+                -- The row's own tooltip, then why it is greyed.
+                local t = opts.tooltip
+                local lines = {}
+                for _, line in ipairs(t.lines or {}) do lines[#lines + 1] = line end
+                lines[#lines + 1] = " "
+                lines[#lines + 1] = { text = self.blockedReason, color = C_TEXT_DIM }
+                GUI:ShowTooltip(self, { title = t.title, lines = lines, anchor = t.anchor })
+            else
+                GUI:ShowTooltip(self, opts.tooltip)
+            end
         end)
         cb:SetScript("OnLeave", function() GUI:HideTooltip() end)
     end
@@ -3398,6 +3472,17 @@ function GUI:SetFrameLevelTooltip(container)
     return container   -- chainable, so it wraps a CreateSlider call in place
 end
 
+-- Attach a hover tooltip to a widget built inline, and hand the widget back.
+-- The same `.tooltip` every factory reads (DandersUI/Widgets.lua ResolveTooltipSpec):
+-- a string is the BODY, and the title stays the widget's own label.
+-- Chainable like SetFrameLevelTooltip, so an inline Add(...) / AddWidget(...) call
+-- gains a tooltip without a new local (the big builders sit near Lua's 200-local limit).
+-- Where a local already holds the widget, set `w.tooltip = ...` directly instead.
+function GUI:WithTooltip(w, text)
+    if w then w.tooltip = text end
+    return w
+end
+
 -- Dual-handle range slider: two draggable handles select a [lo, hi] sub-range of
 -- [minRange, maxRange]. Self-contained — the caller anchors the returned track
 -- frame and reads values via the onChange callback. (:GetValues() also exists and
@@ -4089,6 +4174,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- Type dropdown respects only the extra gate (e.g. Show Border). With no
     -- extra gate (Expiring override) it's always visible.
     w.animationType.hideOn = hideExtra or function() return false end
+    w.animationType.tooltip = L["Adds a moving effect to the border to draw the eye, such as a blink, a glow or sparkles running round it. Pick None to keep the border still."]
 
     -- Perf warning: animations run an OnUpdate per active border, which adds up in 20-30 player raids.
     if showPerfBanner then

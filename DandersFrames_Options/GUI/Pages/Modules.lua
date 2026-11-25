@@ -576,7 +576,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             enableKey = "readyCheckIconEnabled", enableLabel = L["Enable Ready Check Icon"],
             onEnable = OnIconEnabled,
             after = function(group, parent)
-                group:AddWidget(GUI:CreateSlider(parent, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), 55)
+                group:AddWidget(GUI:WithTooltip(GUI:CreateSlider(parent, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), L["How long the ready check result stays on the frames after the check ends. 0 clears it as soon as the check finishes."]), 55)
             end,
             summaryExtra = function(d, parts)
                 local persist = tonumber(d.readyCheckIconPersist)
@@ -689,7 +689,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             showTextKey = "phasedIconShowText",
             texts = { { label = L["Status Text"], key = "phasedIconText" } },
             after = function(group, parent)
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", OnIconEnabled), 30)
+                group:AddWidget(GUI:WithTooltip(GUI:CreateCheckbox(parent, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", OnIconEnabled), L["When a player is in a separate group from you, such as a dungeon finder group, shows the dungeon finder eye instead of the usual phased icon."]), 30)
             end,
             summaryExtra = function(d, parts)
                 if d.phasedIconShowLFGEye then parts[#parts + 1] = L["Show LFG Eye for Cross-Instance"] end
@@ -1061,14 +1061,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function BuildAggroHighlightGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
+            group:AddWidget(GUI:WithTooltip(GUI:CreateDropdown(parent, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
                 -- ⚠ THIS ONE MOVES THE OTHER ROW. Hidden takes the Threat Colors
                 -- row out of the band entirely, exactly as it took the box out of
                 -- the column -- and the state pass is what does it, in both
                 -- layouts, through the same door.
                 tools2.refreshStates()
                 if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-            end), 55)
+            end), L["How a player with threat is shown. Health Bar Color tints their health bar by threat level instead of drawing a border or glow, and Hidden turns it off."]), 55)
             local aggroOnlyTanking = group:AddWidget(GUI:CreateCheckbox(parent, L["Only Show When Tanking"], db, "aggroOnlyTanking", function()
                 -- ⚠ AND SO DOES THIS ONE, one level down: with it on, two of the
                 -- three swatches on the Threat Colors row are out of reach.
@@ -1112,6 +1112,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF:LightweightUpdateHighlight("aggro")
             end, true), 30)
             colorHighestThreat.hideOn = HideNonTankingColors
+            colorHighestThreat.tooltip = L["Used when an enemy is attacking the player but someone else has more threat on it, so it may soon switch targets."]
             local colorTanking = group:AddWidget(GUI:CreateColorPicker(parent, L["Tanking (Red)"], db, "aggroColorTanking", false, nil, function()
                 DF:LightweightUpdateHighlight("aggro")
             end, true), 30)
@@ -1528,6 +1529,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 ApplyDispelSettings()
             end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
             gradSize.disableOn = DisableIfNoGradient
+            gradSize.tooltip = L["How far the wash reaches in from the frame edge, as a share of the frame. Has no effect on Full Frame, which always covers the whole bar."]
             local gradAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
                 InvalidateCurves()
             end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
@@ -1546,6 +1548,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 ApplyDispelSettings()
             end), 55)
             blendDropdown.disableOn = DisableIfNoGradient
+            blendDropdown.tooltip = L["Glow brightens what is underneath so the colour shines, and shows best over dark bars. Solid lays the colour on top exactly as picked, which reads better over bright class colours."]
             -- Darken effect lives at the bottom of the Gradient group (it only
             -- renders behind the gradient).
             local darkenCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()

@@ -512,7 +512,7 @@ DF.DEBUG_GROUP_OF = {
     icons = "gui",
 
     auditspells = "data", exportaudit = "data", overrides = "data",
-    localewarn = "data", testids = "data", autotest = "data",
+    localewarn = "data", testids = "data", autotest = "data", searchdrift = "data",
 
     api = "system", profiler = "system", profile = "system",
     memtest = "system", debugrested = "system",
@@ -2172,6 +2172,15 @@ end
 function DF:GetFrameBorderColor(frame, db)
     local base = db.frameBorderColor or DEFAULT_CLASS_COLOR
     local br, bg, bb, ba = base.r or 0, base.g or 0, base.b or 0, base.a or 1
+
+    -- WoW Forever, the unit frames pet: a standing Pet Happiness tint
+    -- (Features/PetHappiness.lua) IS the border colour, with the picker's alpha,
+    -- exactly as PH.PaintBorder lays it. ☠ Every colour-only pass (FullFrameRefresh,
+    -- the unit-colour pass) reads this; without it they painted the normal colour
+    -- over the tint, and the tint's stamp-diff never repainted it (the tint showed
+    -- only while a border slider was dragged). nil (or false: stale) elsewhere.
+    local tint = frame and frame.dfHappinessBorder
+    if tint then return tint.r, tint.g, tint.b, ba end
 
     -- Resolve source the same way Border:BuildSpec does, so the lightweight
     -- live-update path (LightweightUpdateBorderColor) renders identically to
@@ -6493,6 +6502,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("exportaudit",  "export category drift check", true)
         sub("overrides",    "active auto-layout overrides")
         sub("localewarn",   "toggle missing-locale-key warnings", true)
+        sub("searchdrift",  "settings search: live settings missing from the prebuilt index", true)
         -- GUI probes (stay useful as new surfaces are added)
         sub("pixelcheck",   "report GUI elements off the device pixel grid", true)
         sub("gapcheck",     "GUI spacing probe (add 'all' or 'clear')", true, "[all|clear]")
@@ -7213,6 +7223,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF.GUI.GapCheck(msg:match("^gapcheck%s+(%a+)$"))
                 else
                     DF:Say("GUI module not loaded.")
+                end
+            elseif msg == "searchdrift" then
+                -- Live settings (on pages built this session) that the prebuilt
+                -- search index does not hold: the index needs regenerating.
+                if DF.Search and DF.Search.ReportPrebuiltDrift then
+                    DF.Search:ReportPrebuiltDrift()
+                else
+                    DF:Say("Settings window not loaded -- open /df first.")
                 end
             elseif msg == "navprobe" or msg:match("^navprobe%s+%d+$") then
                 -- Traces the left nav's hover state to separate a stale plate /
